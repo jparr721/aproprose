@@ -1,7 +1,7 @@
 // window-controls.tsx — custom minimize/maximize/close for the frameless window
 // on Windows/Linux. macOS uses native traffic lights (titleBarStyle: Overlay),
-// so this renders nothing there. getCurrentWindow() is called lazily inside
-// handlers so it is never invoked in the non-Tauri browser preview.
+// so this renders nothing there. Tauri IPC calls are .catch-guarded so the
+// non-Tauri browser preview (`just dev`) doesn't throw unhandled rejections.
 
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -16,14 +16,15 @@ export function WindowControls() {
     if (IS_MAC) return;
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
-    void win.isMaximized().then(setMaximized);
+    void win.isMaximized().then(setMaximized).catch(() => {});
     void win
       .onResized(() => {
-        void win.isMaximized().then(setMaximized);
+        void win.isMaximized().then(setMaximized).catch(() => {});
       })
       .then((u) => {
         unlisten = u;
-      });
+      })
+      .catch(() => {});
     return () => unlisten?.();
   }, []);
 

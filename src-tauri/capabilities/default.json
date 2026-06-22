@@ -8,6 +8,15 @@
     "opener:default",
     "dialog:default",
     "fs:default",
+    "os:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://api.openai.com/*" }]

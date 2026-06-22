@@ -28,4 +28,5 @@ tauri-plugin-http = "2.5.9"
 base64 = "0.22.1"
 tokio = { version = "1.52.3", features = ["process", "time", "rt-multi-thread"] }
 dotenvy = "0.15.7"
+tauri-plugin-os = "2.3.2"
 

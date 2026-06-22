@@ -24,8 +24,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SettingsSheet } from "@/components/app/settings-sheet";
+import { WindowControls } from "@/components/app/window-controls";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 function BuildBadge() {
@@ -89,7 +91,13 @@ export function TopBar() {
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
   return (
-    <header className="flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-ui">
+    <header
+      data-tauri-drag-region
+      className={cn(
+        "flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-ui",
+        IS_MAC && "pl-20",
+      )}
+    >
       <SidebarTrigger className="-ml-1 text-mid" />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -159,7 +167,7 @@ export function TopBar() {
         <BuildBadge />
       </div>
 
-      <div className="flex-1" />
+      <div className="flex-1" data-tauri-drag-region />
 
       {project ? (
         <>
@@ -201,6 +209,8 @@ export function TopBar() {
       ) : (
         <SettingsSheet />
       )}
+
+      <WindowControls />
     </header>
   );
 }

@@ -1,9 +1,9 @@
 // App.tsx — the workspace shell.
 //
-// Empty state -> Welcome (open/recent). Project open -> top bar + rail + a
-// resizable editor / PDF / AI split. Focus mode collapses everything but the
-// editor. The unsaved-edits confirm dialog is mounted once here, driven by the
-// view store's guard.
+// Empty state -> Welcome (open/recent). Project open -> a Sidebar + top bar + a
+// resizable editor / PDF / AI split. Focus mode hides the PDF and AI panels; the
+// sidebar is independent (toggled by its own trigger / ⌘B). The unsaved-edits
+// confirm dialog is mounted once here, driven by the view store's guard.
 
 import { useEffect } from "react";
 import {
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
 import { AppSidebar } from "@/components/app/app-sidebar";
@@ -82,17 +82,6 @@ function UnsavedGuard() {
   );
 }
 
-// Focus mode reclaims the editor by collapsing the sidebar (offcanvas) instead
-// of unmounting it. Lives inside SidebarProvider so it can call useSidebar().
-function FocusSync() {
-  const focus = useViewStore((s) => s.focus);
-  const { setOpen } = useSidebar();
-  useEffect(() => {
-    setOpen(!focus);
-  }, [focus, setOpen]);
-  return null;
-}
-
 function App() {
   const status = useProjectStore((s) => s.status);
   const saveChapter = useProjectStore((s) => s.saveChapter);
@@ -132,7 +121,6 @@ function App() {
       <ThemeController />
       {status === "ready" ? (
         <SidebarProvider>
-          <FocusSync />
           <AppSidebar />
           <SidebarInset className="h-svh min-w-0 bg-background">
             <TopBar />

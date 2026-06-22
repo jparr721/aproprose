@@ -32,3 +32,6 @@ dist-ssr
 
 # Local, machine-specific Claude Code settings
 .claude/settings.local.json
+
+# Internal AI planning / spec scaffolding — kept local, not published
+docs/superpowers/

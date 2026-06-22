@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SettingsSheet } from "@/components/app/settings-sheet";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -89,6 +90,7 @@ export function TopBar() {
 
   return (
     <header className="flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-ui">
+      <SidebarTrigger className="-ml-1 text-mid" />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-1.5 font-heading text-[15px]">

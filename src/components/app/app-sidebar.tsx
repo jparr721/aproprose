@@ -1,5 +1,5 @@
-// rail.tsx — the left navigation: chapters (with status), characters, lore.
-// Minimal by design — just enough to move around the manuscript.
+// app-sidebar.tsx — the left navigation as a shadcn Sidebar: chapters (with
+// status), characters, lore. Collapses offcanvas (⌘B). Replaces the old Rail.
 
 import { useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
@@ -15,8 +15,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { TypographyEyebrow } from "@/components/ui/typography";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
 import { chapterStatus, useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -39,33 +49,6 @@ const CHARACTER_COLORS = [
   "oklch(0.5 0.06 100)",
 ];
 
-function SectionHeader({
-  label,
-  onAdd,
-  addTitle,
-}: {
-  label: string;
-  onAdd?: () => void;
-  addTitle?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between px-2 pb-1 pt-4">
-      <TypographyEyebrow>{label}</TypographyEyebrow>
-      {onAdd ? (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="text-mid"
-          title={addTitle}
-          onClick={onAdd}
-        >
-          <IconPlus />
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
 function AddCharacterDialog() {
   const addCharacter = useProjectStore((s) => s.addCharacter);
   const [open, setOpen] = useState(false);
@@ -85,9 +68,9 @@ function AddCharacterDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-xs" className="text-mid" title="Add character">
+        <SidebarGroupAction title="Add character">
           <IconPlus />
-        </Button>
+        </SidebarGroupAction>
       </DialogTrigger>
       <DialogContent className="font-ui sm:max-w-sm">
         <DialogHeader>
@@ -161,9 +144,9 @@ function AddLoreDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-xs" className="text-mid" title="Add lore">
+        <SidebarGroupAction title="Add lore">
           <IconPlus />
-        </Button>
+        </SidebarGroupAction>
       </DialogTrigger>
       <DialogContent className="font-ui sm:max-w-sm">
         <DialogHeader>
@@ -187,7 +170,7 @@ function AddLoreDialog() {
   );
 }
 
-export function Rail() {
+export function AppSidebar() {
   const project = useProjectStore((s) => s.project);
   const meta = useProjectStore((s) => s.meta);
   const activeId = useProjectStore((s) => s.activeChapterId);
@@ -197,85 +180,87 @@ export function Rail() {
   if (!project) return null;
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-r border-line-soft bg-sidebar font-ui">
-      <div className="flex items-baseline gap-1.5 px-4 pb-2 pt-3.5">
-        <span className="truncate font-heading text-sm text-foreground">{project.name}</span>
-      </div>
+    <Sidebar collapsible="offcanvas" className="font-ui">
+      <SidebarHeader>
+        <span className="truncate px-2 py-1 font-heading text-sm text-foreground">
+          {project.name}
+        </span>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Chapters</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {project.chapters.map((c) => {
+                const status = chapterStatus(c, meta, activeId);
+                const on = c.id === activeId;
+                return (
+                  <SidebarMenuItem key={c.id}>
+                    <SidebarMenuButton
+                      isActive={on}
+                      onClick={() => guard(() => void selectChapter(c.id))}
+                      className="grid grid-cols-[24px_1fr_auto] items-center gap-1.5"
+                    >
+                      <span
+                        className={cn(
+                          "font-serif text-[13px] italic",
+                          on ? "text-accent-ink" : "text-faint",
+                        )}
+                      >
+                        {c.label}
+                      </span>
+                      <span className="truncate">{c.title}</span>
+                      <span className={cn("size-1.5 rounded-full", STATUS_DOT[status])} />
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="px-2 pb-6">
-          <SectionHeader label="Chapters" />
-          <div className="flex flex-col gap-0.5">
-            {project.chapters.map((c) => {
-              const status = chapterStatus(c, meta, activeId);
-              const on = c.id === activeId;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => guard(() => void selectChapter(c.id))}
-                  className={cn(
-                    "grid grid-cols-[24px_1fr_auto] items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors",
-                    on ? "bg-card text-foreground" : "text-mid hover:bg-sunk",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "font-serif text-[13px] italic",
-                      on ? "text-accent-ink" : "text-faint",
-                    )}
-                  >
-                    {c.label}
-                  </span>
-                  <span className="truncate">{c.title}</span>
-                  <span className={cn("size-1.5 rounded-full", STATUS_DOT[status])} />
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center justify-between px-2 pb-1 pt-4">
-            <TypographyEyebrow>Characters</TypographyEyebrow>
-            <AddCharacterDialog />
-          </div>
-          <div className="flex flex-col gap-0.5">
+        <SidebarGroup>
+          <SidebarGroupLabel>Characters</SidebarGroupLabel>
+          <AddCharacterDialog />
+          <SidebarGroupContent>
             {meta.characters.length === 0 ? (
-              <p className="px-2 py-1 text-xs text-faint">
-                None yet — add your cast.
-              </p>
+              <p className="px-2 py-1 text-xs text-faint">None yet — add your cast.</p>
             ) : (
-              meta.characters.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-mid"
-                >
-                  <ColorDot color={c.color} />
-                  <span className="truncate">{c.name}</span>
-                </div>
-              ))
+              <SidebarMenu>
+                {meta.characters.map((c) => (
+                  <SidebarMenuItem key={c.id}>
+                    <SidebarMenuButton className="text-mid">
+                      <ColorDot color={c.color} />
+                      <span className="truncate">{c.name}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
             )}
-          </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-          <div className="flex items-center justify-between px-2 pb-1 pt-4">
-            <TypographyEyebrow>Lore</TypographyEyebrow>
-            <AddLoreDialog />
-          </div>
-          <div className="flex flex-col gap-0.5">
+        <SidebarGroup>
+          <SidebarGroupLabel>Lore</SidebarGroupLabel>
+          <AddLoreDialog />
+          <SidebarGroupContent>
             {meta.lore.length === 0 ? (
               <p className="px-2 py-1 text-xs text-faint">No notes yet.</p>
             ) : (
-              meta.lore.map((l) => (
-                <div
-                  key={l.id}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-mid"
-                >
-                  <span className="size-1.5 shrink-0 rounded-full bg-lore-ink" />
-                  <span className="truncate">{l.title}</span>
-                </div>
-              ))
+              <SidebarMenu>
+                {meta.lore.map((l) => (
+                  <SidebarMenuItem key={l.id}>
+                    <SidebarMenuButton className="text-mid">
+                      <span className="size-1.5 shrink-0 rounded-full bg-lore-ink" />
+                      <span className="truncate">{l.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
             )}
-          </div>
-        </div>
-      </ScrollArea>
-    </aside>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
   );
 }

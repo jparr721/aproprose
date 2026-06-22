@@ -18,9 +18,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
-import { Rail } from "@/components/app/rail";
+import { AppSidebar } from "@/components/app/app-sidebar";
 import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
@@ -38,12 +39,6 @@ function Workspace() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      {!focus ? (
-        <div className="w-56 shrink-0">
-          <Rail />
-        </div>
-      ) : null}
-
       {/* Editor and PDF share the central space; the AI panel is a fixed rail. */}
       <div className="min-w-0 flex-1">
         <Editor />
@@ -87,6 +82,17 @@ function UnsavedGuard() {
   );
 }
 
+// Focus mode reclaims the editor by collapsing the sidebar (offcanvas) instead
+// of unmounting it. Lives inside SidebarProvider so it can call useSidebar().
+function FocusSync() {
+  const focus = useViewStore((s) => s.focus);
+  const { setOpen } = useSidebar();
+  useEffect(() => {
+    setOpen(!focus);
+  }, [focus, setOpen]);
+  return null;
+}
+
 function App() {
   const status = useProjectStore((s) => s.status);
   const saveChapter = useProjectStore((s) => s.saveChapter);
@@ -125,10 +131,14 @@ function App() {
     <TooltipProvider>
       <ThemeController />
       {status === "ready" ? (
-        <div className="flex h-screen flex-col bg-background">
-          <TopBar />
-          <Workspace />
-        </div>
+        <SidebarProvider>
+          <FocusSync />
+          <AppSidebar />
+          <SidebarInset className="h-svh min-w-0 bg-background">
+            <TopBar />
+            <Workspace />
+          </SidebarInset>
+        </SidebarProvider>
       ) : (
         <Welcome />
       )}

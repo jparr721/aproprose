@@ -1,0 +1,34 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Secrets / local env — the OpenAI key is entered in-app (Settings) and stored in
+# the OS app-config dir. `.env` is only an optional dev fallback and must NEVER be
+# committed. `.env.example` documents the shape and is intentionally tracked.
+.env
+.env.*
+!.env.example
+
+# Local, machine-specific Claude Code settings
+.claude/settings.local.json

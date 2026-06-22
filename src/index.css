@@ -1,0 +1,291 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/noto-serif";
+@import "@fontsource-variable/lora";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Theme tokens.
+ *
+ * The design's calm, paper-leaning palette is mapped onto shadcn's semantic
+ * token names (so every shadcn primitive inherits the aesthetic) PLUS a small
+ * set of app-specific surface tokens for things shadcn has no name for: the
+ * "paper" editor surface, the rail, sunk wells, and the tinted non-rendering
+ * block types (AI lavender, lore yellow, scratchpad blue).
+ *
+ * Light = :root · Sepia = [data-theme="sepia"] · Dark = .dark (class toggled by
+ * the ThemeController, which also sets data-theme for non-shadcn scoping).
+ * ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --radius: 0.625rem;
+
+  /* shadcn semantic tokens — tuned to warm paper */
+  --background: oklch(0.965 0.006 80);
+  --foreground: oklch(0.26 0.015 60);
+  --card: oklch(0.985 0.004 80);
+  --card-foreground: oklch(0.26 0.015 60);
+  --popover: oklch(0.985 0.004 80);
+  --popover-foreground: oklch(0.26 0.015 60);
+  --primary: oklch(0.26 0.015 60);
+  --primary-foreground: oklch(0.985 0.004 80);
+  --secondary: oklch(0.935 0.008 78);
+  --secondary-foreground: oklch(0.26 0.015 60);
+  --muted: oklch(0.935 0.008 78);
+  --muted-foreground: oklch(0.62 0.01 60);
+  --accent: oklch(0.93 0.04 65);
+  --accent-foreground: oklch(0.5 0.1 45);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.9 0.006 60);
+  --input: oklch(0.9 0.006 60);
+  --ring: oklch(0.56 0.1 45);
+  --chart-1: oklch(0.56 0.1 45);
+  --chart-2: oklch(0.5 0.08 235);
+  --chart-3: oklch(0.65 0.12 85);
+  --chart-4: oklch(0.58 0.1 215);
+  --chart-5: oklch(0.45 0.07 285);
+  --sidebar: oklch(0.945 0.008 80);
+  --sidebar-foreground: oklch(0.26 0.015 60);
+  --sidebar-primary: oklch(0.26 0.015 60);
+  --sidebar-primary-foreground: oklch(0.985 0.004 80);
+  --sidebar-accent: oklch(0.935 0.008 78);
+  --sidebar-accent-foreground: oklch(0.26 0.015 60);
+  --sidebar-border: oklch(0.94 0.005 60);
+  --sidebar-ring: oklch(0.56 0.1 45);
+
+  /* app surfaces */
+  --paper: oklch(0.985 0.004 80);
+  --rail: oklch(0.945 0.008 80);
+  --sunk: oklch(0.935 0.008 78);
+
+  /* extended text ramp (mid sits between foreground and muted; faint is fainter) */
+  --mid: oklch(0.45 0.012 60);
+  --faint: oklch(0.78 0.008 60);
+
+  /* extended line ramp */
+  --line-soft: oklch(0.94 0.005 60);
+  --line-strong: oklch(0.82 0.008 60);
+
+  /* clay accent (ink-colored accent text) */
+  --accent-ink: oklch(0.56 0.1 45);
+
+  /* AI surfaces — lavender */
+  --ai-tint: oklch(0.95 0.018 285);
+  --ai-edge: oklch(0.86 0.04 285);
+  --ai-ink: oklch(0.4 0.08 285);
+
+  /* lore — warm yellow paper */
+  --lore-tint: oklch(0.96 0.045 95);
+  --lore-edge: oklch(0.84 0.06 90);
+  --lore-ink: oklch(0.45 0.07 80);
+
+  /* scratchpad — cool blue */
+  --scratch-tint: oklch(0.95 0.025 200);
+  --scratch-edge: oklch(0.84 0.05 215);
+  --scratch-ink: oklch(0.42 0.08 220);
+
+  /* status hues */
+  --ok: oklch(0.65 0.15 145);
+  --warn: oklch(0.72 0.13 75);
+  --flag: oklch(0.62 0.18 25);
+
+  /* the simulated paper sheet behind the PDF preview */
+  --sheet: oklch(0.99 0.008 95);
+  --sheet-ink: oklch(0.22 0.015 60);
+}
+
+[data-theme="sepia"] {
+  --background: oklch(0.93 0.03 80);
+  --foreground: oklch(0.28 0.04 50);
+  --card: oklch(0.955 0.025 80);
+  --card-foreground: oklch(0.28 0.04 50);
+  --popover: oklch(0.955 0.025 80);
+  --popover-foreground: oklch(0.28 0.04 50);
+  --primary: oklch(0.28 0.04 50);
+  --primary-foreground: oklch(0.955 0.025 80);
+  --secondary: oklch(0.895 0.04 76);
+  --secondary-foreground: oklch(0.28 0.04 50);
+  --muted: oklch(0.895 0.04 76);
+  --muted-foreground: oklch(0.6 0.03 60);
+  --accent: oklch(0.88 0.05 65);
+  --accent-foreground: oklch(0.5 0.12 35);
+  --border: oklch(0.85 0.03 65);
+  --input: oklch(0.85 0.03 65);
+  --ring: oklch(0.5 0.12 35);
+  --sidebar: oklch(0.91 0.035 78);
+  --sidebar-foreground: oklch(0.28 0.04 50);
+  --sidebar-accent: oklch(0.895 0.04 76);
+  --sidebar-border: oklch(0.85 0.03 65);
+
+  --paper: oklch(0.955 0.025 80);
+  --rail: oklch(0.91 0.035 78);
+  --sunk: oklch(0.895 0.04 76);
+  --mid: oklch(0.45 0.035 55);
+  --faint: oklch(0.74 0.025 60);
+  --line-soft: oklch(0.9 0.025 65);
+  --line-strong: oklch(0.76 0.04 60);
+  --accent-ink: oklch(0.5 0.12 35);
+  --sheet: oklch(0.96 0.03 82);
+  --sheet-ink: oklch(0.26 0.04 50);
+}
+
+.dark,
+[data-theme="dark"] {
+  --background: oklch(0.2 0.008 250);
+  --foreground: oklch(0.92 0.008 80);
+  --card: oklch(0.225 0.008 250);
+  --card-foreground: oklch(0.92 0.008 80);
+  --popover: oklch(0.225 0.008 250);
+  --popover-foreground: oklch(0.92 0.008 80);
+  --primary: oklch(0.92 0.008 80);
+  --primary-foreground: oklch(0.225 0.008 250);
+  --secondary: oklch(0.3 0.012 250);
+  --secondary-foreground: oklch(0.92 0.008 80);
+  --muted: oklch(0.27 0.01 250);
+  --muted-foreground: oklch(0.62 0.012 60);
+  --accent: oklch(0.3 0.04 50);
+  --accent-foreground: oklch(0.78 0.1 55);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.3 0.012 250);
+  --input: oklch(0.32 0.014 250);
+  --ring: oklch(0.72 0.1 50);
+  --sidebar: oklch(0.18 0.008 250);
+  --sidebar-foreground: oklch(0.92 0.008 80);
+  --sidebar-primary: oklch(0.92 0.008 80);
+  --sidebar-primary-foreground: oklch(0.225 0.008 250);
+  --sidebar-accent: oklch(0.27 0.01 250);
+  --sidebar-accent-foreground: oklch(0.92 0.008 80);
+  --sidebar-border: oklch(0.26 0.01 250);
+  --sidebar-ring: oklch(0.72 0.1 50);
+
+  --paper: oklch(0.225 0.008 250);
+  --rail: oklch(0.18 0.008 250);
+  --sunk: oklch(0.165 0.008 250);
+  --mid: oklch(0.72 0.012 60);
+  --faint: oklch(0.4 0.01 60);
+  --line-soft: oklch(0.26 0.01 250);
+  --line-strong: oklch(0.38 0.015 250);
+  --accent-ink: oklch(0.72 0.1 50);
+
+  --ai-tint: oklch(0.24 0.022 285);
+  --ai-edge: oklch(0.36 0.04 285);
+  --ai-ink: oklch(0.78 0.06 285);
+  --lore-tint: oklch(0.26 0.035 95);
+  --lore-edge: oklch(0.38 0.05 90);
+  --lore-ink: oklch(0.8 0.07 90);
+  --scratch-tint: oklch(0.24 0.025 215);
+  --scratch-edge: oklch(0.36 0.05 215);
+  --scratch-ink: oklch(0.8 0.07 215);
+
+  --ok: oklch(0.65 0.15 145);
+  --warn: oklch(0.72 0.13 75);
+  --flag: oklch(0.62 0.18 25);
+
+  --sheet: oklch(0.92 0.012 80);
+  --sheet-ink: oklch(0.22 0.015 60);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* app surfaces */
+  --color-paper: var(--paper);
+  --color-rail: var(--rail);
+  --color-sunk: var(--sunk);
+  --color-mid: var(--mid);
+  --color-faint: var(--faint);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-ai-tint: var(--ai-tint);
+  --color-ai-edge: var(--ai-edge);
+  --color-ai-ink: var(--ai-ink);
+  --color-lore-tint: var(--lore-tint);
+  --color-lore-edge: var(--lore-edge);
+  --color-lore-ink: var(--lore-ink);
+  --color-scratch-tint: var(--scratch-tint);
+  --color-scratch-edge: var(--scratch-edge);
+  --color-scratch-ink: var(--scratch-ink);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-flag: var(--flag);
+  --color-sheet: var(--sheet);
+  --color-sheet-ink: var(--sheet-ink);
+
+  /* fonts — serif-forward per project convention; sans only for dense chrome */
+  --font-serif: "Noto Serif Variable", "Source Serif Pro", Georgia, serif;
+  --font-heading: "Lora Variable", "Newsreader", Georgia, serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* serif-forward base (CLAUDE.md). Chrome opts into font-ui via utilities. */
+  html {
+    @apply font-serif;
+  }
+}
+
+@layer utilities {
+  /* a slow, calm caret/cursor blink reused by the editor + streaming AI */
+  @keyframes ap-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  .animate-blink {
+    animation: ap-blink 1s steps(2) infinite;
+  }
+}

@@ -24,11 +24,11 @@ function CursorRow() {
     <div className="mt-2 flex flex-col gap-2.5 py-4 pl-7">
       <div className="flex items-center gap-2.5">
         <span className="inline-block h-5 w-0.5 animate-blink rounded-full bg-accent-ink" />
-        <span className="font-ui text-[10.5px] uppercase tracking-[0.08em] text-faint">
+        <span className="font-sans text-[10.5px] uppercase tracking-[0.08em] text-faint">
           Cursor — next block
         </span>
       </div>
-      <div className="flex flex-wrap gap-1.5 font-ui">
+      <div className="flex flex-wrap gap-1.5 font-sans">
         <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
           + Narration
         </Button>
@@ -71,7 +71,7 @@ export function Editor() {
 
   if (!chapter) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-ui text-mid">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-mid">
         <IconWriting className="size-8 text-faint" />
         <p className="text-sm">Select a chapter to begin.</p>
       </div>
@@ -86,7 +86,7 @@ export function Editor() {
           <span className="font-heading text-2xl font-medium tracking-tight text-foreground">
             {chapter.title}
           </span>
-          <span className={cn("ml-auto font-ui text-[11.5px] tabular-nums text-faint")}>
+          <span className={cn("ml-auto font-sans text-[11.5px] tabular-nums text-faint")}>
             {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
             {chapterDirty ? "unsaved" : "saved"}
           </span>

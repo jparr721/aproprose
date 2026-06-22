@@ -30,7 +30,7 @@ export function Welcome() {
   const loading = useProjectStore((s) => s.status === "loading");
 
   return (
-    <div className="flex h-full items-center justify-center bg-background p-8 font-ui">
+    <div className="flex h-full items-center justify-center bg-background p-8 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-8">
         <div className="flex flex-col items-center gap-4 text-center">
           <span className="grid size-12 place-items-center rounded-xl bg-gradient-to-br from-accent-ink to-lore-edge font-heading text-2xl font-semibold text-background shadow-sm">
@@ -44,7 +44,7 @@ export function Welcome() {
           </div>
         </div>
 
-        <Button size="lg" className="font-ui" onClick={open} disabled={loading}>
+        <Button size="lg" className="font-sans" onClick={open} disabled={loading}>
           <IconFolderOpen />
           {loading ? "Opening…" : "Open a project"}
         </Button>

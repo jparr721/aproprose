@@ -59,7 +59,7 @@ function Field({
       <div className="flex items-baseline justify-between">
         <TypographyEyebrow>{label}</TypographyEyebrow>
         {hint ? (
-          <span className="font-ui text-xs tabular-nums text-faint">{hint}</span>
+          <span className="font-sans text-xs tabular-nums text-faint">{hint}</span>
         ) : null}
       </div>
       {children}
@@ -159,7 +159,7 @@ function OpenAiKeyField() {
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1.5 font-ui text-xs text-ok">
+          <span className="flex items-center gap-1.5 font-sans text-xs text-ok">
             <IconCheck className="size-3.5" /> A key is configured.
           </span>
           <AlertDialog>
@@ -172,7 +172,7 @@ function OpenAiKeyField() {
                 <IconTrash className="size-3.5" /> Remove
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="font-ui">
+            <AlertDialogContent className="font-sans">
               <AlertDialogHeader>
                 <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -193,7 +193,7 @@ function OpenAiKeyField() {
           </AlertDialog>
         </div>
       ) : (
-        <TypographyMuted className="font-ui text-xs">
+        <TypographyMuted className="font-sans text-xs">
           Stored locally in your app config dir — never written into the app
           bundle or your manuscript.
         </TypographyMuted>
@@ -213,11 +213,11 @@ export function SettingsSheet() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="font-ui" title="Settings">
+        <Button variant="ghost" size="icon" className="font-sans" title="Settings">
           <IconSettings />
         </Button>
       </SheetTrigger>
-      <SheetContent className="font-ui">
+      <SheetContent className="font-sans">
         <SheetHeader>
           <SheetTitle className="font-heading">Tweaks</SheetTitle>
           <SheetDescription>Appearance, layout, and your OpenAI key.</SheetDescription>
@@ -266,7 +266,7 @@ export function SettingsSheet() {
                 Focus
               </ToggleGroupItem>
             </ToggleGroup>
-            <TypographyMuted className="font-ui text-xs">
+            <TypographyMuted className="font-sans text-xs">
               2-pane shows the AI panel · 3-pane adds the PDF · Focus hides both.
             </TypographyMuted>
           </Field>

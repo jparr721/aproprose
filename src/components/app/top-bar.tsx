@@ -56,7 +56,7 @@ function BuildBadge() {
           : "not built";
 
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-line-soft bg-card px-2.5 py-1 font-ui text-[11px] text-mid">
+    <span className="flex items-center gap-1.5 rounded-full border border-line-soft bg-card px-2.5 py-1 font-sans text-[11px] text-mid">
       {status === "compiling" ? (
         <IconLoader2 className="size-3 animate-spin text-warn" />
       ) : (
@@ -94,7 +94,7 @@ export function TopBar() {
     <header
       data-tauri-drag-region
       className={cn(
-        "flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-ui",
+        "flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-sans",
         IS_MAC && "pl-20",
       )}
     >
@@ -109,7 +109,7 @@ export function TopBar() {
             <IconChevronDown className="size-3 text-faint" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60 font-ui">
+        <DropdownMenuContent align="start" className="w-60 font-sans">
           <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
             <IconFolderOpen /> Open project…
           </DropdownMenuItem>
@@ -177,7 +177,7 @@ export function TopBar() {
             aria-pressed={pdfOpen && !focus}
             onClick={togglePdf}
             className={cn(
-              "font-ui",
+              "font-sans",
               pdfOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
             )}
           >
@@ -189,7 +189,7 @@ export function TopBar() {
             aria-pressed={aiOpen && !focus}
             onClick={toggleAi}
             className={cn(
-              "font-ui",
+              "font-sans",
               aiOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
             )}
           >
@@ -198,7 +198,7 @@ export function TopBar() {
           <SettingsSheet />
           <Button
             size="sm"
-            className="font-ui"
+            className="font-sans"
             onClick={() => void compileNow()}
             disabled={compiling}
           >

@@ -65,7 +65,7 @@ function UnsavedGuard() {
   const cancel = useViewStore((s) => s.cancelPending);
   return (
     <AlertDialog open={pending != null} onOpenChange={(o) => !o && cancel()}>
-      <AlertDialogContent className="font-ui">
+      <AlertDialogContent className="font-sans">
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
           <AlertDialogDescription>

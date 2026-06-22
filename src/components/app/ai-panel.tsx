@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 // ── shared bits ──────────────────────────────────────────────────────────────
 function ContextLine({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 font-ui text-[11px] text-mid">
+    <div className="flex items-center gap-1.5 font-sans text-[11px] text-mid">
       <span className="size-1.5 rounded-full bg-ai-edge shadow-[0_0_0_2px_var(--ai-tint)]" />
       {children}
     </div>
@@ -50,7 +50,7 @@ function ContextLine({ children }: { children: React.ReactNode }) {
 
 function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-2 rounded-lg border border-line-soft bg-card p-3 font-ui text-xs text-mid">
+    <div className="flex flex-col items-start gap-2 rounded-lg border border-line-soft bg-card p-3 font-sans text-xs text-mid">
       <span className="text-destructive">Couldn't reach the model.</span>
       <span className="text-faint">{error}</span>
       <Button variant="outline" size="sm" onClick={onRetry}>
@@ -129,7 +129,7 @@ function SuggestTab() {
   if (loading) return <div className="p-4"><LoadingLines rows={5} /></div>;
   if (error) return <div className="p-4"><AiError error={error} onRetry={run} /></div>;
   if (!data || data.suggestions.length === 0)
-    return <div className="p-4 font-ui text-xs text-faint">No suggestion.</div>;
+    return <div className="p-4 font-sans text-xs text-faint">No suggestion.</div>;
 
   const v = data.suggestions[Math.min(variant, data.suggestions.length - 1)];
 
@@ -139,7 +139,7 @@ function SuggestTab() {
 
       <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
         <div className="flex items-center justify-between">
-          <span className="font-ui text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ai-ink">
+          <span className="font-sans text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ai-ink">
             {v.type === "dialogue" ? `Dialogue${v.speaker ? ` · ${v.speaker}` : ""}` : "Narration"}
           </span>
           <div className="flex gap-0.5">
@@ -148,7 +148,7 @@ function SuggestTab() {
                 key={i}
                 onClick={() => setVariant(i)}
                 className={cn(
-                  "size-[18px] rounded font-ui text-[10.5px] tabular-nums text-ai-ink transition-opacity",
+                  "size-[18px] rounded font-sans text-[10.5px] tabular-nums text-ai-ink transition-opacity",
                   i === variant ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]" : "opacity-55 hover:opacity-100",
                 )}
               >
@@ -166,8 +166,8 @@ function SuggestTab() {
           {v.type === "dialogue" ? `“${v.text}”` : v.text}
         </p>
         <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-          <span className="font-ui text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
-          <p className="font-ui text-xs leading-[1.5] text-mid">{v.rationale}</p>
+          <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
+          <p className="font-sans text-xs leading-[1.5] text-mid">{v.rationale}</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Button size="sm" onClick={() => insert(v)}>Insert below</Button>
@@ -179,13 +179,13 @@ function SuggestTab() {
         <>
           <Separator />
           <div className="flex flex-col gap-1">
-            <span className="font-ui text-[10px] uppercase tracking-[0.08em] text-faint">
+            <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-faint">
               After this, you could…
             </span>
             {data.followups.map((f, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-ui text-xs text-mid"
+                className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-mid"
               >
                 <IconArrowRight className="size-3 shrink-0 text-faint" />
                 {f}
@@ -232,12 +232,12 @@ function CritiqueTab() {
         (data ?? []).map((n, i) => (
           <div key={i} className="rounded-lg border border-line-soft bg-background p-3">
             <div className="mb-1 flex items-baseline gap-2">
-              <span className={cn("rounded px-1.5 py-0.5 font-ui text-[9.5px] font-semibold uppercase tracking-[0.08em]", NOTE_TONE[n.kind])}>
+              <span className={cn("rounded px-1.5 py-0.5 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em]", NOTE_TONE[n.kind])}>
                 {NOTE_WORD[n.kind]}
               </span>
-              <span className="font-ui text-[10.5px] uppercase tracking-[0.06em] text-mid">{n.tag}</span>
+              <span className="font-sans text-[10.5px] uppercase tracking-[0.06em] text-mid">{n.tag}</span>
             </div>
-            <p className="font-ui text-[12.5px] leading-[1.55] text-mid">{n.text}</p>
+            <p className="font-sans text-[12.5px] leading-[1.55] text-mid">{n.text}</p>
           </div>
         ))
       )}
@@ -281,10 +281,10 @@ function ContinuityTab() {
             <span className={cn("mt-1 size-2 rounded-full", SEV_DOT[f.sev])} />
             <div>
               <div className="mb-0.5 flex items-baseline gap-2">
-                <span className="font-ui text-[11px] font-semibold text-foreground">{f.tag}</span>
-                <span className="font-ui text-[9.5px] uppercase tracking-[0.08em] text-faint">{SEV_WORD[f.sev]}</span>
+                <span className="font-sans text-[11px] font-semibold text-foreground">{f.tag}</span>
+                <span className="font-sans text-[9.5px] uppercase tracking-[0.08em] text-faint">{SEV_WORD[f.sev]}</span>
               </div>
-              <p className="font-ui text-xs leading-[1.5] text-mid">{f.text}</p>
+              <p className="font-sans text-xs leading-[1.5] text-mid">{f.text}</p>
             </div>
           </div>
         ))
@@ -314,13 +314,13 @@ function CastRow({ m }: { m: CastMember }) {
         </span>
       )}
       <div>
-        <div className="flex items-baseline gap-2 font-ui text-[13px] font-medium text-foreground">
+        <div className="flex items-baseline gap-2 font-sans text-[13px] font-medium text-foreground">
           <span className="truncate">{m.name}</span>
           <span className="rounded bg-sunk px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.06em] text-mid">
             {m.state}
           </span>
         </div>
-        <div className="font-ui text-[11.5px] leading-[1.45] text-mid">{m.detail}</div>
+        <div className="font-sans text-[11.5px] leading-[1.45] text-mid">{m.detail}</div>
       </div>
     </div>
   );
@@ -419,7 +419,7 @@ function BrainstormTab() {
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 p-4">
           {messages.length === 0 && streaming == null ? (
-            <p className="font-ui text-xs leading-relaxed text-faint">
+            <p className="font-sans text-xs leading-relaxed text-faint">
               Riff on the scene — ask about motivations, plant a thread, pressure-test a
               beat. The AI reads everything up to your cursor.
             </p>
@@ -428,21 +428,21 @@ function BrainstormTab() {
             m.role === "user" ? (
               <p
                 key={m.id}
-                className="ml-auto max-w-[88%] rounded-[12px_12px_4px_12px] bg-sunk px-3 py-2 font-ui text-[12.5px] leading-[1.55] text-foreground"
+                className="ml-auto max-w-[88%] rounded-[12px_12px_4px_12px] bg-sunk px-3 py-2 font-sans text-[12.5px] leading-[1.55] text-foreground"
               >
                 {m.content}
               </p>
             ) : (
               <p
                 key={m.id}
-                className="max-w-[95%] whitespace-pre-wrap border-l-2 border-ai-edge py-1 pl-3.5 font-ui text-[12.5px] leading-[1.55] text-foreground"
+                className="max-w-[95%] whitespace-pre-wrap border-l-2 border-ai-edge py-1 pl-3.5 font-sans text-[12.5px] leading-[1.55] text-foreground"
               >
                 {m.content}
               </p>
             ),
           )}
           {streaming != null ? (
-            <p className="max-w-[95%] whitespace-pre-wrap border-l-2 border-ai-edge py-1 pl-3.5 font-ui text-[12.5px] leading-[1.55] text-foreground">
+            <p className="max-w-[95%] whitespace-pre-wrap border-l-2 border-ai-edge py-1 pl-3.5 font-sans text-[12.5px] leading-[1.55] text-foreground">
               {streaming}
               <span className="ml-0.5 inline-block h-3 w-1.5 animate-blink bg-ai-ink align-[-1px]" />
             </p>
@@ -462,7 +462,7 @@ function BrainstormTab() {
           }}
           placeholder="Ask, riff, push back…"
           rows={2}
-          className="min-h-0 resize-none font-ui text-[12.5px]"
+          className="min-h-0 resize-none font-sans text-[12.5px]"
         />
         <Button size="icon" onClick={() => void send()} disabled={streaming != null || !draft.trim()}>
           {streaming != null ? <IconLoader2 className="animate-spin" /> : <IconSend />}
@@ -489,7 +489,7 @@ export function AiPanel() {
   return (
     <aside
       data-ai-root
-      className="flex h-full min-h-0 flex-col border-l border-line-soft bg-card font-ui"
+      className="flex h-full min-h-0 flex-col border-l border-line-soft bg-card font-sans"
     >
       <div className="flex h-10 items-center justify-between border-b border-line-soft px-3">
         <div className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">

@@ -72,7 +72,7 @@ function AddCharacterDialog() {
           <IconPlus />
         </SidebarGroupAction>
       </DialogTrigger>
-      <DialogContent className="font-ui sm:max-w-sm">
+      <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading">Add character</DialogTitle>
           <DialogDescription>
@@ -148,7 +148,7 @@ function AddLoreDialog() {
           <IconPlus />
         </SidebarGroupAction>
       </DialogTrigger>
-      <DialogContent className="font-ui sm:max-w-sm">
+      <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading">Add lore note</DialogTitle>
           <DialogDescription>A worldbuilding entry to track.</DialogDescription>
@@ -180,7 +180,7 @@ export function AppSidebar() {
   if (!project) return null;
 
   return (
-    <Sidebar collapsible="offcanvas" className="font-ui">
+    <Sidebar collapsible="offcanvas" className="font-sans">
       <SidebarHeader>
         <span className="truncate px-2 py-1 font-heading text-sm text-foreground">
           {project.name}

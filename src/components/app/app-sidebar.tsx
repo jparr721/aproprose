@@ -2,7 +2,13 @@
 // status), characters, lore. Collapses offcanvas (⌘B). Replaces the old Rail.
 
 import { useState } from "react";
-import { IconPlus } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconDeviceFloppy,
+  IconFolderOpen,
+  IconPlus,
+  IconX,
+} from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +18,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -175,6 +189,13 @@ export function AppSidebar() {
   const meta = useProjectStore((s) => s.meta);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const selectChapter = useProjectStore((s) => s.selectChapter);
+  const chapterDirty = useProjectStore((s) => s.chapterDirty);
+  const saving = useProjectStore((s) => s.saving);
+  const recents = useProjectStore((s) => s.recents);
+  const openDialog = useProjectStore((s) => s.openProjectDialog);
+  const loadAt = useProjectStore((s) => s.loadProjectAt);
+  const closeProject = useProjectStore((s) => s.closeProject);
+  const saveChapter = useProjectStore((s) => s.saveChapter);
   const guard = useViewStore((s) => s.requestGuarded);
 
   if (!project) return null;
@@ -182,9 +203,55 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="offcanvas" className="font-sans">
       <SidebarHeader>
-        <span className="truncate px-2 py-1 font-heading text-sm text-foreground">
-          {project.name}
-        </span>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            {/* The project name is the project switcher — clicking it opens the
+                File menu (open / save / recent / close). */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton className="h-auto min-h-12 items-center gap-2 py-2 whitespace-normal">
+                  <span className="grid size-[18px] shrink-0 place-items-center rounded bg-gradient-to-br from-accent-ink to-lore-edge text-[11px] font-semibold text-background">
+                    A
+                  </span>
+                  <span className="min-w-0 flex-1 break-words font-heading text-sm text-foreground">
+                    {project.name}
+                  </span>
+                  <IconChevronDown className="size-3 shrink-0 text-faint" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-60 font-sans">
+                <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
+                  <IconFolderOpen /> Open project…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!chapterDirty || saving}
+                  onSelect={() => void saveChapter()}
+                >
+                  <IconDeviceFloppy /> Save chapter
+                </DropdownMenuItem>
+                {recents.length > 0 ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-faint">Recent</DropdownMenuLabel>
+                    {recents.slice(0, 6).map((r) => (
+                      <DropdownMenuItem
+                        key={r.root}
+                        disabled={r.root === project.root}
+                        onSelect={() => guard(() => void loadAt(r.root))}
+                      >
+                        <span className="truncate">{r.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => guard(closeProject)}>
+                  <IconX /> Close project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -199,7 +266,7 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       isActive={on}
                       onClick={() => guard(() => void selectChapter(c.id))}
-                      className="grid grid-cols-[24px_1fr_auto] items-center gap-1.5"
+                      className="grid h-auto min-h-8 grid-cols-[24px_1fr_auto] items-start gap-1.5 py-1.5"
                     >
                       <span
                         className={cn(
@@ -209,8 +276,8 @@ export function AppSidebar() {
                       >
                         {c.label}
                       </span>
-                      <span className="truncate">{c.title}</span>
-                      <span className={cn("size-1.5 rounded-full", STATUS_DOT[status])} />
+                      <span className="break-words whitespace-normal">{c.title}</span>
+                      <span className={cn("mt-1.5 size-1.5 rounded-full", STATUS_DOT[status])} />
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -229,9 +296,9 @@ export function AppSidebar() {
               <SidebarMenu>
                 {meta.characters.map((c) => (
                   <SidebarMenuItem key={c.id}>
-                    <SidebarMenuButton className="text-mid">
-                      <ColorDot color={c.color} />
-                      <span className="truncate">{c.name}</span>
+                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-mid whitespace-normal [&>span:last-child]:!whitespace-normal">
+                      <ColorDot color={c.color} className="mt-0.5 shrink-0" />
+                      <span className="break-words">{c.name}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -250,9 +317,9 @@ export function AppSidebar() {
               <SidebarMenu>
                 {meta.lore.map((l) => (
                   <SidebarMenuItem key={l.id}>
-                    <SidebarMenuButton className="text-mid">
-                      <span className="size-1.5 shrink-0 rounded-full bg-lore-ink" />
-                      <span className="truncate">{l.title}</span>
+                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-mid whitespace-normal [&>span:last-child]:!whitespace-normal">
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
+                      <span className="break-words">{l.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}

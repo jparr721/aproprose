@@ -1,27 +1,14 @@
-// top-bar.tsx — the application chrome: document identity, build status, panel
-// toggles, settings, and the Compile CTA. The brand opens the File menu, which
-// is where multi-project switching lives. Opening/closing/switching wipes state,
-// so those actions are routed through the view store's unsaved-edits guard.
+// top-bar.tsx — the application chrome: sidebar toggle, document identity, build
+// status, panel toggles, settings, the Compile CTA, and (off-macOS) window
+// controls. Project switching now lives in the sidebar header, not here.
 
 import {
-  IconChevronDown,
-  IconDeviceFloppy,
   IconFileTypePdf,
-  IconFolderOpen,
   IconLoader2,
   IconPlayerPlayFilled,
   IconSparkles,
-  IconX,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SettingsSheet } from "@/components/app/settings-sheet";
 import { WindowControls } from "@/components/app/window-controls";
@@ -71,14 +58,7 @@ export function TopBar() {
   const project = useProjectStore((s) => s.project);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
-  const saving = useProjectStore((s) => s.saving);
   const compiling = useProjectStore((s) => s.compile.status === "compiling");
-  const recents = useProjectStore((s) => s.recents);
-
-  const openDialog = useProjectStore((s) => s.openProjectDialog);
-  const loadAt = useProjectStore((s) => s.loadProjectAt);
-  const closeProject = useProjectStore((s) => s.closeProject);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
   const compileNow = useProjectStore((s) => s.compileNow);
 
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -86,7 +66,6 @@ export function TopBar() {
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
   const togglePdf = useViewStore((s) => s.togglePdf);
-  const guard = useViewStore((s) => s.requestGuarded);
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
@@ -99,57 +78,9 @@ export function TopBar() {
       )}
     >
       <SidebarTrigger className="-ml-1 text-mid" />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="gap-1.5 font-heading text-[15px]">
-            <span className="grid size-[18px] place-items-center rounded bg-gradient-to-br from-accent-ink to-lore-edge text-[11px] font-semibold text-background">
-              A
-            </span>
-            Aproprose
-            <IconChevronDown className="size-3 text-faint" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60 font-sans">
-          <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
-            <IconFolderOpen /> Open project…
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!chapterDirty || saving}
-            onSelect={() => void saveChapter()}
-          >
-            <IconDeviceFloppy /> Save chapter
-          </DropdownMenuItem>
-          {recents.length > 0 ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-faint">Recent</DropdownMenuLabel>
-              {recents.slice(0, 6).map((r) => (
-                <DropdownMenuItem
-                  key={r.root}
-                  disabled={r.root === project?.root}
-                  onSelect={() => guard(() => void loadAt(r.root))}
-                >
-                  <span className="truncate">{r.name}</span>
-                </DropdownMenuItem>
-              ))}
-            </>
-          ) : null}
-          {project ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => guard(closeProject)}
-              >
-                <IconX /> Close project
-              </DropdownMenuItem>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
 
       {project ? (
-        <div className="flex min-w-0 items-center gap-1.5 border-l border-border pl-3 text-[13px] text-mid">
+        <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-mid">
           <span className="truncate font-medium text-foreground">{project.mainFile}</span>
           {chapter ? (
             <>

@@ -9,7 +9,6 @@ import {
   IconLoader2,
   IconRefresh,
   IconSend,
-  IconX,
 } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -484,23 +483,12 @@ const TABS: { id: AiTab; label: string }[] = [
 export function AiPanel() {
   const tab = useViewStore((s) => s.aiTab);
   const setTab = useViewStore((s) => s.setAiTab);
-  const close = useViewStore((s) => s.toggleAi);
 
   return (
     <aside
       data-ai-root
       className="flex h-full min-h-0 flex-col border-l border-line-soft bg-card font-sans"
     >
-      <div className="flex h-10 items-center justify-between border-b border-line-soft px-3">
-        <div className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">
-          <span className="size-3.5 rounded bg-gradient-to-br from-ai-edge to-ai-ink" />
-          Aproprose AI
-        </div>
-        <Button variant="ghost" size="icon-sm" onClick={close} title="Hide panel">
-          <IconX />
-        </Button>
-      </div>
-
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as AiTab)}

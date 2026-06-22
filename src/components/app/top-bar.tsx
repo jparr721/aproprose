@@ -24,11 +24,11 @@ function BuildBadge() {
 
   const tone =
     status === "clean"
-      ? "bg-ok"
+      ? "bg-success"
       : status === "error"
-        ? "bg-flag"
+        ? "bg-destructive"
         : status === "compiling"
-          ? "bg-warn"
+          ? "bg-warning"
           : "bg-faint";
 
   const label =
@@ -43,9 +43,9 @@ function BuildBadge() {
           : "not built";
 
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-line-soft bg-card px-2.5 py-1 font-sans text-[11px] text-mid">
+    <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground">
       {status === "compiling" ? (
-        <IconLoader2 className="size-3 animate-spin text-warn" />
+        <IconLoader2 className="size-3 animate-spin text-warning" />
       ) : (
         <span className={cn("size-1.5 rounded-full", tone)} />
       )}
@@ -73,14 +73,14 @@ export function TopBar() {
     <header
       data-tauri-drag-region
       className={cn(
-        "flex h-11 items-center gap-3 border-b border-line-soft bg-background px-3 font-sans",
+        "flex h-11 items-center gap-3 border-b border-border bg-background px-3 font-sans",
         IS_MAC && "pl-20",
       )}
     >
-      <SidebarTrigger className="-ml-1 text-mid" />
+      <SidebarTrigger className="-ml-1 text-muted-foreground" />
 
       {project ? (
-        <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-mid">
+        <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
           <span className="truncate font-medium text-foreground">{project.mainFile}</span>
           {chapter ? (
             <>

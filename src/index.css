@@ -78,18 +78,9 @@
   --sidebar-border: var(--line-100);
   --sidebar-ring: var(--clay-500);
 
-  /* ── legacy aliases (TEMPORARY — removed in Phase 4 after the sweep) ───── */
-  --paper: var(--card);
-  --rail: var(--sidebar);
-  --sunk: var(--muted);
-  --mid: var(--muted-foreground);
-  --faint: var(--ink-300);
-  --line-soft: var(--border);
-  --line-strong: var(--line-300);
-  --accent-ink: var(--clay-600);
-  --ok: var(--success);
-  --warn: var(--warning);
-  --flag: var(--destructive);
+  /* ── retained app tokens (no shadcn semantic equivalent) ──────────────── */
+  --faint: var(--ink-300); /* tertiary text, fainter than muted-foreground */
+  --accent-ink: var(--clay-600); /* clay accent ink for emphasis text / marks */
 
   /* ── kept app tokens (irreducible) ────────────────────────────────────── */
   --ai-tint: oklch(0.95 0.018 285);
@@ -202,13 +193,7 @@
   --color-sidebar-ring: var(--sidebar-ring);
 
   /* app surfaces */
-  --color-paper: var(--paper);
-  --color-rail: var(--rail);
-  --color-sunk: var(--sunk);
-  --color-mid: var(--mid);
   --color-faint: var(--faint);
-  --color-line-soft: var(--line-soft);
-  --color-line-strong: var(--line-strong);
   --color-accent-ink: var(--accent-ink);
   --color-ai-tint: var(--ai-tint);
   --color-ai-edge: var(--ai-edge);
@@ -219,9 +204,6 @@
   --color-scratch-tint: var(--scratch-tint);
   --color-scratch-edge: var(--scratch-edge);
   --color-scratch-ink: var(--scratch-ink);
-  --color-ok: var(--ok);
-  --color-warn: var(--warn);
-  --color-flag: var(--flag);
   --color-sheet: var(--sheet);
   --color-sheet-ink: var(--sheet-ink);
 

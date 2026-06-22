@@ -54,7 +54,7 @@ const TYPE_SWATCH: Record<BlockType, string> = {
   dialogue: "bg-foreground",
   lore: "bg-lore-ink",
   scratchpad: "bg-scratch-ink",
-  latex: "bg-mid",
+  latex: "bg-muted-foreground",
 };
 
 const PROSE = "font-serif text-[length:var(--prose-size,17.5px)] leading-[1.65] text-foreground";
@@ -76,7 +76,7 @@ function TypeChip({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="xs" className="gap-1 font-sans text-mid">
+        <Button variant="ghost" size="xs" className="gap-1 font-sans text-muted-foreground">
           {speaker ? <ColorDot color={speaker.color} /> : null}
           {speaker ? speaker.name : TYPE_LABELS[block.type]}
           <IconChevronDown className="size-2.5 opacity-50" />
@@ -131,7 +131,7 @@ function BlockBody({
     case "chapter":
       if (block.level === "break") {
         return (
-          <div className="py-4 text-center font-serif tracking-[0.6em] text-mid">
+          <div className="py-4 text-center font-serif tracking-[0.6em] text-muted-foreground">
             ∗ ∗ ∗
           </div>
         );
@@ -154,7 +154,7 @@ function BlockBody({
       return (
         <div className="flex flex-col gap-1">
           {speaker ? (
-            <div className="flex items-center gap-1.5 font-sans text-[11px] font-medium uppercase tracking-wide text-mid">
+            <div className="flex items-center gap-1.5 font-sans text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               <ColorDot color={speaker.color} />
               {speaker.name}
             </div>
@@ -172,7 +172,7 @@ function BlockBody({
                 value={block.beat ?? ""}
                 onChange={(v) => updateBlock(block.id, { beat: v })}
                 placeholder="Action beat (optional)"
-                className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-mid"
+                className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-muted-foreground"
               />
             </>
           ) : (
@@ -183,7 +183,7 @@ function BlockBody({
                 <span className="text-faint">”</span>
               </p>
               {block.beat ? (
-                <p className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-mid">
+                <p className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-muted-foreground">
                   {renderInline(block.beat)}
                 </p>
               ) : null}
@@ -242,10 +242,10 @@ function BlockBody({
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
-          className="rounded-md border border-line-soft bg-sunk p-2.5 font-mono text-[12.5px] leading-[1.6] text-mid"
+          className="rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground"
         />
       ) : (
-        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-line-soft bg-sunk p-2.5 font-mono text-[12.5px] leading-[1.6] text-mid">
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground">
           {block.text}
         </pre>
       );
@@ -329,8 +329,8 @@ function BlockImpl({
         "group relative flex gap-1.5 rounded-lg border-l-[3px] py-1.5 pl-1.5 pr-2 transition-colors",
         selected
           ? "border-l-accent-ink bg-card"
-          : "border-l-transparent hover:bg-sunk/50",
-        cardChrome && "border border-l-[3px] border-line-soft bg-card px-3 py-3",
+          : "border-l-transparent hover:bg-muted/50",
+        cardChrome && "border border-l-[3px] border-border bg-card px-3 py-3",
         cardChrome && selected && "border-l-accent-ink",
       )}
     >
@@ -349,7 +349,7 @@ function BlockImpl({
       {/* actions */}
       <div
         className={cn(
-          "absolute right-2 top-0 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-line-soft bg-card p-1 shadow-sm",
+          "absolute right-2 top-0 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
           "group-hover:flex",
           selected && "flex",
         )}
@@ -362,7 +362,7 @@ function BlockImpl({
           title="Dictate into this block"
           aria-pressed={dictation.listening && selected}
           className={cn(
-            dictation.listening && selected && "text-flag",
+            dictation.listening && selected && "text-destructive",
           )}
           onClick={onMic}
         >

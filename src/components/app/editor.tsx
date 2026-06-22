@@ -71,7 +71,7 @@ export function Editor() {
 
   if (!chapter) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-mid">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-muted-foreground">
         <IconWriting className="size-8 text-faint" />
         <p className="text-sm">Select a chapter to begin.</p>
       </div>
@@ -81,8 +81,8 @@ export function Editor() {
   return (
     <ScrollArea className="h-full bg-background">
       <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
-        <header className="mb-5 flex items-baseline gap-3 border-b border-line-soft pb-3.5">
-          <span className="font-serif text-lg italic text-mid">Chapter {chapter.label}</span>
+        <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
+          <span className="font-serif text-lg italic text-muted-foreground">Chapter {chapter.label}</span>
           <span className="font-heading text-2xl font-medium tracking-tight text-foreground">
             {chapter.title}
           </span>

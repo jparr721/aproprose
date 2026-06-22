@@ -69,7 +69,7 @@ export function Welcome() {
                   disabled={loading}
                   className={cn(
                     "group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors",
-                    "hover:bg-sunk disabled:pointer-events-none disabled:opacity-50",
+                    "hover:bg-muted disabled:pointer-events-none disabled:opacity-50",
                   )}
                 >
                   <IconBook2 className="size-4 shrink-0 text-faint group-hover:text-accent-ink" />

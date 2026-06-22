@@ -40,7 +40,7 @@ import { cn } from "@/lib/utils";
 // ── shared bits ──────────────────────────────────────────────────────────────
 function ContextLine({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 font-sans text-[11px] text-mid">
+    <div className="flex items-center gap-1.5 font-sans text-[11px] text-muted-foreground">
       <span className="size-1.5 rounded-full bg-ai-edge shadow-[0_0_0_2px_var(--ai-tint)]" />
       {children}
     </div>
@@ -49,7 +49,7 @@ function ContextLine({ children }: { children: React.ReactNode }) {
 
 function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-2 rounded-lg border border-line-soft bg-card p-3 font-sans text-xs text-mid">
+    <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 font-sans text-xs text-muted-foreground">
       <span className="text-destructive">Couldn't reach the model.</span>
       <span className="text-faint">{error}</span>
       <Button variant="outline" size="sm" onClick={onRetry}>
@@ -159,14 +159,14 @@ function SuggestTab() {
         <p
           className={cn(
             "font-serif text-[14.5px] leading-[1.55] text-foreground",
-            v.type === "narration" && "italic text-mid",
+            v.type === "narration" && "italic text-muted-foreground",
           )}
         >
           {v.type === "dialogue" ? `“${v.text}”` : v.text}
         </p>
         <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
           <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
-          <p className="font-sans text-xs leading-[1.5] text-mid">{v.rationale}</p>
+          <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Button size="sm" onClick={() => insert(v)}>Insert below</Button>
@@ -184,7 +184,7 @@ function SuggestTab() {
             {data.followups.map((f, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-mid"
+                className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-muted-foreground"
               >
                 <IconArrowRight className="size-3 shrink-0 text-faint" />
                 {f}
@@ -199,8 +199,8 @@ function SuggestTab() {
 
 // ── Critique ─────────────────────────────────────────────────────────────────
 const NOTE_TONE: Record<CritiqueNote["kind"], string> = {
-  strength: "bg-ok/15 text-ok",
-  watch: "bg-warn/15 text-warn",
+  strength: "bg-success/15 text-success",
+  watch: "bg-warning/15 text-warning",
   idea: "bg-ai-tint text-ai-ink",
 };
 const NOTE_WORD: Record<CritiqueNote["kind"], string> = {
@@ -229,14 +229,14 @@ function CritiqueTab() {
         <AiError error={error} onRetry={run} />
       ) : (
         (data ?? []).map((n, i) => (
-          <div key={i} className="rounded-lg border border-line-soft bg-background p-3">
+          <div key={i} className="rounded-lg border border-border bg-background p-3">
             <div className="mb-1 flex items-baseline gap-2">
               <span className={cn("rounded px-1.5 py-0.5 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em]", NOTE_TONE[n.kind])}>
                 {NOTE_WORD[n.kind]}
               </span>
-              <span className="font-sans text-[10.5px] uppercase tracking-[0.06em] text-mid">{n.tag}</span>
+              <span className="font-sans text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">{n.tag}</span>
             </div>
-            <p className="font-sans text-[12.5px] leading-[1.55] text-mid">{n.text}</p>
+            <p className="font-sans text-[12.5px] leading-[1.55] text-muted-foreground">{n.text}</p>
           </div>
         ))
       )}
@@ -246,9 +246,9 @@ function CritiqueTab() {
 
 // ── Continuity ─────────────────────────────────────────────────────────────────
 const SEV_DOT: Record<ContinuityFlag["sev"], string> = {
-  ok: "bg-ok",
-  warn: "bg-warn",
-  flag: "bg-flag",
+  ok: "bg-success",
+  warn: "bg-warning",
+  flag: "bg-destructive",
 };
 const SEV_WORD: Record<ContinuityFlag["sev"], string> = {
   ok: "Clean",
@@ -276,14 +276,14 @@ function ContinuityTab() {
         <AiError error={error} onRetry={run} />
       ) : (
         (data ?? []).map((f, i) => (
-          <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-line-soft p-2.5">
+          <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
             <span className={cn("mt-1 size-2 rounded-full", SEV_DOT[f.sev])} />
             <div>
               <div className="mb-0.5 flex items-baseline gap-2">
                 <span className="font-sans text-[11px] font-semibold text-foreground">{f.tag}</span>
                 <span className="font-sans text-[9.5px] uppercase tracking-[0.08em] text-faint">{SEV_WORD[f.sev]}</span>
               </div>
-              <p className="font-sans text-xs leading-[1.5] text-mid">{f.text}</p>
+              <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{f.text}</p>
             </div>
           </div>
         ))
@@ -308,18 +308,18 @@ function CastRow({ m }: { m: CastMember }) {
       {m.color ? (
         <ColorAvatar color={m.color} initials={initials(m.name)} />
       ) : (
-        <span className="grid size-8 place-items-center rounded-lg border border-dashed border-border font-heading text-xs text-mid">
+        <span className="grid size-8 place-items-center rounded-lg border border-dashed border-border font-heading text-xs text-muted-foreground">
           {initials(m.name)}
         </span>
       )}
       <div>
         <div className="flex items-baseline gap-2 font-sans text-[13px] font-medium text-foreground">
           <span className="truncate">{m.name}</span>
-          <span className="rounded bg-sunk px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.06em] text-mid">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground">
             {m.state}
           </span>
         </div>
-        <div className="font-sans text-[11.5px] leading-[1.45] text-mid">{m.detail}</div>
+        <div className="font-sans text-[11.5px] leading-[1.45] text-muted-foreground">{m.detail}</div>
       </div>
     </div>
   );
@@ -427,7 +427,7 @@ function BrainstormTab() {
             m.role === "user" ? (
               <p
                 key={m.id}
-                className="ml-auto max-w-[88%] rounded-[12px_12px_4px_12px] bg-sunk px-3 py-2 font-sans text-[12.5px] leading-[1.55] text-foreground"
+                className="ml-auto max-w-[88%] rounded-[12px_12px_4px_12px] bg-muted px-3 py-2 font-sans text-[12.5px] leading-[1.55] text-foreground"
               >
                 {m.content}
               </p>
@@ -449,7 +449,7 @@ function BrainstormTab() {
           {error ? <AiError error={error} onRetry={send} /> : null}
         </div>
       </div>
-      <div className="flex items-end gap-2 border-t border-line-soft bg-card p-3">
+      <div className="flex items-end gap-2 border-t border-border bg-card p-3">
         <Textarea
           value={draft}
           onChange={(e) => setDraft(e.currentTarget.value)}
@@ -487,19 +487,19 @@ export function AiPanel() {
   return (
     <aside
       data-ai-root
-      className="flex h-full min-h-0 flex-col border-l border-line-soft bg-card font-sans"
+      className="flex h-full min-h-0 flex-col border-l border-border bg-card font-sans"
     >
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as AiTab)}
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <TabsList className="h-auto w-full justify-start gap-0 rounded-none border-b border-line-soft bg-transparent px-2 pt-1.5">
+        <TabsList className="h-auto w-full justify-start gap-0 rounded-none border-b border-border bg-transparent px-2 pt-1.5">
           {TABS.map((t) => (
             <TabsTrigger
               key={t.id}
               value={t.id}
-              className="rounded-none border-0 border-b-[1.5px] border-transparent bg-transparent px-2.5 py-1.5 text-[11.5px] font-medium text-mid data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              className="rounded-none border-0 border-b-[1.5px] border-transparent bg-transparent px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
             >
               {t.label}
             </TabsTrigger>

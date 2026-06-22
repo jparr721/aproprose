@@ -159,7 +159,7 @@ function OpenAiKeyField() {
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1.5 font-sans text-xs text-ok">
+          <span className="flex items-center gap-1.5 font-sans text-xs text-success">
             <IconCheck className="size-3.5" /> A key is configured.
           </span>
           <AlertDialog>

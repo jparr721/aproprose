@@ -48,8 +48,8 @@ import type { ChapterStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS_DOT: Record<ChapterStatus, string> = {
-  active: "bg-ok",
-  draft: "bg-warn",
+  active: "bg-success",
+  draft: "bg-warning",
   outline: "bg-scratch-ink",
   planned: "bg-faint opacity-50",
 };
@@ -293,7 +293,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 {meta.characters.map((c) => (
                   <SidebarMenuItem key={c.id}>
-                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-mid whitespace-normal [&>span:last-child]:!whitespace-normal">
+                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
                       <ColorDot color={c.color} className="mt-0.5 shrink-0" />
                       <span className="break-words">{c.name}</span>
                     </SidebarMenuButton>
@@ -314,7 +314,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 {meta.lore.map((l) => (
                   <SidebarMenuItem key={l.id}>
-                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-mid whitespace-normal [&>span:last-child]:!whitespace-normal">
+                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
                       <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
                       <span className="break-words">{l.title}</span>
                     </SidebarMenuButton>

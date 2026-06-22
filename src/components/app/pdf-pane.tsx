@@ -137,7 +137,7 @@ function PdfPageView({
     <div
       ref={wrapRef}
       data-page={pageNumber}
-      className="mx-auto overflow-hidden rounded-[2px] border border-line-soft bg-card shadow-lg"
+      className="mx-auto overflow-hidden rounded-[2px] border border-border bg-card shadow-lg"
     >
       {visible ? <canvas ref={canvasRef} className="block h-full w-full" /> : null}
     </div>
@@ -246,12 +246,12 @@ export function PdfPane() {
   const compiling = status === "compiling";
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-sunk font-sans">
-      <div className="flex h-10 items-center justify-between border-b border-line-soft bg-background px-3">
+    <aside className="flex h-full min-h-0 flex-col bg-muted font-sans">
+      <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
         <div className="flex items-center gap-2.5">
-          <span className="font-mono text-xs text-mid">preview.pdf</span>
-          <span className="flex items-center gap-1.5 rounded-full border border-line-soft bg-card px-2 py-0.5 text-[11px] text-mid">
-            <span className="size-1.5 rounded-full bg-ok" />
+          <span className="font-mono text-xs text-muted-foreground">preview.pdf</span>
+          <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-success" />
             {at ? `compiled ${(durationMs / 1000).toFixed(1)}s` : "loaded"}
           </span>
         </div>
@@ -260,11 +260,11 @@ export function PdfPane() {
             {compiling ? <IconLoader2 className="animate-spin" /> : <IconRefresh />}
           </Button>
           {numPages > 0 ? (
-            <span className="text-[11.5px] tabular-nums text-mid">
+            <span className="text-[11.5px] tabular-nums text-muted-foreground">
               {current} / {numPages}
             </span>
           ) : null}
-          <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-mid">
+          <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-muted-foreground">
             <Button variant="ghost" size="icon-xs" title="Zoom out" onClick={() => applyZoom(scale - ZOOM_STEP)}>
               <IconMinus />
             </Button>
@@ -316,7 +316,7 @@ export function PdfPane() {
             ))}
           </div>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-mid">
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
             {compiling || doc ? (
               <>
                 <IconLoader2 className="size-6 animate-spin text-faint" />

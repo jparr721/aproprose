@@ -5,7 +5,8 @@ A Tauri 2 desktop app with a React 19 + Vite 7 + Tailwind 4 frontend and a Rust 
 ## Layout
 
 - `src/` - React frontend (Vite). Entry `src/main.tsx` -> `src/App.tsx`.
-  - `src/components/ui/` - shadcn-style primitives (`button`, `input`, `card`, `label`, `typography`).
+  - `src/components/ui/` - shadcn-style primitives (`button`, `input`, `card`, `sidebar`, `typography`, …).
+  - `src/components/app/` - app components. Shell: `app-sidebar` (left nav + project switcher), `top-bar` (doubles as the custom titlebar), `window-controls`. `src/lib/platform.ts` exposes `IS_MAC`.
   - `src/lib/utils.ts` - `cn()` (clsx + tailwind-merge). The only class-merging helper.
   - `src/index.css` - Tailwind entry, theme tokens (colors, radius, fonts), base layer.
 - `src-tauri/` - Rust backend. `src/lib.rs` registers commands + plugins; `src/main.rs` is the thin binary entry.
@@ -63,8 +64,17 @@ All accept `className` for additional styling (merged via `cn`).
 - `font-heading` -> Lora (display/headings). Used by `TypographyH1`-`H4` and `TypographyStat`.
 - `font-serif` -> Noto Serif (body). Applied to `html` in the base layer, so paragraphs inherit it.
 - `font-mono` -> system monospace (Tailwind default). Used by `TypographyEyebrow` and `TypographyInlineCode`.
+- `font-sans` -> system UI sans. Dense chrome (top bar, sidebar, panels, dialogs) opts into it; body text stays serif. (Renamed from the former `font-ui`.)
 
 To adjust the type system, edit the token in the `@theme inline` block of `src/index.css` and/or the shared classes in `typography.tsx` - not call sites.
+
+### Theming & tokens
+
+All color flows through shadcn **semantic tokens** - `bg-background`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-card`, `bg-sidebar`, and the status trio `bg-success` / `bg-warning` / `bg-destructive` (each with a `-foreground`). Never hard-code a color or use an ad-hoc `text-[Npx]` in a component; use a token + the type scale.
+
+The palette is a **named warm-paper ramp** (`--paper-*`, `--ink-*`, `--line-*`, `--clay-*`) in `src/index.css`. The semantic mapping (`--background: var(--paper-100)`, …) is declared **once** in `:root`; each theme block (`[data-theme="sepia"]`, `.dark`) overrides only the ramp values. To retune a theme, edit its ramp - not the call sites, not the mapping.
+
+A few **app tokens are retained** because shadcn has no equivalent - keep using them, don't reinvent: `--faint` (tertiary text), `--accent-ink` (clay emphasis ink), the block-type tints `--ai-*` / `--lore-*` / `--scratch-*`, the PDF `--sheet` / `--sheet-ink`, and `--prose-size`. Everything else folds onto shadcn semantics.
 
 ### Text truncation
 
@@ -107,6 +117,12 @@ Trust the type system. Don't mask bugs with defaults.
 - **Permissions are explicit.** Any capability the webview needs (fs, shell, opener, etc.) must be granted in `src-tauri/capabilities/default.json`. If a plugin call fails silently in the webview, check the capability grant first.
 - Keep heavy/privileged work (filesystem, network to third-party APIs, secrets) on the Rust side and expose a narrow command surface. The webview is untrusted UI.
 - Secrets (the `OPENAI_API_KEY`) must not be bundled into the frontend. The key is entered in the in-app Settings and stored in the OS app-config dir on the Rust side (`set_openai_key`; resolved by `get_ai_config` with optional `OPENAI_API_KEY` env / `.env` dev fallbacks). It is read in Rust and exposed only as the resolved value through a command - never inlined into `src/` code shipped to the webview, and never committed (`.env` is gitignored).
+
+## Window shell & custom titlebar
+
+- The app shell is `SidebarProvider` -> `AppSidebar` (left, `collapsible="offcanvas"`) + `SidebarInset` (top bar + editor/PDF/AI). The sidebar toggles via its `SidebarTrigger` or ⌘B (built into `SidebarProvider`) and is **independent of focus mode**. Project switching lives in the **sidebar header** - click the project name.
+- The window is **frameless** (`decorations: false`); the `top-bar` `<header>` is the titlebar via `data-tauri-drag-region` (on the header and the flex spacer). Windows/Linux render custom min/max/close from `window-controls` (`getCurrentWindow()`); macOS keeps native traffic lights via `titleBarStyle: "Overlay"` in `tauri.macos.conf.json` plus a `pl-20` inset. Branch on `IS_MAC` from `@/lib/platform`.
+- Window grants in `capabilities/default.json`: `os:default` and the `core:window:allow-*` set (start-dragging, minimize, maximize, unmaximize, toggle-maximize, internal-toggle-maximize, is-maximized, close). Platform config merges via JSON Merge Patch (arrays replace wholesale), so `tauri.macos.conf.json` repeats the full window object.
 
 ## Library use
 

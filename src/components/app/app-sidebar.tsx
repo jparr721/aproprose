@@ -209,10 +209,7 @@ export function AppSidebar() {
                 File menu (open / save / recent / close). */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="h-auto min-h-12 items-center gap-2 py-2 whitespace-normal">
-                  <span className="grid size-[18px] shrink-0 place-items-center rounded bg-gradient-to-br from-accent-ink to-lore-edge text-[11px] font-semibold text-background">
-                    A
-                  </span>
+                <SidebarMenuButton className="h-auto min-h-10 items-center gap-2 py-2 whitespace-normal">
                   <span className="min-w-0 flex-1 break-words font-heading text-sm text-foreground">
                     {project.name}
                   </span>

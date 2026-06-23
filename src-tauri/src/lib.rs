@@ -7,6 +7,7 @@
 //! these snake_case parameters.
 
 pub mod compile;
+pub mod git;
 pub mod project;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -353,6 +354,7 @@ pub fn run() {
             set_openai_key,
             read_app_data,
             write_app_data,
+            git::git_tooling_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

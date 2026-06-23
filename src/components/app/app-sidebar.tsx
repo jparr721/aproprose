@@ -45,13 +45,13 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
 import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
+import { ChapterList } from "@/components/app/chapter-list";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 
@@ -97,8 +97,6 @@ function AddLoreDialog() {
 export function AppSidebar() {
   const project = useProjectStore((s) => s.project);
   const meta = useProjectStore((s) => s.meta);
-  const activeId = useProjectStore((s) => s.activeChapterId);
-  const selectChapter = useProjectStore((s) => s.selectChapter);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
   const saving = useProjectStore((s) => s.saving);
   const recents = useProjectStore((s) => s.recents);
@@ -161,37 +159,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <Collapsible defaultOpen className="group/collapsible">
-          <SidebarGroup>
-            <SidebarGroupLabel asChild className="gap-1">
-              <CollapsibleTrigger>
-                <IconChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
-                Chapters
-              </CollapsibleTrigger>
-            </SidebarGroupLabel>
-            <CollapsibleContent>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {project.chapters.map((c, idx) => {
-                    const on = c.id === activeId;
-                    return (
-                      <SidebarMenuItem key={c.id}>
-                        <SidebarMenuButton
-                          isActive={on}
-                          onClick={() => guard(() => void selectChapter(c.id))}
-                          className="pr-8"
-                        >
-                          <span>{c.title}</span>
-                        </SidebarMenuButton>
-                        <SidebarMenuBadge>{idx + 1}</SidebarMenuBadge>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </CollapsibleContent>
-          </SidebarGroup>
-        </Collapsible>
+        <ChapterList />
 
         <Collapsible defaultOpen className="group/collapsible">
           <SidebarGroup>

@@ -545,9 +545,13 @@ pub fn write_meta(root: &Path, value: &str) -> Result<(), String> {
 mod meta_tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SEQ: AtomicU32 = AtomicU32::new(0);
 
     fn temp_dir() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("aproprose-meta-{}", std::process::id()));
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("aproprose-meta-{}-{}", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

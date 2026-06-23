@@ -38,6 +38,7 @@ import {
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
 import { pathHash } from "@/lib/path-hash";
+import { useSyncStore } from "@/stores/sync-store";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -236,6 +237,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         void writeAppData(LAST_PROJECT_KEY, root);
 
         set({ project, meta, recents, status: "ready" });
+        void useSyncStore.getState().init(root);
 
         // Load the first chapter (if any) and any already-built PDF.
         const first = project.chapters[0];
@@ -254,6 +256,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
       void writeAppData(LAST_PROJECT_KEY, "");
+      useSyncStore.getState().teardown();
       set({
         status: "empty",
         project: null,

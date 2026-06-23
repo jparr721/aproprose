@@ -29,6 +29,11 @@ interface AiCacheState {
   entries: Record<string, AiCacheEntry>;
   /** Merge a partial entry into the cache for `key`. */
   patch: (key: string, entry: Partial<AiCacheEntry>) => void;
+  /** Replace all entries (used when a project's saved AI state loads). Any
+   *  persisted `loading` flag is forced false -- a request can't be in flight. */
+  hydrate: (entries: Record<string, AiCacheEntry>) => void;
+  /** Drop all entries (used when the open project changes or closes). */
+  reset: () => void;
 }
 
 export const useAiCacheStore = create<AiCacheState>((set) => ({
@@ -37,4 +42,13 @@ export const useAiCacheStore = create<AiCacheState>((set) => ({
     set((s) => ({
       entries: { ...s.entries, [key]: { ...s.entries[key], ...entry } },
     })),
+  hydrate: (entries) =>
+    set(() => {
+      const next: Record<string, AiCacheEntry> = {};
+      for (const [key, e] of Object.entries(entries)) {
+        next[key] = { ...e, loading: false };
+      }
+      return { entries: next };
+    }),
+  reset: () => set(() => ({ entries: {} })),
 }));

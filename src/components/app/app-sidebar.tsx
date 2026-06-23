@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import {
+  IconAdjustments,
   IconChevronDown,
   IconChevronRight,
   IconDeviceFloppy,
@@ -52,6 +53,7 @@ import { ColorDot } from "@/components/app/color-dot";
 import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { ChapterList } from "@/components/app/chapter-list";
+import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 
@@ -105,6 +107,7 @@ export function AppSidebar() {
   const closeProject = useProjectStore((s) => s.closeProject);
   const saveChapter = useProjectStore((s) => s.saveChapter);
   const guard = useViewStore((s) => s.requestGuarded);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (!project) return null;
 
@@ -133,6 +136,9 @@ export function AppSidebar() {
                   onSelect={() => void saveChapter()}
                 >
                   <IconDeviceFloppy /> Save chapter
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                  <IconAdjustments /> Project settings…
                 </DropdownMenuItem>
                 {recents.length > 0 ? (
                   <>
@@ -241,6 +247,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <ProjectSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </Sidebar>
   );
 }

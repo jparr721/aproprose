@@ -35,7 +35,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sidebar,
   SidebarContent,
@@ -52,100 +51,9 @@ import {
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
 import { SettingsSheet } from "@/components/app/settings-sheet";
+import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import { cn } from "@/lib/utils";
-
-const CHARACTER_COLORS = [
-  "oklch(0.55 0.12 30)",
-  "oklch(0.5 0.08 235)",
-  "oklch(0.55 0.1 145)",
-  "oklch(0.58 0.12 300)",
-  "oklch(0.6 0.12 60)",
-  "oklch(0.5 0.06 100)",
-];
-
-function AddCharacterDialog() {
-  const addCharacter = useProjectStore((s) => s.addCharacter);
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [color, setColor] = useState(CHARACTER_COLORS[0]);
-
-  const submit = () => {
-    if (!name.trim()) return;
-    addCharacter({ name: name.trim(), role: role.trim(), color });
-    setName("");
-    setRole("");
-    setColor(CHARACTER_COLORS[0]);
-    setOpen(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <SidebarGroupAction title="Add character">
-          <IconPlus />
-        </SidebarGroupAction>
-      </DialogTrigger>
-      <DialogContent className="font-sans sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-heading">Add character</DialogTitle>
-          <DialogDescription>
-            Characters power dialogue speaker chips and the AI cast tracker.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="char-name">Name</Label>
-            <Input
-              id="char-name"
-              value={name}
-              autoFocus
-              onChange={(e) => setName(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="Det. Marlow"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="char-role">Role</Label>
-            <Input
-              id="char-role"
-              value={role}
-              onChange={(e) => setRole(e.currentTarget.value)}
-              placeholder="Interrogator"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Color</Label>
-            <div className="flex gap-2">
-              {CHARACTER_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  aria-label="color"
-                  aria-pressed={c === color}
-                  onClick={() => setColor(c)}
-                  className={cn(
-                    "size-6 rounded-full ring-offset-2 ring-offset-background transition-shadow",
-                    c === color && "ring-2 ring-ring",
-                  )}
-                >
-                  <ColorDot color={c} className="size-6" />
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={submit} disabled={!name.trim()}>
-            Add character
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function AddLoreDialog() {
   const addLore = useProjectStore((s) => s.addLore);
@@ -293,7 +201,13 @@ export function AppSidebar() {
                 Characters
               </CollapsibleTrigger>
             </SidebarGroupLabel>
-            <AddCharacterDialog />
+            <AddCharacterDialog
+              trigger={
+                <SidebarGroupAction title="Add character">
+                  <IconPlus />
+                </SidebarGroupAction>
+              }
+            />
             <CollapsibleContent>
               <SidebarGroupContent>
                 {meta.characters.length === 0 ? (

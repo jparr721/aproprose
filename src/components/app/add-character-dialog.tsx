@@ -1,9 +1,8 @@
 // add-character-dialog.tsx — the shared "new cast member" form.
 //
-// Today the dialogue block's speaker dropdown uses it (controlled, no trigger,
-// auto-assigning the fresh character as that block's speaker via `onAdded`). The
-// uncontrolled `trigger` path exists so the sidebar's Characters group can be
-// migrated onto this shared dialog (it still has its own copy for now).
+// Used from two places: the sidebar's Characters group (uncontrolled, via the
+// `trigger` prop) and a dialogue block's speaker dropdown (controlled, no
+// trigger, auto-assigning the fresh character as the block's speaker via `onAdded`).
 
 import { useState } from "react";
 import {

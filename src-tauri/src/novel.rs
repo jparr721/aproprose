@@ -224,7 +224,11 @@ fn regenerate(root: &Path, model: &SkeletonModel) -> Result<(), String> {
                 let rel = format!("content/chapter-{next:03}.tex");
                 let abs = root.join(&rel);
                 // create_new so we never overwrite an existing chapter body.
-                match fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
+                match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&abs)
+                {
                     Ok(_) => {}
                     Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                         return Err(format!("chapter file {rel} already exists"));
@@ -256,7 +260,11 @@ pub fn write_skeleton(root: &Path, model: &SkeletonModel) -> Result<ProjectInfo,
 
 /// Regenerate from `model` (which already excludes the chapter) AND remove the
 /// chapter's body file. The one destructive path.
-pub fn delete_chapter(root: &Path, model: &SkeletonModel, file: &str) -> Result<ProjectInfo, String> {
+pub fn delete_chapter(
+    root: &Path,
+    model: &SkeletonModel,
+    file: &str,
+) -> Result<ProjectInfo, String> {
     let root = root
         .canonicalize()
         .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
@@ -285,7 +293,11 @@ fn folder_slug(name: &str) -> String {
         }
     }
     let s = s.trim_matches('-').to_string();
-    if s.is_empty() { "untitled-novel".to_string() } else { s }
+    if s.is_empty() {
+        "untitled-novel".to_string()
+    } else {
+        s
+    }
 }
 
 /// Write the baked static files into `root`, skipping any that already exist
@@ -311,7 +323,11 @@ fn scaffold_missing(root: &Path) -> Result<(), String> {
 }
 
 /// Create a new managed novel under `parent` and return the opened project.
-pub fn create_project(parent: &Path, name: &str, metadata: &NovelMetadata) -> Result<ProjectInfo, String> {
+pub fn create_project(
+    parent: &Path,
+    name: &str,
+    metadata: &NovelMetadata,
+) -> Result<ProjectInfo, String> {
     let parent = parent
         .canonicalize()
         .map_err(|e| format!("invalid location {}: {e}", parent.display()))?;
@@ -357,7 +373,8 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
     fs::write(root.join("metadata.tex"), render_metadata(&metadata)).map_err(|e| e.to_string())?;
     fs::write(root.join("chapters.tex"), render_chapters(&chapters)).map_err(|e| e.to_string())?;
     scaffold_missing(&root)?;
-    fs::write(&main_abs, MAIN_TEX).map_err(|e| format!("cannot write {}: {e}", main_abs.display()))?;
+    fs::write(&main_abs, MAIN_TEX)
+        .map_err(|e| format!("cannot write {}: {e}", main_abs.display()))?;
 
     open_managed(&root)
 }
@@ -419,7 +436,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let content = dir.path().join("content");
         fs::create_dir_all(&content).unwrap();
-        for name in ["chapter0.tex", "chapter12.tex", "chapter13-interlude.tex", "notes.txt"] {
+        for name in [
+            "chapter0.tex",
+            "chapter12.tex",
+            "chapter13-interlude.tex",
+            "notes.txt",
+        ] {
             fs::write(content.join(name), "").unwrap();
         }
         assert_eq!(max_content_index(&content), 13);
@@ -481,8 +503,14 @@ mod tests {
         let model = SkeletonModel {
             metadata: meta(),
             chapters: vec![
-                SkeletonChapter { title: "Terry".into(), file: Some("content/chapter-001.tex".into()) },
-                SkeletonChapter { title: "Party".into(), file: None },
+                SkeletonChapter {
+                    title: "Terry".into(),
+                    file: Some("content/chapter-001.tex".into()),
+                },
+                SkeletonChapter {
+                    title: "Party".into(),
+                    file: None,
+                },
             ],
         };
         let project = write_skeleton(root, &model).unwrap();
@@ -506,7 +534,10 @@ mod tests {
         let dir = managed_fixture();
         let root = dir.path();
         // Model with the only chapter removed.
-        let model = SkeletonModel { metadata: meta(), chapters: vec![] };
+        let model = SkeletonModel {
+            metadata: meta(),
+            chapters: vec![],
+        };
         let project = delete_chapter(root, &model, "content/chapter-001.tex").unwrap();
         assert_eq!(project.chapters.len(), 0);
         assert!(!root.join("content/chapter-001.tex").exists());
@@ -562,8 +593,13 @@ mod tests {
         assert_eq!(project.chapters[0].file, "content/chapter0.tex");
         // metadata.tex/chapters.tex now exist; main.tex is the managed template.
         assert!(root.join("metadata.tex").is_file());
-        assert!(fs::read_to_string(root.join("main.tex")).unwrap().contains("\\input{chapters}"));
+        assert!(fs::read_to_string(root.join("main.tex"))
+            .unwrap()
+            .contains("\\input{chapters}"));
         // A customized options.sty is NOT clobbered.
-        assert_eq!(fs::read_to_string(root.join("misc/options.sty")).unwrap(), "% custom options\n");
+        assert_eq!(
+            fs::read_to_string(root.join("misc/options.sty")).unwrap(),
+            "% custom options\n"
+        );
     }
 }

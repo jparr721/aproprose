@@ -298,7 +298,10 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
         }
         let commit = run(root, "git", &["commit", "-m", message]).await;
         // A racy "nothing to commit" is fine; a real failure is not.
-        if !commit.ok && !commit.stdout.contains("nothing to commit") {
+        if !commit.ok
+            && !commit.stdout.contains("nothing to commit")
+            && !commit.stderr.contains("nothing to commit")
+        {
             return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
         }
     }
@@ -406,7 +409,10 @@ pub async fn init_local_repo(root: &Path) -> Result<(), String> {
         &["-c", "user.email=backup@aproprose.local", "-c", "user.name=aproprose",
           "commit", "-m", "chore: initial backup"],
     ).await;
-    if !commit.ok && !commit.stdout.contains("nothing to commit") {
+    if !commit.ok
+        && !commit.stdout.contains("nothing to commit")
+        && !commit.stderr.contains("nothing to commit")
+    {
         return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
     }
     Ok(())
@@ -449,6 +455,9 @@ pub async fn enable_backup(root: &Path, name: &str, private: bool) -> Result<Rep
         return Err(format!("{}{}", out.stdout, out.stderr).trim().to_string());
     }
     let login = run(&std::env::temp_dir(), "gh", &["api", "user", "--jq", ".login"]).await;
+    if !login.ok {
+        return Err("could not resolve gh owner after repo creation".into());
+    }
     let owner = login.stdout.trim().to_string();
     Ok(RepoCreated {
         remote_url: format!("https://github.com/{owner}/{name}"),
@@ -673,7 +682,7 @@ mod tests {
 
     #[tokio::test]
     async fn init_local_repo_creates_repo_with_gitignore_and_commit() {
-        let dir = std::env::temp_dir().join(format!("aproprose-init-{}", std::process::id()));
+        let dir = unique("aproprose-init");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("main.tex"), "\\documentclass{book}").unwrap();

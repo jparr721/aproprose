@@ -10,7 +10,7 @@
 // composer is pinned to the bottom (ai-elements/prompt-input).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconArrowRight, IconRefresh } from "@tabler/icons-react";
+import { IconArrowRight, IconCheck, IconCopy, IconRefresh } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +30,8 @@ import {
 } from "@/components/ai-elements/conversation";
 import {
   Message,
+  MessageActions,
+  MessageAction,
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
@@ -552,6 +554,26 @@ function CastTab() {
 // -- Brainstorm ---------------------------------------------------------------
 const EMPTY_THREAD: ChatMessage[] = [];
 
+/** One-click copy of a chat reply's markdown source. Reveals on message hover. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100">
+      <MessageAction
+        tooltip={copied ? "Copied" : "Copy"}
+        label="Copy reply"
+        onClick={() => {
+          void navigator.clipboard.writeText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? <IconCheck className="size-3.5" /> : <IconCopy className="size-3.5" />}
+      </MessageAction>
+    </MessageActions>
+  );
+}
+
 function BrainstormTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const messages = useBrainstormStore((s) =>
@@ -634,6 +656,7 @@ function BrainstormTab() {
                   </span>
                 )}
               </MessageContent>
+              {m.role === "assistant" ? <CopyButton text={m.content} /> : null}
             </Message>
           ))}
           {streaming != null ? (

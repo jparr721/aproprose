@@ -117,6 +117,7 @@ export function TopBar() {
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile
+          <KeybindingHint keybinding={KEYBINDINGS.COMPILE} />
         </Button>
       ) : null}
 

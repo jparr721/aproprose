@@ -189,6 +189,7 @@ function BlockBody({
                 autoFocus
                 placeholder="What do they say?"
                 className={PROSE}
+                proseBody
               />
               <AutoGrowTextarea
                 value={block.beat ?? ""}
@@ -250,6 +251,7 @@ function BlockBody({
               autoFocus
               placeholder={isLore ? "Worldbuilding note…" : "Brainstorm, reminders…"}
               className="font-sans text-[13px] leading-[1.55]"
+              proseBody
             />
           ) : (
             <p className="font-sans text-[13px] leading-[1.55]">{renderInline(block.text)}</p>
@@ -281,6 +283,7 @@ function BlockBody({
           autoFocus
           placeholder="Write…"
           className={PROSE}
+          proseBody
         />
       ) : (
         <p className={PROSE}>

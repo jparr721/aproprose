@@ -26,9 +26,9 @@ export const KEYBINDINGS = {
     id: "save-chapter",
     key: "s",
     modifiers: { ctrl: true },
-    description: "Save the active chapter to disk",
+    description: "Save the active chapter and rebuild the PDF",
     category: "document",
-    label: "Save",
+    label: "Save & build",
   },
   COMPILE: {
     id: "compile",
@@ -77,6 +77,14 @@ export const KEYBINDINGS = {
     description: "Redo the last undone editor change",
     category: "editor",
     label: "Redo",
+  },
+  SPLIT_BLOCK: {
+    id: "split-block",
+    key: "enter",
+    modifiers: { ctrl: true, shift: true },
+    description: "Split the block at the cursor, or isolate the selection",
+    category: "editor",
+    label: "Split block",
   },
 } satisfies Record<string, KeybindingDefinition>;
 

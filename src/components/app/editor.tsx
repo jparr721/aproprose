@@ -5,6 +5,7 @@ import {
   IconWriting,
 } from "@tabler/icons-react";
 import { Block } from "@/components/app/block";
+import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjectStore } from "@/stores/project-store";
@@ -13,6 +14,7 @@ import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding"
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { isInAuxSurface } from "@/lib/dom";
+import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/lib/use-dictation";
 import type { BlockType } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -71,7 +73,7 @@ export function Editor() {
   });
 
   // Document + history shortcuts live with the editing surface they act on.
-  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().saveChapter());
+  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().compileNow());
   useKeybindingWithOptions(
     KEYBINDING_IDS.UNDO,
     () => useProjectStore.getState().undo(),
@@ -87,6 +89,24 @@ export function Editor() {
     () => useProjectStore.getState().redo(),
     EDITOR_HISTORY_OPTIONS,
   );
+
+  // Carve/split: Cmd+Shift+Enter. With a selection it isolates the slice as its
+  // own same-type block (like the toolbar's Split); a bare caret splits in two.
+  useKeybinding(KEYBINDING_IDS.SPLIT_BLOCK, () => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
+    const host = el.closest("[data-block-id]");
+    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+    if (!blockId) return;
+    const store = useProjectStore.getState();
+    const { selectionStart, selectionEnd } = el;
+    if (selectionStart !== selectionEnd) {
+      const block = store.blocks.find((b) => b.id === blockId);
+      if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
+    } else {
+      store.splitBlock(blockId, selectionStart);
+    }
+  });
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
@@ -118,6 +138,7 @@ export function Editor() {
         ))}
 
         <AddBlockRow />
+        <SelectionToolbar />
       </div>
     </ScrollArea>
   );

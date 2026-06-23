@@ -39,6 +39,8 @@ import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
+import { KeybindingHint } from "@/components/app/keybinding-hint";
+import { KEYBINDINGS } from "@/lib/keybindings";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
@@ -305,6 +307,22 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
           <Separator />
 
           <OpenAiKeyField />
+
+          <Separator />
+
+          <Field label="Keyboard">
+            <div className="flex flex-col gap-2">
+              {Object.values(KEYBINDINGS).map((kb) => (
+                <div key={kb.id} className="flex items-center justify-between gap-3">
+                  <span className="font-sans text-sm text-foreground">{kb.label}</span>
+                  <KeybindingHint keybinding={kb} />
+                </div>
+              ))}
+            </div>
+            <TypographyMuted className="mt-1 font-sans text-xs">
+              Highlight text in a block to convert or isolate the selection.
+            </TypographyMuted>
+          </Field>
         </div>
       </SheetContent>
     </Sheet>

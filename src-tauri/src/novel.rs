@@ -205,6 +205,71 @@ pub fn detect_and_open(root: &Path) -> Result<OpenOutcome, String> {
     })
 }
 
+/// Regenerate `metadata.tex` + `chapters.tex` from `model`. For each chapter with
+/// `file: None`, allocate a stable name and create an empty stub (NEVER clobbering
+/// an existing body). Returns the resolved (title, file) pairs.
+fn regenerate(root: &Path, model: &SkeletonModel) -> Result<(), String> {
+    let content_dir = root.join("content");
+    fs::create_dir_all(&content_dir)
+        .map_err(|e| format!("cannot create {}: {e}", content_dir.display()))?;
+
+    let mut next = max_content_index(&content_dir);
+    let mut resolved: Vec<(String, String)> = Vec::with_capacity(model.chapters.len());
+
+    for ch in &model.chapters {
+        let file = match &ch.file {
+            Some(f) => f.clone(),
+            None => {
+                next += 1;
+                let rel = format!("content/chapter-{next:03}.tex");
+                let abs = root.join(&rel);
+                // create_new so we never overwrite an existing chapter body.
+                match fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                        return Err(format!("chapter file {rel} already exists"));
+                    }
+                    Err(e) => return Err(format!("cannot create {}: {e}", abs.display())),
+                }
+                rel
+            }
+        };
+        resolved.push((ch.title.clone(), file));
+    }
+
+    fs::write(root.join("metadata.tex"), render_metadata(&model.metadata))
+        .map_err(|e| format!("cannot write metadata.tex: {e}"))?;
+    fs::write(root.join("chapters.tex"), render_chapters(&resolved))
+        .map_err(|e| format!("cannot write chapters.tex: {e}"))?;
+    Ok(())
+}
+
+/// Regenerate the skeleton from `model` and return the re-derived project.
+/// Handles add (file: None) / rename / reorder / metadata edits. Never deletes.
+pub fn write_skeleton(root: &Path, model: &SkeletonModel) -> Result<ProjectInfo, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
+    regenerate(&root, model)?;
+    open_managed(&root)
+}
+
+/// Regenerate from `model` (which already excludes the chapter) AND remove the
+/// chapter's body file. The one destructive path.
+pub fn delete_chapter(root: &Path, model: &SkeletonModel, file: &str) -> Result<ProjectInfo, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
+    regenerate(&root, model)?;
+    let abs = root.join(file);
+    match fs::remove_file(&abs) {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot delete {}: {e}", abs.display())),
+    }
+    open_managed(&root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +379,44 @@ mod tests {
         let outcome = detect_and_open(root).unwrap();
         assert_eq!(outcome.status, "needsMigration");
         assert_eq!(outcome.detected_chapters, Some(2));
+    }
+
+    #[test]
+    fn write_skeleton_allocates_new_chapter_and_preserves_bodies() {
+        let dir = managed_fixture();
+        let root = dir.path();
+        // Model = existing chapter (with file) + one new chapter (file: None).
+        let model = SkeletonModel {
+            metadata: meta(),
+            chapters: vec![
+                SkeletonChapter { title: "Terry".into(), file: Some("content/chapter-001.tex".into()) },
+                SkeletonChapter { title: "Party".into(), file: None },
+            ],
+        };
+        let project = write_skeleton(root, &model).unwrap();
+        assert_eq!(project.chapters.len(), 2);
+        // The new file is chapter-002 (max index 1 + 1) and exists, empty.
+        assert_eq!(project.chapters[1].file, "content/chapter-002.tex");
+        assert!(root.join("content/chapter-002.tex").is_file());
+        // The existing body is untouched.
+        assert_eq!(
+            fs::read_to_string(root.join("content/chapter-001.tex")).unwrap(),
+            "Hello world.\n"
+        );
+        // chapters.tex lists both, in order.
+        let ch = fs::read_to_string(root.join("chapters.tex")).unwrap();
+        assert!(ch.contains("\\chapter{Terry}\n\\input{content/chapter-001.tex}"));
+        assert!(ch.contains("\\chapter{Party}\n\\input{content/chapter-002.tex}"));
+    }
+
+    #[test]
+    fn delete_chapter_removes_file_and_line() {
+        let dir = managed_fixture();
+        let root = dir.path();
+        // Model with the only chapter removed.
+        let model = SkeletonModel { metadata: meta(), chapters: vec![] };
+        let project = delete_chapter(root, &model, "content/chapter-001.tex").unwrap();
+        assert_eq!(project.chapters.len(), 0);
+        assert!(!root.join("content/chapter-001.tex").exists());
     }
 }

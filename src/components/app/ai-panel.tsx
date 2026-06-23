@@ -63,7 +63,7 @@ import { cn } from "@/lib/utils";
 // -- shared bits --------------------------------------------------------------
 function ContextLine({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 font-sans text-[11px] text-muted-foreground">
+    <div className="flex items-center gap-1.5 font-sans text-xs text-muted-foreground">
       <span className="size-1.5 rounded-full bg-ai-edge shadow-[0_0_0_2px_var(--ai-tint)]" />
       {children}
     </div>
@@ -97,7 +97,7 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
 /** Read-only note of the instruction that produced the shown result. */
 function AskedCaption({ instruction }: { instruction?: string }) {
   if (!instruction) return null;
-  return <p className="font-sans text-[10.5px] italic text-faint">Asked: {instruction}</p>;
+  return <p className="font-sans text-xs italic text-faint">Asked: {instruction}</p>;
 }
 
 /**
@@ -189,7 +189,7 @@ function CursorAnchor() {
 
   return (
     <div className="flex items-center gap-2 border-b border-border bg-ai-tint/40 px-3 py-1.5">
-      <span className="shrink-0 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ai-ink">
+      <span className="shrink-0 font-sans text-xs font-semibold uppercase tracking-[0.08em] text-ai-ink">
         {block ? `Continuing after ${block.type}` : "Cursor"}
       </span>
       <div className="min-w-0 flex-1">
@@ -197,8 +197,8 @@ function CursorAnchor() {
           className={cn(
             "line-clamp-1",
             text
-              ? "font-serif text-[11.5px] italic text-muted-foreground"
-              : "font-sans text-[11px] text-faint",
+              ? "font-serif text-xs italic text-muted-foreground"
+              : "font-sans text-xs text-faint",
           )}
         >
           {text || "Place your cursor in the manuscript."}
@@ -257,7 +257,7 @@ function SuggestTab() {
             <>
               <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-sans text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                  <span className="font-sans text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
                     {v.type === "dialogue"
                       ? v.speaker
                         ? `Dialogue: ${v.speaker}`
@@ -270,7 +270,7 @@ function SuggestTab() {
                         key={i}
                         onClick={() => setVariant(i)}
                         className={cn(
-                          "size-[18px] rounded font-sans text-[10.5px] tabular-nums text-ai-ink transition-opacity",
+                          "size-[18px] rounded font-sans text-xs tabular-nums text-ai-ink transition-opacity",
                           i === variant
                             ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]"
                             : "opacity-55 hover:opacity-100",
@@ -283,14 +283,14 @@ function SuggestTab() {
                 </div>
                 <p
                   className={cn(
-                    "font-serif text-[14.5px] leading-[1.55] text-foreground",
+                    "font-serif text-sm leading-[1.55] text-foreground",
                     v.type === "narration" && "italic text-muted-foreground",
                   )}
                 >
                   {v.type === "dialogue" ? `"${v.text}"` : v.text}
                 </p>
                 <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                  <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                  <span className="font-sans text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
                     Why
                   </span>
                   <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
@@ -309,7 +309,7 @@ function SuggestTab() {
                 <>
                   <Separator />
                   <div className="flex flex-col gap-1">
-                    <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-faint">
+                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
                       After this, you could:
                     </span>
                     {data.followups.map((f, i) => (
@@ -378,17 +378,17 @@ function CritiqueTab() {
                 <div className="mb-1 flex items-baseline gap-2">
                   <span
                     className={cn(
-                      "rounded px-1.5 py-0.5 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em]",
+                      "rounded px-1.5 py-0.5 font-sans text-xs font-semibold uppercase tracking-[0.08em]",
                       NOTE_TONE[n.kind],
                     )}
                   >
                     {NOTE_WORD[n.kind]}
                   </span>
-                  <span className="font-sans text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">
+                  <span className="font-sans text-xs uppercase tracking-[0.06em] text-muted-foreground">
                     {n.tag}
                   </span>
                 </div>
-                <p className="font-sans text-[12.5px] leading-[1.55] text-muted-foreground">{n.text}</p>
+                <p className="font-sans text-sm leading-[1.55] text-muted-foreground">{n.text}</p>
               </div>
             ))
           )}
@@ -443,8 +443,8 @@ function ContinuityTab() {
                 <span className={cn("mt-1 size-2 rounded-full", SEV_DOT[f.sev])} />
                 <div>
                   <div className="mb-0.5 flex items-baseline gap-2">
-                    <span className="font-sans text-[11px] font-semibold text-foreground">{f.tag}</span>
-                    <span className="font-sans text-[9.5px] uppercase tracking-[0.08em] text-faint">
+                    <span className="font-sans text-xs font-semibold text-foreground">{f.tag}</span>
+                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
                       {SEV_WORD[f.sev]}
                     </span>
                   </div>
@@ -486,13 +486,13 @@ function CastRow({ m }: { m: CastMember }) {
         </span>
       )}
       <div>
-        <div className="flex items-baseline gap-2 font-sans text-[13px] font-medium text-foreground">
+        <div className="flex items-baseline gap-2 font-sans text-sm font-medium text-foreground">
           <span className="truncate">{m.name}</span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs uppercase tracking-[0.06em] text-muted-foreground">
             {m.state}
           </span>
         </div>
-        <div className="font-sans text-[11.5px] leading-[1.45] text-muted-foreground">{m.detail}</div>
+        <div className="font-sans text-xs leading-[1.45] text-muted-foreground">{m.detail}</div>
       </div>
     </div>
   );
@@ -651,7 +651,7 @@ function BrainstormTab() {
                 {m.role === "assistant" ? (
                   <MessageResponse>{m.content}</MessageResponse>
                 ) : (
-                  <span className="whitespace-pre-wrap font-sans text-[12.5px] leading-[1.55]">
+                  <span className="whitespace-pre-wrap font-sans text-sm leading-[1.55]">
                     {m.content}
                   </span>
                 )}
@@ -707,7 +707,7 @@ export function AiPanel() {
             <TabsTrigger
               key={t.id}
               value={t.id}
-              className="rounded-none border-0 border-b-[1.5px] border-transparent bg-transparent px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              className="rounded-none border-0 border-b-[1.5px] border-transparent bg-transparent px-2.5 py-1.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
             >
               {t.label}
             </TabsTrigger>

@@ -7,6 +7,7 @@
 // byte-for-byte.
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import type {
   Block,
   BlockType,
@@ -140,11 +141,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // would be overkill; writes are cheap and infrequent).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
-    if (project) void writeAppData(metaKey(project.root), meta);
+    if (project)
+      void writeAppData(metaKey(project.root), meta).catch((e) => {
+        toast.error("Couldn't save project metadata", { description: String(e) });
+      });
   };
 
   const persistRecents = (recents: RecentProject[]) => {
-    void writeAppData(RECENTS_KEY, recents);
+    void writeAppData(RECENTS_KEY, recents).catch((e) => {
+      toast.error("Couldn't save recent projects", { description: String(e) });
+    });
   };
 
   return {
@@ -214,7 +220,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (first) await get().selectChapter(first.id);
 
         const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
-        const pdfBase64 = await readPdf(root, pdfName).catch(() => null);
+        const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
+          if (import.meta.env.DEV) console.warn(`readPdf(${pdfName}) failed:`, e);
+          return null;
+        });
         if (pdfBase64) {
           set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
         }

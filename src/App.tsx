@@ -29,6 +29,7 @@ import { Welcome } from "@/components/app/welcome";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { bindingFor } from "@/lib/keybindings";
+import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -104,7 +105,7 @@ function App() {
 
       if (binding.id === "split") {
         const el = document.activeElement;
-        if (!(el instanceof HTMLTextAreaElement) || !el.matches("[data-prose-body]")) return;
+        if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
         const host = el.closest("[data-block-id]");
         const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
         if (!blockId) return;

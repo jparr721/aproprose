@@ -3,6 +3,7 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { PROSE_BODY_ATTR } from "@/lib/prose-body";
 
 export function AutoGrowTextarea({
   value,
@@ -41,7 +42,7 @@ export function AutoGrowTextarea({
       spellCheck
       onKeyDown={onKeyDown}
       onChange={(e) => onChange(e.currentTarget.value)}
-      data-prose-body={proseBody ? "" : undefined}
+      {...(proseBody ? { [PROSE_BODY_ATTR]: "" } : {})}
       className={cn(
         "w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0",
         className,

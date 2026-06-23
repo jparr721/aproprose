@@ -11,6 +11,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { selectionRect } from "@/lib/textarea-caret";
 import type { BlockType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 
 const CONVERT_TARGETS: { type: BlockType; label: string }[] = [
   { type: "narration", label: "Narration" },
@@ -35,7 +36,7 @@ export function SelectionToolbar() {
     const el = document.activeElement;
     if (
       !(el instanceof HTMLTextAreaElement) ||
-      !el.matches("[data-prose-body]") ||
+      !el.matches(PROSE_BODY_SELECTOR) ||
       el.selectionStart === el.selectionEnd
     ) {
       setSel(null);

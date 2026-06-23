@@ -1,6 +1,7 @@
 // editor.tsx — the center column: the chapter as an editable block stream.
 
 import {
+  IconGitMerge,
   IconSparkles,
   IconWriting,
 } from "@tabler/icons-react";
@@ -23,7 +24,9 @@ import { Block } from "@/components/app/block";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TypographyLarge, TypographyMuted } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
+import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
@@ -139,6 +142,8 @@ export function Editor() {
     }
   });
 
+  const conflictedFiles = useSyncStore((s) => s.conflictedFiles);
+
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
   if (!chapter) {
@@ -146,6 +151,19 @@ export function Editor() {
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-muted-foreground">
         <IconWriting className="size-8 text-faint" />
         <p className="text-sm">Select a chapter to begin.</p>
+      </div>
+    );
+  }
+
+  if (conflictedFiles.includes(chapter.file)) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center font-sans">
+        <IconGitMerge className="size-8 text-destructive" />
+        <TypographyLarge>This chapter has a merge conflict</TypographyLarge>
+        <TypographyMuted className="max-w-sm text-sm">
+          Resolve the conflict in <span className="font-mono">{chapter.file}</span> with git, then
+          sync again. Editing is disabled here until it's resolved to avoid corrupting the file.
+        </TypographyMuted>
       </div>
     );
   }

@@ -214,3 +214,68 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+// ── Backup / sync ─────────────────────────────────────────────────────────────
+
+export interface ToolingStatus {
+  gitInstalled: boolean;
+  gitVersion: string | null;
+  ghInstalled: boolean;
+  ghAuthed: boolean;
+  login: string | null;
+}
+
+export interface ChangedFile {
+  /** Project-relative path. */
+  path: string;
+  /** Two-char git short status, e.g. "M ", "??", "UU". */
+  status: string;
+  conflicted: boolean;
+}
+
+export interface RepoStatus {
+  isRepo: boolean;
+  hasRemote: boolean;
+  remoteUrl: string | null;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  changedFiles: ChangedFile[];
+  conflictedFiles: string[];
+}
+
+export type SyncOutcome =
+  | { kind: "clean" }
+  | { kind: "synced" }
+  | { kind: "conflict"; files: string[] }
+  | { kind: "pushRejected" }
+  | { kind: "needsSetup"; reason: string }
+  | { kind: "authMissing" }
+  | { kind: "offline" };
+
+export type SyncStatus =
+  | "disabled"
+  | "clean"
+  | "dirty"
+  | "syncing"
+  | "synced"
+  | "error"
+  | "conflict"
+  | "offline"
+  | "needsSetup";
+
+export interface SyncPrefs {
+  autoSync: boolean;
+  intervalMinutes: number;
+}
+
+export interface NameCheck {
+  available: boolean;
+  reason: string | null;
+}
+
+export interface RepoCreated {
+  remoteUrl: string;
+  owner: string;
+}

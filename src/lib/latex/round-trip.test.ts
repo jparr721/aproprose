@@ -5,7 +5,7 @@
 // LaTeX source is therefore silently dropped on every save. These tests pin that
 // round-trip for the fields the editor mutates.
 
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import type { Block } from "@/lib/types";
 import { parseChapter } from "./parse";
 import { serializeChapter } from "./serialize";

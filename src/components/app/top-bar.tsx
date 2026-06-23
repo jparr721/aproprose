@@ -14,7 +14,7 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
-import { BackupReviewSheet } from "@/components/app/backup-review-sheet";
+import { BackupReviewDialog } from "@/components/app/backup-review-dialog";
 import { BackupSetupDialog } from "@/components/app/backup-setup-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
@@ -178,7 +178,7 @@ export function TopBar() {
         ) : null}
         <WindowControls />
       </div>
-      <BackupReviewSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+      <BackupReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
       <BackupSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
     </header>
   );

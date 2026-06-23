@@ -105,29 +105,29 @@ export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "m
   return parts.join("+");
 }
 
-const MAC_MODIFIER_SYMBOLS = { ctrl: "⌘", shift: "⇧", alt: "⌥" } as const;
-const PC_MODIFIER_LABELS = { ctrl: "Ctrl", shift: "Shift", alt: "Alt" } as const;
-const MAC_KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
+// Compact glyphs for on-screen hints. Only the command modifier differs by
+// platform — ⌘ on macOS, ⌃ (control) elsewhere; shift / alt and the key glyphs
+// are shared, and parts join with no separator (e.g. "⌘⇧P" / "⌃⇧P").
+const KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
 
-function formatKey(key: string, isMac: boolean): string {
-  if (isMac && MAC_KEY_SYMBOLS[key]) return MAC_KEY_SYMBOLS[key];
+function formatKey(key: string): string {
+  if (KEY_SYMBOLS[key]) return KEY_SYMBOLS[key];
   if (key.length === 1) return key.toUpperCase();
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 /**
- * A compact human label for on-screen hints — "⌘⇧P" on macOS, "Ctrl+Shift+P"
- * elsewhere. Pass `IS_MAC` from `@/lib/platform`.
+ * A compact glyph hint for a shortcut — "⌘⇧P" on macOS, "⌃⇧P" elsewhere.
+ * Pass `IS_MAC` from `@/lib/platform`.
  */
 export function formatKeybinding(
   keybinding: Pick<KeybindingDefinition, "key" | "modifiers">,
   isMac: boolean,
 ): string {
-  const mods = isMac ? MAC_MODIFIER_SYMBOLS : PC_MODIFIER_LABELS;
   const parts: string[] = [];
-  if (keybinding.modifiers.ctrl) parts.push(mods.ctrl);
-  if (keybinding.modifiers.shift) parts.push(mods.shift);
-  if (keybinding.modifiers.alt) parts.push(mods.alt);
-  parts.push(formatKey(keybinding.key, isMac));
-  return parts.join(isMac ? "" : "+");
+  if (keybinding.modifiers.ctrl) parts.push(isMac ? "⌘" : "⌃");
+  if (keybinding.modifiers.shift) parts.push("⇧");
+  if (keybinding.modifiers.alt) parts.push("⌥");
+  parts.push(formatKey(keybinding.key));
+  return parts.join("");
 }

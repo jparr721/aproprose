@@ -213,9 +213,11 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="font-sans" title="Settings">
-          <IconSettings />
-        </Button>
+        {trigger ?? (
+          <Button variant="ghost" size="icon" className="font-sans" title="Settings">
+            <IconSettings />
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="font-sans">
         <SheetHeader>

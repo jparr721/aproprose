@@ -41,3 +41,7 @@ fmt:
 clean:
     rm -rf dist node_modules
     cd src-tauri && cargo clean
+
+# Run the frontend unit tests.
+test:
+    bun x vitest run

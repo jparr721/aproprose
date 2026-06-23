@@ -4,16 +4,19 @@
 
 import {
   IconFileTypePdf,
-  IconLoader2,
   IconPlayerPlayFilled,
   IconSparkles,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SettingsSheet } from "@/components/app/settings-sheet";
 import { WindowControls } from "@/components/app/window-controls";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useKeybinding } from "@/hooks/use-keybinding";
+import { KEYBINDINGS, KEYBINDING_IDS, formatKeybinding } from "@/lib/keybindings";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -39,13 +42,13 @@ function BuildBadge() {
       : status === "error"
         ? `${errors.length || "build"} error${errors.length === 1 ? "" : "s"}`
         : status === "compiling"
-          ? "compiling…"
+          ? "compiling"
           : "not built";
 
   return (
     <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground">
       {status === "compiling" ? (
-        <IconLoader2 className="size-3 animate-spin text-warning" />
+        <Spinner className="size-3 text-warning" />
       ) : (
         <span className={cn("size-1.5 rounded-full", tone)} />
       )}
@@ -66,6 +69,12 @@ export function TopBar() {
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
   const togglePdf = useViewStore((s) => s.togglePdf);
+
+  // Shortcuts for the chrome actions live with their buttons. (Save / undo / redo
+  // are bound in the editor.)
+  useKeybinding(KEYBINDING_IDS.COMPILE, () => void compileNow());
+  useKeybinding(KEYBINDING_IDS.TOGGLE_PDF, togglePdf);
+  useKeybinding(KEYBINDING_IDS.TOGGLE_AI, toggleAi);
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
@@ -113,6 +122,7 @@ export function TopBar() {
             )}
           >
             <IconFileTypePdf /> PDF
+            <Kbd>{formatKeybinding(KEYBINDINGS.TOGGLE_PDF, IS_MAC)}</Kbd>
           </Button>
           <Button
             variant="outline"
@@ -125,6 +135,7 @@ export function TopBar() {
             )}
           >
             <IconSparkles /> AI
+            <Kbd>{formatKeybinding(KEYBINDINGS.TOGGLE_AI, IS_MAC)}</Kbd>
           </Button>
           <SettingsSheet />
           <Button
@@ -133,7 +144,7 @@ export function TopBar() {
             onClick={() => void compileNow()}
             disabled={compiling}
           >
-            {compiling ? <IconLoader2 className="animate-spin" /> : <IconPlayerPlayFilled />}
+            {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
             Compile
           </Button>
         </>

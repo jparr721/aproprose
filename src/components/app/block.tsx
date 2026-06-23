@@ -309,7 +309,7 @@ function BlockImpl({
   const onClean = async () => {
     if (!block.text.trim()) return;
     setCleaning(true);
-    const t = toast.loading("Cleaning up with AI…");
+    const t = toast.loading("Cleaning up with AI");
     try {
       const cleaned = await cleanTranscript(block.text, buildAiContext(block.id));
       updateBlockText(block.id, cleaned.trim());

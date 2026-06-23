@@ -88,6 +88,12 @@ Never truncate text in JS. Use Tailwind utilities so truncation adapts to contai
 
 Constrain width on the element or its parent (`min-w-0` on flex children) so truncation actually triggers.
 
+### Loading & async state
+
+**Never use an ellipsis (`…` or `...`) to signal a loading / in-progress ("loadable") state** — no "Opening…", "Compiling…", "Saving…". Use the `Spinner` component (`@/components/ui/spinner`): drop the trailing ellipsis and render `<Spinner />` (optionally beside a plain-text label like "Opening"). Async toasts use `toast.loading("Cleaning up with AI")` — the loading toast already shows a spinner, so no ellipsis there either. **Don't hand-roll a spinner** with `IconLoader`/`IconLoader2` + `animate-spin`; reach for `Spinner`.
+
+Ellipses remain correct for **non-loading** affordances: a menu item that opens a dialog (`Open project…`), input placeholders, and text truncation.
+
 ### Component primitives
 
 - Prefer stock shadcn/ui primitives composed with Tailwind over bespoke components. Add new ones with `bunx shadcn@latest add <component>` (config in `components.json`: style `radix-mira`, base color `olive`, icons `tabler`).
@@ -110,6 +116,10 @@ Trust the type system. Don't mask bugs with defaults.
 - For state shared across unrelated components or persisted across reloads, add **`zustand`** (one store per concern, `<concern>-store.ts`, a single exported hook). Don't build a Context + `useState` provider tree for read-and-write app state, and don't reach for Redux/Jotai.
 - React Context is only for static or rarely-changing scope (theme, identity). The moment two unrelated components must read **and** write the same value, it's a store.
 - Not for a store: form input state (`useState`/form lib) and server/cache data.
+
+### Keyboard shortcuts
+
+Shortcuts go through the **keybinding registry**, not ad-hoc `window` keydown listeners. Every shortcut is one typed entry in `src/lib/keybindings.ts` (`KEYBINDINGS`), and the component that owns the action binds it with `useKeybinding(KEYBINDING_IDS.X, cb)` (or `useKeybindingWithOptions` for a per-binding `ignoreEventWhen` guard) from `@/hooks/use-keybinding` - **co-located** with the action, not centralized. `modifiers.ctrl` means the platform command key (Cmd on macOS, Ctrl elsewhere). Render an on-screen hint with `formatKeybinding(KEYBINDINGS.X, IS_MAC)` inside a `Kbd`. Focus policy lives in the hook (chords fire through form inputs; `[data-capture-keyboard]` / `isInAuxSurface` opt subtrees out) - don't reimplement it at call sites. The built-in sidebar ⌘B is the one exception (owned by `SidebarProvider`).
 
 ## Tauri (Rust) Conventions
 
@@ -136,6 +146,7 @@ Trust the type system. Don't mask bugs with defaults.
 | Icons | `@tabler/icons-react`. |
 | Styling | Tailwind 4 utilities + theme tokens in `src/index.css`. No inline styles, no separate CSS modules. |
 | Native bridge | `@tauri-apps/api` (commands, events) + Tauri plugins (`@tauri-apps/plugin-opener`). |
+| Keyboard shortcuts | `react-hotkeys-hook` via the registry in `src/lib/keybindings.ts` + `useKeybinding`. No raw `window` keydown listeners. |
 
 AI inference goes through the Vercel AI SDK (`ai` + `@ai-sdk/openai`), not hand-rolled `fetch`. The `OPENAI_API_KEY` is entered in Settings and resolved on the Rust side (`get_ai_config`) per the Tauri secrets rule above; HTTP egress is routed through the Tauri `http` plugin to dodge webview CORS.
 

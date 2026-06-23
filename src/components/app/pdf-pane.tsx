@@ -12,7 +12,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
-  IconLoader2,
   IconMinus,
   IconPlayerPlayFilled,
   IconPlus,
@@ -21,6 +20,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -257,7 +257,7 @@ export function PdfPane() {
         </div>
         <div className="flex items-center gap-1.5">
           <Button variant="ghost" size="icon-sm" title="Re-compile" onClick={() => void compileNow()} disabled={compiling}>
-            {compiling ? <IconLoader2 className="animate-spin" /> : <IconRefresh />}
+            {compiling ? <Spinner /> : <IconRefresh />}
           </Button>
           {numPages > 0 ? (
             <span className="text-[11.5px] tabular-nums text-muted-foreground">
@@ -319,8 +319,8 @@ export function PdfPane() {
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
             {compiling || doc ? (
               <>
-                <IconLoader2 className="size-6 animate-spin text-faint" />
-                <p className="text-sm">{compiling ? "Compiling…" : "Rendering…"}</p>
+                <Spinner className="size-6 text-faint" />
+                <p className="text-sm">{compiling ? "Compiling" : "Rendering"}</p>
               </>
             ) : (
               <>

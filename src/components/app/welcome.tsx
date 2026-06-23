@@ -2,6 +2,7 @@
 
 import { IconBook2, IconClock, IconFolderOpen } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { WindowControls } from "@/components/app/window-controls";
 import { useProjectStore } from "@/stores/project-store";
@@ -90,8 +91,8 @@ export function Welcome() {
           ) : null}
 
           <Button size="lg" className="font-sans" onClick={open} disabled={loading}>
-            <IconFolderOpen />
-            {loading ? "Opening…" : "Open a project"}
+            {loading ? <Spinner /> : <IconFolderOpen />}
+            {loading ? "Opening" : "Open a project"}
           </Button>
         </div>
       </div>

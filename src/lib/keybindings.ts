@@ -1,0 +1,133 @@
+// keybindings.ts — the single registry of app keyboard shortcuts.
+//
+// Ported from warlock/apps/reaper's keybinding module: one typed definition per
+// shortcut, translated to a `react-hotkeys-hook` combo string at bind time and to
+// a human label for on-screen hints. Components bind a definition with the
+// `useKeybinding` hook rather than hand-rolling `window` keydown listeners, so the
+// shortcut surface stays declarative and discoverable from one place.
+//
+// `modifiers.ctrl` means the platform command key — Cmd on macOS, Ctrl elsewhere
+// — because it lowers to react-hotkeys-hook's "mod" token.
+
+export interface KeybindingDefinition {
+  /** Stable kebab id, handy as a React key / persistence handle. */
+  id: string;
+  /** react-hotkeys-hook key token (e.g. "s", "enter", "z"). */
+  key: string;
+  /** "ctrl" lowers to the "mod" key (Cmd on macOS, Ctrl elsewhere). */
+  modifiers: { ctrl?: boolean; shift?: boolean; alt?: boolean };
+  description: string;
+  category: "document" | "view" | "editor";
+  label: string;
+}
+
+export const KEYBINDINGS = {
+  SAVE_CHAPTER: {
+    id: "save-chapter",
+    key: "s",
+    modifiers: { ctrl: true },
+    description: "Save the active chapter to disk",
+    category: "document",
+    label: "Save",
+  },
+  COMPILE: {
+    id: "compile",
+    key: "enter",
+    modifiers: { ctrl: true },
+    description: "Compile the manuscript",
+    category: "document",
+    label: "Compile",
+  },
+  TOGGLE_PDF: {
+    id: "toggle-pdf",
+    key: "p",
+    modifiers: { ctrl: true, shift: true },
+    description: "Toggle the PDF preview pane",
+    category: "view",
+    label: "Toggle PDF",
+  },
+  TOGGLE_AI: {
+    id: "toggle-ai",
+    key: "a",
+    modifiers: { ctrl: true, shift: true },
+    description: "Toggle the AI panel",
+    category: "view",
+    label: "Toggle AI",
+  },
+  UNDO: {
+    id: "undo",
+    key: "z",
+    modifiers: { ctrl: true },
+    description: "Undo the last editor change",
+    category: "editor",
+    label: "Undo",
+  },
+  REDO: {
+    id: "redo",
+    key: "z",
+    modifiers: { ctrl: true, shift: true },
+    description: "Redo the last undone editor change",
+    category: "editor",
+    label: "Redo",
+  },
+  REDO_ALT: {
+    id: "redo-alt",
+    key: "y",
+    modifiers: { ctrl: true },
+    description: "Redo the last undone editor change",
+    category: "editor",
+    label: "Redo",
+  },
+} satisfies Record<string, KeybindingDefinition>;
+
+export type KeybindingId = keyof typeof KEYBINDINGS;
+
+/** `{ SAVE_CHAPTER: "SAVE_CHAPTER", … }` — lets call sites pass ids type-safely. */
+export const KEYBINDING_IDS = Object.fromEntries(
+  Object.keys(KEYBINDINGS).map((k) => [k, k]),
+) as { [K in KeybindingId]: K };
+
+// Punctuation keys whose literal differs from react-hotkeys-hook's token. None of
+// the current bindings need translating, but the indirection is the extension
+// point — add "," -> "comma" etc. here rather than at call sites.
+const KEY_ALIASES: Record<string, string> = {};
+
+/** Lower a definition to a react-hotkeys-hook combo string (e.g. "mod+shift+p"). */
+export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "modifiers">): string {
+  if (!keybinding.key) {
+    throw new Error("toHotkeyString: key must be a non-empty string");
+  }
+  const parts: string[] = [];
+  if (keybinding.modifiers.ctrl) parts.push("mod");
+  if (keybinding.modifiers.shift) parts.push("shift");
+  if (keybinding.modifiers.alt) parts.push("alt");
+  parts.push(KEY_ALIASES[keybinding.key] ?? keybinding.key);
+  return parts.join("+");
+}
+
+const MAC_MODIFIER_SYMBOLS = { ctrl: "⌘", shift: "⇧", alt: "⌥" } as const;
+const PC_MODIFIER_LABELS = { ctrl: "Ctrl", shift: "Shift", alt: "Alt" } as const;
+const MAC_KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
+
+function formatKey(key: string, isMac: boolean): string {
+  if (isMac && MAC_KEY_SYMBOLS[key]) return MAC_KEY_SYMBOLS[key];
+  if (key.length === 1) return key.toUpperCase();
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+/**
+ * A compact human label for on-screen hints — "⌘⇧P" on macOS, "Ctrl+Shift+P"
+ * elsewhere. Pass `IS_MAC` from `@/lib/platform`.
+ */
+export function formatKeybinding(
+  keybinding: Pick<KeybindingDefinition, "key" | "modifiers">,
+  isMac: boolean,
+): string {
+  const mods = isMac ? MAC_MODIFIER_SYMBOLS : PC_MODIFIER_LABELS;
+  const parts: string[] = [];
+  if (keybinding.modifiers.ctrl) parts.push(mods.ctrl);
+  if (keybinding.modifiers.shift) parts.push(mods.shift);
+  if (keybinding.modifiers.alt) parts.push(mods.alt);
+  parts.push(formatKey(keybinding.key, isMac));
+  return parts.join(isMac ? "" : "+");
+}

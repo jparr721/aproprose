@@ -46,7 +46,9 @@ function emphasisOpenAt(text: string, index: number): boolean {
 
 // Re-balance `_emphasis_` markers for a piece whose original span in `full` is
 // [start, end). Drops markers orphaned at a cut and opens/closes runs the cut
-// split, so no piece ever emits a dangling `_`.
+// split, so an emphasis run is never left dangling across a carve. Counts every
+// `_`, so it assumes prose uses `_` only for emphasis — a stray literal
+// underscore can be mis-paired, which is acceptable since literal `_` is rare.
 function balanceEmphasis(piece: string, full: string, start: number, end: number): string {
   let out = piece;
   if (emphasisOpenAt(full, start)) {
@@ -132,4 +134,9 @@ export function planCarve(block: Block, start: number, end: number, newType: Blo
   }
 
   return { blocks: pieces, focusId: mid.id };
+}
+
+/** True when a plan represents no change — the planner returned the source block untouched. */
+export function isNoOp(plan: CarvePlan, source: Block): boolean {
+  return plan.blocks.length === 1 && plan.blocks[0] === source;
 }

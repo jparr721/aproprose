@@ -20,8 +20,7 @@ export interface Keybinding {
   label: string;
   description: string;
   /** Matches if ANY listed combo matches the event. */
-  combos: Combo[];
-  scope: "global" | "editor";
+  combos: [Combo, ...Combo[]];
 }
 
 export const KEYBINDINGS: Keybinding[] = [
@@ -30,21 +29,18 @@ export const KEYBINDINGS: Keybinding[] = [
     label: "Save & build PDF",
     description: "Write the chapter to disk and recompile the PDF.",
     combos: [{ mod: true, key: "s" }],
-    scope: "global",
   },
   {
     id: "split",
     label: "Split block at cursor",
     description: "Break the current block into two at the caret.",
     combos: [{ mod: true, key: "Enter" }],
-    scope: "editor",
   },
   {
     id: "undo",
     label: "Undo",
     description: "Undo the last editor change.",
     combos: [{ mod: true, key: "z" }],
-    scope: "editor",
   },
   {
     id: "redo",
@@ -54,7 +50,6 @@ export const KEYBINDINGS: Keybinding[] = [
       { mod: true, shift: true, key: "z" },
       { mod: true, key: "y" },
     ],
-    scope: "editor",
   },
 ];
 

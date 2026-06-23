@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planSplit, planCarve, stripOuterQuotes } from "@/lib/blocks/carve";
+import { planSplit, planCarve, stripOuterQuotes, isNoOp } from "@/lib/blocks/carve";
 import type { Block } from "@/lib/types";
 
 const mk = (p: Partial<Block> = {}): Block => ({
@@ -151,6 +151,14 @@ describe("planCarve", () => {
       ["narration", "one"],
       ["narration", "two"],
     ]);
+  });
+});
+
+describe("isNoOp", () => {
+  it("detects an untouched plan vs a real carve", () => {
+    const b = mk({ text: "Hello world" });
+    expect(isNoOp(planSplit(b, 0), b)).toBe(true);
+    expect(isNoOp(planCarve(b, 0, 5, "lore"), b)).toBe(false);
   });
 });
 

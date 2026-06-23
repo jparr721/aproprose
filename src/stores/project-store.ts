@@ -35,7 +35,7 @@ import {
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
-import { planCarve, planSplit } from "@/lib/blocks/carve";
+import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -352,7 +352,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const idx = s.blocks.findIndex((b) => b.id === id);
         if (idx < 0) return {};
         const plan = planSplit(s.blocks[idx], at);
-        if (plan.blocks.length < 2) return {}; // caret at an edge — nothing to do
+        if (isNoOp(plan, s.blocks[idx])) return {}; // caret at an edge — nothing to do
         const next = [...s.blocks];
         next.splice(idx, 1, ...plan.blocks);
         return {
@@ -371,7 +371,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (idx < 0) return {};
         const plan = planCarve(s.blocks[idx], start, end, type);
         // No-op only when the plan handed back the original block untouched.
-        if (plan.blocks.length === 1 && plan.blocks[0] === s.blocks[idx]) return {};
+        if (isNoOp(plan, s.blocks[idx])) return {};
         const next = [...s.blocks];
         next.splice(idx, 1, ...plan.blocks);
         return {

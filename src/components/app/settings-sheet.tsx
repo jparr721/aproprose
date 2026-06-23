@@ -204,6 +204,34 @@ function OpenAiKeyField() {
   );
 }
 
+/** The one-line tooling status under the Backup heading; nothing until probed. */
+function ToolingNotice({ tooling }: { tooling: ToolingStatus | null }) {
+  if (!tooling) return null;
+  const cls = "font-sans text-xs";
+  if (!tooling.gitInstalled) {
+    return <TypographyMuted className={cls}>git isn't installed — backup is unavailable.</TypographyMuted>;
+  }
+  if (!tooling.ghInstalled) {
+    return (
+      <TypographyMuted className={cls}>
+        The GitHub CLI (gh) isn't installed — creating repos and name checks need it.
+      </TypographyMuted>
+    );
+  }
+  if (!tooling.ghAuthed) {
+    return (
+      <TypographyMuted className={cls}>
+        Not signed in to GitHub — run <span className="font-mono">gh auth login</span>.
+      </TypographyMuted>
+    );
+  }
+  return (
+    <TypographyMuted className={cls}>
+      Signed in as <span className="font-mono">{tooling.login ?? "—"}</span>.
+    </TypographyMuted>
+  );
+}
+
 function BackupSyncField() {
   const autoSync = useSyncStore((s) => s.autoSync);
   const intervalMinutes = useSyncStore((s) => s.intervalMinutes);
@@ -218,21 +246,7 @@ function BackupSyncField() {
 
   return (
     <Field label="Backup & sync">
-      {tooling && (!tooling.gitInstalled || !tooling.ghInstalled) ? (
-        <TypographyMuted className="font-sans text-xs">
-          {!tooling.gitInstalled
-            ? "git isn't installed — backup is unavailable."
-            : "The GitHub CLI (gh) isn't installed — creating repos and name checks need it."}
-        </TypographyMuted>
-      ) : tooling && !tooling.ghAuthed ? (
-        <TypographyMuted className="font-sans text-xs">
-          Not signed in to GitHub — run <span className="font-mono">gh auth login</span>.
-        </TypographyMuted>
-      ) : tooling ? (
-        <TypographyMuted className="font-sans text-xs">
-          Signed in as <span className="font-mono">{tooling.login ?? "—"}</span>.
-        </TypographyMuted>
-      ) : null}
+      <ToolingNotice tooling={tooling} />
 
       <div className="flex items-center justify-between">
         <span className="font-sans text-sm">Auto-sync this project</span>

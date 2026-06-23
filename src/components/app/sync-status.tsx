@@ -33,6 +33,51 @@ const TONE: Record<SyncStatus, string> = {
   disabled: "bg-faint",
 };
 
+function statusLabel(status: SyncStatus): string {
+  switch (status) {
+    case "syncing":
+      return "Syncing";
+    case "conflict":
+      return "Conflict";
+    case "error":
+      return "Sync error";
+    case "offline":
+      return "Offline";
+    case "dirty":
+      return "Unsynced changes";
+    default:
+      return "Backed up";
+  }
+}
+
+/** The compact glyph in the top-bar trigger: a spinner, the conflict icon, or a tone dot. */
+function TriggerGlyph({ status }: { status: SyncStatus }) {
+  switch (status) {
+    case "syncing":
+      return <Spinner className="size-3 text-success" />;
+    case "conflict":
+      return <IconGitMerge className="size-3 text-destructive" />;
+    default:
+      return <span className={cn("size-1.5 rounded-full", TONE[status])} />;
+  }
+}
+
+/** The header icon for the details popover, keyed by status. */
+function StatusIcon({ status }: { status: SyncStatus }) {
+  switch (status) {
+    case "clean":
+    case "synced":
+      return <IconCloudCheck className="size-4 text-success" />;
+    case "offline":
+      return <IconCloudOff className="size-4 text-muted-foreground" />;
+    case "conflict":
+    case "error":
+      return <IconAlertTriangle className="size-4 text-destructive" />;
+    default:
+      return <IconCloudUp className="size-4 text-warning" />;
+  }
+}
+
 export function SyncStatus({
   onReview,
   onSetup,
@@ -62,18 +107,7 @@ export function SyncStatus({
     );
   }
 
-  const label =
-    status === "syncing"
-      ? "Syncing"
-      : status === "conflict"
-        ? "Conflict"
-        : status === "error"
-          ? "Sync error"
-          : status === "offline"
-            ? "Offline"
-            : status === "dirty"
-              ? "Unsynced changes"
-              : "Backed up";
+  const label = statusLabel(status);
 
   return (
     <Popover>
@@ -82,28 +116,14 @@ export function SyncStatus({
           type="button"
           className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground"
         >
-          {status === "syncing" ? (
-            <Spinner className="size-3 text-success" />
-          ) : status === "conflict" ? (
-            <IconGitMerge className="size-3 text-destructive" />
-          ) : (
-            <span className={cn("size-1.5 rounded-full", TONE[status])} />
-          )}
+          <TriggerGlyph status={status} />
           {label}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 font-sans">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
-            {status === "clean" || status === "synced" ? (
-              <IconCloudCheck className="size-4 text-success" />
-            ) : status === "offline" ? (
-              <IconCloudOff className="size-4 text-muted-foreground" />
-            ) : status === "conflict" || status === "error" ? (
-              <IconAlertTriangle className="size-4 text-destructive" />
-            ) : (
-              <IconCloudUp className="size-4 text-warning" />
-            )}
+            <StatusIcon status={status} />
             <TypographySmall>{label}</TypographySmall>
           </div>
 

@@ -1,10 +1,11 @@
 // welcome.tsx — the no-project-open state: open a project or pick a recent.
 
-import { IconBook2, IconClock, IconFolderOpen } from "@tabler/icons-react";
+import { IconBook2, IconBookUpload, IconClock, IconFolderOpen } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { WindowControls } from "@/components/app/window-controls";
+import { NewNovelDialog } from "@/components/app/new-novel-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -90,10 +91,26 @@ export function Welcome() {
             </TypographyMuted>
           ) : null}
 
-          <Button size="lg" className="font-sans" onClick={open} disabled={loading}>
-            {loading ? <Spinner /> : <IconFolderOpen />}
-            {loading ? "Opening" : "Open a project"}
-          </Button>
+          <div className="flex w-full flex-col gap-2">
+            <NewNovelDialog
+              trigger={
+                <Button size="lg" className="w-full font-sans" disabled={loading}>
+                  <IconBookUpload />
+                  New novel
+                </Button>
+              }
+            />
+            <Button
+              size="lg"
+              variant="outline"
+              className="w-full font-sans"
+              onClick={open}
+              disabled={loading}
+            >
+              {loading ? <Spinner /> : <IconFolderOpen />}
+              {loading ? "Opening" : "Open a project"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

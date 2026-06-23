@@ -85,6 +85,35 @@ function UnsavedGuard() {
   );
 }
 
+function MigrationGuard() {
+  const needsMigration = useProjectStore((s) => s.needsMigration);
+  const migrate = useProjectStore((s) => s.migrateProject);
+  const cancel = useProjectStore((s) => s.cancelMigration);
+  return (
+    <AlertDialog
+      open={needsMigration != null}
+      onOpenChange={(o) => !o && cancel()}
+    >
+      <AlertDialogContent className="font-sans">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Convert to managed structure?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This project uses an older layout. Aproprose can convert it (found{" "}
+            {needsMigration?.detectedChapters ?? 0} chapters): metadata and the
+            chapter list move into <code>metadata.tex</code> / <code>chapters.tex</code>,
+            and <code>main.tex</code> is backed up to <code>main.tex.bak</code>. Your
+            chapter files are left untouched.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Not now</AlertDialogCancel>
+          <AlertDialogAction onClick={() => void migrate()}>Convert</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function App() {
   const status = useProjectStore((s) => s.status);
 
@@ -103,6 +132,7 @@ function App() {
         <Welcome />
       )}
       <UnsavedGuard />
+      <MigrationGuard />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

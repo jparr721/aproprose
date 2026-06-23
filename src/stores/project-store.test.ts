@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
   openProject: vi.fn(),
+  createProject: vi.fn(),
+  writeSkeleton: vi.fn(),
+  deleteChapterCmd: vi.fn(),
+  migrateToManaged: vi.fn(),
   pickProjectDir: vi.fn(),
   readAppData: vi.fn().mockResolvedValue(null),
   readPdf: vi.fn().mockRejectedValue(new Error("no pdf")),

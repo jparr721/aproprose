@@ -1,0 +1,66 @@
+\documentclass[12pt,openany]{book}
+
+\usepackage[T1]{fontenc}
+\input{metadata}
+\usepackage{misc/options}
+\usepackage{xcolor}
+\usepackage{csquotes}
+
+\makeatletter
+\newif\if@bubblesent
+\newenvironment{textbubble}[2][received]{%
+  \def\@bubbletype{#1}%
+  \def\@timestamp{#2}%
+  \def\@tempa{sent}%
+  \ifx\@bubbletype\@tempa%
+    \@bubblesenttrue%
+  \else%
+    \@bubblesentfalse%
+  \fi%
+  \begin{quote}%
+    \ttfamily\small%
+    \setlength{\fboxsep}{6pt}%
+    \if@bubblesent%
+      \raggedleft%
+    \fi%
+    \begin{lrbox}{\@tempboxa}%
+      \begin{minipage}{0.65\linewidth}%
+}{%
+      \end{minipage}%
+    \end{lrbox}%
+    \if@bubblesent%
+      \colorbox{blue!25}{\usebox{\@tempboxa}}%
+    \else%
+      \colorbox{gray!10}{\usebox{\@tempboxa}}%
+    \fi%
+    % Add timestamp below bubble
+    \par\vspace{2pt}%
+    {\tiny\color{gray}\@timestamp}%
+  \end{quote}%
+}
+\newcommand{\chatHeader}[1]{%
+  \vspace{12pt}%
+  \begin{center}%
+    {\sffamily\large #1}%
+  \end{center}%
+  \vspace{-8pt}%
+  {\centering\color{gray!40}\rule{0.5\linewidth}{0.4pt}\par}%
+  \vspace{8pt}%
+}
+\makeatother
+
+\title{\booktitle}
+\author{\authorname}
+
+\begin{document}
+\frontmatter
+\input{frontmatter/titlepage}
+\input{frontmatter/copyrightpage}
+\input{frontmatter/preface}
+\input{frontmatter/tocpage}
+
+\mainmatter
+\pagestyle{fancy}
+\input{chapters}
+
+\end{document}

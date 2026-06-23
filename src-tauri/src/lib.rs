@@ -8,6 +8,7 @@
 
 pub mod compile;
 pub mod git;
+pub mod novel;
 pub mod project;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -16,15 +17,48 @@ use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
 
 use compile::CompileResult;
-use project::ProjectInfo;
+use project::{NovelMetadata, ProjectInfo};
 
 // ── Project ─────────────────────────────────────────────────────────────────
 
-/// Parse a project directory: locate the main `.tex`, read title/author, and
-/// enumerate the `\chapter{…}` / `\input{…}` pairs.
+/// Open a project folder: managed → ready `ProjectInfo`; legacy → a
+/// `needsMigration` signal the UI turns into a convert prompt.
 #[tauri::command]
-fn open_project(root: String) -> Result<ProjectInfo, String> {
-    project::open_project(Path::new(&root))
+fn open_project(root: String) -> Result<novel::OpenOutcome, String> {
+    novel::detect_and_open(Path::new(&root))
+}
+
+/// Scaffold a new managed novel under `parent` and open it.
+#[tauri::command]
+fn create_project(
+    parent: String,
+    name: String,
+    metadata: NovelMetadata,
+) -> Result<ProjectInfo, String> {
+    novel::create_project(Path::new(&parent), &name, &metadata)
+}
+
+/// Regenerate metadata.tex + chapters.tex from the model (add/rename/reorder/
+/// metadata edits). Creates an empty body for any new chapter; never deletes.
+#[tauri::command]
+fn write_skeleton(root: String, model: novel::SkeletonModel) -> Result<ProjectInfo, String> {
+    novel::write_skeleton(Path::new(&root), &model)
+}
+
+/// Delete a chapter: regenerate from the (already-trimmed) model and remove its body file.
+#[tauri::command]
+fn delete_chapter(
+    root: String,
+    model: novel::SkeletonModel,
+    file: String,
+) -> Result<ProjectInfo, String> {
+    novel::delete_chapter(Path::new(&root), &model, &file)
+}
+
+/// Convert a legacy project to the managed layout (one-time).
+#[tauri::command]
+fn migrate_to_managed(root: String) -> Result<ProjectInfo, String> {
+    novel::migrate_to_managed(Path::new(&root))
 }
 
 /// Read `<root>/.aproprose/meta.json`, or `None` if it doesn't exist.
@@ -357,6 +391,10 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             open_project,
+            create_project,
+            write_skeleton,
+            delete_chapter,
+            migrate_to_managed,
             read_project_meta,
             write_project_meta,
             read_text_file,

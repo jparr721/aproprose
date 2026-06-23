@@ -2,7 +2,7 @@
 // status, panel toggles, settings, the Compile CTA, and (off-macOS) window
 // controls. Project switching now lives in the sidebar header, not here.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   IconFileTypePdf,
   IconPlayerPlayFilled,
@@ -15,7 +15,9 @@ import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
 import { BackupReviewSheet } from "@/components/app/backup-review-sheet";
+import { BackupSetupDialog } from "@/components/app/backup-setup-dialog";
 import { useProjectStore } from "@/stores/project-store";
+import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding } from "@/hooks/use-keybinding";
 import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
@@ -61,6 +63,14 @@ function BuildBadge() {
 
 export function TopBar() {
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  const prefsKnown = useSyncStore((s) => s.prefsKnown);
+  const repoDetected = useSyncStore((s) => s.isRepo);
+  useEffect(() => {
+    // Git repo aproprose hasn't recorded prefs for → offer setup once.
+    if (repoDetected && !prefsKnown) setSetupOpen(true);
+  }, [repoDetected, prefsKnown]);
 
   const project = useProjectStore((s) => s.project);
   const activeId = useProjectStore((s) => s.activeChapterId);
@@ -111,7 +121,7 @@ export function TopBar() {
 
         <BuildBadge />
         {project ? (
-          <SyncStatus onReview={() => setReviewOpen(true)} onSetup={() => {}} />
+          <SyncStatus onReview={() => setReviewOpen(true)} onSetup={() => setSetupOpen(true)} />
         ) : null}
       </div>
 
@@ -163,6 +173,7 @@ export function TopBar() {
         <WindowControls />
       </div>
       <BackupReviewSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+      <BackupSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
     </header>
   );
 }

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
+import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -105,6 +106,9 @@ export function TopBar() {
         ) : null}
 
         <BuildBadge />
+        {project ? (
+          <SyncStatus onReview={() => {}} onSetup={() => {}} />
+        ) : null}
       </div>
 
       {/* Center: the Compile CTA. */}

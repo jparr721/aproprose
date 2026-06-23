@@ -39,6 +39,9 @@ import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { KEYBINDINGS, comboTokens } from "@/lib/keybindings";
+import { IS_MAC } from "@/lib/platform";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
@@ -303,6 +306,33 @@ export function SettingsSheet() {
           <Separator />
 
           <OpenAiKeyField />
+
+          <Separator />
+
+          <Field label="Keyboard">
+            <div className="flex flex-col gap-2">
+              {KEYBINDINGS.map((b) => (
+                <div key={b.id} className="flex items-center justify-between gap-3">
+                  <span className="font-sans text-sm text-foreground">{b.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    {b.combos.map((c, i) => (
+                      <span key={i} className="flex items-center gap-1.5">
+                        {i > 0 ? <span className="text-xs text-faint">or</span> : null}
+                        <KbdGroup>
+                          {comboTokens(c, IS_MAC).map((t, j) => (
+                            <Kbd key={j}>{t}</Kbd>
+                          ))}
+                        </KbdGroup>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <TypographyMuted className="mt-1 font-sans text-xs">
+              Highlight text in a block to convert or isolate the selection.
+            </TypographyMuted>
+          </Field>
         </div>
       </SheetContent>
     </Sheet>

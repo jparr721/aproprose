@@ -27,6 +27,18 @@ fn open_project(root: String) -> Result<ProjectInfo, String> {
     project::open_project(Path::new(&root))
 }
 
+/// Read `<root>/.aproprose/meta.json`, or `None` if it doesn't exist.
+#[tauri::command]
+fn read_project_meta(root: String) -> Result<Option<String>, String> {
+    project::read_meta(Path::new(&root))
+}
+
+/// Write `<root>/.aproprose/meta.json`, creating `.aproprose/` if needed.
+#[tauri::command]
+fn write_project_meta(root: String, value: String) -> Result<(), String> {
+    project::write_meta(Path::new(&root), &value)
+}
+
 // ── Files ───────────────────────────────────────────────────────────────────
 
 /// Read a UTF-8 text file. `path` may be absolute or relative to `root`; either
@@ -345,6 +357,8 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             open_project,
+            read_project_meta,
+            write_project_meta,
             read_text_file,
             write_text_file,
             compile_project,

@@ -5,7 +5,23 @@ import {
   IconSparkles,
   IconWriting,
 } from "@tabler/icons-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Block } from "@/components/app/block";
+import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TypographyLarge, TypographyMuted } from "@/components/ui/typography";
@@ -16,6 +32,7 @@ import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding"
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { isInAuxSurface } from "@/lib/dom";
+import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/lib/use-dictation";
 import type { BlockType } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -62,6 +79,22 @@ export function Editor() {
   const activeId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
+  const select = useProjectStore((s) => s.select);
+  const reorderBlock = useProjectStore((s) => s.reorderBlock);
+
+  // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
+  // click on the grip a selection rather than a drag; KeyboardSensor makes the
+  // handle operable with space + arrows.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (over && active.id !== over.id) {
+      reorderBlock(String(active.id), String(over.id));
+    }
+  };
 
   // One recognizer for the whole editor; dictation lands in the selected block.
   const dictation = useDictation((text) => {
@@ -74,7 +107,7 @@ export function Editor() {
   });
 
   // Document + history shortcuts live with the editing surface they act on.
-  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().saveChapter());
+  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().compileNow());
   useKeybindingWithOptions(
     KEYBINDING_IDS.UNDO,
     () => useProjectStore.getState().undo(),
@@ -90,6 +123,24 @@ export function Editor() {
     () => useProjectStore.getState().redo(),
     EDITOR_HISTORY_OPTIONS,
   );
+
+  // Carve/split: Cmd+Shift+Enter. With a selection it isolates the slice as its
+  // own same-type block (like the toolbar's Split); a bare caret splits in two.
+  useKeybinding(KEYBINDING_IDS.SPLIT_BLOCK, () => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
+    const host = el.closest("[data-block-id]");
+    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+    if (!blockId) return;
+    const store = useProjectStore.getState();
+    const { selectionStart, selectionEnd } = el;
+    if (selectionStart !== selectionEnd) {
+      const block = store.blocks.find((b) => b.id === blockId);
+      if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
+    } else {
+      store.splitBlock(blockId, selectionStart);
+    }
+  });
 
   const conflictedFiles = useSyncStore((s) => s.conflictedFiles);
 
@@ -118,7 +169,23 @@ export function Editor() {
   }
 
   return (
-    <ScrollArea className="h-full bg-background">
+    <ScrollArea
+      className="h-full bg-background"
+      // A press on empty editor surface (gutters, padding, the chapter header)
+      // clears the selection so the active block leaves edit mode. Blocks handle
+      // their own selection; buttons (the add-block row) and the scrollbar keep
+      // the selection so they still act on the selected block.
+      onMouseDown={(e) => {
+        const t = e.target as Element;
+        if (
+          t.closest("[data-block-id]") ||
+          t.closest("button") ||
+          t.closest('[data-slot="scroll-area-scrollbar"]')
+        )
+          return;
+        select(null);
+      }}
+    >
       <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
         <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
           <span className="font-serif text-lg italic text-muted-foreground">Chapter {chapter.label}</span>
@@ -131,11 +198,24 @@ export function Editor() {
           </span>
         </header>
 
-        {blocks.map((b) => (
-          <Block key={b.id} block={b} dictation={dictation} />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={blocks.map((b) => b.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {blocks.map((b) => (
+              <Block key={b.id} block={b} dictation={dictation} />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         <AddBlockRow />
+        <SelectionToolbar />
       </div>
     </ScrollArea>
   );

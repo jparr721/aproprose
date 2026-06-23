@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
@@ -78,6 +78,11 @@ export function TopBar() {
   const compiling = useProjectStore((s) => s.compile.status === "compiling");
   const compileNow = useProjectStore((s) => s.compileNow);
 
+  // On macOS the traffic lights only sit over the top bar when the sidebar is
+  // collapsed; when it's open they're over the sidebar header (which reserves
+  // its own band), so the pl-20 inset would just be wasted space here.
+  const sidebarState = useSidebar().state;
+
   const aiOpen = useViewStore((s) => s.aiOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
@@ -97,7 +102,7 @@ export function TopBar() {
       data-tauri-drag-region
       className={cn(
         "flex h-11 items-center gap-3 border-b border-border bg-background px-3 font-sans",
-        IS_MAC && "pl-20",
+        IS_MAC && sidebarState === "collapsed" && "pl-20",
       )}
     >
       {/* Left: sidebar toggle, document identity, build status. */}
@@ -131,10 +136,11 @@ export function TopBar() {
           size="sm"
           onClick={() => void compileNow()}
           disabled={compiling}
-          className="bg-success font-sans text-success-foreground hover:bg-success/90"
+          className="font-sans"
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile
+          <KeybindingHint keybinding={KEYBINDINGS.COMPILE} />
         </Button>
       ) : null}
 

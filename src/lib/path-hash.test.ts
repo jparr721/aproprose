@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { pathHash } from "./path-hash";
 
 test("pathHash is stable and deterministic", () => {

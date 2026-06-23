@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from "./messages";
 import type { RepoStatus } from "@/lib/types";
 

@@ -54,6 +54,8 @@ import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { IS_MAC } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 function AddLoreDialog() {
   const addLore = useProjectStore((s) => s.addLore);
@@ -99,20 +101,23 @@ export function AppSidebar() {
   const meta = useProjectStore((s) => s.meta);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const selectChapter = useProjectStore((s) => s.selectChapter);
-  const chapterDirty = useProjectStore((s) => s.chapterDirty);
-  const saving = useProjectStore((s) => s.saving);
   const recents = useProjectStore((s) => s.recents);
   const openDialog = useProjectStore((s) => s.openProjectDialog);
   const loadAt = useProjectStore((s) => s.loadProjectAt);
   const closeProject = useProjectStore((s) => s.closeProject);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
+  const compileNow = useProjectStore((s) => s.compileNow);
+  const compiling = useProjectStore((s) => s.compile.status === "compiling");
   const guard = useViewStore((s) => s.requestGuarded);
 
   if (!project) return null;
 
   return (
     <Sidebar collapsible="offcanvas" className="font-sans">
-      <SidebarHeader>
+      {/* On macOS the native traffic lights are pinned to the window's top-left
+          (x16/y16). When the sidebar is open that corner is the header, so we
+          reserve a top-bar-height band (pt-11 = h-11) to drop the project name
+          clear of the lights instead of nudging the name itself. */}
+      <SidebarHeader className={cn(IS_MAC && "pt-11")}>
         <SidebarMenu>
           <SidebarMenuItem>
             {/* The project name is the project switcher — clicking it opens the
@@ -131,10 +136,10 @@ export function AppSidebar() {
                   <IconFolderOpen /> Open project…
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={!chapterDirty || saving}
-                  onSelect={() => void saveChapter()}
+                  disabled={compiling}
+                  onSelect={() => void compileNow()}
                 >
-                  <IconDeviceFloppy /> Save chapter
+                  <IconDeviceFloppy /> Save &amp; build PDF
                 </DropdownMenuItem>
                 {recents.length > 0 ? (
                   <>

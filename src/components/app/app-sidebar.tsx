@@ -4,6 +4,7 @@
 import { useState } from "react";
 import {
   IconChevronDown,
+  IconChevronRight,
   IconDeviceFloppy,
   IconFolderOpen,
   IconPlus,
@@ -28,6 +29,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -40,22 +46,15 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
 import { SettingsSheet } from "@/components/app/settings-sheet";
-import { chapterStatus, useProjectStore } from "@/stores/project-store";
+import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import type { ChapterStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-const STATUS_DOT: Record<ChapterStatus, string> = {
-  active: "bg-success",
-  draft: "bg-warning",
-  outline: "bg-scratch-ink",
-  planned: "bg-faint opacity-50",
-};
 
 const CHARACTER_COLORS = [
   "oklch(0.55 0.12 30)",
@@ -254,79 +253,97 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Chapters</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {project.chapters.map((c) => {
-                const status = chapterStatus(c, meta, activeId);
-                const on = c.id === activeId;
-                return (
-                  <SidebarMenuItem key={c.id}>
-                    <SidebarMenuButton
-                      isActive={on}
-                      onClick={() => guard(() => void selectChapter(c.id))}
-                      className="grid h-auto min-h-8 grid-cols-[24px_1fr_auto] items-start gap-1.5 py-1.5"
-                    >
-                      <span
-                        className={cn(
-                          "font-serif text-[13px] italic",
-                          on ? "text-accent-ink" : "text-faint",
-                        )}
-                      >
-                        {c.label}
-                      </span>
-                      <span className="break-words whitespace-normal">{c.title}</span>
-                      <span className={cn("mt-1.5 size-1.5 rounded-full", STATUS_DOT[status])} />
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <Collapsible defaultOpen className="group/collapsible">
+          <SidebarGroup>
+            <SidebarGroupLabel asChild className="gap-1">
+              <CollapsibleTrigger>
+                <IconChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                Chapters
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {project.chapters.map((c, idx) => {
+                    const on = c.id === activeId;
+                    return (
+                      <SidebarMenuItem key={c.id}>
+                        <SidebarMenuButton
+                          isActive={on}
+                          onClick={() => guard(() => void selectChapter(c.id))}
+                          className="pr-8"
+                        >
+                          <span>{c.title}</span>
+                        </SidebarMenuButton>
+                        <SidebarMenuBadge>{idx + 1}</SidebarMenuBadge>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Characters</SidebarGroupLabel>
-          <AddCharacterDialog />
-          <SidebarGroupContent>
-            {meta.characters.length === 0 ? (
-              <p className="px-2 py-1 text-xs text-faint">None yet — add your cast.</p>
-            ) : (
-              <SidebarMenu>
-                {meta.characters.map((c) => (
-                  <SidebarMenuItem key={c.id}>
-                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                      <ColorDot color={c.color} className="mt-0.5 shrink-0" />
-                      <span className="break-words">{c.name}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <Collapsible defaultOpen className="group/collapsible">
+          <SidebarGroup>
+            <SidebarGroupLabel asChild className="gap-1">
+              <CollapsibleTrigger>
+                <IconChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                Characters
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <AddCharacterDialog />
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                {meta.characters.length === 0 ? (
+                  <p className="px-2 py-1 text-xs text-faint">None yet — add your cast.</p>
+                ) : (
+                  <SidebarMenu>
+                    {meta.characters.map((c) => (
+                      <SidebarMenuItem key={c.id}>
+                        <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
+                          <ColorDot color={c.color} className="mt-0.5 shrink-0" />
+                          <span className="break-words">{c.name}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                )}
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Lore</SidebarGroupLabel>
-          <AddLoreDialog />
-          <SidebarGroupContent>
-            {meta.lore.length === 0 ? (
-              <p className="px-2 py-1 text-xs text-faint">No notes yet.</p>
-            ) : (
-              <SidebarMenu>
-                {meta.lore.map((l) => (
-                  <SidebarMenuItem key={l.id}>
-                    <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
-                      <span className="break-words">{l.title}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <Collapsible defaultOpen className="group/collapsible">
+          <SidebarGroup>
+            <SidebarGroupLabel asChild className="gap-1">
+              <CollapsibleTrigger>
+                <IconChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                Lore
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <AddLoreDialog />
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                {meta.lore.length === 0 ? (
+                  <p className="px-2 py-1 text-xs text-faint">No notes yet.</p>
+                ) : (
+                  <SidebarMenu>
+                    {meta.lore.map((l) => (
+                      <SidebarMenuItem key={l.id}>
+                        <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
+                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
+                          <span className="break-words">{l.title}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                )}
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>

@@ -215,6 +215,16 @@ export interface ChatMessage {
   content: string;
 }
 
+/** A single proposed in-place revision of one block (see the AI "Edit" tab). */
+export interface BlockEdit {
+  /** The id of an existing block to revise. */
+  blockId: string;
+  /** The full revised cleaned text for that block. */
+  newText: string;
+  /** A short phrase: what changed and why. */
+  reason: string;
+}
+
 // ── Backup / sync ─────────────────────────────────────────────────────────────
 
 export interface ToolingStatus {

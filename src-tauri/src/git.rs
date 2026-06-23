@@ -133,7 +133,7 @@ pub fn parse_status(porcelain_branch: &str) -> RepoStatus {
             // "main...origin/main [ahead 2, behind 1]" | "main" | "HEAD (no branch)"
             let name_part = rest.split("...").next().unwrap_or(rest);
             let name = name_part.split_whitespace().next().unwrap_or("");
-            if !name.is_empty() && name != "HEAD" {
+            if !name.is_empty() && name != "HEAD" && !rest.starts_with("No commits yet on") {
                 branch = Some(name.to_string());
             }
             if let (Some(b), Some(e)) = (rest.find('['), rest.find(']')) {
@@ -305,5 +305,19 @@ mod tests {
         assert!(s.dirty);
         assert_eq!(s.changed_files[0].path, "a.tex");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_status_no_commits_yet_has_no_branch() {
+        let r = parse_status("## No commits yet on main\n");
+        assert_eq!(r.branch, None);
+        assert!(!r.dirty);
+    }
+
+    #[test]
+    fn parse_status_rename_takes_new_path() {
+        let r = parse_status("## main\nR  old.tex -> new.tex\n");
+        assert_eq!(r.changed_files.len(), 1);
+        assert_eq!(r.changed_files[0].path, "new.tex");
     }
 }

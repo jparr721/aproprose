@@ -7,6 +7,7 @@
 // byte-for-byte.
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import type {
   Block,
   BlockType,
@@ -41,6 +42,7 @@ import {
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
+import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -138,8 +140,12 @@ interface ProjectState {
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
   insertAfter: (afterId: string | null, partial?: Partial<Block>) => string;
+  splitBlock: (id: string, at: number) => void;
+  convertSelection: (id: string, start: number, end: number, type: BlockType) => void;
   deleteBlock: (id: string) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
+  /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
+  reorderBlock: (fromId: string, toId: string) => void;
 
   // history (undo/redo of the block list within the current chapter)
   past: Block[][];
@@ -172,11 +178,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // would be overkill; writes are cheap and infrequent).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
-    if (project) void writeAppData(metaKey(project.root), meta);
+    if (project)
+      void writeAppData(metaKey(project.root), meta).catch((e) => {
+        toast.error("Couldn't save project metadata", { description: String(e) });
+      });
   };
 
   const persistRecents = (recents: RecentProject[]) => {
-    void writeAppData(RECENTS_KEY, recents);
+    void writeAppData(RECENTS_KEY, recents).catch((e) => {
+      toast.error("Couldn't save recent projects", { description: String(e) });
+    });
   };
 
   // Shared tail of loading a ready project (used by loadProjectAt + migrate +
@@ -193,7 +204,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     if (first) await get().selectChapter(first.id);
 
     const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
-    const pdfBase64 = await readPdf(root, pdfName).catch(() => null);
+    const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
+      if (import.meta.env.DEV) console.warn(`readPdf(${pdfName}) failed:`, e);
+      return null;
+    });
     if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
   };
 
@@ -504,6 +518,43 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       return id;
     },
 
+    splitBlock: (id, at) =>
+      set((s) => {
+        const idx = s.blocks.findIndex((b) => b.id === id);
+        if (idx < 0) return {};
+        const plan = planSplit(s.blocks[idx], at);
+        if (isNoOp(plan, s.blocks[idx])) return {}; // caret at an edge — nothing to do
+        const next = [...s.blocks];
+        next.splice(idx, 1, ...plan.blocks);
+        return {
+          blocks: next,
+          selectedId: plan.focusId,
+          chapterDirty: true,
+          past: capPush(s.past, s.blocks),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    convertSelection: (id, start, end, type) =>
+      set((s) => {
+        const idx = s.blocks.findIndex((b) => b.id === id);
+        if (idx < 0) return {};
+        const plan = planCarve(s.blocks[idx], start, end, type);
+        // No-op only when the plan handed back the original block untouched.
+        if (isNoOp(plan, s.blocks[idx])) return {};
+        const next = [...s.blocks];
+        next.splice(idx, 1, ...plan.blocks);
+        return {
+          blocks: next,
+          selectedId: plan.focusId,
+          chapterDirty: true,
+          past: capPush(s.past, s.blocks),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
     deleteBlock: (id) =>
       set((s) => {
         const idx = s.blocks.findIndex((b) => b.id === id);
@@ -534,6 +585,29 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // serialization uses positions consistently.
         return {
           blocks: next,
+          chapterDirty: true,
+          past: capPush(s.past, s.blocks),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    // Drag-reorder via @dnd-kit: drop `fromId` onto `toId`'s slot. Mirrors
+    // arrayMove (remove, then insert at the target's original index) and keeps
+    // the moved block selected. Like moveBlock, reordering changes emitted
+    // output even for clean blocks, so the chapter is marked dirty.
+    reorderBlock: (fromId, toId) =>
+      set((s) => {
+        if (fromId === toId) return {};
+        const from = s.blocks.findIndex((b) => b.id === fromId);
+        const to = s.blocks.findIndex((b) => b.id === toId);
+        if (from < 0 || to < 0 || from === to) return {};
+        const next = [...s.blocks];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return {
+          blocks: next,
+          selectedId: fromId,
           chapterDirty: true,
           past: capPush(s.past, s.blocks),
           future: [],

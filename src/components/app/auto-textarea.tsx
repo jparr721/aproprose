@@ -3,6 +3,7 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { PROSE_BODY_ATTR } from "@/lib/prose-body";
 
 export function AutoGrowTextarea({
   value,
@@ -11,6 +12,7 @@ export function AutoGrowTextarea({
   autoFocus,
   placeholder,
   onKeyDown,
+  proseBody,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -18,6 +20,8 @@ export function AutoGrowTextarea({
   autoFocus?: boolean;
   placeholder?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Mark this as a carve-eligible prose body (selection toolbar + split shortcut). */
+  proseBody?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -38,8 +42,11 @@ export function AutoGrowTextarea({
       spellCheck
       onKeyDown={onKeyDown}
       onChange={(e) => onChange(e.currentTarget.value)}
+      {...(proseBody ? { [PROSE_BODY_ATTR]: "" } : {})}
       className={cn(
-        "w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0",
+        // `block` (not the default inline-block) avoids the baseline descender
+        // gap that otherwise adds phantom padding below the textarea on select.
+        "block w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0",
         className,
       )}
     />

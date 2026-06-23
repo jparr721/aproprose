@@ -32,8 +32,9 @@ bundle:
 typecheck:
     bun x tsc --noEmit
 
-# Run the Rust unit tests.
+# Run the unit tests (frontend Vitest + Rust).
 test:
+    bun x vitest run
     cd src-tauri && cargo test
 
 # Format and lint the Rust side.

@@ -56,6 +56,8 @@ import { ChapterList } from "@/components/app/chapter-list";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { IS_MAC } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 function AddLoreDialog() {
   const addLore = useProjectStore((s) => s.addLore);
@@ -99,13 +101,12 @@ function AddLoreDialog() {
 export function AppSidebar() {
   const project = useProjectStore((s) => s.project);
   const meta = useProjectStore((s) => s.meta);
-  const chapterDirty = useProjectStore((s) => s.chapterDirty);
-  const saving = useProjectStore((s) => s.saving);
   const recents = useProjectStore((s) => s.recents);
   const openDialog = useProjectStore((s) => s.openProjectDialog);
   const loadAt = useProjectStore((s) => s.loadProjectAt);
   const closeProject = useProjectStore((s) => s.closeProject);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
+  const compileNow = useProjectStore((s) => s.compileNow);
+  const compiling = useProjectStore((s) => s.compile.status === "compiling");
   const guard = useViewStore((s) => s.requestGuarded);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -113,7 +114,11 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="offcanvas" className="font-sans">
-      <SidebarHeader>
+      {/* On macOS the native traffic lights are pinned to the window's top-left
+          (x16/y16). When the sidebar is open that corner is the header, so we
+          reserve a top-bar-height band (pt-11 = h-11) to drop the project name
+          clear of the lights instead of nudging the name itself. */}
+      <SidebarHeader className={cn(IS_MAC && "pt-11")}>
         <SidebarMenu>
           <SidebarMenuItem>
             {/* The project name is the project switcher — clicking it opens the
@@ -132,10 +137,10 @@ export function AppSidebar() {
                   <IconFolderOpen /> Open project…
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={!chapterDirty || saving}
-                  onSelect={() => void saveChapter()}
+                  disabled={compiling}
+                  onSelect={() => void compileNow()}
                 >
-                  <IconDeviceFloppy /> Save chapter
+                  <IconDeviceFloppy /> Save &amp; build PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
                   <IconAdjustments /> Project settings…
@@ -191,7 +196,9 @@ export function AppSidebar() {
                     {meta.characters.map((c) => (
                       <SidebarMenuItem key={c.id}>
                         <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                          <ColorDot color={c.color} className="mt-0.5 shrink-0" />
+                          <span className="flex h-4 shrink-0 items-center">
+                            <ColorDot color={c.color} />
+                          </span>
                           <span className="break-words">{c.name}</span>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -221,7 +228,9 @@ export function AppSidebar() {
                     {meta.lore.map((l) => (
                       <SidebarMenuItem key={l.id}>
                         <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
+                          <span className="flex h-4 shrink-0 items-center">
+                            <span className="size-1.5 rounded-full bg-lore-ink" />
+                          </span>
                           <span className="break-words">{l.title}</span>
                         </SidebarMenuButton>
                       </SidebarMenuItem>

@@ -23,7 +23,9 @@ For each suggestion:
 - "text" is the continuation prose itself, written in the manuscript's voice and ready to drop into the page. Keep it tight — a sentence or a short beat, not a full scene. Use plain prose (straight quotes, real em dashes); do NOT emit LaTeX.
 - "rationale" is one crisp sentence on why this direction works dramatically — tied to what is actually on the page.
 
-Also return a few short "followups": terse "after this, you could…" nudges (a handful of words each) the author might pursue next.`;
+Also return a few short "followups": terse "after this, you could…" nudges (a handful of words each) the author might pursue next.
+
+If the author included an explicit request ("AUTHOR'S REQUEST"), treat it as the primary brief and shape all three continuations to honour it. Otherwise, use your judgment.`;
 
 /** critique — strengths, things to watch, and ideas, pinned to the prose. */
 export const CRITIQUE_SYSTEM = `${VOICE_PREAMBLE}
@@ -35,7 +37,9 @@ Each note has:
 - "tag": a one- or two-word craft category, e.g. "Voice", "Pacing", "Tension", "Imagery", "Dialogue", "Clarity".
 - "text": one or two sentences naming the specific moment and why it lands or wavers. Quote or paraphrase the actual line you mean.
 
-Return a balanced handful (roughly 4–7 notes). Lead with at least one genuine strength; never produce only criticism. Do not invent problems that aren't on the page.`;
+Return a balanced handful (roughly 4–7 notes). Lead with at least one genuine strength; never produce only criticism. Do not invent problems that aren't on the page.
+
+If the author included an explicit request ("AUTHOR'S REQUEST"), focus your notes on what they asked about. Otherwise, cover the most important craft notes you see.`;
 
 /** continuityCheck — internal-consistency observations. */
 export const CONTINUITY_SYSTEM = `${VOICE_PREAMBLE}
@@ -47,7 +51,9 @@ Each observation has:
 - "tag": a short label for the thing being tracked, e.g. "Cast", "Props", "Timeline", "Geography", "Pronouns".
 - "text": one or two sentences describing the observation, naming the specific detail and where it appears.
 
-Only report what the supplied text actually supports — if you cannot see earlier chapters, do not assume a contradiction with them. Prefer a few high-signal observations over an exhaustive list.`;
+Only report what the supplied text actually supports — if you cannot see earlier chapters, do not assume a contradiction with them. Prefer a few high-signal observations over an exhaustive list.
+
+If the author included an explicit request ("AUTHOR'S REQUEST"), prioritise the continuity dimension they named. Otherwise, sweep broadly.`;
 
 /** detectCast — who is on the page versus referenced off-page. */
 export const CAST_SYSTEM = `${VOICE_PREAMBLE}
@@ -64,7 +70,9 @@ For every character:
 - "detail": a brief phrase grounding the call in the text (what they're doing or how they're referenced).
 - "color": only set this when a known cast member with an assigned colour is provided in context; otherwise omit it so the UI renders a neutral avatar.
 
-Infer relationships and the POV character from the narration. Do not invent characters who are not implied by the text.`;
+Infer relationships and the POV character from the narration. Do not invent characters who are not implied by the text.
+
+If the author included an explicit request ("AUTHOR'S REQUEST"), let it focus your reading. Otherwise, report the full cast you can see.`;
 
 /** brainstorm — open-ended chat about the manuscript. */
 export const BRAINSTORM_SYSTEM = `${VOICE_PREAMBLE}

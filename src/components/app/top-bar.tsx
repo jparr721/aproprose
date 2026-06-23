@@ -17,7 +17,7 @@ import { useViewStore } from "@/stores/view-store";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
-import { primaryTokens } from "@/lib/keybindings";
+import { primaryTokens, primaryLabel } from "@/lib/keybindings";
 
 function BuildBadge() {
   const status = useProjectStore((s) => s.compile.status);
@@ -134,6 +134,8 @@ export function TopBar() {
             className="font-sans"
             onClick={() => void compileNow()}
             disabled={compiling}
+            title={`Save & build PDF (${primaryLabel("save-build", IS_MAC)})`}
+            aria-label={`Save & build PDF (${primaryLabel("save-build", IS_MAC)})`}
           >
             {compiling ? <IconLoader2 className="animate-spin" /> : <IconPlayerPlayFilled />}
             Compile

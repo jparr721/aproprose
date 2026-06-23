@@ -108,3 +108,10 @@ export function primaryTokens(id: KeybindingId, mac: boolean): string[] {
   if (!binding) return [];
   return comboTokens(binding.combos[0], mac);
 }
+
+/** Flat chord label for a binding's primary combo — for title/aria-label text. */
+export function primaryLabel(id: KeybindingId, mac: boolean): string {
+  const binding = KEYBINDINGS.find((b) => b.id === id);
+  if (!binding) return "";
+  return formatCombo(binding.combos[0], mac);
+}

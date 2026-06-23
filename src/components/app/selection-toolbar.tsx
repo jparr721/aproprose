@@ -109,11 +109,24 @@ export function SelectionToolbar() {
       )}
     >
       {targets.map((t) => (
-        <Button key={t.type} variant="ghost" size="xs" onClick={() => apply(t.type)}>
+        <Button
+          key={t.type}
+          variant="ghost"
+          size="xs"
+          onClick={() => apply(t.type)}
+          title={`Convert selection to ${t.label}`}
+          aria-label={`Convert selection to ${t.label}`}
+        >
           → {t.label}
         </Button>
       ))}
-      <Button variant="ghost" size="xs" onClick={() => apply(block.type)} title="Isolate as its own block">
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => apply(block.type)}
+        title="Isolate as its own block"
+        aria-label="Isolate selection as its own block"
+      >
         <IconScissors className="size-3.5" /> Split
       </Button>
     </div>,

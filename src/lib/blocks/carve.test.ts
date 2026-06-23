@@ -1,0 +1,114 @@
+import { describe, it, expect } from "vitest";
+import { planSplit, planCarve, stripOuterQuotes } from "@/lib/blocks/carve";
+import type { Block } from "@/lib/types";
+
+const mk = (p: Partial<Block> = {}): Block => ({
+  id: "src",
+  type: "narration",
+  text: "",
+  raw: "orig",
+  dirty: false,
+  ...p,
+});
+
+describe("planSplit", () => {
+  it("is a no-op at the very start or end", () => {
+    const b = mk({ text: "Hello world" });
+    expect(planSplit(b, 0).blocks).toEqual([b]);
+    expect(planSplit(b, 11).blocks).toEqual([b]);
+    expect(planSplit(b, 0).focusId).toBe("src");
+  });
+
+  it("splits narration into two fresh, dirty pieces at the caret", () => {
+    const b = mk({ text: "Hello world" });
+    const { blocks, focusId } = planSplit(b, 5);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].text).toBe("Hello");
+    expect(blocks[1].text).toBe("world");
+    expect(blocks.every((p) => p.type === "narration")).toBe(true);
+    expect(blocks.every((p) => p.dirty && p.raw === "")).toBe(true);
+    expect(blocks[0].id).not.toBe(blocks[1].id);
+    expect(focusId).toBe(blocks[1].id);
+  });
+
+  it("keeps the speaker on both halves and moves the beat to the trailing half", () => {
+    const b = mk({ type: "dialogue", text: "Hi there", speaker: "c1", beat: "She waved." });
+    const { blocks } = planSplit(b, 2);
+    expect(blocks[0]).toMatchObject({ type: "dialogue", text: "Hi", speaker: "c1" });
+    expect(blocks[0].beat).toBeUndefined();
+    expect(blocks[1]).toMatchObject({
+      type: "dialogue",
+      text: "there",
+      speaker: "c1",
+      beat: "She waved.",
+    });
+  });
+});
+
+describe("planCarve", () => {
+  it("carves a middle slice into a new-typed block, splitting into three", () => {
+    const b = mk({ text: "abc def ghi" });
+    const { blocks, focusId } = planCarve(b, 4, 7, "lore");
+    expect(blocks.map((p) => [p.type, p.text])).toEqual([
+      ["narration", "abc"],
+      ["lore", "def"],
+      ["narration", "ghi"],
+    ]);
+    expect(focusId).toBe(blocks[1].id);
+  });
+
+  it("drops empty edge pieces when the selection touches a boundary", () => {
+    const b = mk({ text: "def ghi" });
+    const { blocks } = planCarve(b, 0, 3, "lore");
+    expect(blocks.map((p) => [p.type, p.text])).toEqual([
+      ["lore", "def"],
+      ["narration", "ghi"],
+    ]);
+  });
+
+  it("becomes a whole-block type change when the whole text is selected", () => {
+    const b = mk({ text: "all of it" });
+    const { blocks } = planCarve(b, 0, 9, "scratchpad");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: "scratchpad", text: "all of it" });
+    expect(blocks[0].id).not.toBe("src");
+  });
+
+  it("strips surrounding quotes when converting to dialogue", () => {
+    const b = mk({ text: 'She said, "Run now."' });
+    const { blocks } = planCarve(b, 10, 20, "dialogue");
+    expect(blocks.map((p) => [p.type, p.text])).toEqual([
+      ["narration", "She said,"],
+      ["dialogue", "Run now."],
+    ]);
+    expect(blocks[1].speaker).toBeUndefined();
+  });
+
+  it("resets fields converting to a different type, keeps them when isolating", () => {
+    const b = mk({ type: "dialogue", text: "Hello there friend", speaker: "c1" });
+    const lore = planCarve(b, 6, 11, "lore").blocks;
+    expect(lore.map((p) => [p.type, p.speaker])).toEqual([
+      ["dialogue", "c1"],
+      ["lore", undefined],
+      ["dialogue", "c1"],
+    ]);
+    const iso = planCarve(b, 6, 11, "dialogue").blocks;
+    expect(iso[1]).toMatchObject({ type: "dialogue", text: "there", speaker: "c1" });
+  });
+
+  it("rebalances emphasis markers across a cut", () => {
+    const b = mk({ text: "a _bc_ d" });
+    const { blocks } = planSplit(b, 4);
+    expect(blocks[0].text).toBe("a _b_");
+    expect(blocks[1].text).toBe("_c_ d");
+  });
+});
+
+describe("stripOuterQuotes", () => {
+  it("removes one matched pair of straight or curly quotes", () => {
+    expect(stripOuterQuotes('"hi"')).toBe("hi");
+    expect(stripOuterQuotes("“hi”")).toBe("hi");
+    expect(stripOuterQuotes("'hi'")).toBe("hi");
+    expect(stripOuterQuotes("no quotes")).toBe("no quotes");
+  });
+});

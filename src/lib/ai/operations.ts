@@ -49,12 +49,15 @@ export interface AiContext {
   cursorSummary?: string;
   /** The known cast, so the model can name speakers and tag colours. */
   characters?: { name: string; role?: string }[];
+  /** Optional free-text steering from the author's ask box; honoured when present. */
+  instruction?: string;
 }
 
 /**
  * Render the grounding the model reads before doing any work: the chapter, the
- * cast roster, the cursor position, and the scene prose, in a stable order. This
- * goes in the `prompt` field; the per-operation instructions live in `system`.
+ * cast roster, the cursor position, the scene prose, and — when the author
+ * supplied one — their explicit request, in a stable order. This goes in the
+ * `prompt` field; the per-operation instructions live in `system`.
  */
 function buildGrounding(ctx: AiContext): string {
   const parts: string[] = [];
@@ -74,8 +77,13 @@ function buildGrounding(ctx: AiContext): string {
     parts.push(`CURSOR: ${ctx.cursorSummary}`);
   }
 
-  // The scene itself goes last so it's the freshest thing in the model's window.
+  // The scene itself goes before the request so the request is the last,
+  // freshest, most salient directive in the model's window.
   parts.push(`SCENE PROSE:\n${ctx.blocksText}`);
+
+  if (ctx.instruction?.trim()) {
+    parts.push(`AUTHOR'S REQUEST (follow this):\n${ctx.instruction.trim()}`);
+  }
 
   return parts.join("\n\n");
 }

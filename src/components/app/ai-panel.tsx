@@ -201,11 +201,15 @@ function SuggestTab() {
   const characters = useProjectStore((s) => s.meta.characters);
 
   const cacheKey = `suggest:${activeChapterId ?? ""}:${selectedId ?? ""}`;
-  // Seed the ask box from the instruction that produced the cached result (if any)
-  // so a remounted tab shows the box and result in sync.
+  // Seed/re-sync the ask box from the instruction that produced the cached result
+  // (if any) so the box and the shown result stay in sync — at mount and whenever
+  // the anchor (cursor/chapter) changes while the tab stays mounted.
   const [instruction, setInstruction] = useState(
     () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
   );
+  useEffect(() => {
+    setInstruction(useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "");
+  }, [cacheKey]);
   const askRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = instruction.trim() || undefined;
 
@@ -345,6 +349,10 @@ function CritiqueTab() {
   const [instruction, setInstruction] = useState(
     () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
   );
+  // Re-sync the ask box when the anchor changes (cursor/chapter) without a remount.
+  useEffect(() => {
+    setInstruction(useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "");
+  }, [cacheKey]);
   const trimmed = instruction.trim() || undefined;
   const { data, loading, error, run } = useAi<CritiqueNote[]>(
     () => critique({ ...buildAiContext(), instruction: trimmed }),
@@ -409,6 +417,10 @@ function ContinuityTab() {
   const [instruction, setInstruction] = useState(
     () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
   );
+  // Re-sync the ask box when the anchor changes (cursor/chapter) without a remount.
+  useEffect(() => {
+    setInstruction(useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "");
+  }, [cacheKey]);
   const trimmed = instruction.trim() || undefined;
   const { data, loading, error, run } = useAi<ContinuityFlag[]>(
     () => continuityCheck({ ...buildAiContext(), instruction: trimmed }),
@@ -490,6 +502,10 @@ function CastTab() {
   const [instruction, setInstruction] = useState(
     () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
   );
+  // Re-sync the ask box when the anchor changes (cursor/chapter) without a remount.
+  useEffect(() => {
+    setInstruction(useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "");
+  }, [cacheKey]);
   const trimmed = instruction.trim() || undefined;
   const { data, loading, error, run } = useAi<CastResult>(
     () => detectCast({ ...buildAiContext(), instruction: trimmed }),

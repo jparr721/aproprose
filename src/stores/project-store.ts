@@ -122,7 +122,8 @@ interface ProjectState {
   compileNow: () => Promise<void>;
 
   // metadata
-  addCharacter: (c: Omit<Character, "id">) => void;
+  /** Adds a character and returns its newly-minted id. */
+  addCharacter: (c: Omit<Character, "id">) => string;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
   removeCharacter: (id: string) => void;
   addLore: (title: string) => void;
@@ -492,13 +493,15 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
-    addCharacter: (c) =>
+    addCharacter: (c) => {
+      const character: Character = { ...c, id: uid("c") };
       set((s) => {
-        const character: Character = { ...c, id: uid("c") };
         const meta = { ...s.meta, characters: [...s.meta.characters, character] };
         persistMeta(meta);
         return { meta };
-      }),
+      });
+      return character.id;
+    },
 
     updateCharacter: (id, patch) =>
       set((s) => {

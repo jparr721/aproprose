@@ -18,6 +18,9 @@ import {
   IconArrowDown,
   IconWand,
   IconCheck,
+  IconCopy,
+  IconClipboardText,
+  IconUserPlus,
 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -27,10 +30,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
 import { ColorDot } from "@/components/app/color-dot";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
+import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { renderInline } from "@/components/app/inline";
+import { copyText, currentSelectionText } from "@/lib/clipboard";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -69,48 +81,57 @@ function TypeChip({
 }) {
   const changeType = useProjectStore((s) => s.changeType);
   const changeSpeaker = useProjectStore((s) => s.changeSpeaker);
+  const [addOpen, setAddOpen] = useState(false);
   const speaker = block.speaker
     ? characters.find((c) => c.id === block.speaker)
     : undefined;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="xs" className="gap-1 font-sans text-muted-foreground">
-          {speaker ? <ColorDot color={speaker.color} /> : null}
-          {speaker ? speaker.name : TYPE_LABELS[block.type]}
-          <IconChevronDown className="size-2.5 opacity-50" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56 font-sans">
-        {block.type === "dialogue" ? (
-          <>
-            <DropdownMenuLabel className="text-faint">Speaker</DropdownMenuLabel>
-            {characters.length === 0 ? (
-              <DropdownMenuItem disabled>Add characters in the rail</DropdownMenuItem>
-            ) : (
-              characters.map((c) => (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="xs" className="gap-1 font-sans text-muted-foreground">
+            {speaker ? <ColorDot color={speaker.color} /> : null}
+            {speaker ? speaker.name : TYPE_LABELS[block.type]}
+            <IconChevronDown className="size-2.5 opacity-50" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56 font-sans">
+          {block.type === "dialogue" ? (
+            <>
+              <DropdownMenuLabel className="text-faint">Speaker</DropdownMenuLabel>
+              {characters.map((c) => (
                 <DropdownMenuItem key={c.id} onSelect={() => changeSpeaker(block.id, c.id)}>
                   <ColorDot color={c.color} />
                   <span className="flex-1">{c.name}</span>
                   <span className="text-xs text-faint">{c.role}</span>
                   {block.speaker === c.id ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
                 </DropdownMenuItem>
-              ))
-            )}
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        <DropdownMenuLabel className="text-faint">Block type</DropdownMenuLabel>
-        {(Object.keys(TYPE_LABELS) as BlockType[]).map((t) => (
-          <DropdownMenuItem key={t} onSelect={() => changeType(block.id, t)}>
-            <span className={cn("size-2 rounded-[2px]", TYPE_SWATCH[t])} />
-            <span className="flex-1">{TYPE_LABELS[t]}</span>
-            {block.type === t ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+              ))}
+              <DropdownMenuItem onSelect={() => setAddOpen(true)}>
+                <IconUserPlus />
+                <span className="flex-1">Add character</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          <DropdownMenuLabel className="text-faint">Block type</DropdownMenuLabel>
+          {(Object.keys(TYPE_LABELS) as BlockType[]).map((t) => (
+            <DropdownMenuItem key={t} onSelect={() => changeType(block.id, t)}>
+              <span className={cn("size-2 rounded-[2px]", TYPE_SWATCH[t])} />
+              <span className="flex-1">{TYPE_LABELS[t]}</span>
+              {block.type === t ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* Rendered outside the menu so closing the dropdown doesn't unmount it. */}
+      <AddCharacterDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onAdded={(id) => changeSpeaker(block.id, id)}
+      />
+    </>
   );
 }
 
@@ -268,6 +289,25 @@ function BlockBody({
   }
 }
 
+// A whole block as readable plain text, for the "Copy block" context action.
+function blockPlainText(block: BlockT, characters: Character[]): string {
+  switch (block.type) {
+    case "chapter":
+      return block.level === "break" ? "* * *" : block.text;
+    case "dialogue": {
+      const sp = block.speaker ? characters.find((c) => c.id === block.speaker) : undefined;
+      const quote = `"${block.text}"`;
+      const head = sp ? `${sp.name}: ${quote}` : quote;
+      return block.beat ? `${head}\n${block.beat}` : head;
+    }
+    case "lore":
+    case "scratchpad":
+      return block.title ? `${block.title}\n${block.text}` : block.text;
+    default:
+      return block.text;
+  }
+}
+
 // ── Block ─────────────────────────────────────────────────────────────────────
 // Memoized: editing one block re-serializes only that block's `raw`/identity, so
 // the other blocks in a long chapter don't re-render on every keystroke.
@@ -288,6 +328,9 @@ function BlockImpl({
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
 
   const [cleaning, setCleaning] = useState(false);
+  // Text selected at right-click time — captured before Radix opens its menu and
+  // moves focus, which would otherwise drop the selection (see onContextMenuCapture).
+  const [selText, setSelText] = useState("");
   const speaker = block.speaker
     ? characters.find((c) => c.id === block.speaker)
     : undefined;
@@ -321,89 +364,138 @@ function BlockImpl({
     }
   };
 
+  // The whole block as plain text — copied verbatim and used to gate the item.
+  const blockText = blockPlainText(block, characters);
+
+  const onCopySelection = async () => {
+    // selText is the snapshot taken on right-click (the menu gesture has since
+    // dropped the live selection); the item is disabled when it's empty.
+    if (!selText.trim()) return;
+    if (!(await copyText(selText))) toast.error("Couldn't copy to the clipboard");
+  };
+
+  const onCopyBlock = async () => {
+    if (!(await copyText(blockText))) toast.error("Couldn't copy to the clipboard");
+  };
+
   return (
-    <div
-      data-block-id={block.id}
-      onMouseDown={() => select(block.id)}
-      className={cn(
-        "group relative flex gap-1.5 rounded-lg border-l-[3px] py-1.5 pl-1.5 pr-2 transition-colors",
-        selected
-          ? "border-l-accent-ink bg-card"
-          : "border-l-transparent hover:bg-muted/50",
-        cardChrome && "border border-l-[3px] border-border bg-card px-3 py-3",
-        cardChrome && selected && "border-l-accent-ink",
-      )}
-    >
-      {/* gutter */}
-      <div className="flex w-5 shrink-0 justify-center pt-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <span className="cursor-grab text-faint" title="Drag handle — use ⋯ to move">
-          <IconGripVertical className="size-3.5" />
-        </span>
-      </div>
-
-      {/* body */}
-      <div className="min-w-0 flex-1">
-        <BlockBody block={block} editing={editing} speaker={speaker} />
-      </div>
-
-      {/* actions */}
-      <div
-        className={cn(
-          "absolute right-2 top-0 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
-          "group-hover:flex",
-          selected && "flex",
-        )}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <TypeChip block={block} characters={characters} />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="Dictate into this block"
-          aria-pressed={dictation.listening && selected}
-          className={cn(
-            dictation.listening && selected && "text-destructive",
-          )}
-          onClick={onMic}
-        >
-          <IconMicrophone className={cn(dictation.listening && selected && "animate-pulse")} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="Suggest what comes next here"
-          onClick={() => {
-            select(block.id);
-            triggerSuggest();
+    <ContextMenu>
+      {/* select-text overrides the trigger's default select-none (merged away by
+          cn/tailwind-merge) so prose stays highlightable for "Copy". */}
+      <ContextMenuTrigger asChild className="select-text">
+        <div
+          data-block-id={block.id}
+          // Left press selects (and enters edit mode); right press must NOT, or
+          // selecting the block swaps the prose for textareas and drops the
+          // highlight the user is trying to copy.
+          onMouseDown={(e) => {
+            if (e.button === 0) select(block.id);
           }}
+          onContextMenuCapture={() => setSelText(currentSelectionText())}
+          className={cn(
+            "group relative flex gap-1.5 rounded-lg border border-transparent py-1.5 pl-1.5 pr-2 transition-colors",
+            selected
+              ? "border-select-edge bg-card"
+              : "hover:bg-muted/50",
+            cardChrome && "border-border bg-card px-3 py-3",
+            cardChrome && selected && "border-select-edge",
+          )}
         >
-          <IconSparkles className="text-ai-ink" />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" title="More">
-              <IconDotsVertical />
+          {/* gutter */}
+          <div className="flex w-5 shrink-0 justify-center pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="cursor-grab text-faint" title="Drag handle — use ⋯ to move">
+              <IconGripVertical className="size-3.5" />
+            </span>
+          </div>
+
+          {/* body */}
+          <div className="min-w-0 flex-1">
+            <BlockBody block={block} editing={editing} speaker={speaker} />
+          </div>
+
+          {/* actions */}
+          <div
+            className={cn(
+              "absolute right-2 top-0 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
+              "group-hover:flex has-[[data-state=open]]:flex",
+              selected && "flex",
+            )}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <TypeChip block={block} characters={characters} />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Dictate into this block"
+              aria-pressed={dictation.listening && selected}
+              className={cn(
+                dictation.listening && selected && "text-destructive",
+              )}
+              onClick={onMic}
+            >
+              <IconMicrophone className={cn(dictation.listening && selected && "animate-pulse")} />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48 font-sans">
-            <DropdownMenuItem onSelect={() => moveBlock(block.id, -1)}>
-              <IconArrowUp /> Move up
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => moveBlock(block.id, 1)}>
-              <IconArrowDown /> Move down
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>
-              <IconWand /> Clean up with AI
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={() => deleteBlock(block.id)}>
-              <IconTrash /> Delete block
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Suggest what comes next here"
+              onClick={() => {
+                select(block.id);
+                triggerSuggest();
+              }}
+            >
+              <IconSparkles className="text-ai-ink" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" title="More">
+                  <IconDotsVertical />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 font-sans">
+                <DropdownMenuItem onSelect={() => moveBlock(block.id, -1)}>
+                  <IconArrowUp /> Move up
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => moveBlock(block.id, 1)}>
+                  <IconArrowDown /> Move down
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>
+                  <IconWand /> Clean up with AI
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => deleteBlock(block.id)}>
+                  <IconTrash /> Delete block
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52 font-sans">
+        <ContextMenuItem disabled={!selText.trim()} onSelect={() => void onCopySelection()}>
+          <IconCopy /> Copy
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!blockText.trim()} onSelect={() => void onCopyBlock()}>
+          <IconClipboardText /> Copy block
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => moveBlock(block.id, -1)}>
+          <IconArrowUp /> Move up
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => moveBlock(block.id, 1)}>
+          <IconArrowDown /> Move down
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>
+          <IconWand /> Clean up with AI
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => deleteBlock(block.id)}>
+          <IconTrash /> Delete block
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

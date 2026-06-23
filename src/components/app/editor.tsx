@@ -24,7 +24,7 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
   ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
 };
 
-function CursorRow() {
+function AddBlockRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
@@ -32,32 +32,24 @@ function CursorRow() {
   const add = (type: BlockType) => insertAfter(selectedId, { type });
 
   return (
-    <div className="mt-2 flex flex-col gap-2.5 py-4 pl-7">
-      <div className="flex items-center gap-2.5">
-        <span className="inline-block h-5 w-0.5 animate-blink rounded-full bg-accent-ink" />
-        <span className="font-sans text-[10.5px] uppercase tracking-[0.08em] text-faint">
-          Cursor — next block
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-1.5 font-sans">
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
-          + Narration
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("dialogue")}>
-          + Dialogue
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
-          + Scratchpad
-        </Button>
-        <Button
-          size="sm"
-          className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
-          onClick={triggerSuggest}
-        >
-          <IconSparkles className="size-3.5" />
-          Suggest from context
-        </Button>
-      </div>
+    <div className="mt-2 flex flex-wrap gap-1.5 py-4 pl-7 font-sans">
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
+        + Narration
+      </Button>
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("dialogue")}>
+        + Dialogue
+      </Button>
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
+        + Scratchpad
+      </Button>
+      <Button
+        size="sm"
+        className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
+        onClick={triggerSuggest}
+      >
+        <IconSparkles className="size-3.5" />
+        Suggest from context
+      </Button>
     </div>
   );
 }
@@ -125,7 +117,7 @@ export function Editor() {
           <Block key={b.id} block={b} dictation={dictation} />
         ))}
 
-        <CursorRow />
+        <AddBlockRow />
       </div>
     </ScrollArea>
   );

@@ -15,9 +15,11 @@ import type {
   Character,
   CompileError,
   LoreEntry,
+  NovelMetadata,
   ProjectInfo,
   ProjectMeta,
   RecentProject,
+  SkeletonModel,
 } from "@/lib/types";
 import {
   countWords,
@@ -26,12 +28,16 @@ import {
 } from "@/lib/latex";
 import {
   compileProject,
+  createProject as createProjectCmd,
+  deleteChapterCmd,
+  migrateToManaged,
   openProject as openProjectCmd,
   pickProjectDir,
   readAppData,
   readPdf,
   readTextFile,
   writeAppData,
+  writeSkeleton,
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
@@ -79,6 +85,8 @@ interface ProjectState {
   project: ProjectInfo | null;
   meta: ProjectMeta;
   recents: RecentProject[];
+  /** Set when an opened folder is a legacy project that needs conversion. */
+  needsMigration: { root: string; mainFile: string; detectedChapters: number } | null;
 
   activeChapterId: string | null;
   blocks: Block[];
@@ -97,6 +105,14 @@ interface ProjectState {
 
   // chapters
   selectChapter: (id: string) => Promise<void>;
+  createProject: (parent: string, name: string, author: string) => Promise<void>;
+  addChapter: (title: string) => Promise<void>;
+  renameChapter: (id: string, title: string) => Promise<void>;
+  moveChapter: (id: string, dir: -1 | 1) => Promise<void>;
+  deleteChapter: (id: string) => Promise<void>;
+  updateMetadata: (fields: Partial<NovelMetadata>) => Promise<void>;
+  migrateProject: () => Promise<void>;
+  cancelMigration: () => void;
 
   // block editing
   select: (id: string | null) => void;
@@ -146,11 +162,36 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     void writeAppData(RECENTS_KEY, recents);
   };
 
+  // Shared tail of loading a ready project (used by loadProjectAt + migrate +
+  // create): record recents, remember for relaunch, select first chapter, PDF.
+  const finishLoad = async (root: string, project: ProjectInfo) => {
+    const meta = (await readAppData<ProjectMeta>(metaKey(root))) ?? EMPTY_META;
+    const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
+    const recents = [entry, ...get().recents.filter((r) => r.root !== root)].slice(0, 12);
+    persistRecents(recents);
+    void writeAppData(LAST_PROJECT_KEY, root);
+    set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
+
+    const first = project.chapters[0];
+    if (first) await get().selectChapter(first.id);
+
+    const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
+    const pdfBase64 = await readPdf(root, pdfName).catch(() => null);
+    if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
+  };
+
+  /** Build a regeneration model from the current project (order-preserving). */
+  const toModel = (project: ProjectInfo): SkeletonModel => ({
+    metadata: project.metadata,
+    chapters: project.chapters.map((c) => ({ title: c.title, file: c.file })),
+  });
+
   return {
     status: "empty",
     project: null,
     meta: EMPTY_META,
     recents: [],
+    needsMigration: null,
     activeChapterId: null,
     blocks: [],
     selectedId: null,
@@ -187,6 +228,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         status: "loading",
         project: null,
         meta: EMPTY_META,
+        needsMigration: null,
         activeChapterId: null,
         blocks: [],
         selectedId: null,
@@ -198,35 +240,22 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         lastTextEditId: null,
       });
       try {
-        const project = await openProjectCmd(root);
-        const meta =
-          (await readAppData<ProjectMeta>(metaKey(root))) ?? EMPTY_META;
-
-        // Record in recents (most-recent first, de-duped, capped).
-        const entry: RecentProject = {
-          root,
-          name: project.name,
-          openedAt: Date.now(),
-        };
-        const recents = [
-          entry,
-          ...get().recents.filter((r) => r.root !== root),
-        ].slice(0, 12);
-        persistRecents(recents);
-        // Remember this as the project to auto-reopen on next launch.
-        void writeAppData(LAST_PROJECT_KEY, root);
-
-        set({ project, meta, recents, status: "ready" });
-
-        // Load the first chapter (if any) and any already-built PDF.
-        const first = project.chapters[0];
-        if (first) await get().selectChapter(first.id);
-
-        const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
-        const pdfBase64 = await readPdf(root, pdfName).catch(() => null);
-        if (pdfBase64) {
-          set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
+        const outcome = await openProjectCmd(root);
+        if (outcome.status === "needsMigration") {
+          set({
+            status: "empty",
+            needsMigration: {
+              root,
+              mainFile: outcome.mainFile ?? "main.tex",
+              detectedChapters: outcome.detectedChapters ?? 0,
+            },
+          });
+          return;
         }
+        if (!outcome.project) {
+          throw new Error("managed project returned without data");
+        }
+        await finishLoad(root, outcome.project);
       } catch (e) {
         set({ status: "empty", error: String(e) });
       }
@@ -239,6 +268,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         status: "empty",
         project: null,
         meta: EMPTY_META,
+        needsMigration: null,
         activeChapterId: null,
         blocks: [],
         selectedId: null,
@@ -273,6 +303,118 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({ error: String(e) });
       }
     },
+
+    createProject: async (parent, name, author) => {
+      set({ status: "loading", error: null });
+      try {
+        const metadata: NovelMetadata = {
+          title: name,
+          subtitle: "",
+          author,
+          publisher: "",
+          isbn: "",
+        };
+        const project = await createProjectCmd(parent, name, metadata);
+        await finishLoad(project.root, project);
+      } catch (e) {
+        set({ status: "empty", error: String(e) });
+      }
+    },
+
+    addChapter: async (title) => {
+      const { project } = get();
+      if (!project) return;
+      const model = toModel(project);
+      model.chapters.push({ title, file: null });
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+        const created = updated.chapters[updated.chapters.length - 1];
+        if (created) await get().selectChapter(created.id);
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    renameChapter: async (id, title) => {
+      const { project } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      if (idx < 0) return;
+      const model = toModel(project);
+      model.chapters[idx] = { ...model.chapters[idx], title };
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    moveChapter: async (id, dir) => {
+      const { project } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      const to = idx + dir;
+      if (idx < 0 || to < 0 || to >= project.chapters.length) return;
+      const model = toModel(project);
+      const [m] = model.chapters.splice(idx, 1);
+      model.chapters.splice(to, 0, m);
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    deleteChapter: async (id) => {
+      const { project, activeChapterId } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      if (idx < 0) return;
+      const file = project.chapters[idx].file;
+      const model = toModel(project);
+      model.chapters.splice(idx, 1);
+      try {
+        const updated = await deleteChapterCmd(project.root, model, file);
+        set({ project: updated });
+        if (activeChapterId === id) {
+          const first = updated.chapters[0];
+          if (first) await get().selectChapter(first.id);
+          else set({ activeChapterId: null, blocks: [], selectedId: null });
+        }
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    updateMetadata: async (fields) => {
+      const { project } = get();
+      if (!project) return;
+      const model = toModel(project);
+      model.metadata = { ...project.metadata, ...fields };
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    migrateProject: async () => {
+      const nm = get().needsMigration;
+      if (!nm) return;
+      set({ status: "loading", needsMigration: null, error: null });
+      try {
+        const project = await migrateToManaged(nm.root);
+        await finishLoad(project.root, project);
+      } catch (e) {
+        set({ status: "empty", error: String(e) });
+      }
+    },
+
+    cancelMigration: () => set({ needsMigration: null }),
 
     select: (id) => set({ selectedId: id }),
 

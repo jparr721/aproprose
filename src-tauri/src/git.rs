@@ -240,9 +240,8 @@ pub async fn git_diff(root: String, file: Option<String>) -> Result<String, Stri
     diff(Path::new(&root), file.as_deref()).await
 }
 
-/// Map a git stderr blob to a non-conflict failure outcome, if recognizable.
-pub fn classify_git_error(text: &str) -> Option<SyncOutcome> {
-    let t = text.to_lowercase();
+/// Auth/offline transport failures shared by pull and push. `t` must already be lowercased.
+fn classify_transport_error(t: &str) -> Option<SyncOutcome> {
     if t.contains("authentication failed")
         || t.contains("could not read username")
         || t.contains("permission denied (publickey)")
@@ -257,14 +256,22 @@ pub fn classify_git_error(text: &str) -> Option<SyncOutcome> {
     {
         return Some(SyncOutcome::Offline);
     }
-    if t.contains("[rejected]") || t.contains("non-fast-forward") || t.contains("fetch first") {
-        return Some(SyncOutcome::PushRejected);
-    }
     None
 }
 
+/// Map a git stderr blob to a non-conflict failure outcome, if recognizable.
+/// Includes the push-only `PushRejected`; pull failures use `classify_transport_error`.
+pub fn classify_git_error(text: &str) -> Option<SyncOutcome> {
+    let t = text.to_lowercase();
+    classify_transport_error(&t).or_else(|| {
+        (t.contains("[rejected]") || t.contains("non-fast-forward") || t.contains("fetch first"))
+            .then_some(SyncOutcome::PushRejected)
+    })
+}
+
 fn looks_like_conflict(text: &str) -> bool {
-    text.contains("CONFLICT") || text.contains("Automatic merge failed") || text.contains("Merge conflict")
+    let t = text.to_lowercase();
+    t.contains("conflict") || t.contains("automatic merge failed")
 }
 
 pub async fn unmerged_files(root: &Path) -> Vec<String> {
@@ -303,7 +310,7 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
         if looks_like_conflict(&blob) {
             return Ok(SyncOutcome::Conflict { files: unmerged_files(root).await });
         }
-        if let Some(o) = classify_git_error(&blob) {
+        if let Some(o) = classify_transport_error(&blob.to_lowercase()) {
             return Ok(o);
         }
         return Err(blob.trim().to_string());
@@ -458,6 +465,13 @@ mod tests {
         assert!(d.contains("-one"));
         assert!(d.contains("+two"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classify_transport_error_ignores_rejected() {
+        assert!(classify_transport_error(" ! [rejected] main -> main (fetch first)").is_none());
+        assert!(matches!(classify_transport_error("fatal: authentication failed"), Some(SyncOutcome::AuthMissing)));
+        assert!(matches!(classify_transport_error("could not resolve host: github.com"), Some(SyncOutcome::Offline)));
     }
 
     #[test]

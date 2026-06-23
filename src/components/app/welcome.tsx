@@ -45,17 +45,6 @@ export function Welcome() {
 
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="flex w-full max-w-md flex-col items-center gap-8">
-          <Button size="lg" className="font-sans" onClick={open} disabled={loading}>
-            <IconFolderOpen />
-            {loading ? "Opening…" : "Open a project"}
-          </Button>
-
-          {error ? (
-            <TypographyMuted className="text-center text-destructive">
-              {error}
-            </TypographyMuted>
-          ) : null}
-
           {recents.length > 0 ? (
             <div className="flex w-full flex-col gap-2">
               <TypographyEyebrow className="px-1">
@@ -93,6 +82,17 @@ export function Welcome() {
               compiles in place, nothing is copied.
             </TypographyMuted>
           )}
+
+          {error ? (
+            <TypographyMuted className="text-center text-destructive">
+              {error}
+            </TypographyMuted>
+          ) : null}
+
+          <Button size="lg" className="font-sans" onClick={open} disabled={loading}>
+            <IconFolderOpen />
+            {loading ? "Opening…" : "Open a project"}
+          </Button>
         </div>
       </div>
     </div>

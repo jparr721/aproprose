@@ -429,7 +429,7 @@ function BlockImpl({
               {...listeners}
               title="Drag to reorder"
               aria-label="Drag to reorder block"
-              className="cursor-grab touch-none text-faint active:cursor-grabbing"
+              className="inline-flex cursor-grab touch-none border-0 bg-transparent p-0 text-faint active:cursor-grabbing"
             >
               <IconGripVertical className="size-3.5" />
             </button>

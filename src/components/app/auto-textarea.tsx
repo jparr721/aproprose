@@ -44,7 +44,9 @@ export function AutoGrowTextarea({
       onChange={(e) => onChange(e.currentTarget.value)}
       {...(proseBody ? { [PROSE_BODY_ATTR]: "" } : {})}
       className={cn(
-        "w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0",
+        // `block` (not the default inline-block) avoids the baseline descender
+        // gap that otherwise adds phantom padding below the textarea on select.
+        "block w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0",
         className,
       )}
     />

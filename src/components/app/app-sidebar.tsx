@@ -54,6 +54,8 @@ import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { IS_MAC } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 function AddLoreDialog() {
   const addLore = useProjectStore((s) => s.addLore);
@@ -111,7 +113,11 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="offcanvas" className="font-sans">
-      <SidebarHeader>
+      {/* On macOS the native traffic lights are pinned to the window's top-left
+          (x16/y16). When the sidebar is open that corner is the header, so we
+          reserve a top-bar-height band (pt-11 = h-11) to drop the project name
+          clear of the lights instead of nudging the name itself. */}
+      <SidebarHeader className={cn(IS_MAC && "pt-11")}>
         <SidebarMenu>
           <SidebarMenuItem>
             {/* The project name is the project switcher — clicking it opens the

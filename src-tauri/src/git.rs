@@ -118,6 +118,18 @@ pub async fn git_tooling_status() -> Result<ToolingStatus, String> {
     Ok(tooling_status().await)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SyncOutcome {
+    Clean,
+    Synced,
+    Conflict { files: Vec<String> },
+    PushRejected,
+    NeedsSetup { reason: String },
+    AuthMissing,
+    Offline,
+}
+
 /// Parse `git status --porcelain=v1 --branch` into a RepoStatus. The caller
 /// fills is_repo/has_remote/remote_url; this fills branch/ahead/behind/dirty/
 /// changed_files/conflicted_files.
@@ -226,6 +238,100 @@ pub async fn diff(root: &Path, file: Option<&str>) -> Result<String, String> {
 #[tauri::command]
 pub async fn git_diff(root: String, file: Option<String>) -> Result<String, String> {
     diff(Path::new(&root), file.as_deref()).await
+}
+
+/// Map a git stderr blob to a non-conflict failure outcome, if recognizable.
+pub fn classify_git_error(text: &str) -> Option<SyncOutcome> {
+    let t = text.to_lowercase();
+    if t.contains("authentication failed")
+        || t.contains("could not read username")
+        || t.contains("permission denied (publickey)")
+        || t.contains("invalid username or password")
+    {
+        return Some(SyncOutcome::AuthMissing);
+    }
+    if t.contains("could not resolve host")
+        || t.contains("connection timed out")
+        || t.contains("network is unreachable")
+        || t.contains("temporary failure in name resolution")
+    {
+        return Some(SyncOutcome::Offline);
+    }
+    if t.contains("[rejected]") || t.contains("non-fast-forward") || t.contains("fetch first") {
+        return Some(SyncOutcome::PushRejected);
+    }
+    None
+}
+
+fn looks_like_conflict(text: &str) -> bool {
+    text.contains("CONFLICT") || text.contains("Automatic merge failed") || text.contains("Merge conflict")
+}
+
+pub async fn unmerged_files(root: &Path) -> Vec<String> {
+    let out = run(root, "git", &["diff", "--name-only", "--diff-filter=U"]).await;
+    out.stdout.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+/// The atomic backup sequence: stage → commit → pull/merge → push.
+pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
+    if !is_repo(root).await {
+        return Ok(SyncOutcome::NeedsSetup { reason: "not a git repository".into() });
+    }
+    if origin_url(root).await.is_none() {
+        return Ok(SyncOutcome::NeedsSetup { reason: "no 'origin' remote".into() });
+    }
+
+    let pre = repo_status(root).await;
+
+    // Stage + commit anything local.
+    if pre.dirty {
+        let add = run(root, "git", &["add", "-A"]).await;
+        if !add.ok {
+            return Err(add.stderr.trim().to_string());
+        }
+        let commit = run(root, "git", &["commit", "-m", message]).await;
+        // A racy "nothing to commit" is fine; a real failure is not.
+        if !commit.ok && !commit.stdout.contains("nothing to commit") {
+            return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
+        }
+    }
+
+    // Pull (merge). Conflicts are surfaced, not aborted.
+    let pull = run(root, "git", &["pull", "--no-rebase", "--no-edit"]).await;
+    if !pull.ok {
+        let blob = format!("{}{}", pull.stdout, pull.stderr);
+        if looks_like_conflict(&blob) {
+            return Ok(SyncOutcome::Conflict { files: unmerged_files(root).await });
+        }
+        if let Some(o) = classify_git_error(&blob) {
+            return Ok(o);
+        }
+        return Err(blob.trim().to_string());
+    }
+
+    // Push.
+    let push = run(root, "git", &["push"]).await;
+    if !push.ok {
+        let blob = format!("{}{}", push.stdout, push.stderr);
+        if let Some(o) = classify_git_error(&blob) {
+            return Ok(o);
+        }
+        return Err(blob.trim().to_string());
+    }
+
+    let nothing_local = !pre.dirty;
+    let pull_noop = pull.stdout.contains("Already up to date") || pull.stderr.contains("Already up to date");
+    let push_noop = push.stderr.contains("Everything up-to-date") || push.stdout.contains("Everything up-to-date");
+    if nothing_local && pull_noop && push_noop && pre.ahead == 0 {
+        Ok(SyncOutcome::Clean)
+    } else {
+        Ok(SyncOutcome::Synced)
+    }
+}
+
+#[tauri::command]
+pub async fn sync_project(root: String, message: String) -> Result<SyncOutcome, String> {
+    sync(Path::new(&root), &message).await
 }
 
 #[cfg(test)]
@@ -352,5 +458,84 @@ mod tests {
         assert!(d.contains("-one"));
         assert!(d.contains("+two"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classify_recognizes_auth_offline_rejected() {
+        assert!(matches!(classify_git_error("fatal: Authentication failed for 'https://...'"), Some(SyncOutcome::AuthMissing)));
+        assert!(matches!(classify_git_error("Permission denied (publickey)."), Some(SyncOutcome::AuthMissing)));
+        assert!(matches!(classify_git_error("fatal: unable to access ... Could not resolve host: github.com"), Some(SyncOutcome::Offline)));
+        assert!(matches!(classify_git_error(" ! [rejected] main -> main (fetch first)"), Some(SyncOutcome::PushRejected)));
+        assert!(classify_git_error("some unrelated error").is_none());
+    }
+
+    /// Build a bare "origin" + a working clone wired to it.
+    fn repo_with_origin() -> (std::path::PathBuf, std::path::PathBuf) {
+        let base = unique("aproprose-sync");
+        let _ = std::fs::remove_dir_all(&base);
+        let origin = base.join("origin.git");
+        let work = base.join("work");
+        std::fs::create_dir_all(&origin).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        StdCommand::new("git").args(["init", "--bare", "-q", "-b", "main"]).current_dir(&origin).output().unwrap();
+        let g = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work).output().unwrap(); };
+        g(&["init", "-q", "-b", "main"]);
+        g(&["config", "user.email", "t@t.t"]);
+        g(&["config", "user.name", "t"]);
+        std::fs::write(work.join("a.tex"), "one\n").unwrap();
+        g(&["add", "-A"]);
+        g(&["commit", "-qm", "init"]);
+        g(&["remote", "add", "origin", origin.to_str().unwrap()]);
+        g(&["push", "-q", "-u", "origin", "main"]);
+        (origin, work)
+    }
+
+    #[tokio::test]
+    async fn sync_no_remote_returns_needs_setup() {
+        let dir = temp_repo();
+        std::fs::write(dir.join("a.tex"), "x").unwrap();
+        let out = sync(&dir, "msg").await.unwrap();
+        assert!(matches!(out, SyncOutcome::NeedsSetup { .. }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_commits_and_pushes_changes() {
+        let (origin, work) = repo_with_origin();
+        std::fs::write(work.join("a.tex"), "two\n").unwrap();
+        let out = sync(&work, "Backup test").await.unwrap();
+        assert!(matches!(out, SyncOutcome::Synced));
+        // The change reached origin:
+        let log = StdCommand::new("git").args(["log", "--oneline"]).current_dir(&origin).output().unwrap();
+        let log = String::from_utf8_lossy(&log.stdout);
+        assert!(log.contains("Backup test"));
+        let _ = std::fs::remove_dir_all(work.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn sync_clean_repo_is_clean() {
+        let (_origin, work) = repo_with_origin();
+        let out = sync(&work, "noop").await.unwrap();
+        assert!(matches!(out, SyncOutcome::Clean));
+        let _ = std::fs::remove_dir_all(work.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn sync_surfaces_merge_conflict() {
+        let (origin, work_a) = repo_with_origin();
+        // Second clone B advances origin on the same line.
+        let work_b = work_a.parent().unwrap().join("work_b");
+        StdCommand::new("git").args(["clone", "-q", origin.to_str().unwrap(), work_b.to_str().unwrap()]).output().unwrap();
+        let gb = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work_b).output().unwrap(); };
+        gb(&["config", "user.email", "b@b.b"]);
+        gb(&["config", "user.name", "b"]);
+        std::fs::write(work_b.join("a.tex"), "from-b\n").unwrap();
+        gb(&["commit", "-aqm", "b-change"]);
+        gb(&["push", "-q"]);
+        // A changes the same line and syncs → conflict.
+        std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
+        let out = sync(&work_a, "a-change").await.unwrap();
+        assert!(matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()]));
+        let _ = std::fs::remove_dir_all(work_a.parent().unwrap());
     }
 }

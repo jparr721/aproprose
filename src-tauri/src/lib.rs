@@ -357,6 +357,7 @@ pub fn run() {
             git::git_tooling_status,
             git::git_repo_status,
             git::git_diff,
+            git::sync_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

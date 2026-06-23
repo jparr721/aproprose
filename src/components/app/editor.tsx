@@ -61,6 +61,7 @@ export function Editor() {
   const activeId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
+  const select = useProjectStore((s) => s.select);
 
   // One recognizer for the whole editor; dictation lands in the selected block.
   const dictation = useDictation((text) => {
@@ -120,7 +121,23 @@ export function Editor() {
   }
 
   return (
-    <ScrollArea className="h-full bg-background">
+    <ScrollArea
+      className="h-full bg-background"
+      // A press on empty editor surface (gutters, padding, the chapter header)
+      // clears the selection so the active block leaves edit mode. Blocks handle
+      // their own selection; buttons (the add-block row) and the scrollbar keep
+      // the selection so they still act on the selected block.
+      onMouseDown={(e) => {
+        const t = e.target as Element;
+        if (
+          t.closest("[data-block-id]") ||
+          t.closest("button") ||
+          t.closest('[data-slot="scroll-area-scrollbar"]')
+        )
+          return;
+        select(null);
+      }}
+    >
       <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
         <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
           <span className="font-serif text-lg italic text-muted-foreground">Chapter {chapter.label}</span>

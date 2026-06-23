@@ -208,6 +208,26 @@ pub async fn git_repo_status(root: String) -> Result<RepoStatus, String> {
     Ok(repo_status(Path::new(&root)).await)
 }
 
+/// Unified diff of uncommitted changes vs HEAD (optionally one path).
+pub async fn diff(root: &Path, file: Option<&str>) -> Result<String, String> {
+    let mut args = vec!["diff", "HEAD"];
+    if let Some(f) = file {
+        args.push("--");
+        args.push(f);
+    }
+    let out = run(root, "git", &args).await;
+    if out.ok {
+        Ok(out.stdout)
+    } else {
+        Err(out.stderr.trim().to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn git_diff(root: String, file: Option<String>) -> Result<String, String> {
+    diff(Path::new(&root), file.as_deref()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +339,18 @@ mod tests {
         let r = parse_status("## main\nR  old.tex -> new.tex\n");
         assert_eq!(r.changed_files.len(), 1);
         assert_eq!(r.changed_files[0].path, "new.tex");
+    }
+
+    #[tokio::test]
+    async fn diff_shows_modified_tracked_file() {
+        let dir = temp_repo();
+        std::fs::write(dir.join("a.tex"), "one\n").unwrap();
+        StdCommand::new("git").args(["add", "-A"]).current_dir(&dir).output().unwrap();
+        StdCommand::new("git").args(["commit", "-qm", "init"]).current_dir(&dir).output().unwrap();
+        std::fs::write(dir.join("a.tex"), "two\n").unwrap();
+        let d = diff(&dir, None).await.unwrap();
+        assert!(d.contains("-one"));
+        assert!(d.contains("+two"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

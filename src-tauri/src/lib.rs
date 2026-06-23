@@ -356,6 +356,7 @@ pub fn run() {
             write_app_data,
             git::git_tooling_status,
             git::git_repo_status,
+            git::git_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

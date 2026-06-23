@@ -54,6 +54,14 @@ export const KEYBINDINGS = {
     category: "view",
     label: "Toggle AI",
   },
+  TOGGLE_SETTINGS: {
+    id: "toggle-settings",
+    key: ",",
+    modifiers: { ctrl: true },
+    description: "Toggle the settings sheet",
+    category: "view",
+    label: "Toggle settings",
+  },
   UNDO: {
     id: "undo",
     key: "z",
@@ -95,10 +103,10 @@ export const KEYBINDING_IDS = Object.fromEntries(
   Object.keys(KEYBINDINGS).map((k) => [k, k]),
 ) as { [K in KeybindingId]: K };
 
-// Punctuation keys whose literal differs from react-hotkeys-hook's token. None of
-// the current bindings need translating, but the indirection is the extension
-// point — add "," -> "comma" etc. here rather than at call sites.
-const KEY_ALIASES: Record<string, string> = {};
+// Punctuation keys whose literal differs from react-hotkeys-hook's token. The
+// comma doubles as react-hotkeys-hook's hotkey delimiter, so it must lower to the
+// "comma" token (not a bare ",") or the settings combo never binds.
+const KEY_ALIASES: Record<string, string> = { ",": "comma" };
 
 /** Lower a definition to a react-hotkeys-hook combo string (e.g. "mod+shift+p"). */
 export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "modifiers">): string {

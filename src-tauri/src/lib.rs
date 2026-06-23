@@ -7,6 +7,7 @@
 //! these snake_case parameters.
 
 pub mod compile;
+pub mod git;
 pub mod novel;
 pub mod project;
 
@@ -58,6 +59,18 @@ fn delete_chapter(
 #[tauri::command]
 fn migrate_to_managed(root: String) -> Result<ProjectInfo, String> {
     novel::migrate_to_managed(Path::new(&root))
+}
+
+/// Read `<root>/.aproprose/meta.json`, or `None` if it doesn't exist.
+#[tauri::command]
+fn read_project_meta(root: String) -> Result<Option<String>, String> {
+    project::read_meta(Path::new(&root))
+}
+
+/// Write `<root>/.aproprose/meta.json`, creating `.aproprose/` if needed.
+#[tauri::command]
+fn write_project_meta(root: String, value: String) -> Result<(), String> {
+    project::write_meta(Path::new(&root), &value)
 }
 
 // ── Files ───────────────────────────────────────────────────────────────────
@@ -382,6 +395,8 @@ pub fn run() {
             write_skeleton,
             delete_chapter,
             migrate_to_managed,
+            read_project_meta,
+            write_project_meta,
             read_text_file,
             write_text_file,
             compile_project,
@@ -391,6 +406,12 @@ pub fn run() {
             set_openai_key,
             read_app_data,
             write_app_data,
+            git::git_tooling_status,
+            git::git_repo_status,
+            git::git_diff,
+            git::sync_project,
+            git::gh_check_repo_name,
+            git::enable_backup_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

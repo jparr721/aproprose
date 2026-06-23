@@ -12,10 +12,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   CompileResult,
+  NameCheck,
   NovelMetadata,
   OpenOutcome,
   ProjectInfo,
+  RepoCreated,
+  RepoStatus,
   SkeletonModel,
+  SyncOutcome,
+  ToolingStatus,
 } from "@/lib/types";
 
 // ── Project ───────────────────────────────────────────────────────────────────
@@ -136,4 +141,38 @@ export async function readAppData<T>(key: string): Promise<T | null> {
 
 export function writeAppData<T>(key: string, value: T): Promise<void> {
   return invoke<void>("write_app_data", { key, value: JSON.stringify(value) });
+}
+
+// ── Backup / sync ─────────────────────────────────────────────────────────────
+
+export function gitToolingStatus(): Promise<ToolingStatus> {
+  return invoke<ToolingStatus>("git_tooling_status");
+}
+
+export function gitRepoStatus(root: string): Promise<RepoStatus> {
+  return invoke<RepoStatus>("git_repo_status", { root });
+}
+
+export function gitDiff(root: string, file?: string): Promise<string> {
+  return invoke<string>("git_diff", { root, file: file ?? null });
+}
+
+export function syncProject(root: string, message: string): Promise<SyncOutcome> {
+  return invoke<SyncOutcome>("sync_project", { root, message });
+}
+
+export function ghCheckRepoName(name: string): Promise<NameCheck> {
+  return invoke<NameCheck>("gh_check_repo_name", { name });
+}
+
+export function enableBackup(root: string, name: string, isPrivate: boolean): Promise<RepoCreated> {
+  return invoke<RepoCreated>("enable_backup_cmd", { root, name, private: isPrivate });
+}
+
+export function readProjectMeta(root: string): Promise<string | null> {
+  return invoke<string | null>("read_project_meta", { root });
+}
+
+export function writeProjectMeta(root: string, value: string): Promise<void> {
+  return invoke<void>("write_project_meta", { root, value });
 }

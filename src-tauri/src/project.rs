@@ -419,3 +419,64 @@ fn strip_inline(s: &str) -> String {
     let cleaned = strip_latex(s);
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+/// Path of the in-repo metadata file (committed with the book).
+fn meta_path(root: &Path) -> std::path::PathBuf {
+    root.join(".aproprose").join("meta.json")
+}
+
+/// Read `<root>/.aproprose/meta.json`, or `None` if it doesn't exist.
+pub fn read_meta(root: &Path) -> Result<Option<String>, String> {
+    let path = meta_path(root);
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+    }
+}
+
+/// Write `<root>/.aproprose/meta.json`, creating `.aproprose/` if needed.
+pub fn write_meta(root: &Path, value: &str) -> Result<(), String> {
+    let path = meta_path(root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&path, value).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod meta_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("aproprose-meta-{}-{}", std::process::id(), n));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn read_missing_meta_is_none() {
+        let d = temp_dir();
+        assert_eq!(read_meta(&d).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn write_then_read_round_trips_and_creates_dir() {
+        let d = temp_dir();
+        write_meta(&d, "{\"characters\":[]}").unwrap();
+        assert!(d.join(".aproprose").join("meta.json").exists());
+        assert_eq!(
+            read_meta(&d).unwrap().as_deref(),
+            Some("{\"characters\":[]}")
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

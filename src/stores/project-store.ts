@@ -36,12 +36,16 @@ import {
   pickProjectDir,
   readAppData,
   readPdf,
+  readProjectMeta,
   readTextFile,
   writeAppData,
+  writeProjectMeta,
   writeSkeleton,
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
+import { pathHash } from "@/lib/path-hash";
+import { useSyncStore } from "@/stores/sync-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 
 type ProjectStatus = "empty" | "loading" | "ready";
@@ -90,13 +94,7 @@ const LAST_PROJECT_KEY = "last-project";
 
 /** Stable, filesystem-safe key for a project's metadata blob. */
 function metaKey(root: string): string {
-  // FNV-1a over the absolute path — avoids collisions without leaking the path.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < root.length; i++) {
-    h ^= root.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return `meta-${(h >>> 0).toString(16)}`;
+  return `meta-${pathHash(root)}`;
 }
 
 interface ProjectState {
@@ -174,12 +172,11 @@ const capPush = (stack: Block[][], snapshot: Block[]): Block[][] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
 
 export const useProjectStore = create<ProjectState>((set, get) => {
-  // Persist the current project's metadata (debounced via microtask coalescing
-  // would be overkill; writes are cheap and infrequent).
+  // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
     if (project)
-      void writeAppData(metaKey(project.root), meta).catch((e) => {
+      void writeProjectMeta(project.root, JSON.stringify(meta)).catch((e) => {
         toast.error("Couldn't save project metadata", { description: String(e) });
       });
   };
@@ -193,12 +190,34 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // Shared tail of loading a ready project (used by loadProjectAt + migrate +
   // create): record recents, remember for relaunch, select first chapter, PDF.
   const finishLoad = async (root: string, project: ProjectInfo) => {
-    const meta = (await readAppData<ProjectMeta>(metaKey(root))) ?? EMPTY_META;
+    // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
+    // In-repo metadata wins; a corrupt meta.json must not brick the open — fall
+    // back to the legacy app-config record (or empty), migrating that record into
+    // the repo once when no in-repo file exists yet.
+    let meta: ProjectMeta;
+    const inRepo = await readProjectMeta(root);
+    let parsed: ProjectMeta | null = null;
+    if (inRepo) {
+      try {
+        parsed = JSON.parse(inRepo) as ProjectMeta;
+      } catch {
+        parsed = null;
+      }
+    }
+    if (parsed) {
+      meta = parsed;
+    } else {
+      const legacy = await readAppData<ProjectMeta>(metaKey(root));
+      meta = legacy ?? EMPTY_META;
+      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
+    }
+
     const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
     const recents = [entry, ...get().recents.filter((r) => r.root !== root)].slice(0, 12);
     persistRecents(recents);
     void writeAppData(LAST_PROJECT_KEY, root);
     set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
+    void useSyncStore.getState().init(root);
 
     const first = project.chapters[0];
     if (first) await get().selectChapter(first.id);
@@ -281,6 +300,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
       void writeAppData(LAST_PROJECT_KEY, "");
+      useSyncStore.getState().teardown();
       set({
         status: "empty",
         project: null,

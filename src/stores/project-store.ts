@@ -61,6 +61,7 @@ const EMPTY_COMPILE: CompileState = {
 };
 
 const RECENTS_KEY = "recents";
+const LAST_PROJECT_KEY = "last-project";
 
 /** Stable, filesystem-safe key for a project's metadata blob. */
 function metaKey(root: string): string {
@@ -163,6 +164,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     init: async () => {
       const recents = (await readAppData<RecentProject[]>(RECENTS_KEY)) ?? [];
       set({ recents });
+      // Re-open the last project so a refresh / relaunch lands back in the editor.
+      // If it can't be reopened (folder moved or deleted), forget it so the
+      // welcome screen doesn't show the same error on every launch.
+      const lastRoot = await readAppData<string>(LAST_PROJECT_KEY);
+      if (lastRoot) {
+        await get().loadProjectAt(lastRoot);
+        if (get().status !== "ready") void writeAppData(LAST_PROJECT_KEY, "");
+      }
     },
 
     openProjectDialog: async () => {
@@ -203,6 +212,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ...get().recents.filter((r) => r.root !== root),
         ].slice(0, 12);
         persistRecents(recents);
+        // Remember this as the project to auto-reopen on next launch.
+        void writeAppData(LAST_PROJECT_KEY, root);
 
         set({ project, meta, recents, status: "ready" });
 
@@ -220,7 +231,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
-    closeProject: () =>
+    closeProject: () => {
+      // Explicit close: forget the last project so it isn't auto-reopened.
+      void writeAppData(LAST_PROJECT_KEY, "");
       set({
         status: "empty",
         project: null,
@@ -234,7 +247,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         past: [],
         future: [],
         lastTextEditId: null,
-      }),
+      });
+    },
 
     selectChapter: async (id) => {
       const { project } = get();

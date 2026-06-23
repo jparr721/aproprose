@@ -37,8 +37,9 @@ export function buildAiContext(uptoId?: string): AiContext {
   } else {
     // Only narration/dialogue/heading text is shown to the model; lore, scratchpad,
     // raw-latex and scene-break blocks are excluded from the grounding, so don't
-    // leak their text into the cursor summary either. (Model-facing string, so
-    // slicing here is fine — this is not UI text.)
+    // leak their text into the cursor summary either. (Taking the last 12 words
+    // here is fine — this is a model-facing prompt string, not UI text, so the
+    // "no JS truncation" UI rule doesn't apply.)
     const canShowTail =
       last.type === "narration" ||
       last.type === "dialogue" ||

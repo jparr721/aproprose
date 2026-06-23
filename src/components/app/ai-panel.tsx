@@ -37,6 +37,7 @@ import {
 } from "@/lib/ai/operations";
 import type {
   CastMember,
+  CastResult,
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
@@ -59,7 +60,9 @@ function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 font-sans text-xs text-muted-foreground">
       <span className="text-destructive">Couldn't reach the model.</span>
-      <span className="text-faint">{error}</span>
+      <span className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words text-faint">
+        {error}
+      </span>
       <Button variant="outline" size="sm" onClick={onRetry}>
         <IconRefresh /> Try again
       </Button>
@@ -85,21 +88,25 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
  * panel/focus toggles, reopening the panel) without re-burning tokens, while a
  * new key (different scene / cursor) reads as idle until the author asks.
  *
- * Two things keep runs correct. `op` is read through `opRef`, so each run invokes
- * the latest closure — picking up the current ask-box instruction — while `run`
- * itself is memoised on `cacheKey` and therefore writes its result back under the
- * key it was created for. So moving the cursor mid-flight (which yields a new key)
- * can never land a stale result against the new anchor; the in-flight run just
- * populates the old scene's cache entry.
+ * Two things keep runs correct. `op` and `instruction` are read through refs, so
+ * each run uses the latest closure — picking up the current ask-box text — while
+ * `run` stays memoised on `cacheKey` alone (no `op`/`instruction` in its deps, so
+ * it doesn't churn on every keystroke) and therefore writes its result back under
+ * the key it was created for. So moving the cursor mid-flight (which yields a new
+ * key) can never land a stale result against the new anchor; the in-flight run
+ * just populates the old scene's cache entry. The instruction that produced a
+ * result is stored on the entry so a remounted tab can restore its ask box.
  */
-function useAi<T>(op: () => Promise<T>, cacheKey: string) {
+function useAi<T>(op: () => Promise<T>, cacheKey: string, instruction?: string) {
   const entry = useAiCacheStore((s) => s.entries[cacheKey]);
   const patch = useAiCacheStore((s) => s.patch);
   const opRef = useRef(op);
   opRef.current = op;
+  const instructionRef = useRef(instruction);
+  instructionRef.current = instruction;
 
   const run = useCallback(() => {
-    patch(cacheKey, { loading: true, error: null });
+    patch(cacheKey, { loading: true, error: null, instruction: instructionRef.current });
     opRef
       .current()
       .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
@@ -193,18 +200,21 @@ function SuggestTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const characters = useProjectStore((s) => s.meta.characters);
 
-  const [instruction, setInstruction] = useState("");
+  const cacheKey = `suggest:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  // Seed the ask box from the instruction that produced the cached result (if any)
+  // so a remounted tab shows the box and result in sync.
+  const [instruction, setInstruction] = useState(
+    () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
+  );
   const askRef = useRef<HTMLTextAreaElement>(null);
+  const trimmed = instruction.trim() || undefined;
 
   // Keyed on chapter + cursor so a different scene/block reads as idle and an
   // "Insert below" never drops an old block's suggestion into a new spot.
   const { data, loading, error, run } = useAi<SuggestResult>(
-    () =>
-      suggestContinuation({
-        ...buildAiContext(),
-        instruction: instruction.trim() || undefined,
-      }),
-    `suggest:${activeChapterId ?? ""}:${selectedId ?? ""}`,
+    () => suggestContinuation({ ...buildAiContext(), instruction: trimmed }),
+    cacheKey,
+    trimmed,
   );
 
   const [variant, setVariant] = useState(0);
@@ -331,10 +341,15 @@ const NOTE_WORD: Record<CritiqueNote["kind"], string> = {
 function CritiqueTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const [instruction, setInstruction] = useState("");
+  const cacheKey = `critique:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [instruction, setInstruction] = useState(
+    () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
+  );
+  const trimmed = instruction.trim() || undefined;
   const { data, loading, error, run } = useAi<CritiqueNote[]>(
-    () => critique({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    `critique:${activeChapterId ?? ""}:${selectedId ?? ""}`,
+    () => critique({ ...buildAiContext(), instruction: trimmed }),
+    cacheKey,
+    trimmed,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -390,10 +405,15 @@ const SEV_WORD: Record<ContinuityFlag["sev"], string> = {
 function ContinuityTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const [instruction, setInstruction] = useState("");
+  const cacheKey = `continuity:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [instruction, setInstruction] = useState(
+    () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
+  );
+  const trimmed = instruction.trim() || undefined;
   const { data, loading, error, run } = useAi<ContinuityFlag[]>(
-    () => continuityCheck({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    `continuity:${activeChapterId ?? ""}:${selectedId ?? ""}`,
+    () => continuityCheck({ ...buildAiContext(), instruction: trimmed }),
+    cacheKey,
+    trimmed,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -466,10 +486,15 @@ function CastRow({ m }: { m: CastMember }) {
 function CastTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const [instruction, setInstruction] = useState("");
-  const { data, loading, error, run } = useAi(
-    () => detectCast({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    `cast:${activeChapterId ?? ""}:${selectedId ?? ""}`,
+  const cacheKey = `cast:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [instruction, setInstruction] = useState(
+    () => useAiCacheStore.getState().entries[cacheKey]?.instruction ?? "",
+  );
+  const trimmed = instruction.trim() || undefined;
+  const { data, loading, error, run } = useAi<CastResult>(
+    () => detectCast({ ...buildAiContext(), instruction: trimmed }),
+    cacheKey,
+    trimmed,
   );
   return (
     <div className="flex flex-col gap-3 p-4">

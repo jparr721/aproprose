@@ -56,8 +56,10 @@ export interface AiContext {
 /**
  * Render the grounding the model reads before doing any work: the chapter, the
  * cast roster, the cursor position, the scene prose, and — when the author
- * supplied one — their explicit request, in a stable order. This goes in the
- * `prompt` field; the per-operation instructions live in `system`.
+ * supplied one — their explicit request, in a stable order. The prose sits near
+ * the end and the request last, so the freshest, most salient items are closest
+ * to the model's attention. This goes in the `prompt` field; the per-operation
+ * instructions live in `system`.
  */
 function buildGrounding(ctx: AiContext): string {
   const parts: string[] = [];

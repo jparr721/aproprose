@@ -7,7 +7,9 @@
 // toggle / reopen and the author would have to re-ask. Entries are keyed by
 // "<op>:<chapter>:<block>" so a genuine change of scene/cursor reads as idle, but
 // a remount within the same scene reuses the result. A request fires only from an
-// explicit run() — the tabs' Generate / Try again / Refresh.
+// explicit run() — the tabs' Generate / Try again / Refresh. The ask-box
+// instruction that produced a result is stored alongside it so a remounted tab
+// can restore the box and keep it in sync with the result shown.
 
 import { create } from "zustand";
 
@@ -18,6 +20,9 @@ export interface AiCacheEntry {
   loading: boolean;
   /** Stringified error from the last failed request, or null. */
   error: string | null;
+  /** The ask-box instruction that produced `data`, so a remounted tab can
+   *  restore its box and keep it in sync with the result shown. */
+  instruction?: string;
 }
 
 interface AiCacheState {

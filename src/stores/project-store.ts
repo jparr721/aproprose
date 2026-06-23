@@ -199,14 +199,26 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
         // First open of a project that predates this: migrate the legacy app-config
         // record into the repo once.
+        // In-repo metadata wins; a corrupt/conflicted meta.json must not brick the
+        // project open — fall back to the legacy record (or empty) in that case.
         let meta: ProjectMeta;
         const inRepo = await readProjectMeta(root);
+        let parsed: ProjectMeta | null = null;
         if (inRepo) {
-          meta = JSON.parse(inRepo) as ProjectMeta;
+          try {
+            parsed = JSON.parse(inRepo) as ProjectMeta;
+          } catch {
+            parsed = null;
+          }
+        }
+        if (parsed) {
+          meta = parsed;
         } else {
           const legacy = await readAppData<ProjectMeta>(metaKey(root));
           meta = legacy ?? EMPTY_META;
-          if (legacy) await writeProjectMeta(root, JSON.stringify(legacy));
+          // Migrate the legacy record into the repo only when there is no in-repo
+          // file at all (don't overwrite a present-but-corrupt one).
+          if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
         }
 
         // Record in recents (most-recent first, de-duped, capped).

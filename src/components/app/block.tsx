@@ -5,7 +5,7 @@
 // gutter grip and the action row: a type/speaker chip, dictation mic, an
 // AI "suggest what comes next" spark, and a more-menu (move / AI cleanup / delete).
 
-import { memo, useState } from "react";
+import { memo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import {
   IconChevronDown,
@@ -22,6 +22,8 @@ import {
   IconClipboardText,
   IconUserPlus,
 } from "@tabler/icons-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -330,6 +332,14 @@ function BlockImpl({
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const blockStyle = useSettingsStore((s) => s.blockStyle);
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    isDragging,
+  } = useSortable({ id: block.id });
 
   const [cleaning, setCleaning] = useState(false);
   // Text selected at right-click time — captured before Radix opens its menu and
@@ -388,6 +398,7 @@ function BlockImpl({
           cn/tailwind-merge) so prose stays highlightable for "Copy". */}
       <ContextMenuTrigger asChild className="select-text">
         <div
+          ref={setNodeRef}
           data-block-id={block.id}
           // Left press selects (and enters edit mode); right press must NOT, or
           // selecting the block swaps the prose for textareas and drops the
@@ -396,20 +407,32 @@ function BlockImpl({
             if (e.button === 0) select(block.id);
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
+          // dnd-kit drives the live drag offset; surface it as a CSS var (per the
+          // no-inline-style rule) consumed by the arbitrary transform utility.
+          style={{ "--dnd-transform": CSS.Transform.toString(transform) } as CSSProperties}
           className={cn(
-            "group relative flex gap-1.5 rounded-lg border border-transparent py-1.5 pl-1.5 pr-2 transition-colors",
+            "group relative flex gap-1.5 rounded-lg border border-transparent py-1.5 pl-1.5 pr-2 transition-colors [transform:var(--dnd-transform,none)]",
             selected
               ? "border-select-edge bg-card"
               : "hover:bg-muted/50",
             cardChrome && "border-border bg-card px-3 py-3",
             cardChrome && selected && "border-select-edge",
+            isDragging && "z-10 opacity-90 shadow-lg",
           )}
         >
-          {/* gutter */}
-          <div className="flex w-5 shrink-0 justify-center pt-1 opacity-0 transition-opacity group-hover:opacity-100">
-            <span className="cursor-grab text-faint" title="Drag handle — use ⋯ to move">
+          {/* gutter — drag handle */}
+          <div className="flex w-5 shrink-0 justify-center pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <button
+              type="button"
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+              title="Drag to reorder"
+              aria-label="Drag to reorder block"
+              className="cursor-grab touch-none text-faint active:cursor-grabbing"
+            >
               <IconGripVertical className="size-3.5" />
-            </span>
+            </button>
           </div>
 
           {/* body */}

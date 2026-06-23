@@ -4,6 +4,21 @@ import {
   IconSparkles,
   IconWriting,
 } from "@tabler/icons-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Block } from "@/components/app/block";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
@@ -62,6 +77,21 @@ export function Editor() {
   const blocks = useProjectStore((s) => s.blocks);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
   const select = useProjectStore((s) => s.select);
+  const reorderBlock = useProjectStore((s) => s.reorderBlock);
+
+  // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
+  // click on the grip a selection rather than a drag; KeyboardSensor makes the
+  // handle operable with space + arrows.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (over && active.id !== over.id) {
+      reorderBlock(String(active.id), String(over.id));
+    }
+  };
 
   // One recognizer for the whole editor; dictation lands in the selected block.
   const dictation = useDictation((text) => {
@@ -150,9 +180,21 @@ export function Editor() {
           </span>
         </header>
 
-        {blocks.map((b) => (
-          <Block key={b.id} block={b} dictation={dictation} />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={blocks.map((b) => b.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {blocks.map((b) => (
+              <Block key={b.id} block={b} dictation={dictation} />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         <AddBlockRow />
         <SelectionToolbar />

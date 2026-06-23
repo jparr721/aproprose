@@ -92,6 +92,54 @@ describe("convertSelection", () => {
   });
 });
 
+describe("reorderBlock", () => {
+  it("moves a block to a later position, keeps it selected, pushes one history entry", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    const c = mkBlock({ id: "c" });
+    const d = mkBlock({ id: "d" });
+    useProjectStore.setState({ blocks: [a, b, c, d], selectedId: "a", past: [] });
+
+    useProjectStore.getState().reorderBlock("a", "c");
+
+    const { blocks, selectedId, past, chapterDirty } = useProjectStore.getState();
+    expect(blocks.map((x) => x.id)).toEqual(["b", "c", "a", "d"]);
+    expect(selectedId).toBe("a");
+    expect(past).toHaveLength(1);
+    expect(chapterDirty).toBe(true);
+  });
+
+  it("moves a block to an earlier position", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    const c = mkBlock({ id: "c" });
+    const d = mkBlock({ id: "d" });
+    useProjectStore.setState({ blocks: [a, b, c, d], past: [] });
+
+    useProjectStore.getState().reorderBlock("d", "b");
+
+    expect(useProjectStore.getState().blocks.map((x) => x.id)).toEqual([
+      "a",
+      "d",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("is a no-op when source and target are the same (no history)", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    useProjectStore.setState({ blocks: [a, b], past: [], chapterDirty: false });
+
+    useProjectStore.getState().reorderBlock("a", "a");
+
+    const { blocks, past, chapterDirty } = useProjectStore.getState();
+    expect(blocks.map((x) => x.id)).toEqual(["a", "b"]);
+    expect(past).toHaveLength(0);
+    expect(chapterDirty).toBe(false);
+  });
+});
+
 describe("undo / redo", () => {
   it("round-trips a split through undo", () => {
     const b = mkBlock({ text: "Hello world" });

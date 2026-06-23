@@ -113,7 +113,7 @@ export function TopBar() {
           size="sm"
           onClick={() => void compileNow()}
           disabled={compiling}
-          className="bg-success font-sans text-success-foreground hover:bg-success/90"
+          className="font-sans"
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile

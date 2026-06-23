@@ -32,9 +32,9 @@ bundle:
 typecheck:
     bun x tsc --noEmit
 
-# Run the frontend unit tests (Bun's built-in runner).
+# Run the frontend unit tests (Vitest).
 test:
-    bun test
+    bun x vitest run
 
 # Format and lint the Rust side.
 fmt:
@@ -45,7 +45,3 @@ fmt:
 clean:
     rm -rf dist node_modules
     cd src-tauri && cargo clean
-
-# Run the frontend unit tests.
-test:
-    bun x vitest run

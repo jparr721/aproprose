@@ -111,6 +111,8 @@ interface ProjectState {
   convertSelection: (id: string, start: number, end: number, type: BlockType) => void;
   deleteBlock: (id: string) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
+  /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
+  reorderBlock: (fromId: string, toId: string) => void;
 
   // history (undo/redo of the block list within the current chapter)
   past: Block[][];
@@ -438,6 +440,29 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // serialization uses positions consistently.
         return {
           blocks: next,
+          chapterDirty: true,
+          past: capPush(s.past, s.blocks),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    // Drag-reorder via @dnd-kit: drop `fromId` onto `toId`'s slot. Mirrors
+    // arrayMove (remove, then insert at the target's original index) and keeps
+    // the moved block selected. Like moveBlock, reordering changes emitted
+    // output even for clean blocks, so the chapter is marked dirty.
+    reorderBlock: (fromId, toId) =>
+      set((s) => {
+        if (fromId === toId) return {};
+        const from = s.blocks.findIndex((b) => b.id === fromId);
+        const to = s.blocks.findIndex((b) => b.id === toId);
+        if (from < 0 || to < 0 || from === to) return {};
+        const next = [...s.blocks];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return {
+          blocks: next,
+          selectedId: fromId,
           chapterDirty: true,
           past: capPush(s.past, s.blocks),
           future: [],

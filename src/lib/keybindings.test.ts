@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { matchesCombo, bindingFor, comboTokens, formatCombo } from "@/lib/keybindings";
+import { matchesCombo, bindingFor, comboTokens, formatCombo, primaryTokens, primaryLabel, KEYBINDINGS } from "@/lib/keybindings";
+import type { KeybindingId } from "@/lib/keybindings";
 
 const ev = (p: Partial<KeyboardEvent>): KeyboardEvent =>
   ({ metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, key: "", ...p }) as KeyboardEvent;
@@ -33,5 +34,26 @@ describe("comboTokens / formatCombo", () => {
     expect(comboTokens({ mod: true, key: "Enter" }, true)).toEqual(["⌘", "↵"]);
     expect(formatCombo({ mod: true, key: "s" }, true)).toBe("⌘S");
     expect(formatCombo({ mod: true, key: "s" }, false)).toBe("Ctrl+S");
+  });
+});
+
+describe("primaryTokens / primaryLabel", () => {
+  it("returns the primary combo, platform-aware", () => {
+    expect(primaryTokens("save-build", true)).toEqual(["⌘", "S"]);
+    expect(primaryLabel("save-build", true)).toBe("⌘S");
+    expect(primaryLabel("save-build", false)).toBe("Ctrl+S");
+    expect(primaryTokens("redo", false)).toEqual(["Ctrl", "Shift", "Z"]);
+  });
+  it("returns empty for an unknown id", () => {
+    expect(primaryTokens("nope" as KeybindingId, true)).toEqual([]);
+    expect(primaryLabel("nope" as KeybindingId, true)).toBe("");
+  });
+});
+
+describe("KEYBINDINGS registry", () => {
+  it("has exactly the expected ids, no duplicates", () => {
+    const ids = KEYBINDINGS.map((b) => b.id);
+    expect(ids.length).toBe(4);
+    expect(new Set(ids)).toEqual(new Set(["save-build", "split", "undo", "redo"]));
   });
 });

@@ -51,6 +51,20 @@ describe("planSplit", () => {
     expect(blocks[1].text).toBe("_cd_ ef");
     for (const p of blocks) expect((p.text.match(/_/g) ?? []).length % 2).toBe(0);
   });
+
+  it("rebalances emphasis markers across a cut", () => {
+    const b = mk({ text: "a _bc_ d" });
+    const { blocks } = planSplit(b, 4);
+    expect(blocks[0].text).toBe("a _b_");
+    expect(blocks[1].text).toBe("_c_ d");
+  });
+
+  it("keeps a lore title on the first piece when split", () => {
+    const b = mk({ type: "lore", text: "Origin myth here", title: "Genesis" });
+    const { blocks } = planSplit(b, 7);
+    expect(blocks[0].title).toBe("Genesis");
+    expect(blocks[1].title).toBeUndefined();
+  });
 });
 
 describe("planCarve", () => {
@@ -104,11 +118,20 @@ describe("planCarve", () => {
     expect(iso[1]).toMatchObject({ type: "dialogue", text: "there", speaker: "c1" });
   });
 
-  it("rebalances emphasis markers across a cut", () => {
-    const b = mk({ text: "a _bc_ d" });
-    const { blocks } = planSplit(b, 4);
-    expect(blocks[0].text).toBe("a _b_");
-    expect(blocks[1].text).toBe("_c_ d");
+  it("moves a dialogue beat to the trailing dialogue piece when carving a middle slice", () => {
+    const b = mk({ type: "dialogue", text: "Hello there friend", speaker: "c1", beat: "She waved." });
+    const { blocks } = planCarve(b, 6, 11, "lore");
+    expect(blocks.map((p) => p.type)).toEqual(["dialogue", "lore", "dialogue"]);
+    expect(blocks[0].beat).toBeUndefined();
+    expect(blocks[2].beat).toBe("She waved.");
+  });
+
+  it("keeps a lore title on the first surviving lore piece when carving", () => {
+    const b = mk({ type: "lore", text: "Origin myth retold here", title: "Genesis" });
+    const { blocks } = planCarve(b, 7, 11, "narration");
+    expect(blocks.map((p) => p.type)).toEqual(["lore", "narration", "lore"]);
+    expect(blocks[0].title).toBe("Genesis");
+    expect(blocks[2].title).toBeUndefined();
   });
 
   it("drops orphaned emphasis markers when carving an emphasized word", () => {

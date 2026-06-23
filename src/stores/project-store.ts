@@ -35,6 +35,7 @@ import {
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
+import { pathHash } from "@/lib/path-hash";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -65,13 +66,7 @@ const LAST_PROJECT_KEY = "last-project";
 
 /** Stable, filesystem-safe key for a project's metadata blob. */
 function metaKey(root: string): string {
-  // FNV-1a over the absolute path — avoids collisions without leaking the path.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < root.length; i++) {
-    h ^= root.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return `meta-${(h >>> 0).toString(16)}`;
+  return `meta-${pathHash(root)}`;
 }
 
 interface ProjectState {

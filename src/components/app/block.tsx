@@ -48,6 +48,7 @@ import { useViewStore } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { buildAiContext } from "@/lib/ai/context";
 import { cleanTranscript } from "@/lib/ai/operations";
+import { describeAiError } from "@/lib/ai/errors";
 import type { Block as BlockT, BlockType, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -361,7 +362,7 @@ function BlockImpl({
       updateBlockText(block.id, cleaned.trim());
       toast.success("Tidied up", { id: t });
     } catch (e) {
-      toast.error("Couldn't reach the model", { id: t, description: String(e) });
+      toast.error("Couldn't reach the model", { id: t, description: describeAiError(e) });
     } finally {
       setCleaning(false);
     }

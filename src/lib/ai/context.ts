@@ -31,9 +31,26 @@ export function buildAiContext(uptoId?: string): AiContext {
   }
 
   const last = upto[upto.length - 1];
-  const cursorSummary = last
-    ? `Cursor sits just after a ${last.type} block.`
-    : "Cursor is at the start of the chapter.";
+  let cursorSummary: string;
+  if (!last) {
+    cursorSummary = "Cursor is at the start of the chapter.";
+  } else {
+    // Only narration/dialogue/heading text is shown to the model; lore, scratchpad,
+    // raw-latex and scene-break blocks are excluded from the grounding, so don't
+    // leak their text into the cursor summary either. (Taking the last 12 words
+    // here is fine — this is a model-facing prompt string, not UI text, so the
+    // "no JS truncation" UI rule doesn't apply.)
+    const canShowTail =
+      last.type === "narration" ||
+      last.type === "dialogue" ||
+      (last.type === "chapter" && last.level !== "break");
+    const tail = canShowTail
+      ? last.text.trim().split(/\s+/).slice(-12).join(" ")
+      : "";
+    cursorSummary = tail
+      ? `Cursor sits just after a ${last.type} block ending: "…${tail}".`
+      : `Cursor sits just after a ${last.type} block.`;
+  }
 
   return {
     chapterTitle: chapter?.title,

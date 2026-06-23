@@ -14,7 +14,7 @@ const prefsKey = (root: string) => `sync-${pathHash(root)}`;
 
 interface SyncState {
   root: string | null;
-  /** Null until the first-run setup dialog should be offered (git repo, no prefs yet). */
+  /** False after init() when this git repo has no stored prefs — drives the first-run setup dialog. */
   prefsKnown: boolean;
   status: SyncStatus;
   isRepo: boolean;

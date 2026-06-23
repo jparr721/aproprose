@@ -104,7 +104,7 @@ export function Editor() {
     );
   }
 
-  if (chapter && conflictedFiles.includes(chapter.file)) {
+  if (conflictedFiles.includes(chapter.file)) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center font-sans">
         <IconGitMerge className="size-8 text-destructive" />

@@ -207,7 +207,7 @@ pub async fn repo_status(root: &Path) -> RepoStatus {
             ahead: 0, behind: 0, dirty: false, changed_files: Vec::new(), conflicted_files: Vec::new(),
         };
     }
-    let out = run(root, "git", &["status", "--porcelain=v1", "--branch"]).await;
+    let out = run(root, "git", &["-c", "core.quotePath=false", "status", "--porcelain=v1", "--branch"]).await;
     let mut status = parse_status(&out.stdout);
     let remote = origin_url(root).await;
     status.has_remote = remote.is_some();
@@ -275,7 +275,7 @@ fn looks_like_conflict(text: &str) -> bool {
 }
 
 pub async fn unmerged_files(root: &Path) -> Vec<String> {
-    let out = run(root, "git", &["diff", "--name-only", "--diff-filter=U"]).await;
+    let out = run(root, "git", &["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U"]).await;
     out.stdout.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect()
 }
 
@@ -289,6 +289,12 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     }
 
     let pre = repo_status(root).await;
+
+    // Already conflicted (e.g. reopened mid-conflict): surface it directly
+    // rather than transiting an error state on a refused commit.
+    if !pre.conflicted_files.is_empty() {
+        return Ok(SyncOutcome::Conflict { files: pre.conflicted_files });
+    }
 
     // Stage + commit anything local.
     if pre.dirty {
@@ -711,6 +717,26 @@ mod tests {
         std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
         let out = sync(&work_a, "a-change").await.unwrap();
         assert!(matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()]));
+        let _ = std::fs::remove_dir_all(work_a.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn sync_on_already_conflicted_tree_returns_conflict() {
+        let (origin, work_a) = repo_with_origin();
+        let work_b = work_a.parent().unwrap().join("work_b");
+        StdCommand::new("git").args(["clone", "-q", origin.to_str().unwrap(), work_b.to_str().unwrap()]).output().unwrap();
+        let gb = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work_b).output().unwrap(); };
+        gb(&["config", "user.email", "b@b.b"]);
+        gb(&["config", "user.name", "b"]);
+        std::fs::write(work_b.join("a.tex"), "from-b\n").unwrap();
+        gb(&["commit", "-aqm", "b-change"]);
+        gb(&["push", "-q"]);
+        std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
+        let first = sync(&work_a, "a-change").await.unwrap();
+        assert!(matches!(first, SyncOutcome::Conflict { .. }));
+        // Tree is still conflicted; a second sync must early-return Conflict, not Err.
+        let second = sync(&work_a, "retry").await.unwrap();
+        assert!(matches!(second, SyncOutcome::Conflict { ref files } if files.contains(&"a.tex".to_string())));
         let _ = std::fs::remove_dir_all(work_a.parent().unwrap());
     }
 }

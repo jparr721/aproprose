@@ -3,16 +3,16 @@
 // The prototype faked a typeset page; here we render the actual latexmk output
 // with pdf.js to a canvas (WebKitGTK has no built-in PDF viewer, so an <iframe>
 // won't do). Every page is stacked in one scrollable column so the writer reads
-// by scrolling — no page arrows. Pages render lazily (only those near the
-// viewport paint to a canvas) to keep a long manuscript light. Zoom is a typed,
-// persisted percentage. PDF bytes arrive base64-encoded from the Rust
+// by scrolling; a typed page field jumps to any page. Pages render lazily (only
+// those near the viewport paint to a canvas) to keep a long manuscript light.
+// Zoom is a typed, persisted percentage, and the reading position is kept across
+// re-compiles. PDF bytes arrive base64-encoded from the Rust
 // `compile_project`/`read_pdf` commands.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
-  IconLoader2,
   IconMinus,
   IconPlayerPlayFilled,
   IconPlus,
@@ -21,6 +21,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -43,6 +44,8 @@ const ZOOM_MAX = 5;
 const ZOOM_STEP = 0.1;
 /** Render pages within this many px above/below the viewport, not just visible ones. */
 const RENDER_MARGIN_PX = 400;
+/** The scroll column's top padding (Tailwind p-4); kept above a page when scrolling to it. */
+const SCROLL_TOP_PADDING_PX = 16;
 
 function base64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -160,6 +163,30 @@ export function PdfPane() {
   const [current, setCurrent] = useState(1);
   const ratios = useRef<Map<number, number>>(new Map());
 
+  // Latest values mirrored into refs so the byte-loading effect (which only
+  // re-runs on new bytes) can read them without widening its dependencies.
+  const docRef = useRef<PdfDoc | null>(null);
+  docRef.current = doc;
+  const currentRef = useRef(1);
+  currentRef.current = current;
+  // Page to scroll to once the next document mounts (set on re-compile to keep
+  // the reader's place); null once consumed.
+  const restorePageRef = useRef<number | null>(null);
+
+  // Scroll the column so page n sits at the top of the viewport.
+  const scrollToPage = (n: number) => {
+    if (!scrollEl) return;
+    const max = doc?.numPages ?? 1;
+    const clamped = Math.min(max, Math.max(1, n));
+    const el = scrollEl.querySelector<HTMLElement>(`[data-page="${clamped}"]`);
+    if (!el) return;
+    const top =
+      el.getBoundingClientRect().top -
+      scrollEl.getBoundingClientRect().top +
+      scrollEl.scrollTop;
+    scrollEl.scrollTo({ top: Math.max(0, top - SCROLL_TOP_PADDING_PX) });
+  };
+
   // Editable zoom field: a free-typed string committed on Enter/blur.
   const [zoomText, setZoomText] = useState(() => String(Math.round(scale * 100)));
   const [editingZoom, setEditingZoom] = useState(false);
@@ -181,6 +208,26 @@ export function PdfPane() {
     setEditingZoom(false);
   };
 
+  // Editable page field: the same free-typed-string pattern as zoom. Committing
+  // jumps the column to that page; while idle it tracks the visible page.
+  const [pageText, setPageText] = useState("1");
+  const [editingPage, setEditingPage] = useState(false);
+  const cancelPageCommitRef = useRef(false);
+  useEffect(() => {
+    if (!editingPage) setPageText(String(current));
+  }, [current, editingPage]);
+
+  const commitPage = () => {
+    if (cancelPageCommitRef.current) {
+      cancelPageCommitRef.current = false;
+      setEditingPage(false);
+      return;
+    }
+    const n = Number.parseInt(pageText, 10);
+    if (Number.isFinite(n)) scrollToPage(n);
+    setEditingPage(false);
+  };
+
   // Load the document whenever fresh PDF bytes arrive.
   useEffect(() => {
     if (!pdfBase64) {
@@ -189,6 +236,11 @@ export function PdfPane() {
       return;
     }
     let cancelled = false;
+    // A document is already showing → these are re-compiled bytes for the same
+    // project, so keep the reader on their page. No prior doc (opening a project,
+    // first compile) → start at the top. (A project switch tears the doc down to
+    // null first, so it correctly reads as a fresh load here.)
+    const restoreTo = docRef.current ? currentRef.current : 1;
     const task = pdfjsLib.getDocument({ data: base64ToBytes(pdfBase64) });
     task.promise
       .then(async (d) => {
@@ -197,10 +249,11 @@ export function PdfPane() {
         const first = await d.getPage(1);
         if (cancelled) return;
         const viewport = first.getViewport({ scale: 1 });
+        const target = Math.min(d.numPages, Math.max(1, restoreTo));
+        restorePageRef.current = target;
         setBaseSize({ width: viewport.width, height: viewport.height });
         setDoc(d);
-        setCurrent(1);
-        scrollEl?.scrollTo({ top: 0 });
+        setCurrent(target);
       })
       .catch(() => {
         if (!cancelled) {
@@ -212,9 +265,21 @@ export function PdfPane() {
       cancelled = true;
       void task.destroy();
     };
-    // Reset only on new bytes; scrollEl is read opportunistically.
+    // Re-run only on new bytes; the page to restore is read from refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfBase64]);
+
+  // Once the (re)compiled document has mounted and its page boxes are sized,
+  // jump to the page captured above so a re-compile doesn't lose the reader's
+  // place. A layout effect runs before paint, so there's no flash at the top.
+  useLayoutEffect(() => {
+    const target = restorePageRef.current;
+    if (target == null || !doc || !baseSize || !scrollEl) return;
+    restorePageRef.current = null;
+    scrollToPage(target);
+    // scrollToPage closes over the freshly-mounted doc/scrollEl; deps cover the remount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, baseSize, scrollEl]);
 
   // Track the most-visible page for the page indicator.
   useEffect(() => {
@@ -257,11 +322,33 @@ export function PdfPane() {
         </div>
         <div className="flex items-center gap-1.5">
           <Button variant="ghost" size="icon-sm" title="Re-compile" onClick={() => void compileNow()} disabled={compiling}>
-            {compiling ? <IconLoader2 className="animate-spin" /> : <IconRefresh />}
+            {compiling ? <Spinner /> : <IconRefresh />}
           </Button>
           {numPages > 0 ? (
-            <span className="text-[11.5px] tabular-nums text-muted-foreground">
-              {current} / {numPages}
+            <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-muted-foreground">
+              <Input
+                value={pageText}
+                inputMode="numeric"
+                aria-label="Current page"
+                className="h-6 w-9 rounded-sm px-1 text-center text-[11.5px] tabular-nums md:text-[11.5px]"
+                onFocus={(e) => {
+                  setEditingPage(true);
+                  e.currentTarget.select();
+                }}
+                onChange={(e) =>
+                  setPageText(e.target.value.replace(/[^\d]/g, ""))
+                }
+                onBlur={commitPage}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.currentTarget.blur();
+                  } else if (e.key === "Escape") {
+                    cancelPageCommitRef.current = true;
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+              <span className="text-faint">/ {numPages}</span>
             </span>
           ) : null}
           <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-muted-foreground">
@@ -319,8 +406,8 @@ export function PdfPane() {
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
             {compiling || doc ? (
               <>
-                <IconLoader2 className="size-6 animate-spin text-faint" />
-                <p className="text-sm">{compiling ? "Compiling…" : "Rendering…"}</p>
+                <Spinner className="size-6 text-faint" />
+                <p className="text-sm">{compiling ? "Compiling" : "Rendering"}</p>
               </>
             ) : (
               <>

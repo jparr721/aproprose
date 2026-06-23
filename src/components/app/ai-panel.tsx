@@ -1,12 +1,12 @@
 // ai-panel.tsx — the right-side assistant. Five tabs, each backed by a real
 // gpt-5.4-nano call grounded on the current scene:
 //   Suggest · Critique · Brainstorm · Continuity · Cast
-// Results fetch when a tab is opened and can be refreshed; nothing here is mocked.
+// Each result is fetched once per scene and cached (see useAi / ai-cache-store),
+// so remounting a tab reuses it; "Try again" / "Refresh" force a new call.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconArrowRight,
-  IconLoader2,
   IconRefresh,
   IconSend,
 } from "@tabler/icons-react";
@@ -14,10 +14,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
 import { ColorAvatar } from "@/components/app/color-dot";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
+import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { buildAiContext } from "@/lib/ai/context";
 import { uid } from "@/lib/id";
 import {
@@ -69,29 +71,37 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Lazy async result that runs on mount and on the given nonce. */
-function useAi<T>(op: () => Promise<T>, nonce: unknown = 0) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+/** Cached async result. Fetches once the first time a `cacheKey` is seen, then
+ *  reuses the stored result across remounts (tab switches, panel/focus toggles,
+ *  reopening the panel) so we don't re-burn tokens on a result we already have.
+ *  A new key (different scene / bumped suggest nonce) fetches fresh; run() forces
+ *  a refetch — that's the tabs' "Try again" / "Refresh" buttons. */
+function useAi<T>(op: () => Promise<T>, cacheKey: string) {
+  const entry = useAiCacheStore((s) => s.entries[cacheKey]);
+  const patch = useAiCacheStore((s) => s.patch);
   const opRef = useRef(op);
   opRef.current = op;
 
   const run = useCallback(() => {
-    setLoading(true);
-    setError(null);
+    patch(cacheKey, { loading: true, error: null });
     opRef
       .current()
-      .then((d) => setData(d))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
+      .catch((e) => patch(cacheKey, { loading: false, error: String(e) }));
+  }, [cacheKey, patch]);
 
   useEffect(() => {
-    run();
-  }, [run, nonce]);
+    // Only the first sighting of a key fetches; read fresh state (not the
+    // subscribed `entry`) so a rapid key change can't fire a duplicate request.
+    if (useAiCacheStore.getState().entries[cacheKey] === undefined) run();
+  }, [cacheKey, run]);
 
-  return { data, loading, error, run };
+  return {
+    data: (entry?.data ?? null) as T | null,
+    loading: entry?.loading ?? true,
+    error: entry?.error ?? null,
+    run,
+  };
 }
 
 // ── Suggest ────────────────────────────────────────────────────────────────────
@@ -106,7 +116,7 @@ function SuggestTab() {
   // below" never drops an old chapter's suggestion into a different scene.
   const { data, loading, error, run } = useAi<SuggestResult>(
     () => suggestContinuation(buildAiContext()),
-    `${activeChapterId ?? ""}:${nonce}`,
+    `suggest:${activeChapterId ?? ""}:${nonce}`,
   );
   const [variant, setVariant] = useState(0);
   useEffect(() => setVariant(0), [data]);
@@ -213,7 +223,7 @@ function CritiqueTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const { data, loading, error, run } = useAi<CritiqueNote[]>(
     () => critique(buildAiContext()),
-    activeChapterId,
+    `critique:${activeChapterId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -260,7 +270,7 @@ function ContinuityTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const { data, loading, error, run } = useAi<ContinuityFlag[]>(
     () => continuityCheck(buildAiContext()),
-    activeChapterId,
+    `continuity:${activeChapterId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -329,7 +339,7 @@ function CastTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const { data, loading, error, run } = useAi(
     () => detectCast(buildAiContext()),
-    activeChapterId,
+    `cast:${activeChapterId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -464,7 +474,7 @@ function BrainstormTab() {
           className="min-h-0 resize-none font-sans text-[12.5px]"
         />
         <Button size="icon" onClick={() => void send()} disabled={streaming != null || !draft.trim()}>
-          {streaming != null ? <IconLoader2 className="animate-spin" /> : <IconSend />}
+          {streaming != null ? <Spinner /> : <IconSend />}
         </Button>
       </div>
     </div>

@@ -10,11 +10,23 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
+import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
+import { KEYBINDING_IDS } from "@/lib/keybindings";
+import { isInAuxSurface } from "@/lib/dom";
+import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/lib/use-dictation";
 import type { BlockType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function CursorRow() {
+// Editor history defers to native undo/redo while the AI panel or a dialog holds
+// focus, so those inputs keep their own history.
+const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
+  enabled: true,
+  ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
+};
+
+function AddBlockRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
@@ -22,32 +34,24 @@ function CursorRow() {
   const add = (type: BlockType) => insertAfter(selectedId, { type });
 
   return (
-    <div className="mt-2 flex flex-col gap-2.5 py-4 pl-7">
-      <div className="flex items-center gap-2.5">
-        <span className="inline-block h-5 w-0.5 animate-blink rounded-full bg-accent-ink" />
-        <span className="font-sans text-[10.5px] uppercase tracking-[0.08em] text-faint">
-          Cursor — next block
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-1.5 font-sans">
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
-          + Narration
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("dialogue")}>
-          + Dialogue
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
-          + Scratchpad
-        </Button>
-        <Button
-          size="sm"
-          className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
-          onClick={triggerSuggest}
-        >
-          <IconSparkles className="size-3.5" />
-          Suggest from context
-        </Button>
-      </div>
+    <div className="mt-2 flex flex-wrap gap-1.5 py-4 pl-7 font-sans">
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
+        + Narration
+      </Button>
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("dialogue")}>
+        + Dialogue
+      </Button>
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
+        + Scratchpad
+      </Button>
+      <Button
+        size="sm"
+        className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
+        onClick={triggerSuggest}
+      >
+        <IconSparkles className="size-3.5" />
+        Suggest from context
+      </Button>
     </div>
   );
 }
@@ -66,6 +70,42 @@ export function Editor() {
     const b = st.blocks.find((x) => x.id === id);
     if (!b) return;
     st.updateBlockText(id, (b.text ? `${b.text} ` : "") + text);
+  });
+
+  // Document + history shortcuts live with the editing surface they act on.
+  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().compileNow());
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.UNDO,
+    () => useProjectStore.getState().undo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.REDO,
+    () => useProjectStore.getState().redo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.REDO_ALT,
+    () => useProjectStore.getState().redo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
+
+  // Carve/split: Cmd+Shift+Enter. With a selection it isolates the slice as its
+  // own same-type block (like the toolbar's Split); a bare caret splits in two.
+  useKeybinding(KEYBINDING_IDS.SPLIT_BLOCK, () => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
+    const host = el.closest("[data-block-id]");
+    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+    if (!blockId) return;
+    const store = useProjectStore.getState();
+    const { selectionStart, selectionEnd } = el;
+    if (selectionStart !== selectionEnd) {
+      const block = store.blocks.find((b) => b.id === blockId);
+      if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
+    } else {
+      store.splitBlock(blockId, selectionStart);
+    }
   });
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
@@ -97,7 +137,7 @@ export function Editor() {
           <Block key={b.id} block={b} dictation={dictation} />
         ))}
 
-        <CursorRow />
+        <AddBlockRow />
         <SelectionToolbar />
       </div>
     </ScrollArea>

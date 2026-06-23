@@ -1,112 +1,142 @@
-// keybindings.ts — single source of truth for app keyboard shortcuts.
+// keybindings.ts — the single registry of app keyboard shortcuts.
 //
-// The global keydown dispatcher (App.tsx) and the read-only Settings list both
-// read KEYBINDINGS, so documented shortcuts can't drift from the handlers.
-// Pure module: platform detection (IS_MAC from @/lib/platform) is passed in by
-// callers, so this stays unit-testable in node. `mod` = Cmd on macOS / Ctrl else.
+// Ported from warlock/apps/reaper's keybinding module: one typed definition per
+// shortcut, translated to a `react-hotkeys-hook` combo string at bind time and to
+// a human label for on-screen hints. Components bind a definition with the
+// `useKeybinding` hook rather than hand-rolling `window` keydown listeners, so the
+// shortcut surface stays declarative and discoverable from one place.
+//
+// `modifiers.ctrl` means the platform command key — Cmd on macOS, Ctrl elsewhere
+// — because it lowers to react-hotkeys-hook's "mod" token.
 
-export interface Combo {
-  mod?: boolean;
-  shift?: boolean;
-  alt?: boolean;
-  /** KeyboardEvent.key, compared case-insensitively (e.g. "s", "Enter"). */
+export interface KeybindingDefinition {
+  /** Stable kebab id, handy as a React key / persistence handle. */
+  id: string;
+  /** react-hotkeys-hook key token (e.g. "s", "enter", "z"). */
   key: string;
-}
-
-export type KeybindingId = "save-build" | "split" | "undo" | "redo";
-
-export interface Keybinding {
-  id: KeybindingId;
-  label: string;
+  /** "ctrl" lowers to the "mod" key (Cmd on macOS, Ctrl elsewhere). */
+  modifiers: { ctrl?: boolean; shift?: boolean; alt?: boolean };
   description: string;
-  /** Matches if ANY listed combo matches the event. */
-  combos: [Combo, ...Combo[]];
+  category: "document" | "view" | "editor";
+  label: string;
 }
 
-export const KEYBINDINGS: Keybinding[] = [
-  {
-    id: "save-build",
-    label: "Save & build PDF",
-    description: "Write the chapter to disk and recompile the PDF.",
-    combos: [{ mod: true, key: "s" }],
+export const KEYBINDINGS = {
+  SAVE_CHAPTER: {
+    id: "save-chapter",
+    key: "s",
+    modifiers: { ctrl: true },
+    description: "Save the active chapter and rebuild the PDF",
+    category: "document",
+    label: "Save & build",
   },
-  {
-    id: "split",
-    label: "Split block at cursor",
-    description: "Break the current block into two at the caret.",
-    combos: [{ mod: true, key: "Enter" }],
+  COMPILE: {
+    id: "compile",
+    key: "enter",
+    modifiers: { ctrl: true },
+    description: "Compile the manuscript",
+    category: "document",
+    label: "Compile",
   },
-  {
+  TOGGLE_PDF: {
+    id: "toggle-pdf",
+    key: "p",
+    modifiers: { ctrl: true, shift: true },
+    description: "Toggle the PDF preview pane",
+    category: "view",
+    label: "Toggle PDF",
+  },
+  TOGGLE_AI: {
+    id: "toggle-ai",
+    key: "a",
+    modifiers: { ctrl: true, shift: true },
+    description: "Toggle the AI panel",
+    category: "view",
+    label: "Toggle AI",
+  },
+  UNDO: {
     id: "undo",
+    key: "z",
+    modifiers: { ctrl: true },
+    description: "Undo the last editor change",
+    category: "editor",
     label: "Undo",
-    description: "Undo the last editor change.",
-    combos: [{ mod: true, key: "z" }],
   },
-  {
+  REDO: {
     id: "redo",
+    key: "z",
+    modifiers: { ctrl: true, shift: true },
+    description: "Redo the last undone editor change",
+    category: "editor",
     label: "Redo",
-    description: "Redo the last undone change.",
-    combos: [
-      { mod: true, shift: true, key: "z" },
-      { mod: true, key: "y" },
-    ],
   },
-];
+  REDO_ALT: {
+    id: "redo-alt",
+    key: "y",
+    modifiers: { ctrl: true },
+    description: "Redo the last undone editor change",
+    category: "editor",
+    label: "Redo",
+  },
+  SPLIT_BLOCK: {
+    id: "split-block",
+    key: "enter",
+    modifiers: { ctrl: true, shift: true },
+    description: "Split the block at the cursor, or isolate the selection",
+    category: "editor",
+    label: "Split block",
+  },
+} satisfies Record<string, KeybindingDefinition>;
 
-export function matchesCombo(e: KeyboardEvent, combo: Combo): boolean {
-  const mod = e.metaKey || e.ctrlKey;
-  if (!!combo.mod !== mod) return false;
-  if (!!combo.shift !== e.shiftKey) return false;
-  if (!!combo.alt !== e.altKey) return false;
-  return e.key.toLowerCase() === combo.key.toLowerCase();
-}
+export type KeybindingId = keyof typeof KEYBINDINGS;
 
-export function bindingFor(e: KeyboardEvent): Keybinding | null {
-  for (const binding of KEYBINDINGS) {
-    if (binding.combos.some((c) => matchesCombo(e, c))) return binding;
+/** `{ SAVE_CHAPTER: "SAVE_CHAPTER", … }` — lets call sites pass ids type-safely. */
+export const KEYBINDING_IDS = Object.fromEntries(
+  Object.keys(KEYBINDINGS).map((k) => [k, k]),
+) as { [K in KeybindingId]: K };
+
+// Punctuation keys whose literal differs from react-hotkeys-hook's token. None of
+// the current bindings need translating, but the indirection is the extension
+// point — add "," -> "comma" etc. here rather than at call sites.
+const KEY_ALIASES: Record<string, string> = {};
+
+/** Lower a definition to a react-hotkeys-hook combo string (e.g. "mod+shift+p"). */
+export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "modifiers">): string {
+  if (!keybinding.key) {
+    throw new Error("toHotkeyString: key must be a non-empty string");
   }
-  return null;
+  const parts: string[] = [];
+  if (keybinding.modifiers.ctrl) parts.push("mod");
+  if (keybinding.modifiers.shift) parts.push("shift");
+  if (keybinding.modifiers.alt) parts.push("alt");
+  parts.push(KEY_ALIASES[keybinding.key] ?? keybinding.key);
+  return parts.join("+");
 }
 
-function keyLabel(key: string, mac: boolean): string {
-  switch (key.toLowerCase()) {
-    case "enter":
-      return mac ? "↵" : "Enter";
-    case "escape":
-      return "Esc";
-    case " ":
-      return "Space";
-    default:
-      return key.length === 1 ? key.toUpperCase() : key;
-  }
+// Compact glyphs for on-screen hints. Only the command modifier differs by
+// platform — ⌘ on macOS, ⌃ (control) elsewhere; shift / alt and the key glyphs
+// are shared.
+const KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
+
+function formatKey(key: string): string {
+  if (KEY_SYMBOLS[key]) return KEY_SYMBOLS[key];
+  if (key.length === 1) return key.toUpperCase();
+  return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-/** Tokens for a chord, one per <Kbd> chip (e.g. ["⌘","⇧","Z"]). */
-export function comboTokens(combo: Combo, mac: boolean): string[] {
-  const tokens: string[] = [];
-  if (combo.mod) tokens.push(mac ? "⌘" : "Ctrl");
-  if (combo.shift) tokens.push(mac ? "⇧" : "Shift");
-  if (combo.alt) tokens.push(mac ? "⌥" : "Alt");
-  tokens.push(keyLabel(combo.key, mac));
-  return tokens;
-}
-
-/** Flat string form for title/aria-label use. */
-export function formatCombo(combo: Combo, mac: boolean): string {
-  const tokens = comboTokens(combo, mac);
-  return mac ? tokens.join("") : tokens.join("+");
-}
-
-/** Tokens for a binding's primary combo — for inline hints. */
-export function primaryTokens(id: KeybindingId, mac: boolean): string[] {
-  const binding = KEYBINDINGS.find((b) => b.id === id);
-  if (!binding) return [];
-  return comboTokens(binding.combos[0], mac);
-}
-
-/** Flat chord label for a binding's primary combo — for title/aria-label text. */
-export function primaryLabel(id: KeybindingId, mac: boolean): string {
-  const binding = KEYBINDINGS.find((b) => b.id === id);
-  if (!binding) return "";
-  return formatCombo(binding.combos[0], mac);
+/**
+ * The display glyphs of a shortcut, in press order — e.g. `["⌘", "⇧", "P"]` on
+ * macOS, `["⌃", "⇧", "P"]` elsewhere. Render each in its own `<Kbd>` (see
+ * `KeybindingHint`). Pass `IS_MAC` from `@/lib/platform`.
+ */
+export function keybindingParts(
+  keybinding: Pick<KeybindingDefinition, "key" | "modifiers">,
+  isMac: boolean,
+): string[] {
+  const parts: string[] = [];
+  if (keybinding.modifiers.ctrl) parts.push(isMac ? "⌘" : "⌃");
+  if (keybinding.modifiers.shift) parts.push("⇧");
+  if (keybinding.modifiers.alt) parts.push("⌥");
+  parts.push(formatKey(keybinding.key));
+  return parts;
 }

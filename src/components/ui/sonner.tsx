@@ -1,5 +1,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon, IconLoader } from "@tabler/icons-react"
+import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon } from "@tabler/icons-react"
+import { Spinner } from "@/components/ui/spinner"
 import { useSettingsStore } from "@/stores/settings-store"
 
 const Toaster = ({ ...props }: ToasterProps) => {
@@ -25,7 +26,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <IconAlertOctagon className="size-4" />
         ),
         loading: (
-          <IconLoader className="size-4 animate-spin" />
+          <Spinner className="size-4" />
         ),
       }}
       style={

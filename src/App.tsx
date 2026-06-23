@@ -4,8 +4,11 @@
 // resizable editor / PDF / AI split. Focus mode hides the PDF and AI panels; the
 // sidebar is independent (toggled by its own trigger / ⌘B). The unsaved-edits
 // confirm dialog is mounted once here, driven by the view store's guard.
+//
+// Keyboard shortcuts are not wired here: each lives with the component that owns
+// its action (top bar: compile / panel toggles; editor: save / undo / redo) via
+// the `useKeybinding` hook and the `src/lib/keybindings.ts` registry.
 
-import { useEffect } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,8 +31,6 @@ import { AiPanel } from "@/components/app/ai-panel";
 import { Welcome } from "@/components/app/welcome";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import { bindingFor } from "@/lib/keybindings";
-import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -86,55 +87,6 @@ function UnsavedGuard() {
 
 function App() {
   const status = useProjectStore((s) => s.status);
-  const compileNow = useProjectStore((s) => s.compileNow);
-
-  // Keyboard shortcuts come from the central registry (see src/lib/keybindings.ts):
-  // ⌘/Ctrl+S saves & rebuilds the PDF, ⌘/Ctrl+Enter splits the focused prose
-  // block at the caret, ⌘/Ctrl+Z / +Shift+Z (or Ctrl+Y) undo/redo. Undo/redo is
-  // skipped when focus is inside the AI panel or a dialog.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const binding = bindingFor(e);
-      if (!binding) return;
-
-      if (binding.id === "save-build") {
-        e.preventDefault();
-        void compileNow();
-        return;
-      }
-
-      if (binding.id === "split") {
-        const el = document.activeElement;
-        if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
-        const host = el.closest("[data-block-id]");
-        const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
-        if (!blockId) return;
-        e.preventDefault();
-        const store = useProjectStore.getState();
-        const { selectionStart, selectionEnd } = el;
-        if (selectionStart !== selectionEnd) {
-          // A real selection → isolate it as its own same-type block (like the toolbar's Split).
-          const block = store.blocks.find((b) => b.id === blockId);
-          if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
-        } else {
-          store.splitBlock(blockId, selectionStart);
-        }
-        return;
-      }
-
-      // undo / redo
-      const inAux = (document.activeElement as HTMLElement | null)?.closest(
-        '[data-ai-root],[role="dialog"],[role="alertdialog"]',
-      );
-      if (inAux) return;
-      e.preventDefault();
-      const store = useProjectStore.getState();
-      if (binding.id === "redo") store.redo();
-      else store.undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [compileNow]);
 
   return (
     <TooltipProvider>

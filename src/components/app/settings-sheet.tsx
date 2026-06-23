@@ -9,7 +9,6 @@ import {
   IconCheck,
   IconEye,
   IconEyeOff,
-  IconLoader2,
   IconSettings,
   IconTrash,
 } from "@tabler/icons-react";
@@ -35,13 +34,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
-import { KEYBINDINGS, comboTokens } from "@/lib/keybindings";
-import { IS_MAC } from "@/lib/platform";
+import { KeybindingHint } from "@/components/app/keybinding-hint";
+import { KEYBINDINGS } from "@/lib/keybindings";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
@@ -155,7 +154,7 @@ function OpenAiKeyField() {
           onClick={() => void save()}
           disabled={!draft.trim() || saving}
         >
-          {saving ? <IconLoader2 className="animate-spin" /> : null}
+          {saving ? <Spinner /> : null}
           Save
         </Button>
       </div>
@@ -205,7 +204,7 @@ function OpenAiKeyField() {
   );
 }
 
-export function SettingsSheet() {
+export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const { theme, layout, blockStyle, proseSize } = useSettingsStore();
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setLayout = useSettingsStore((s) => s.setLayout);
@@ -216,9 +215,11 @@ export function SettingsSheet() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="font-sans" title="Settings">
-          <IconSettings />
-        </Button>
+        {trigger ?? (
+          <Button variant="ghost" size="icon" className="font-sans" title="Settings">
+            <IconSettings />
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="font-sans">
         <SheetHeader>
@@ -311,21 +312,10 @@ export function SettingsSheet() {
 
           <Field label="Keyboard">
             <div className="flex flex-col gap-2">
-              {KEYBINDINGS.map((b) => (
-                <div key={b.id} className="flex items-center justify-between gap-3">
-                  <span className="font-sans text-sm text-foreground">{b.label}</span>
-                  <div className="flex items-center gap-1.5">
-                    {b.combos.map((c, i) => (
-                      <span key={i} className="flex items-center gap-1.5">
-                        {i > 0 ? <span className="text-xs text-faint">or</span> : null}
-                        <KbdGroup>
-                          {comboTokens(c, IS_MAC).map((t, j) => (
-                            <Kbd key={j}>{t}</Kbd>
-                          ))}
-                        </KbdGroup>
-                      </span>
-                    ))}
-                  </div>
+              {Object.values(KEYBINDINGS).map((kb) => (
+                <div key={kb.id} className="flex items-center justify-between gap-3">
+                  <span className="font-sans text-sm text-foreground">{kb.label}</span>
+                  <KeybindingHint keybinding={kb} />
                 </div>
               ))}
             </div>

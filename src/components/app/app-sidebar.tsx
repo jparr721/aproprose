@@ -7,6 +7,7 @@ import {
   IconDeviceFloppy,
   IconFolderOpen,
   IconPlus,
+  IconSettings,
   IconX,
 } from "@tabler/icons-react";
 import {
@@ -32,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupContent,
@@ -42,6 +44,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
+import { SettingsSheet } from "@/components/app/settings-sheet";
 import { chapterStatus, useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { ChapterStatus } from "@/lib/types";
@@ -325,6 +328,20 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SettingsSheet
+              trigger={
+                <SidebarMenuButton>
+                  <IconSettings />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              }
+            />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

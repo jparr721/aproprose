@@ -4,8 +4,11 @@
 // resizable editor / PDF / AI split. Focus mode hides the PDF and AI panels; the
 // sidebar is independent (toggled by its own trigger / ⌘B). The unsaved-edits
 // confirm dialog is mounted once here, driven by the view store's guard.
+//
+// Keyboard shortcuts are not wired here: each lives with the component that owns
+// its action (top bar: compile / panel toggles; editor: save / undo / redo) via
+// the `useKeybinding` hook and the `src/lib/keybindings.ts` registry.
 
-import { useEffect } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,37 +87,6 @@ function UnsavedGuard() {
 
 function App() {
   const status = useProjectStore((s) => s.status);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
-  const compileNow = useProjectStore((s) => s.compileNow);
-
-  // Keyboard: ⌘/Ctrl+S saves, ⌘/Ctrl+Enter compiles, ⌘/Ctrl+Z / +Shift+Z (or
-  // Ctrl+Y) undo/redo the editor. Undo/redo is skipped when focus is inside the
-  // AI panel or a dialog so those inputs keep their own behavior.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-      if (key === "s") {
-        e.preventDefault();
-        void saveChapter();
-      } else if (key === "enter") {
-        e.preventDefault();
-        void compileNow();
-      } else if (key === "z" || key === "y") {
-        const inAux = (document.activeElement as HTMLElement | null)?.closest(
-          '[data-ai-root],[role="dialog"],[role="alertdialog"]',
-        );
-        if (inAux) return;
-        e.preventDefault();
-        const store = useProjectStore.getState();
-        if (key === "y" || e.shiftKey) store.redo();
-        else store.undo();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [saveChapter, compileNow]);
 
   return (
     <TooltipProvider>

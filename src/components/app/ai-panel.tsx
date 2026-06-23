@@ -1,12 +1,15 @@
 // ai-panel.tsx — the right-side assistant. Five tabs, each backed by a real
 // gpt-5.4-nano call grounded on the current scene:
 //   Suggest · Critique · Brainstorm · Continuity · Cast
-// Results fetch when a tab is opened and can be refreshed; nothing here is mocked.
+// Nothing infers on its own: each generating tab waits for an explicit Generate
+// (or Try again), and the author can steer the request with an optional
+// instruction. Results are cached per scene (see useAi / ai-cache-store) so
+// switching tabs or toggling the panel reuses a result instead of re-burning
+// tokens; a new scene/cursor shows idle until the author asks.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconArrowRight,
-  IconLoader2,
   IconRefresh,
   IconSend,
   IconSparkles,
@@ -15,10 +18,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
 import { ColorAvatar } from "@/components/app/color-dot";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
+import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { buildAiContext } from "@/lib/ai/context";
 import { uid } from "@/lib/id";
 import {
@@ -71,48 +76,38 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
 }
 
 /**
- * Manual async result: idle until run() is called; clears back to idle when
- * resetKey changes. `op` is read through a ref so run() (a stable callback)
- * always uses the latest closure — e.g. the current ask-box instruction —
- * without re-creating the callback or listing it as a dependency. A run-id guard
- * drops any in-flight result whose anchor (resetKey) changed before it resolved,
- * so a stale suggestion can never land against a new cursor/chapter.
+ * Cache-backed, manual async result. It is idle-first: nothing fetches on mount
+ * or when `cacheKey` changes — a request fires only on an explicit run() (the
+ * tabs' Generate / Try again / Refresh). Results live in the shared
+ * ai-cache-store keyed by `cacheKey`, so they survive remounts (tab switches,
+ * panel/focus toggles, reopening the panel) without re-burning tokens, while a
+ * new key (different scene / cursor) reads as idle until the author asks.
+ *
+ * `op` is read through a ref so run() (stable per key) always uses the latest
+ * closure — e.g. the current ask-box instruction. An in-flight run writes to the
+ * key it was started for, so moving the cursor mid-flight can never land a stale
+ * result against the new anchor; it just populates the old scene's cache entry.
  */
-function useAi<T>(op: () => Promise<T>, resetKey: unknown = 0) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function useAi<T>(op: () => Promise<T>, cacheKey: string) {
+  const entry = useAiCacheStore((s) => s.entries[cacheKey]);
+  const patch = useAiCacheStore((s) => s.patch);
   const opRef = useRef(op);
   opRef.current = op;
-  const runId = useRef(0);
 
   const run = useCallback(() => {
-    const id = ++runId.current;
-    setLoading(true);
-    setError(null);
+    patch(cacheKey, { loading: true, error: null });
     opRef
       .current()
-      .then((d) => {
-        if (id === runId.current) setData(d);
-      })
-      .catch((e) => {
-        if (id === runId.current) setError(String(e));
-      })
-      .finally(() => {
-        if (id === runId.current) setLoading(false);
-      });
-  }, []);
+      .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
+      .catch((e) => patch(cacheKey, { loading: false, error: String(e) }));
+  }, [cacheKey, patch]);
 
-  // Anchor (chapter/cursor) changed → invalidate any in-flight run and drop
-  // stale results back to idle. Never auto-runs.
-  useEffect(() => {
-    runId.current++;
-    setData(null);
-    setError(null);
-    setLoading(false);
-  }, [resetKey]);
-
-  return { data, loading, error, run };
+  return {
+    data: (entry?.data ?? null) as T | null,
+    loading: entry?.loading ?? false,
+    error: entry?.error ?? null,
+    run,
+  };
 }
 
 /** Persistent "you are here": the block the next AI action anchors to. */
@@ -177,7 +172,7 @@ function AskBox({
         className="min-h-0 resize-none font-sans text-[12.5px]"
       />
       <Button size="sm" onClick={onGenerate} disabled={loading} className="self-start">
-        {loading ? <IconLoader2 className="animate-spin" /> : <IconSparkles />}
+        {loading ? <Spinner /> : <IconSparkles />}
         Generate
       </Button>
     </div>
@@ -194,15 +189,16 @@ function SuggestTab() {
 
   const [instruction, setInstruction] = useState("");
   const askRef = useRef<HTMLTextAreaElement>(null);
-  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
 
+  // Keyed on chapter + cursor so a different scene/block reads as idle and an
+  // "Insert below" never drops an old block's suggestion into a new spot.
   const { data, loading, error, run } = useAi<SuggestResult>(
     () =>
       suggestContinuation({
         ...buildAiContext(),
         instruction: instruction.trim() || undefined,
       }),
-    resetKey,
+    `suggest:${activeChapterId ?? ""}:${selectedId ?? ""}`,
   );
 
   const [variant, setVariant] = useState(0);
@@ -277,7 +273,7 @@ function SuggestTab() {
                 v.type === "narration" && "italic text-muted-foreground",
               )}
             >
-              {v.type === "dialogue" ? `"${v.text}"` : v.text}
+              {v.type === "dialogue" ? `“${v.text}”` : v.text}
             </p>
             <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
               <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
@@ -330,10 +326,9 @@ function CritiqueTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
   const [instruction, setInstruction] = useState("");
-  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi<CritiqueNote[]>(
     () => critique({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    resetKey,
+    `critique:${activeChapterId ?? ""}:${selectedId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -390,10 +385,9 @@ function ContinuityTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
   const [instruction, setInstruction] = useState("");
-  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi<ContinuityFlag[]>(
     () => continuityCheck({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    resetKey,
+    `continuity:${activeChapterId ?? ""}:${selectedId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -467,10 +461,9 @@ function CastTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
   const [instruction, setInstruction] = useState("");
-  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi(
     () => detectCast({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
-    resetKey,
+    `cast:${activeChapterId ?? ""}:${selectedId ?? ""}`,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
@@ -614,7 +607,7 @@ function BrainstormTab() {
           className="min-h-0 resize-none font-sans text-[12.5px]"
         />
         <Button size="icon" onClick={() => void send()} disabled={streaming != null || !draft.trim()}>
-          {streaming != null ? <IconLoader2 className="animate-spin" /> : <IconSend />}
+          {streaming != null ? <Spinner /> : <IconSend />}
         </Button>
       </div>
     </div>

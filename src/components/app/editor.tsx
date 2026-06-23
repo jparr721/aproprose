@@ -9,9 +9,20 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
+import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
+import { KEYBINDING_IDS } from "@/lib/keybindings";
+import { isInAuxSurface } from "@/lib/dom";
 import { useDictation } from "@/lib/use-dictation";
 import type { BlockType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// Editor history defers to native undo/redo while the AI panel or a dialog holds
+// focus, so those inputs keep their own history.
+const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
+  enabled: true,
+  ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
+};
 
 function CursorRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
@@ -66,6 +77,24 @@ export function Editor() {
     if (!b) return;
     st.updateBlockText(id, (b.text ? `${b.text} ` : "") + text);
   });
+
+  // Document + history shortcuts live with the editing surface they act on.
+  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().saveChapter());
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.UNDO,
+    () => useProjectStore.getState().undo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.REDO,
+    () => useProjectStore.getState().redo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.REDO_ALT,
+    () => useProjectStore.getState().redo(),
+    EDITOR_HISTORY_OPTIONS,
+  );
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
 

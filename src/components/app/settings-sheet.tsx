@@ -9,7 +9,6 @@ import {
   IconCheck,
   IconEye,
   IconEyeOff,
-  IconLoader2,
   IconSettings,
   IconTrash,
 } from "@tabler/icons-react";
@@ -35,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
@@ -152,7 +152,7 @@ function OpenAiKeyField() {
           onClick={() => void save()}
           disabled={!draft.trim() || saving}
         >
-          {saving ? <IconLoader2 className="animate-spin" /> : null}
+          {saving ? <Spinner /> : null}
           Save
         </Button>
       </div>
@@ -202,7 +202,7 @@ function OpenAiKeyField() {
   );
 }
 
-export function SettingsSheet() {
+export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const { theme, layout, blockStyle, proseSize } = useSettingsStore();
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setLayout = useSettingsStore((s) => s.setLayout);
@@ -213,9 +213,11 @@ export function SettingsSheet() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="font-sans" title="Settings">
-          <IconSettings />
-        </Button>
+        {trigger ?? (
+          <Button variant="ghost" size="icon" className="font-sans" title="Settings">
+            <IconSettings />
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="font-sans">
         <SheetHeader>

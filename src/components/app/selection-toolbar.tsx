@@ -91,7 +91,8 @@ export function SelectionToolbar() {
     setSel(null);
   };
 
-  // Flip below the selection when there isn't room above.
+  // Flip below the selection when there isn't room above. 56px ≈ the block
+  // action-row height that sits above a selected block near the viewport top.
   const below = sel.rect.top < 56;
   const x = sel.rect.left + sel.rect.width / 2;
   const y = below ? sel.rect.bottom + 8 : sel.rect.top - 8;

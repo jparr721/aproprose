@@ -358,6 +358,8 @@ pub fn run() {
             git::git_repo_status,
             git::git_diff,
             git::sync_project,
+            git::gh_check_repo_name,
+            git::enable_backup_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

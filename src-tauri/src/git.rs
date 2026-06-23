@@ -341,6 +341,131 @@ pub async fn sync_project(root: String, message: String) -> Result<SyncOutcome, 
     sync(Path::new(&root), &message).await
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameCheck {
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoCreated {
+    pub remote_url: String,
+    pub owner: String,
+}
+
+const GITIGNORE_BLOCK: &[&str] = &[
+    "# LaTeX build artifacts (aproprose)",
+    "*.aux", "*.log", "*.out", "*.toc", "*.lof", "*.lot",
+    "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.bbl", "*.blg",
+    "*.run.xml", "*-blx.bib",
+    "# Compiled output (regenerable from source)",
+    "*.pdf",
+];
+
+/// Append our default ignore lines to `existing`, skipping any already present.
+/// Idempotent; never reorders or removes the user's lines.
+pub fn gitignore_with_defaults(existing: &str) -> String {
+    let have: std::collections::HashSet<&str> =
+        existing.lines().map(|l| l.trim()).collect();
+    let mut out = existing.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    let missing: Vec<&str> = GITIGNORE_BLOCK.iter().copied().filter(|l| !have.contains(l)).collect();
+    for line in missing {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Initialize `root` as a git repo (if needed), write/extend `.gitignore`, and
+/// make an initial commit. Uses ephemeral identity flags so it works even when
+/// the machine has no global git identity.
+pub async fn init_local_repo(root: &Path) -> Result<(), String> {
+    if !is_repo(root).await {
+        let init = run(root, "git", &["init", "-b", "main"]).await;
+        if !init.ok {
+            return Err(init.stderr.trim().to_string());
+        }
+    }
+    let gi_path = root.join(".gitignore");
+    let existing = std::fs::read_to_string(&gi_path).unwrap_or_default();
+    std::fs::write(&gi_path, gitignore_with_defaults(&existing))
+        .map_err(|e| format!("cannot write .gitignore: {e}"))?;
+
+    let add = run(root, "git", &["add", "-A"]).await;
+    if !add.ok {
+        return Err(add.stderr.trim().to_string());
+    }
+    let commit = run(
+        root,
+        "git",
+        &["-c", "user.email=backup@aproprose.local", "-c", "user.name=aproprose",
+          "commit", "-m", "chore: initial backup"],
+    ).await;
+    if !commit.ok && !commit.stdout.contains("nothing to commit") {
+        return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Validate a repo name against GitHub naming rules and check availability via
+/// `gh api`. Requires `gh` to be installed + authed.
+pub async fn check_repo_name(name: &str) -> Result<NameCheck, String> {
+    let valid = !name.is_empty()
+        && name.len() <= 100
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    if !valid {
+        return Ok(NameCheck { available: false, reason: Some("Use letters, numbers, '-', '_', '.'".into()) });
+    }
+    let login = {
+        let auth = run(&std::env::temp_dir(), "gh", &["api", "user", "--jq", ".login"]).await;
+        if !auth.ok {
+            return Err("gh is not authenticated — run `gh auth login`".into());
+        }
+        auth.stdout.trim().to_string()
+    };
+    let probe = run(&std::env::temp_dir(), "gh", &["api", &format!("repos/{login}/{name}"), "--silent"]).await;
+    // Exit 0 → repo exists (taken); non-zero (404) → available.
+    Ok(NameCheck {
+        available: !probe.ok,
+        reason: probe.ok.then(|| "A repo with that name already exists".to_string()),
+    })
+}
+
+/// Create a GitHub repo and set it as `origin`, pushing the current branch.
+pub async fn enable_backup(root: &Path, name: &str, private: bool) -> Result<RepoCreated, String> {
+    init_local_repo(root).await?;
+    let vis = if private { "--private" } else { "--public" };
+    let out = run(
+        root,
+        "gh",
+        &["repo", "create", name, vis, "--source=.", "--remote=origin", "--push"],
+    ).await;
+    if !out.ok {
+        return Err(format!("{}{}", out.stdout, out.stderr).trim().to_string());
+    }
+    let login = run(&std::env::temp_dir(), "gh", &["api", "user", "--jq", ".login"]).await;
+    let owner = login.stdout.trim().to_string();
+    Ok(RepoCreated {
+        remote_url: format!("https://github.com/{owner}/{name}"),
+        owner,
+    })
+}
+
+#[tauri::command]
+pub async fn gh_check_repo_name(name: String) -> Result<NameCheck, String> {
+    check_repo_name(&name).await
+}
+
+#[tauri::command]
+pub async fn enable_backup_cmd(root: String, name: String, private: bool) -> Result<RepoCreated, String> {
+    enable_backup(Path::new(&root), &name, private).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +657,33 @@ mod tests {
         let out = sync(&work, "noop").await.unwrap();
         assert!(matches!(out, SyncOutcome::Clean));
         let _ = std::fs::remove_dir_all(work.parent().unwrap());
+    }
+
+    #[test]
+    fn gitignore_is_idempotent_and_preserves_existing() {
+        let existing = "node_modules\n*.log\n";
+        let first = gitignore_with_defaults(existing);
+        assert!(first.contains("node_modules")); // preserved
+        assert_eq!(first.matches("*.log").count(), 1); // not duplicated
+        assert!(first.contains("*.fdb_latexmk"));
+        assert!(first.contains("*.pdf"));
+        // Running again changes nothing.
+        assert_eq!(gitignore_with_defaults(&first), first);
+    }
+
+    #[tokio::test]
+    async fn init_local_repo_creates_repo_with_gitignore_and_commit() {
+        let dir = std::env::temp_dir().join(format!("aproprose-init-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.tex"), "\\documentclass{book}").unwrap();
+        // git needs an identity; set it locally after init via init_local_repo? We set here:
+        init_local_repo(&dir).await.unwrap();
+        assert!(dir.join(".git").exists());
+        assert!(dir.join(".gitignore").exists());
+        let log = StdCommand::new("git").args(["log", "--oneline"]).current_dir(&dir).output().unwrap();
+        assert!(String::from_utf8_lossy(&log.stdout).contains("backup"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

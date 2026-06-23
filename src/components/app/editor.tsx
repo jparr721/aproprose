@@ -5,6 +5,7 @@ import {
   IconWriting,
 } from "@tabler/icons-react";
 import { Block } from "@/components/app/block";
+import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjectStore } from "@/stores/project-store";
@@ -97,6 +98,7 @@ export function Editor() {
         ))}
 
         <CursorRow />
+        <SelectionToolbar />
       </div>
     </ScrollArea>
   );

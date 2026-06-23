@@ -7,7 +7,7 @@
 //! renames every field to camelCase so the JSON the webview receives matches
 //! the `ProjectInfo` / `ChapterRef` interfaces byte-for-byte.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// A chapter as discovered in the project's main `.tex` file.
@@ -28,6 +28,19 @@ pub struct ChapterRef {
     pub word_count: usize,
 }
 
+/// The editable manuscript metadata, mirrored from `metadata.tex`.
+/// Mirrors `NovelMetadata` in `src/lib/types.ts`. `editionyear` is intentionally
+/// absent — the template always renders it as `\the\year{}` (current year).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NovelMetadata {
+    pub title: String,
+    pub subtitle: String,
+    pub author: String,
+    pub publisher: String,
+    pub isbn: String,
+}
+
 /// The shape returned by the `open_project` command.
 /// Mirrors `ProjectInfo` in `src/lib/types.ts`.
 #[derive(Debug, Serialize)]
@@ -38,6 +51,7 @@ pub struct ProjectInfo {
     pub main_file: String,
     pub title: Option<String>,
     pub author: Option<String>,
+    pub metadata: NovelMetadata,
     pub chapters: Vec<ChapterRef>,
 }
 
@@ -71,6 +85,7 @@ pub fn open_project(root: &Path) -> Result<ProjectInfo, String> {
         main_file: main_rel,
         title,
         author,
+        metadata: NovelMetadata::default(),
         chapters,
     })
 }

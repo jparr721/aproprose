@@ -25,6 +25,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { buildAiContext } from "@/lib/ai/context";
+import { describeAiError } from "@/lib/ai/errors";
 import { uid } from "@/lib/id";
 import {
   brainstorm,
@@ -101,7 +102,7 @@ function useAi<T>(op: () => Promise<T>, cacheKey: string) {
     opRef
       .current()
       .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
-      .catch((e) => patch(cacheKey, { loading: false, error: String(e) }));
+      .catch((e) => patch(cacheKey, { loading: false, error: describeAiError(e) }));
   }, [cacheKey, patch]);
 
   return {
@@ -542,19 +543,24 @@ function BrainstormTab() {
     setDraft("");
     setStreaming("");
     setError(null);
+    let acc = "";
     try {
       const result = await brainstorm(
         next.map(({ role, content }) => ({ role, content })),
         buildAiContext(),
       );
-      let acc = "";
       for await (const delta of result.textStream) {
         acc += delta;
         setStreaming(acc);
       }
       setMessages([...next, { id: uid("m"), role: "assistant", content: acc }]);
     } catch (e) {
-      setError(String(e));
+      // Keep whatever streamed before the failure so a near-complete reply isn't
+      // lost; surface the error (with HTTP status / body) alongside it.
+      if (acc) {
+        setMessages([...next, { id: uid("m"), role: "assistant", content: acc }]);
+      }
+      setError(describeAiError(e));
     } finally {
       setStreaming(null);
     }

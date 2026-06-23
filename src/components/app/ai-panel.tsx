@@ -40,16 +40,19 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
-import { buildAiContext } from "@/lib/ai/context";
+import { buildAiContext, buildEditRequest } from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
 import {
   brainstorm,
   critique,
   continuityCheck,
   detectCast,
+  editBlocks,
   suggestContinuation,
 } from "@/lib/ai/operations";
+import { diffWords, type DiffSegment } from "@/lib/diff/word-diff";
 import type {
+  BlockEdit,
   CastMember,
   CastResult,
   ChatMessage,
@@ -148,12 +151,14 @@ function AiComposer({
   onSubmit,
   allowEmpty = false,
   focusSignal,
+  toolbar,
 }: {
   placeholder: string;
   loading: boolean;
   onSubmit: (text: string) => void;
   allowEmpty?: boolean;
   focusSignal?: number;
+  toolbar?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -161,7 +166,8 @@ function AiComposer({
   }, [focusSignal]);
 
   return (
-    <div ref={ref} className="shrink-0 border-t border-border bg-card p-3">
+    <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
+      {toolbar}
       <PromptInput
         onSubmit={(m) => {
           const t = m.text.trim();
@@ -551,6 +557,168 @@ function CastTab() {
   );
 }
 
+// -- Edit ---------------------------------------------------------------------
+const DIFF_TONE: Record<DiffSegment["type"], string> = {
+  same: "text-foreground",
+  add: "rounded-sm bg-success/15 text-success",
+  del: "text-faint line-through",
+};
+
+function DiffText({ segments }: { segments: DiffSegment[] }) {
+  return (
+    <p className="font-serif text-sm leading-relaxed">
+      {segments.map((s, i) => (
+        <span key={i} className={cn(DIFF_TONE[s.type])}>
+          {s.text}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function ScopeToggle({
+  scope,
+  onChange,
+  disabled,
+}: {
+  scope: "block" | "chapter";
+  onChange: (s: "block" | "chapter") => void;
+  disabled?: boolean;
+}) {
+  const opts: { id: "block" | "chapter"; label: string }[] = [
+    { id: "block", label: "This block" },
+    { id: "chapter", label: "Whole chapter" },
+  ];
+  return (
+    <div className="flex gap-1">
+      {opts.map((o) => (
+        <Button
+          key={o.id}
+          size="sm"
+          variant={scope === o.id ? "default" : "outline"}
+          disabled={disabled}
+          onClick={() => onChange(o.id)}
+          className="h-7 flex-1 text-xs"
+        >
+          {o.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function EditTab() {
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const blocks = useProjectStore((s) => s.blocks);
+  const updateBlockText = useProjectStore((s) => s.updateBlockText);
+  const patch = useAiCacheStore((s) => s.patch);
+
+  const [scope, setScope] = useState<"block" | "chapter">("block");
+  const cacheKey = `edit:${activeChapterId ?? ""}:${scope}:${
+    scope === "block" ? selectedId ?? "" : ""
+  }`;
+  const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
+    (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
+    cacheKey,
+  );
+
+  const edits = data ?? [];
+  // Resolve each edit against the live block so the diff reflects current text;
+  // drop edits whose block has since been removed.
+  const live = edits.flatMap((edit) => {
+    const block = blocks.find((b) => b.id === edit.blockId);
+    return block ? [{ edit, block }] : [];
+  });
+
+  const dismiss = (blockId: string) =>
+    patch(cacheKey, { data: edits.filter((e) => e.blockId !== blockId) });
+  const accept = (e: BlockEdit) => {
+    updateBlockText(e.blockId, e.newText);
+    dismiss(e.blockId);
+  };
+  const acceptAll = () => {
+    for (const { edit } of live) updateBlockText(edit.blockId, edit.newText);
+    patch(cacheKey, { data: [] });
+  };
+  const rejectAll = () => patch(cacheKey, { data: [] });
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-3 p-4">
+          <AskedCaption instruction={instruction} />
+          {loading ? (
+            <LoadingLines rows={5} />
+          ) : error ? (
+            <AiError error={error} onRetry={() => run(instruction)} />
+          ) : !data ? (
+            <p className="font-sans text-xs leading-relaxed text-faint">
+              Describe an edit and pick a scope. Changes come back block by block
+              as before/after diffs you can accept or reject.
+            </p>
+          ) : live.length === 0 ? (
+            <p className="font-sans text-xs text-faint">No changes suggested.</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
+                  {live.length} proposed {live.length === 1 ? "edit" : "edits"}
+                </span>
+                <div className="flex gap-1.5">
+                  <Button size="sm" onClick={acceptAll}>
+                    Accept all
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={rejectAll}>
+                    Reject all
+                  </Button>
+                </div>
+              </div>
+              {live.map(({ edit, block }) => (
+                <div
+                  key={edit.blockId}
+                  className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3"
+                >
+                  <span className="font-sans text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                    {block.type}
+                  </span>
+                  <DiffText segments={diffWords(block.text, edit.newText)} />
+                  <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
+                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                      Why
+                    </span>
+                    <p className="font-sans text-xs leading-snug text-muted-foreground">
+                      {edit.reason}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button size="sm" onClick={() => accept(edit)}>
+                      Accept
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => dismiss(edit.blockId)}>
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+      <AiComposer
+        placeholder={
+          scope === "block" && !selectedId
+            ? "Place your cursor in a block to edit it"
+            : "Describe the edit, e.g. fix typos, tighten, make her colder"
+        }
+        loading={loading}
+        onSubmit={(t) => run(t)}
+        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} />}
+      />
+    </div>
+  );
+}
+
 // -- Brainstorm ---------------------------------------------------------------
 const EMPTY_THREAD: ChatMessage[] = [];
 
@@ -682,6 +850,7 @@ function BrainstormTab() {
 // -- Panel shell --------------------------------------------------------------
 const TABS: { id: AiTab; label: string }[] = [
   { id: "suggest", label: "Suggest" },
+  { id: "edit", label: "Edit" },
   { id: "critique", label: "Critique" },
   { id: "brainstorm", label: "Brainstorm" },
   { id: "continuity", label: "Continuity" },
@@ -719,6 +888,9 @@ export function AiPanel() {
         {/* Each tab is a flex column: a scrollable body and a bottom-pinned composer. */}
         <TabsContent value="suggest" className="min-h-0 flex-1">
           <SuggestTab />
+        </TabsContent>
+        <TabsContent value="edit" className="min-h-0 flex-1">
+          <EditTab />
         </TabsContent>
         <TabsContent value="critique" className="min-h-0 flex-1">
           <CritiqueTab />

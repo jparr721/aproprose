@@ -90,6 +90,36 @@ pub fn render_chapters(chapters: &[(String, String)]) -> String {
     out
 }
 
+/// The largest leading-number found across `content/*.tex` filenames, or 0 if
+/// none. Tolerant of prelude's irregular legacy names (e.g. `chapter7-interlude.tex`
+/// → 7, `chapter13-interlude.tex` → 13, `chapter-001.tex` → 1). New chapters get
+/// `content/chapter-{max+1:03}.tex`, so there is never a collision.
+fn max_content_index(content_dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(content_dir) else {
+        return 0;
+    };
+    let mut max = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("tex") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // First contiguous run of digits in the stem.
+        let digits: String = stem
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digits.parse::<usize>() {
+            max = max.max(n);
+        }
+    }
+    max
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +162,24 @@ mod tests {
             "\\chapter{Terry}\n\\input{content/chapter-001.tex}\n\
              \\chapter{Party}\n\\input{content/chapter-002.tex}\n"
         );
+    }
+
+    #[test]
+    fn max_index_empty_dir_is_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = dir.path().join("content");
+        fs::create_dir_all(&content).unwrap();
+        assert_eq!(max_content_index(&content), 0);
+    }
+
+    #[test]
+    fn max_index_handles_irregular_legacy_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = dir.path().join("content");
+        fs::create_dir_all(&content).unwrap();
+        for name in ["chapter0.tex", "chapter12.tex", "chapter13-interlude.tex", "notes.txt"] {
+            fs::write(content.join(name), "").unwrap();
+        }
+        assert_eq!(max_content_index(&content), 13);
     }
 }

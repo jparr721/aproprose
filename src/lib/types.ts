@@ -72,6 +72,37 @@ export interface ChapterRef {
   wordCount: number;
 }
 
+/** Editable manuscript metadata, mirrored from `metadata.tex`. Edition year is
+ *  always the current year (rendered as `\the\year`), so it is not a field. */
+export interface NovelMetadata {
+  title: string;
+  subtitle: string;
+  author: string;
+  publisher: string;
+  isbn: string;
+}
+
+/** One chapter in a skeleton-mutation request. `file: null` means "new chapter —
+ *  the backend allocates a stable filename and creates an empty body". */
+export interface SkeletonChapter {
+  title: string;
+  file: string | null;
+}
+
+/** The full skeleton the app owns; the backend regenerates the `.tex` from it. */
+export interface SkeletonModel {
+  metadata: NovelMetadata;
+  chapters: SkeletonChapter[];
+}
+
+/** The result of opening a folder: a ready managed project, or a migration signal. */
+export interface OpenOutcome {
+  status: "managed" | "needsMigration";
+  project: ProjectInfo | null;
+  mainFile: string | null;
+  detectedChapters: number | null;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -97,6 +128,7 @@ export interface ProjectInfo {
   title: string | null;
   /** `\author` / `\authorname` if found in the preamble. */
   author: string | null;
+  metadata: NovelMetadata;
   chapters: ChapterRef[];
 }
 

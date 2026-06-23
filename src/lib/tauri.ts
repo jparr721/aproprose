@@ -10,7 +10,13 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { CompileResult, ProjectInfo } from "@/lib/types";
+import type {
+  CompileResult,
+  NovelMetadata,
+  OpenOutcome,
+  ProjectInfo,
+  SkeletonModel,
+} from "@/lib/types";
 
 // ── Project ───────────────────────────────────────────────────────────────────
 
@@ -25,11 +31,42 @@ export async function pickProjectDir(): Promise<string | null> {
 }
 
 /**
- * Parse a project directory: locate the main `.tex` file, read its preamble for
- * title/author, and enumerate `\chapter{…}` / `\input{…}` pairs.
+ * Open a project folder. Managed projects return `{status: "managed", project}`;
+ * legacy folders return `{status: "needsMigration", mainFile, detectedChapters}`.
  */
-export function openProject(root: string): Promise<ProjectInfo> {
-  return invoke<ProjectInfo>("open_project", { root });
+export function openProject(root: string): Promise<OpenOutcome> {
+  return invoke<OpenOutcome>("open_project", { root });
+}
+
+/** Scaffold a new managed novel under `parent` and open it. */
+export function createProject(
+  parent: string,
+  name: string,
+  metadata: NovelMetadata,
+): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("create_project", { parent, name, metadata });
+}
+
+/** Regenerate metadata.tex + chapters.tex from the model; returns the fresh project. */
+export function writeSkeleton(
+  root: string,
+  model: SkeletonModel,
+): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("write_skeleton", { root, model });
+}
+
+/** Delete a chapter: regenerate from the trimmed model and remove its body file. */
+export function deleteChapterCmd(
+  root: string,
+  model: SkeletonModel,
+  file: string,
+): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("delete_chapter", { root, model, file });
+}
+
+/** Convert a legacy project to the managed layout (one-time). */
+export function migrateToManaged(root: string): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("migrate_to_managed", { root });
 }
 
 // ── Files ─────────────────────────────────────────────────────────────────────

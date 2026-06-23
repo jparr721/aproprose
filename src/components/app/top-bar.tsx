@@ -2,6 +2,7 @@
 // status, panel toggles, settings, the Compile CTA, and (off-macOS) window
 // controls. Project switching now lives in the sidebar header, not here.
 
+import { useState } from "react";
 import {
   IconFileTypePdf,
   IconPlayerPlayFilled,
@@ -13,6 +14,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
+import { BackupReviewSheet } from "@/components/app/backup-review-sheet";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding } from "@/hooks/use-keybinding";
@@ -58,6 +60,8 @@ function BuildBadge() {
 }
 
 export function TopBar() {
+  const [reviewOpen, setReviewOpen] = useState(false);
+
   const project = useProjectStore((s) => s.project);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
@@ -107,7 +111,7 @@ export function TopBar() {
 
         <BuildBadge />
         {project ? (
-          <SyncStatus onReview={() => {}} onSetup={() => {}} />
+          <SyncStatus onReview={() => setReviewOpen(true)} onSetup={() => {}} />
         ) : null}
       </div>
 
@@ -158,6 +162,7 @@ export function TopBar() {
         ) : null}
         <WindowControls />
       </div>
+      <BackupReviewSheet open={reviewOpen} onOpenChange={setReviewOpen} />
     </header>
   );
 }

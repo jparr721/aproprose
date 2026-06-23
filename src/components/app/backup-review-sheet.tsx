@@ -40,6 +40,7 @@ function FileRow({ root, path, status }: { root: string; path: string; status: s
   const [open, setOpen] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = async () => {
     const next = !open;
@@ -48,6 +49,8 @@ function FileRow({ root, path, status }: { root: string; path: string; status: s
       setLoading(true);
       try {
         setDiff(await gitDiff(root, path));
+      } catch (e) {
+        setError(String(e));
       } finally {
         setLoading(false);
       }
@@ -67,6 +70,8 @@ function FileRow({ root, path, status }: { root: string; path: string; status: s
       {open ? (
         loading ? (
           <Spinner className="size-3.5" />
+        ) : error ? (
+          <TypographyMuted className="text-[11px] text-destructive">Couldn't load diff: {error}</TypographyMuted>
         ) : diff && diff.trim() ? (
           <DiffView text={diff} />
         ) : (

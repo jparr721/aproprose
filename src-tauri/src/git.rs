@@ -279,7 +279,9 @@ pub async fn unmerged_files(root: &Path) -> Vec<String> {
     out.stdout.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect()
 }
 
-/// The atomic backup sequence: stage → commit → pull/merge → push.
+/// The backup sequence: stage → commit → pull/merge → push. Steps short-circuit
+/// into a SyncOutcome (conflict / push-rejected / offline / auth-missing) that
+/// leaves a recoverable partial state, surfaced to the UI — it is not atomic.
 pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     if !is_repo(root).await {
         return Ok(SyncOutcome::NeedsSetup { reason: "not a git repository".into() });

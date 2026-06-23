@@ -7,7 +7,7 @@ import { create } from "zustand";
 import type { ChangedFile, RepoStatus, SyncPrefs, SyncStatus } from "@/lib/types";
 import { gitRepoStatus, syncProject, readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
-import { backupMessage, outcomeToStatus } from "@/lib/backup/messages";
+import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from "@/lib/backup/messages";
 
 const DEFAULT_PREFS: SyncPrefs = { autoSync: false, intervalMinutes: 10 };
 const prefsKey = (root: string) => `sync-${pathHash(root)}`;
@@ -36,12 +36,6 @@ interface SyncState {
   setIntervalMinutes: (n: number) => void;
 }
 
-function deriveIdleStatus(s: RepoStatus): SyncStatus {
-  if (!s.isRepo || !s.hasRemote) return "disabled";
-  if (s.conflictedFiles.length > 0) return "conflict";
-  if (s.dirty || s.ahead > 0) return "dirty";
-  return "clean";
-}
 
 export const useSyncStore = create<SyncState>((set, get) => {
   const armTimer = () => {
@@ -107,14 +101,26 @@ export const useSyncStore = create<SyncState>((set, get) => {
     refreshStatus: async () => {
       const { root } = get();
       if (!root) return;
-      const s = await gitRepoStatus(root);
-      set({
+      let s: RepoStatus;
+      try {
+        s = await gitRepoStatus(root);
+      } catch (e) {
+        set({ status: "error", lastError: String(e) });
+        return;
+      }
+      set((prev) => ({
         isRepo: s.isRepo,
         remoteUrl: s.remoteUrl,
         changedFiles: s.changedFiles,
         conflictedFiles: s.conflictedFiles,
-        status: get().inFlight ? "syncing" : deriveIdleStatus(s),
-      });
+        // Don't repaint a terminal failure the sync just set.
+        status:
+          prev.inFlight
+            ? "syncing"
+            : prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"
+              ? prev.status
+              : deriveIdleStatus(s),
+      }));
     },
 
     syncNow: async () => {
@@ -126,19 +132,34 @@ export const useSyncStore = create<SyncState>((set, get) => {
         const status = outcomeToStatus(outcome);
         set({
           status,
-          lastError: outcome.kind === "needsSetup" ? outcome.reason : null,
+          lastError: outcomeMessage(outcome),
           lastSyncedAt: status === "synced" || status === "clean" ? Date.now() : get().lastSyncedAt,
         });
         if (outcome.kind === "conflict") {
           // Pause auto-sync until resolved.
           set({ autoSync: false, conflictedFiles: outcome.files });
+          persistPrefs();
           armTimer();
         }
       } catch (e) {
         set({ status: "error", lastError: String(e) });
       } finally {
         set({ inFlight: false });
-        await get().refreshStatus();
+        // Refresh the file lists WITHOUT overwriting the outcome status.
+        const { root: r } = get();
+        if (r) {
+          try {
+            const s = await gitRepoStatus(r);
+            set({
+              isRepo: s.isRepo,
+              remoteUrl: s.remoteUrl,
+              changedFiles: s.changedFiles,
+              conflictedFiles: s.conflictedFiles,
+            });
+          } catch {
+            // status already reflects the sync outcome; ignore a refresh failure
+          }
+        }
       }
     },
 

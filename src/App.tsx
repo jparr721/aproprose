@@ -28,6 +28,7 @@ import { AiPanel } from "@/components/app/ai-panel";
 import { Welcome } from "@/components/app/welcome";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { bindingFor } from "@/lib/keybindings";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -84,37 +85,47 @@ function UnsavedGuard() {
 
 function App() {
   const status = useProjectStore((s) => s.status);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
   const compileNow = useProjectStore((s) => s.compileNow);
 
-  // Keyboard: ⌘/Ctrl+S saves, ⌘/Ctrl+Enter compiles, ⌘/Ctrl+Z / +Shift+Z (or
-  // Ctrl+Y) undo/redo the editor. Undo/redo is skipped when focus is inside the
-  // AI panel or a dialog so those inputs keep their own behavior.
+  // Keyboard shortcuts come from the central registry (see src/lib/keybindings.ts):
+  // ⌘/Ctrl+S saves & rebuilds the PDF, ⌘/Ctrl+Enter splits the focused prose
+  // block at the caret, ⌘/Ctrl+Z / +Shift+Z (or Ctrl+Y) undo/redo. Undo/redo is
+  // skipped when focus is inside the AI panel or a dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-      if (key === "s") {
-        e.preventDefault();
-        void saveChapter();
-      } else if (key === "enter") {
+      const binding = bindingFor(e);
+      if (!binding) return;
+
+      if (binding.id === "save-build") {
         e.preventDefault();
         void compileNow();
-      } else if (key === "z" || key === "y") {
-        const inAux = (document.activeElement as HTMLElement | null)?.closest(
-          '[data-ai-root],[role="dialog"],[role="alertdialog"]',
-        );
-        if (inAux) return;
-        e.preventDefault();
-        const store = useProjectStore.getState();
-        if (key === "y" || e.shiftKey) store.redo();
-        else store.undo();
+        return;
       }
+
+      if (binding.id === "split") {
+        const el = document.activeElement;
+        if (!(el instanceof HTMLTextAreaElement) || !el.matches("[data-prose-body]")) return;
+        const host = el.closest("[data-block-id]");
+        const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+        if (!blockId) return;
+        e.preventDefault();
+        useProjectStore.getState().splitBlock(blockId, el.selectionStart);
+        return;
+      }
+
+      // undo / redo
+      const inAux = (document.activeElement as HTMLElement | null)?.closest(
+        '[data-ai-root],[role="dialog"],[role="alertdialog"]',
+      );
+      if (inAux) return;
+      e.preventDefault();
+      const store = useProjectStore.getState();
+      if (binding.id === "redo") store.redo();
+      else store.undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [saveChapter, compileNow]);
+  }, [compileNow]);
 
   return (
     <TooltipProvider>

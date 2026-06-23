@@ -120,8 +120,14 @@ fn max_content_index(content_dir: &Path) -> usize {
     max
 }
 
-/// Build a `NovelMetadata` from a source containing the 6 `\newcommand` macros
+/// Build a `NovelMetadata` from a source containing the `\newcommand` macros
 /// (works for both `metadata.tex` and a legacy `main.tex` preamble).
+///
+/// Migration limitation: this reads only the `\newcommand{\booktitle}{…}` style
+/// macros that this app's template (and prelude) use. A hand-built legacy project
+/// that puts its title/author in bare `\title{…}` / `\author{…}` commands will
+/// migrate with empty metadata — the author can re-enter it in Project settings,
+/// and the original is preserved in `main.tex.bak`.
 fn read_metadata(source: &str) -> NovelMetadata {
     let get = |name: &str| {
         project::newcommand_value(source, name)

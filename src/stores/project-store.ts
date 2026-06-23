@@ -334,6 +334,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const project = await createProjectCmd(parent, name, metadata);
         await finishLoad(project.root, project);
       } catch (e) {
+        toast.error("Couldn't create the project", { description: String(e) });
         set({ status: "empty", error: String(e) });
       }
     },
@@ -349,6 +350,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const created = updated.chapters[updated.chapters.length - 1];
         if (created) await get().selectChapter(created.id);
       } catch (e) {
+        toast.error("Couldn't add the chapter", { description: String(e) });
         set({ error: String(e) });
       }
     },
@@ -364,6 +366,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
       } catch (e) {
+        toast.error("Couldn't rename the chapter", { description: String(e) });
         set({ error: String(e) });
       }
     },
@@ -381,6 +384,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
       } catch (e) {
+        toast.error("Couldn't reorder chapters", { description: String(e) });
         set({ error: String(e) });
       }
     },
@@ -402,6 +406,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           else set({ activeChapterId: null, blocks: [], selectedId: null });
         }
       } catch (e) {
+        toast.error("Couldn't delete the chapter", { description: String(e) });
         set({ error: String(e) });
       }
     },
@@ -415,6 +420,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
       } catch (e) {
+        toast.error("Couldn't save project settings", { description: String(e) });
         set({ error: String(e) });
       }
     },
@@ -427,7 +433,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const project = await migrateToManaged(nm.root);
         await finishLoad(project.root, project);
       } catch (e) {
-        set({ status: "empty", error: String(e) });
+        // Restore the migration prompt so the user can retry without reopening.
+        toast.error("Migration failed", { description: String(e) });
+        set({ status: "empty", error: String(e), needsMigration: nm });
       }
     },
 

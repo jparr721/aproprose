@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   SidebarGroup,
   SidebarGroupAction,
@@ -80,13 +81,17 @@ function AddChapterDialog() {
         <DialogHeader>
           <DialogTitle className="font-heading">Add chapter</DialogTitle>
         </DialogHeader>
-        <Input
-          value={title}
-          autoFocus
-          onChange={(e) => setTitle(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Chapter title"
-        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="add-chapter-title">Title</Label>
+          <Input
+            id="add-chapter-title"
+            value={title}
+            autoFocus
+            onChange={(e) => setTitle(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="Chapter title"
+          />
+        </div>
         <DialogFooter>
           <Button onClick={submit} disabled={!title.trim()}>
             Add
@@ -119,12 +124,16 @@ function RenameChapterDialog({
         <DialogHeader>
           <DialogTitle className="font-heading">Rename chapter</DialogTitle>
         </DialogHeader>
-        <Input
-          value={title}
-          autoFocus
-          onChange={(e) => setTitle(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="rename-chapter-title">Title</Label>
+          <Input
+            id="rename-chapter-title"
+            value={title}
+            autoFocus
+            onChange={(e) => setTitle(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        </div>
         <DialogFooter>
           <Button onClick={submit} disabled={!title.trim()}>
             Rename

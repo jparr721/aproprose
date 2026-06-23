@@ -107,7 +107,7 @@ export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "m
 
 // Compact glyphs for on-screen hints. Only the command modifier differs by
 // platform — ⌘ on macOS, ⌃ (control) elsewhere; shift / alt and the key glyphs
-// are shared, and parts join with no separator (e.g. "⌘⇧P" / "⌃⇧P").
+// are shared.
 const KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
 
 function formatKey(key: string): string {
@@ -117,17 +117,18 @@ function formatKey(key: string): string {
 }
 
 /**
- * A compact glyph hint for a shortcut — "⌘⇧P" on macOS, "⌃⇧P" elsewhere.
- * Pass `IS_MAC` from `@/lib/platform`.
+ * The display glyphs of a shortcut, in press order — e.g. `["⌘", "⇧", "P"]` on
+ * macOS, `["⌃", "⇧", "P"]` elsewhere. Render each in its own `<Kbd>` (see
+ * `KeybindingHint`). Pass `IS_MAC` from `@/lib/platform`.
  */
-export function formatKeybinding(
+export function keybindingParts(
   keybinding: Pick<KeybindingDefinition, "key" | "modifiers">,
   isMac: boolean,
-): string {
+): string[] {
   const parts: string[] = [];
   if (keybinding.modifiers.ctrl) parts.push(isMac ? "⌘" : "⌃");
   if (keybinding.modifiers.shift) parts.push("⇧");
   if (keybinding.modifiers.alt) parts.push("⌥");
   parts.push(formatKey(keybinding.key));
-  return parts.join("");
+  return parts;
 }

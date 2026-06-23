@@ -8,14 +8,14 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { WindowControls } from "@/components/app/window-controls";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding } from "@/hooks/use-keybinding";
-import { KEYBINDINGS, KEYBINDING_IDS, formatKeybinding } from "@/lib/keybindings";
+import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -135,7 +135,7 @@ export function TopBar() {
               )}
             >
               <IconFileTypePdf /> PDF
-              <Kbd>{formatKeybinding(KEYBINDINGS.TOGGLE_PDF, IS_MAC)}</Kbd>
+              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} />
             </Button>
             <Button
               variant="outline"
@@ -148,7 +148,7 @@ export function TopBar() {
               )}
             >
               <IconSparkles /> AI
-              <Kbd>{formatKeybinding(KEYBINDINGS.TOGGLE_AI, IS_MAC)}</Kbd>
+              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_AI} />
             </Button>
           </>
         ) : null}

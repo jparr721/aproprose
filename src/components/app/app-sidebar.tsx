@@ -217,7 +217,9 @@ export function AppSidebar() {
                     {meta.characters.map((c) => (
                       <SidebarMenuItem key={c.id}>
                         <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                          <ColorDot color={c.color} className="mt-0.5 shrink-0" />
+                          <span className="flex h-4 shrink-0 items-center">
+                            <ColorDot color={c.color} />
+                          </span>
                           <span className="break-words">{c.name}</span>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -247,7 +249,9 @@ export function AppSidebar() {
                     {meta.lore.map((l) => (
                       <SidebarMenuItem key={l.id}>
                         <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
-                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-lore-ink" />
+                          <span className="flex h-4 shrink-0 items-center">
+                            <span className="size-1.5 rounded-full bg-lore-ink" />
+                          </span>
                           <span className="break-words">{l.title}</span>
                         </SidebarMenuButton>
                       </SidebarMenuItem>

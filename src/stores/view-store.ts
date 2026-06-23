@@ -1,16 +1,28 @@
-// view-store.ts — ephemeral view state shared across the chrome.
+// view-store.ts -- view state shared across the chrome.
 //
 // Panel visibility (AI / PDF / focus) is read+written by the top bar, the editor
 // layout, and the settings sheet, so per CLAUDE.md it's a store rather than a
 // context. It also owns the "discard unsaved edits?" guard: any state-wiping
 // action (open project, switch chapter, close) is routed through requestGuarded,
 // which defers to a confirm dialog when the current chapter is dirty.
+//
+// Only `aiTab` is persisted (to the app config dir, via the Tauri-backed storage
+// adapter) so the panel reopens on the tab the author last used; the rest of the
+// state is ephemeral and the `pending` callback is not serializable.
 
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { LayoutMode } from "@/lib/types";
+import { tauriStateStorage } from "@/lib/storage";
 import { useProjectStore } from "@/stores/project-store";
 
-export type AiTab = "suggest" | "critique" | "brainstorm" | "continuity" | "cast";
+export type AiTab =
+  | "suggest"
+  | "edit"
+  | "critique"
+  | "brainstorm"
+  | "continuity"
+  | "cast";
 
 interface ViewState {
   aiOpen: boolean;
@@ -21,7 +33,7 @@ interface ViewState {
 
   /** Active AI panel tab. */
   aiTab: AiTab;
-  /** Bumped to focus the Suggest ask box (e.g. from the ✨ spark). Never runs the model. */
+  /** Bumped to focus the Suggest ask box (e.g. from the spark). Never runs the model. */
   suggestFocusTick: number;
 
   toggleAi: () => void;
@@ -37,42 +49,53 @@ interface ViewState {
   cancelPending: () => void;
 }
 
-export const useViewStore = create<ViewState>((set, get) => ({
-  aiOpen: true,
-  pdfOpen: false,
-  focus: false,
-
-  pending: null,
-
-  aiTab: "suggest",
-  suggestFocusTick: 0,
-
-  toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
-  togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
-
-  applyLayoutPreset: (preset) => {
-    if (preset === "focus") set({ focus: true });
-    else if (preset === "two") set({ focus: false, aiOpen: true, pdfOpen: false });
-    else set({ focus: false, aiOpen: true, pdfOpen: true });
-  },
-
-  setAiTab: (tab) => set({ aiTab: tab }),
-  triggerSuggest: () =>
-    set((s) => ({
+export const useViewStore = create<ViewState>()(
+  persist(
+    (set, get) => ({
       aiOpen: true,
+      pdfOpen: false,
       focus: false,
-      aiTab: "suggest",
-      suggestFocusTick: s.suggestFocusTick + 1,
-    })),
 
-  requestGuarded: (action) => {
-    if (useProjectStore.getState().chapterDirty) set({ pending: () => action() });
-    else action();
-  },
-  confirmPending: () => {
-    const { pending } = get();
-    pending?.();
-    set({ pending: null });
-  },
-  cancelPending: () => set({ pending: null }),
-}));
+      pending: null,
+
+      aiTab: "suggest",
+      suggestFocusTick: 0,
+
+      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
+      togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
+
+      applyLayoutPreset: (preset) => {
+        if (preset === "focus") set({ focus: true });
+        else if (preset === "two") set({ focus: false, aiOpen: true, pdfOpen: false });
+        else set({ focus: false, aiOpen: true, pdfOpen: true });
+      },
+
+      setAiTab: (tab) => set({ aiTab: tab }),
+      triggerSuggest: () =>
+        set((s) => ({
+          aiOpen: true,
+          focus: false,
+          aiTab: "suggest",
+          suggestFocusTick: s.suggestFocusTick + 1,
+        })),
+
+      requestGuarded: (action) => {
+        if (useProjectStore.getState().chapterDirty) set({ pending: () => action() });
+        else action();
+      },
+      confirmPending: () => {
+        const { pending } = get();
+        pending?.();
+        set({ pending: null });
+      },
+      cancelPending: () => set({ pending: null }),
+    }),
+    {
+      name: "view",
+      storage: createJSONStorage(() => tauriStateStorage),
+      // Only the selected tab persists; visibility toggles are ephemeral and the
+      // `pending` callback is not serializable.
+      partialize: ({ aiTab }) => ({ aiTab }),
+    },
+  ),
+);

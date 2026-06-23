@@ -135,11 +135,26 @@ const RE_TEXTBF = /^\\textbf\{([\s\S]*)\}$/;
 const RE_LORE = /^%\s*@lore(?:\[([^\]]*)\])?:\s?([\s\S]*)$/;
 // A scratchpad comment: `% @scratch: body`.
 const RE_SCRATCH = /^%\s*@scratch:\s?([\s\S]*)$/;
+// A speaker tag: `% @speaker: <id>` on its own line, immediately above the
+// dialogue it labels (see serialize.ts). The id references a Character.
+const RE_SPEAKER = /^\s*%\s*@speaker:\s?(\S+)\s*\n([\s\S]*)$/;
 // A backslash macro that is NOT \emph — its presence disqualifies simple prose.
 // (\emph is the one inline macro prose is allowed to carry.)
 const RE_NON_EMPH_MACRO = /\\(?!emph\b)[a-zA-Z@]+/;
 
 function classify(content: string, raw: string): Block {
+  // A leading `% @speaker: <id>` line tags the dialogue beneath it. Honor it only
+  // when the remainder really is dialogue, so a stray comment is never dropped
+  // (fidelity over cleverness — the full segment still lives in `raw`).
+  const sp = RE_SPEAKER.exec(content);
+  if (sp) {
+    const dialogue = tryDialogue(sp[2].trim(), raw);
+    if (dialogue) {
+      dialogue.speaker = sp[1];
+      return dialogue;
+    }
+  }
+
   const trimmed = content.trim();
 
   // 1. Centered environments → chapter scene / break.

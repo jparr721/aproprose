@@ -37,10 +37,14 @@ function renderBody(block: Block): string {
 
     case "dialogue": {
       const quote = `\`\`${textToLatex(block.text)}''`;
-      if (block.beat && block.beat.trim().length > 0) {
-        return `${quote} ${textToLatex(block.beat)}`;
-      }
-      return quote;
+      const body =
+        block.beat && block.beat.trim().length > 0
+          ? `${quote} ${textToLatex(block.beat)}`
+          : quote;
+      // Persist the speaker as a non-rendering comment above the line, so the
+      // assignment survives the save round-trip (parse.ts reads it back). The id
+      // references a Character in the project meta.
+      return block.speaker ? `% @speaker: ${block.speaker}\n${body}` : body;
     }
 
     case "chapter": {

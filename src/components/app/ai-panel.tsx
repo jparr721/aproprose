@@ -3,9 +3,10 @@
 //   Suggest · Critique · Brainstorm · Continuity · Cast
 // Nothing infers on its own: each generating tab waits for an explicit Generate
 // (or Try again), and the author can steer the request with an optional
-// instruction. Results are cached per scene (see useAi / ai-cache-store) so
-// switching tabs or toggling the panel reuses a result instead of re-burning
-// tokens; a new scene/cursor shows idle until the author asks.
+// instruction. Results for the four generating tabs are cached per scene (see
+// useAi / ai-cache-store) so switching tabs or toggling the panel reuses a result
+// instead of re-burning tokens; a new scene/cursor shows idle until the author
+// asks. (Brainstorm keeps its thread in component state and resets per chapter.)
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -169,7 +170,7 @@ function AskBox({
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            onGenerate();
+            if (!loading) onGenerate();
           }
         }}
         placeholder={placeholder}
@@ -535,35 +536,51 @@ function BrainstormTab() {
     setDraft("");
   }, [activeChapterId]);
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || streaming != null) return;
-    const next: ChatMsg[] = [...messages, { id: uid("m"), role: "user", content: text }];
-    setMessages(next);
-    setDraft("");
+  // Stream a reply for a history whose last turn is the user message being answered.
+  const streamReply = async (history: ChatMsg[]) => {
     setStreaming("");
     setError(null);
     let acc = "";
     try {
       const result = await brainstorm(
-        next.map(({ role, content }) => ({ role, content })),
+        history.map(({ role, content }) => ({ role, content })),
         buildAiContext(),
       );
       for await (const delta of result.textStream) {
         acc += delta;
         setStreaming(acc);
       }
-      setMessages([...next, { id: uid("m"), role: "assistant", content: acc }]);
+      setMessages([...history, { id: uid("m"), role: "assistant", content: acc }]);
     } catch (e) {
       // Keep whatever streamed before the failure so a near-complete reply isn't
       // lost; surface the error (with HTTP status / body) alongside it.
-      if (acc) {
-        setMessages([...next, { id: uid("m"), role: "assistant", content: acc }]);
-      }
+      setMessages(
+        acc ? [...history, { id: uid("m"), role: "assistant", content: acc }] : history,
+      );
       setError(describeAiError(e));
     } finally {
       setStreaming(null);
     }
+  };
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text || streaming != null) return;
+    const next: ChatMsg[] = [...messages, { id: uid("m"), role: "user", content: text }];
+    setMessages(next);
+    setDraft("");
+    void streamReply(next);
+  };
+
+  // "Try again" re-answers the last user turn (the composer draft is already
+  // cleared by now), dropping any partial reply that followed it.
+  const retry = () => {
+    if (streaming != null) return;
+    const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx < 0) return;
+    const history = messages.slice(0, lastUserIdx + 1);
+    setMessages(history);
+    void streamReply(history);
   };
 
   return (
@@ -599,7 +616,7 @@ function BrainstormTab() {
               <span className="ml-0.5 inline-block h-3 w-1.5 animate-blink bg-ai-ink align-[-1px]" />
             </p>
           ) : null}
-          {error ? <AiError error={error} onRetry={send} /> : null}
+          {error ? <AiError error={error} onRetry={retry} /> : null}
         </div>
       </div>
       <div className="flex items-end gap-2 border-t border-border bg-card p-3">

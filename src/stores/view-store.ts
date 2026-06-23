@@ -16,6 +16,9 @@ interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
   focus: boolean;
+  /** Whether the settings sheet is open. Lifted here so the command palette can
+   *  open it; the sidebar's gear button drives the same flag. */
+  settingsOpen: boolean;
   /** A pending state-wiping action awaiting confirmation, or null. */
   pending: (() => void) | null;
 
@@ -26,8 +29,11 @@ interface ViewState {
 
   toggleAi: () => void;
   togglePdf: () => void;
+  setSettingsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
+  /** Open the AI panel and switch to `tab` in one step (for the command palette). */
+  openAiTab: (tab: AiTab) => void;
   /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
   triggerSuggest: () => void;
 
@@ -41,6 +47,7 @@ export const useViewStore = create<ViewState>((set, get) => ({
   aiOpen: true,
   pdfOpen: false,
   focus: false,
+  settingsOpen: false,
 
   pending: null,
 
@@ -49,6 +56,7 @@ export const useViewStore = create<ViewState>((set, get) => ({
 
   toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
   togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 
   applyLayoutPreset: (preset) => {
     if (preset === "focus") set({ focus: true });
@@ -57,6 +65,7 @@ export const useViewStore = create<ViewState>((set, get) => ({
   },
 
   setAiTab: (tab) => set({ aiTab: tab }),
+  openAiTab: (tab) => set({ aiOpen: true, focus: false, aiTab: tab }),
   triggerSuggest: () =>
     set((s) => ({
       aiOpen: true,

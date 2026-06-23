@@ -25,6 +25,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { CommandPalette } from "@/components/app/command-palette";
 import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
@@ -127,6 +128,7 @@ function App() {
             <TopBar />
             <Workspace />
           </SidebarInset>
+          <CommandPalette />
         </SidebarProvider>
       ) : (
         <Welcome />

@@ -172,7 +172,7 @@ function AiComposer({
         <PromptInputBody>
           <PromptInputTextarea placeholder={placeholder} disabled={loading} />
         </PromptInputBody>
-        <PromptInputFooter>
+        <PromptInputFooter className="justify-end">
           <PromptInputSubmit status={loading ? "submitted" : undefined} />
         </PromptInputFooter>
       </PromptInput>

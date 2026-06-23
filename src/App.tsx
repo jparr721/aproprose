@@ -110,7 +110,15 @@ function App() {
         const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
         if (!blockId) return;
         e.preventDefault();
-        useProjectStore.getState().splitBlock(blockId, el.selectionStart);
+        const store = useProjectStore.getState();
+        const { selectionStart, selectionEnd } = el;
+        if (selectionStart !== selectionEnd) {
+          // A real selection → isolate it as its own same-type block (like the toolbar's Split).
+          const block = store.blocks.find((b) => b.id === blockId);
+          if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
+        } else {
+          store.splitBlock(blockId, selectionStart);
+        }
         return;
       }
 

@@ -7,6 +7,7 @@
 //! these snake_case parameters.
 
 pub mod compile;
+pub mod novel;
 pub mod project;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};

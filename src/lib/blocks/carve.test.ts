@@ -43,6 +43,14 @@ describe("planSplit", () => {
       beat: "She waved.",
     });
   });
+
+  it("does not leave a dangling marker when the cut is right after an underscore", () => {
+    const b = mk({ text: "ab _cd_ ef" });
+    const { blocks } = planSplit(b, 4);
+    expect(blocks[0].text).toBe("ab");
+    expect(blocks[1].text).toBe("_cd_ ef");
+    for (const p of blocks) expect((p.text.match(/_/g) ?? []).length % 2).toBe(0);
+  });
 });
 
 describe("planCarve", () => {
@@ -101,6 +109,25 @@ describe("planCarve", () => {
     const { blocks } = planSplit(b, 4);
     expect(blocks[0].text).toBe("a _b_");
     expect(blocks[1].text).toBe("_c_ d");
+  });
+
+  it("drops orphaned emphasis markers when carving an emphasized word", () => {
+    const b = mk({ text: "abc _def_ ghi" });
+    const { blocks } = planCarve(b, 5, 8, "lore");
+    expect(blocks.map((p) => [p.type, p.text])).toEqual([
+      ["narration", "abc"],
+      ["lore", "_def_"],
+      ["narration", "ghi"],
+    ]);
+  });
+
+  it("treats a whitespace-only selection as a caret split (no empty block)", () => {
+    const b = mk({ text: "one   two" });
+    const { blocks } = planCarve(b, 3, 6, "dialogue");
+    expect(blocks.map((p) => [p.type, p.text])).toEqual([
+      ["narration", "one"],
+      ["narration", "two"],
+    ]);
   });
 });
 

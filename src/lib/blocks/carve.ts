@@ -44,12 +44,21 @@ function emphasisOpenAt(text: string, index: number): boolean {
   return count % 2 === 1;
 }
 
-// Close/reopen `_emphasis_` so a piece sliced from `full` over [a, b) never emits
-// a dangling marker. Whitespace trimming doesn't affect marker parity.
-function balanceEmphasis(piece: string, full: string, a: number, b: number): string {
+// Re-balance `_emphasis_` markers for a piece whose original span in `full` is
+// [start, end). Drops markers orphaned at a cut and opens/closes runs the cut
+// split, so no piece ever emits a dangling `_`.
+function balanceEmphasis(piece: string, full: string, start: number, end: number): string {
   let out = piece;
-  if (emphasisOpenAt(full, a)) out = `_${out}`;
-  if (emphasisOpenAt(full, b)) out = `${out}_`;
+  if (emphasisOpenAt(full, start)) {
+    // Entering mid-run: a leading marker closes an outside run (orphan → drop);
+    // otherwise the piece needs its own opener.
+    out = out.startsWith("_") ? out.slice(1) : `_${out}`;
+  }
+  if (emphasisOpenAt(full, end)) {
+    // Leaving mid-run: a trailing marker opens a new run with no content here
+    // (orphan → drop); otherwise close the run.
+    out = out.endsWith("_") ? out.slice(0, -1) : `${out}_`;
+  }
   return out;
 }
 
@@ -70,20 +79,18 @@ export function planSplit(block: Block, at: number): CarvePlan {
 
   const before = makePiece(
     block,
-    balanceEmphasis(text.slice(0, at).replace(/\s+$/, ""), text, 0, at),
+    balanceEmphasis(text.slice(0, at), text, 0, at).replace(/\s+$/, ""),
     block.type,
     true,
   );
   const after = makePiece(
     block,
-    balanceEmphasis(text.slice(at).replace(/^\s+/, ""), text, at, text.length),
+    balanceEmphasis(text.slice(at), text, at, text.length).replace(/^\s+/, ""),
     block.type,
     true,
   );
 
-  // Dialogue: the action beat belongs to the trailing utterance.
   if (block.type === "dialogue" && block.beat !== undefined) after.beat = block.beat;
-  // Lore: the title belongs to the first piece only.
   if (block.type === "lore" && block.title !== undefined) before.title = block.title;
 
   return { blocks: [before, after], focusId: after.id };
@@ -97,18 +104,21 @@ export function planCarve(block: Block, start: number, end: number, newType: Blo
   // Empty selection behaves like a caret split (newType is irrelevant).
   if (a === b) return planSplit(block, a);
 
+  let midText = balanceEmphasis(text.slice(a, b), text, a, b).trim();
+  if (newType === "dialogue") midText = stripOuterQuotes(midText);
+  // Whitespace-only (or quotes-only) selection: nothing to carve → treat as a split.
+  if (midText.length === 0) return planSplit(block, a);
+
   const sameType = newType === block.type;
   const pieces: Block[] = [];
 
-  const beforeText = balanceEmphasis(text.slice(0, a).replace(/\s+$/, ""), text, 0, a);
+  const beforeText = balanceEmphasis(text.slice(0, a), text, 0, a).replace(/\s+$/, "");
   if (beforeText.length > 0) pieces.push(makePiece(block, beforeText, block.type, true));
 
-  let midText = balanceEmphasis(text.slice(a, b).trim(), text, a, b);
-  if (newType === "dialogue") midText = stripOuterQuotes(midText);
   const mid = makePiece(block, midText, newType, sameType);
   pieces.push(mid);
 
-  const afterText = balanceEmphasis(text.slice(b).replace(/^\s+/, ""), text, b, text.length);
+  const afterText = balanceEmphasis(text.slice(b), text, b, text.length).replace(/^\s+/, "");
   if (afterText.length > 0) pieces.push(makePiece(block, afterText, block.type, true));
 
   // Redistribute the source's type-specific singletons to surviving same-type pieces.

@@ -36,14 +36,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
-import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
+import { useSyncStore } from "@/stores/sync-store";
+import { hasOpenAiKey, setOpenAiKey, gitToolingStatus } from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
-import type { BlockStyle, LayoutMode, Theme } from "@/lib/types";
+import type { BlockStyle, LayoutMode, Theme, ToolingStatus } from "@/lib/types";
 
 function Field({
   label,
@@ -202,6 +204,58 @@ function OpenAiKeyField() {
   );
 }
 
+function BackupSyncField() {
+  const autoSync = useSyncStore((s) => s.autoSync);
+  const intervalMinutes = useSyncStore((s) => s.intervalMinutes);
+  const isRepo = useSyncStore((s) => s.isRepo);
+  const setAutoSync = useSyncStore((s) => s.setAutoSync);
+  const setIntervalMinutes = useSyncStore((s) => s.setIntervalMinutes);
+  const [tooling, setTooling] = useState<ToolingStatus | null>(null);
+
+  useEffect(() => {
+    void gitToolingStatus().then(setTooling).catch(() => setTooling(null));
+  }, []);
+
+  return (
+    <Field label="Backup & sync">
+      {tooling && (!tooling.gitInstalled || !tooling.ghInstalled) ? (
+        <TypographyMuted className="font-sans text-xs">
+          {!tooling.gitInstalled
+            ? "git isn't installed — backup is unavailable."
+            : "The GitHub CLI (gh) isn't installed — creating repos and name checks need it."}
+        </TypographyMuted>
+      ) : tooling && !tooling.ghAuthed ? (
+        <TypographyMuted className="font-sans text-xs">
+          Not signed in to GitHub — run <span className="font-mono">gh auth login</span>.
+        </TypographyMuted>
+      ) : tooling ? (
+        <TypographyMuted className="font-sans text-xs">
+          Signed in as <span className="font-mono">{tooling.login ?? "—"}</span>.
+        </TypographyMuted>
+      ) : null}
+
+      <div className="flex items-center justify-between">
+        <span className="font-sans text-sm">Auto-sync this project</span>
+        <Switch checked={autoSync} disabled={!isRepo} onCheckedChange={setAutoSync} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span className="font-sans text-sm text-muted-foreground">Every</span>
+          <span className="font-mono text-xs text-muted-foreground">{intervalMinutes} min</span>
+        </div>
+        <Slider
+          min={1}
+          max={60}
+          step={1}
+          value={[intervalMinutes]}
+          onValueChange={([v]) => setIntervalMinutes(v)}
+          disabled={!autoSync || !isRepo}
+        />
+      </div>
+    </Field>
+  );
+}
+
 export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const { theme, layout, blockStyle, proseSize } = useSettingsStore();
   const setTheme = useSettingsStore((s) => s.setTheme);
@@ -305,6 +359,10 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
           <Separator />
 
           <OpenAiKeyField />
+
+          <Separator />
+
+          <BackupSyncField />
         </div>
       </SheetContent>
     </Sheet>

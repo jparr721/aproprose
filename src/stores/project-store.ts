@@ -30,8 +30,10 @@ import {
   pickProjectDir,
   readAppData,
   readPdf,
+  readProjectMeta,
   readTextFile,
   writeAppData,
+  writeProjectMeta,
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
@@ -134,7 +136,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // would be overkill; writes are cheap and infrequent).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
-    if (project) void writeAppData(metaKey(project.root), meta);
+    if (project) void writeProjectMeta(project.root, JSON.stringify(meta));
   };
 
   const persistRecents = (recents: RecentProject[]) => {
@@ -194,8 +196,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       });
       try {
         const project = await openProjectCmd(root);
-        const meta =
-          (await readAppData<ProjectMeta>(metaKey(root))) ?? EMPTY_META;
+        // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
+        // First open of a project that predates this: migrate the legacy app-config
+        // record into the repo once.
+        let meta: ProjectMeta;
+        const inRepo = await readProjectMeta(root);
+        if (inRepo) {
+          meta = JSON.parse(inRepo) as ProjectMeta;
+        } else {
+          const legacy = await readAppData<ProjectMeta>(metaKey(root));
+          meta = legacy ?? EMPTY_META;
+          if (legacy) await writeProjectMeta(root, JSON.stringify(legacy));
+        }
 
         // Record in recents (most-recent first, de-duped, capped).
         const entry: RecentProject = {

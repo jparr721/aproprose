@@ -9,6 +9,7 @@ import {
   IconLoader2,
   IconRefresh,
   IconSend,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -69,130 +70,246 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Lazy async result that runs on mount and on the given nonce. */
-function useAi<T>(op: () => Promise<T>, nonce: unknown = 0) {
+/**
+ * Manual async result: idle until run() is called; clears back to idle when
+ * resetKey changes. `op` is read through a ref so run() (a stable callback)
+ * always uses the latest closure — e.g. the current ask-box instruction —
+ * without re-creating the callback or listing it as a dependency. A run-id guard
+ * drops any in-flight result whose anchor (resetKey) changed before it resolved,
+ * so a stale suggestion can never land against a new cursor/chapter.
+ */
+function useAi<T>(op: () => Promise<T>, resetKey: unknown = 0) {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const opRef = useRef(op);
   opRef.current = op;
+  const runId = useRef(0);
 
   const run = useCallback(() => {
+    const id = ++runId.current;
     setLoading(true);
     setError(null);
     opRef
       .current()
-      .then((d) => setData(d))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (id === runId.current) setData(d);
+      })
+      .catch((e) => {
+        if (id === runId.current) setError(String(e));
+      })
+      .finally(() => {
+        if (id === runId.current) setLoading(false);
+      });
   }, []);
 
+  // Anchor (chapter/cursor) changed → invalidate any in-flight run and drop
+  // stale results back to idle. Never auto-runs.
   useEffect(() => {
-    run();
-  }, [run, nonce]);
+    runId.current++;
+    setData(null);
+    setError(null);
+    setLoading(false);
+  }, [resetKey]);
 
   return { data, loading, error, run };
 }
 
+/** Persistent "you are here": the block the next AI action anchors to. */
+function CursorAnchor() {
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const blocks = useProjectStore((s) => s.blocks);
+  const block = selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
+  const text = block?.text.trim();
+
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-ai-tint/40 px-3 py-1.5">
+      <span className="shrink-0 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ai-ink">
+        {block ? `Continuing after · ${block.type}` : "Cursor"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p
+          className={cn(
+            "line-clamp-1",
+            text
+              ? "font-serif text-[11.5px] italic text-muted-foreground"
+              : "font-sans text-[11px] text-faint",
+          )}
+        >
+          {text || "Place your cursor in the manuscript."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Optional instruction + a Generate button, shared by the four generating tabs. */
+function AskBox({
+  value,
+  onChange,
+  onGenerate,
+  loading,
+  placeholder,
+  inputRef,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onGenerate: () => void;
+  loading: boolean;
+  placeholder: string;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Textarea
+        ref={inputRef}
+        aria-label={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onGenerate();
+          }
+        }}
+        placeholder={placeholder}
+        rows={2}
+        className="min-h-0 resize-none font-sans text-[12.5px]"
+      />
+      <Button size="sm" onClick={onGenerate} disabled={loading} className="self-start">
+        {loading ? <IconLoader2 className="animate-spin" /> : <IconSparkles />}
+        Generate
+      </Button>
+    </div>
+  );
+}
+
 // ── Suggest ────────────────────────────────────────────────────────────────────
 function SuggestTab() {
-  const nonce = useViewStore((s) => s.suggestNonce);
+  const focusTick = useViewStore((s) => s.suggestFocusTick);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
   const characters = useProjectStore((s) => s.meta.characters);
 
-  // Refetch when the cursor moves (nonce) OR the chapter changes, so an "Insert
-  // below" never drops an old chapter's suggestion into a different scene.
+  const [instruction, setInstruction] = useState("");
+  const askRef = useRef<HTMLTextAreaElement>(null);
+  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
+
   const { data, loading, error, run } = useAi<SuggestResult>(
-    () => suggestContinuation(buildAiContext()),
-    `${activeChapterId ?? ""}:${nonce}`,
+    () =>
+      suggestContinuation({
+        ...buildAiContext(),
+        instruction: instruction.trim() || undefined,
+      }),
+    resetKey,
   );
+
   const [variant, setVariant] = useState(0);
   useEffect(() => setVariant(0), [data]);
+
+  // The ✨ spark / "Suggest from context" lands the cursor in the ask box. No call.
+  useEffect(() => {
+    askRef.current?.focus();
+  }, [focusTick]);
 
   const insert = (s: Suggestion) => {
     const speakerId =
       s.type === "dialogue" && s.speaker
-        ? characters.find(
-            (c) => c.name.toLowerCase() === s.speaker?.toLowerCase(),
-          )?.id
+        ? characters.find((c) => c.name.toLowerCase() === s.speaker?.toLowerCase())?.id
         : undefined;
-    insertAfter(selectedId, {
-      type: s.type,
-      text: s.text,
-      speaker: speakerId,
-    });
+    insertAfter(selectedId, { type: s.type, text: s.text, speaker: speakerId });
   };
 
-  if (loading) return <div className="p-4"><LoadingLines rows={5} /></div>;
-  if (error) return <div className="p-4"><AiError error={error} onRetry={run} /></div>;
-  if (!data || data.suggestions.length === 0)
-    return <div className="p-4 font-sans text-xs text-faint">No suggestion.</div>;
-
-  const v = data.suggestions[Math.min(variant, data.suggestions.length - 1)];
+  const v =
+    data && data.suggestions.length > 0
+      ? data.suggestions[Math.min(variant, data.suggestions.length - 1)]
+      : undefined;
 
   return (
     <div className="flex flex-col gap-3.5 p-4">
-      <ContextLine>Reading the scene up to the cursor</ContextLine>
+      <AskBox
+        value={instruction}
+        onChange={setInstruction}
+        onGenerate={run}
+        loading={loading}
+        placeholder="Ask for a direction — e.g. more tension, have her lie (optional)"
+        inputRef={askRef}
+      />
 
-      <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
-        <div className="flex items-center justify-between">
-          <span className="font-sans text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ai-ink">
-            {v.type === "dialogue" ? `Dialogue${v.speaker ? ` · ${v.speaker}` : ""}` : "Narration"}
-          </span>
-          <div className="flex gap-0.5">
-            {data.suggestions.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setVariant(i)}
-                className={cn(
-                  "size-[18px] rounded font-sans text-[10.5px] tabular-nums text-ai-ink transition-opacity",
-                  i === variant ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]" : "opacity-55 hover:opacity-100",
-                )}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p
-          className={cn(
-            "font-serif text-[14.5px] leading-[1.55] text-foreground",
-            v.type === "narration" && "italic text-muted-foreground",
-          )}
-        >
-          {v.type === "dialogue" ? `“${v.text}”` : v.text}
+      {loading ? (
+        <LoadingLines rows={5} />
+      ) : error ? (
+        <AiError error={error} onRetry={run} />
+      ) : !data ? (
+        <p className="font-sans text-xs leading-relaxed text-faint">
+          Generate reads the scene up to your cursor and proposes three ways to continue.
         </p>
-        <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-          <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
-          <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" onClick={() => insert(v)}>Insert below</Button>
-          <Button size="sm" variant="outline" onClick={run}>Try again</Button>
-        </div>
-      </div>
-
-      {data.followups.length > 0 ? (
+      ) : !v ? (
+        <p className="font-sans text-xs text-faint">No suggestion.</p>
+      ) : (
         <>
-          <Separator />
-          <div className="flex flex-col gap-1">
-            <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-faint">
-              After this, you could…
-            </span>
-            {data.followups.map((f, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-muted-foreground"
-              >
-                <IconArrowRight className="size-3 shrink-0 text-faint" />
-                {f}
+          <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
+            <div className="flex items-center justify-between">
+              <span className="font-sans text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                {v.type === "dialogue" ? `Dialogue${v.speaker ? ` · ${v.speaker}` : ""}` : "Narration"}
+              </span>
+              <div className="flex gap-0.5">
+                {data.suggestions.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setVariant(i)}
+                    className={cn(
+                      "size-[18px] rounded font-sans text-[10.5px] tabular-nums text-ai-ink transition-opacity",
+                      i === variant
+                        ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]"
+                        : "opacity-55 hover:opacity-100",
+                    )}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
               </div>
-            ))}
+            </div>
+            <p
+              className={cn(
+                "font-serif text-[14.5px] leading-[1.55] text-foreground",
+                v.type === "narration" && "italic text-muted-foreground",
+              )}
+            >
+              {v.type === "dialogue" ? `"${v.text}"` : v.text}
+            </p>
+            <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
+              <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ai-ink opacity-70">Why</span>
+              <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" onClick={() => insert(v)}>Insert below</Button>
+              <Button size="sm" variant="outline" onClick={run}>Try again</Button>
+            </div>
           </div>
+
+          {data.followups.length > 0 ? (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-1">
+                <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-faint">
+                  After this, you could…
+                </span>
+                {data.followups.map((f, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-muted-foreground"
+                  >
+                    <IconArrowRight className="size-3 shrink-0 text-faint" />
+                    {f}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
         </>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -211,27 +328,40 @@ const NOTE_WORD: Record<CritiqueNote["kind"], string> = {
 
 function CritiqueTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const [instruction, setInstruction] = useState("");
+  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi<CritiqueNote[]>(
-    () => critique(buildAiContext()),
-    activeChapterId,
+    () => critique({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
+    resetKey,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex items-center justify-between">
-        <ContextLine>Critique of the current scene</ContextLine>
-        <Button variant="ghost" size="icon-sm" onClick={run} title="Refresh">
-          <IconRefresh />
-        </Button>
-      </div>
+      <AskBox
+        value={instruction}
+        onChange={setInstruction}
+        onGenerate={run}
+        loading={loading}
+        placeholder="Focus the critique — e.g. pacing, dialogue (optional)"
+      />
       {loading ? (
         <LoadingLines rows={6} />
       ) : error ? (
         <AiError error={error} onRetry={run} />
+      ) : !data ? (
+        <p className="font-sans text-xs leading-relaxed text-faint">
+          Generate reads the scene up to your cursor and returns craft notes.
+        </p>
       ) : (
-        (data ?? []).map((n, i) => (
+        data.map((n, i) => (
           <div key={i} className="rounded-lg border border-border bg-background p-3">
             <div className="mb-1 flex items-baseline gap-2">
-              <span className={cn("rounded px-1.5 py-0.5 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em]", NOTE_TONE[n.kind])}>
+              <span
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-sans text-[9.5px] font-semibold uppercase tracking-[0.08em]",
+                  NOTE_TONE[n.kind],
+                )}
+              >
                 {NOTE_WORD[n.kind]}
               </span>
               <span className="font-sans text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">{n.tag}</span>
@@ -258,24 +388,32 @@ const SEV_WORD: Record<ContinuityFlag["sev"], string> = {
 
 function ContinuityTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const [instruction, setInstruction] = useState("");
+  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi<ContinuityFlag[]>(
-    () => continuityCheck(buildAiContext()),
-    activeChapterId,
+    () => continuityCheck({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
+    resetKey,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex items-center justify-between">
-        <ContextLine>Continuity sweep of the scene</ContextLine>
-        <Button variant="ghost" size="icon-sm" onClick={run} title="Refresh">
-          <IconRefresh />
-        </Button>
-      </div>
+      <AskBox
+        value={instruction}
+        onChange={setInstruction}
+        onGenerate={run}
+        loading={loading}
+        placeholder="Anything specific to check? (optional)"
+      />
       {loading ? (
         <LoadingLines rows={6} />
       ) : error ? (
         <AiError error={error} onRetry={run} />
+      ) : !data ? (
+        <p className="font-sans text-xs leading-relaxed text-faint">
+          Generate sweeps the scene up to your cursor for continuity issues.
+        </p>
       ) : (
-        (data ?? []).map((f, i) => (
+        data.map((f, i) => (
           <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
             <span className={cn("mt-1 size-2 rounded-full", SEV_DOT[f.sev])} />
             <div>
@@ -327,33 +465,45 @@ function CastRow({ m }: { m: CastMember }) {
 
 function CastTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const [instruction, setInstruction] = useState("");
+  const resetKey = `${activeChapterId ?? ""}:${selectedId ?? ""}`;
   const { data, loading, error, run } = useAi(
-    () => detectCast(buildAiContext()),
-    activeChapterId,
+    () => detectCast({ ...buildAiContext(), instruction: instruction.trim() || undefined }),
+    resetKey,
   );
   return (
     <div className="flex flex-col gap-3 p-4">
-      <div className="flex items-center justify-between">
-        <ContextLine>Who's in the scene</ContextLine>
-        <Button variant="ghost" size="icon-sm" onClick={run} title="Refresh">
-          <IconRefresh />
-        </Button>
-      </div>
+      <AskBox
+        value={instruction}
+        onChange={setInstruction}
+        onGenerate={run}
+        loading={loading}
+        placeholder="Anything specific about the cast? (optional)"
+      />
       {loading ? (
         <LoadingLines rows={5} />
       ) : error ? (
         <AiError error={error} onRetry={run} />
+      ) : !data ? (
+        <p className="font-sans text-xs leading-relaxed text-faint">
+          Generate reads the scene up to your cursor and lists who's present.
+        </p>
       ) : (
         <>
           <div className="flex flex-col gap-2.5">
-            {(data?.inScene ?? []).map((m, i) => <CastRow key={i} m={m} />)}
+            {data.inScene.map((m, i) => (
+              <CastRow key={i} m={m} />
+            ))}
           </div>
-          {data && data.offPage.length > 0 ? (
+          {data.offPage.length > 0 ? (
             <>
               <Separator />
               <ContextLine>Off-page but referenced</ContextLine>
               <div className="flex flex-col gap-2.5">
-                {data.offPage.map((m, i) => <CastRow key={i} m={m} />)}
+                {data.offPage.map((m, i) => (
+                  <CastRow key={i} m={m} />
+                ))}
               </div>
             </>
           ) : null}
@@ -505,6 +655,8 @@ export function AiPanel() {
             </TabsTrigger>
           ))}
         </TabsList>
+
+        <CursorAnchor />
 
         {/* Suggest/Critique/etc. own their own scrolling; Brainstorm fills height. */}
         <TabsContent value="suggest" className="min-h-0 flex-1 overflow-y-auto">

@@ -21,14 +21,14 @@ interface ViewState {
 
   /** Active AI panel tab. */
   aiTab: AiTab;
-  /** Bumped to ask the Suggest tab to (re)run for the current cursor. */
-  suggestNonce: number;
+  /** Bumped to focus the Suggest ask box (e.g. from the ✨ spark). Never runs the model. */
+  suggestFocusTick: number;
 
   toggleAi: () => void;
   togglePdf: () => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
-  /** Open the AI panel, focus Suggest, and request a fresh continuation. */
+  /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
   triggerSuggest: () => void;
 
   /** Run `action` now, or stage it behind the confirm dialog if edits are unsaved. */
@@ -45,7 +45,7 @@ export const useViewStore = create<ViewState>((set, get) => ({
   pending: null,
 
   aiTab: "suggest",
-  suggestNonce: 0,
+  suggestFocusTick: 0,
 
   toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
   togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
@@ -62,7 +62,7 @@ export const useViewStore = create<ViewState>((set, get) => ({
       aiOpen: true,
       focus: false,
       aiTab: "suggest",
-      suggestNonce: s.suggestNonce + 1,
+      suggestFocusTick: s.suggestFocusTick + 1,
     })),
 
   requestGuarded: (action) => {

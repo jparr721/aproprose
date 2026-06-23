@@ -1,13 +1,13 @@
 // ai-cache-store.ts — in-memory cache for the right-panel AI results.
 //
-// Each AI tab (Suggest, Critique, Continuity, Cast) fires a gpt-5.4-nano call on
-// mount. Radix unmounts inactive tabs and App.tsx unmounts the whole panel
-// whenever the AI panel or focus mode toggles, so without a cache every tab
-// switch / panel toggle / reopen re-runs the model and burns tokens for a result
-// we already have. Entries are keyed by "<op>:<scope>" (scope = the chapter, plus
-// the suggest nonce) so a genuine change of scene still refetches, but a remount
-// reuses the cached result. A request fires only on the first sight of a key or on
-// an explicit run() — the tabs' "Try again" / "Refresh" buttons.
+// The generating AI tabs (Suggest, Critique, Continuity, Cast) are idle-first:
+// nothing runs until the author clicks Generate. Radix unmounts inactive tabs and
+// App.tsx unmounts the whole panel whenever the AI panel or focus mode toggles,
+// so without a cache a generated result would be lost on every tab switch / panel
+// toggle / reopen and the author would have to re-ask. Entries are keyed by
+// "<op>:<chapter>:<block>" so a genuine change of scene/cursor reads as idle, but
+// a remount within the same scene reuses the result. A request fires only from an
+// explicit run() — the tabs' Generate / Try again / Refresh.
 
 import { create } from "zustand";
 

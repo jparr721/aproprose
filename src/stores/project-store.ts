@@ -66,6 +66,23 @@ const EMPTY_COMPILE: CompileState = {
   at: null,
 };
 
+/** The state reset applied whenever we begin loading a project. */
+const LOADING_RESET = {
+  status: "loading" as const,
+  project: null,
+  meta: EMPTY_META,
+  needsMigration: null,
+  activeChapterId: null,
+  blocks: [],
+  selectedId: null,
+  chapterDirty: false,
+  compile: EMPTY_COMPILE,
+  error: null,
+  past: [],
+  future: [],
+  lastTextEditId: null,
+};
+
 const RECENTS_KEY = "recents";
 const LAST_PROJECT_KEY = "last-project";
 
@@ -224,21 +241,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     loadProjectAt: async (root) => {
       // Wipe everything — this is the multi-project reset.
-      set({
-        status: "loading",
-        project: null,
-        meta: EMPTY_META,
-        needsMigration: null,
-        activeChapterId: null,
-        blocks: [],
-        selectedId: null,
-        chapterDirty: false,
-        compile: EMPTY_COMPILE,
-        error: null,
-        past: [],
-        future: [],
-        lastTextEditId: null,
-      });
+      set(LOADING_RESET);
       try {
         const outcome = await openProjectCmd(root);
         if (outcome.status === "needsMigration") {
@@ -305,7 +308,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     createProject: async (parent, name, author) => {
-      set({ status: "loading", error: null });
+      set(LOADING_RESET);
       try {
         const metadata: NovelMetadata = {
           title: name,
@@ -405,7 +408,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     migrateProject: async () => {
       const nm = get().needsMigration;
       if (!nm) return;
-      set({ status: "loading", needsMigration: null, error: null });
+      set(LOADING_RESET);
       try {
         const project = await migrateToManaged(nm.root);
         await finishLoad(project.root, project);

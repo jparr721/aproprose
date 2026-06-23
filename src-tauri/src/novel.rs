@@ -560,6 +560,28 @@ mod tests {
     }
 
     #[test]
+    fn migrate_excludes_inline_frontmatter_chapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("content")).unwrap();
+        fs::write(
+            root.join("main.tex"),
+            "\\documentclass{book}\n\
+             \\newcommand{\\booktitle}{Bk}\n\
+             \\begin{document}\n\\frontmatter\n\
+             \\chapter{Preface}\n\
+             \\mainmatter\n\
+             \\chapter{One}\n\\input{content/chapter0.tex}\n\\end{document}\n",
+        )
+        .unwrap();
+        fs::write(root.join("content/chapter0.tex"), "a").unwrap();
+        let project = migrate_to_managed(root).unwrap();
+        // The inline frontmatter \chapter{Preface} (before \mainmatter) is excluded.
+        assert_eq!(project.chapters.len(), 1);
+        assert_eq!(project.chapters[0].title, "One");
+    }
+
+    #[test]
     fn migrate_extracts_metadata_and_chapters() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

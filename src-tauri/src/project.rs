@@ -94,7 +94,7 @@ pub fn open_project(root: &Path) -> Result<ProjectInfo, String> {
 ///
 /// Prefers `main.tex`; otherwise the first `*.tex` (sorted, top level first)
 /// that contains both `\documentclass` and `\begin{document}`.
-fn find_main_tex(root: &Path) -> Result<String, String> {
+pub(crate) fn find_main_tex(root: &Path) -> Result<String, String> {
     let main = root.join("main.tex");
     if main.is_file() {
         return Ok("main.tex".to_string());
@@ -227,7 +227,7 @@ fn command_arg(source: &str, cmd: &str) -> Option<String> {
 
 /// Extract the value `\newcommand{\<name>}{VALUE}` (also accepts the
 /// `\newcommand\name{VALUE}` form and an optional `[n]` arity argument).
-fn newcommand_value(source: &str, name: &str) -> Option<String> {
+pub(crate) fn newcommand_value(source: &str, name: &str) -> Option<String> {
     let name = name.trim_start_matches('\\');
     for kw in ["\\newcommand", "\\renewcommand", "\\providecommand"] {
         let mut search_from = 0;
@@ -312,7 +312,7 @@ fn match_brace_end(source: &str, open: usize) -> Option<usize> {
 
 /// Scan the main file for `\chapter{TITLE}` commands, each optionally followed
 /// (next non-empty, non-comment line) by `\input{FILE}`.
-fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
+pub(crate) fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
     // Restrict to the document body so preamble \chapter redefinitions (rare)
     // and example code don't pollute the list.
     let body = source

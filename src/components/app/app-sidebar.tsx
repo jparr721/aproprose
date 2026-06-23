@@ -189,13 +189,12 @@ export function AppSidebar() {
   const meta = useProjectStore((s) => s.meta);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const selectChapter = useProjectStore((s) => s.selectChapter);
-  const chapterDirty = useProjectStore((s) => s.chapterDirty);
-  const saving = useProjectStore((s) => s.saving);
   const recents = useProjectStore((s) => s.recents);
   const openDialog = useProjectStore((s) => s.openProjectDialog);
   const loadAt = useProjectStore((s) => s.loadProjectAt);
   const closeProject = useProjectStore((s) => s.closeProject);
-  const saveChapter = useProjectStore((s) => s.saveChapter);
+  const compileNow = useProjectStore((s) => s.compileNow);
+  const compiling = useProjectStore((s) => s.compile.status === "compiling");
   const guard = useViewStore((s) => s.requestGuarded);
 
   if (!project) return null;
@@ -221,10 +220,10 @@ export function AppSidebar() {
                   <IconFolderOpen /> Open project…
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={!chapterDirty || saving}
-                  onSelect={() => void saveChapter()}
+                  disabled={compiling}
+                  onSelect={() => void compileNow()}
                 >
-                  <IconDeviceFloppy /> Save chapter
+                  <IconDeviceFloppy /> Save &amp; build PDF
                 </DropdownMenuItem>
                 {recents.length > 0 ? (
                   <>

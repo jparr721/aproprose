@@ -16,6 +16,8 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { primaryTokens } from "@/lib/keybindings";
 
 function BuildBadge() {
   const status = useProjectStore((s) => s.compile.status);
@@ -135,6 +137,11 @@ export function TopBar() {
           >
             {compiling ? <IconLoader2 className="animate-spin" /> : <IconPlayerPlayFilled />}
             Compile
+            <KbdGroup className="ml-1">
+              {primaryTokens("save-build", IS_MAC).map((t, i) => (
+                <Kbd key={i}>{t}</Kbd>
+              ))}
+            </KbdGroup>
           </Button>
         </>
       ) : (

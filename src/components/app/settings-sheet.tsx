@@ -40,7 +40,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
-import { KEYBINDINGS } from "@/lib/keybindings";
+import { useKeybinding } from "@/hooks/use-keybinding";
+import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
@@ -205,6 +206,12 @@ function OpenAiKeyField() {
 }
 
 export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
+  // Open state lives here: only this component reads or writes it, so it's local
+  // state, not a store. ⌘/Ctrl+, flips it — co-located with the action per the
+  // keybinding convention; the controlled Sheet means the trigger still works.
+  const [open, setOpen] = useState(false);
+  useKeybinding(KEYBINDING_IDS.TOGGLE_SETTINGS, () => setOpen((o) => !o));
+
   const { theme, layout, blockStyle, proseSize } = useSettingsStore();
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setLayout = useSettingsStore((s) => s.setLayout);
@@ -213,7 +220,7 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const applyLayoutPreset = useViewStore((s) => s.applyLayoutPreset);
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         {trigger ?? (
           <Button variant="ghost" size="icon" className="font-sans" title="Settings">

@@ -120,6 +120,91 @@ fn max_content_index(content_dir: &Path) -> usize {
     max
 }
 
+/// Build a `NovelMetadata` from a source containing the 6 `\newcommand` macros
+/// (works for both `metadata.tex` and a legacy `main.tex` preamble).
+fn read_metadata(source: &str) -> NovelMetadata {
+    let get = |name: &str| {
+        project::newcommand_value(source, name)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default()
+    };
+    NovelMetadata {
+        title: get("booktitle"),
+        subtitle: get("subtitle"),
+        author: get("authorname"),
+        publisher: get("publisher"),
+        isbn: get("isbn"),
+    }
+}
+
+/// Open a managed project: chapters from `chapters.tex`, metadata from `metadata.tex`.
+pub fn open_managed(root: &Path) -> Result<ProjectInfo, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("cannot open project root {}: {e}", root.display()))?;
+
+    let main_rel = project::find_main_tex(&root)?;
+
+    let meta_src = fs::read_to_string(root.join("metadata.tex")).unwrap_or_default();
+    let metadata = read_metadata(&meta_src);
+
+    let chapters_src = fs::read_to_string(root.join("chapters.tex")).unwrap_or_default();
+    let chapters = project::parse_chapters(&chapters_src, &root);
+
+    let title = (!metadata.title.is_empty()).then(|| metadata.title.clone());
+    let author = (!metadata.author.is_empty()).then(|| metadata.author.clone());
+    let name = title.clone().unwrap_or_else(|| {
+        root.file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.display().to_string())
+    });
+
+    Ok(ProjectInfo {
+        root: root.display().to_string(),
+        name,
+        main_file: main_rel,
+        title,
+        author,
+        metadata,
+        chapters,
+    })
+}
+
+/// Whether a project directory uses the managed layout.
+fn is_managed(root: &Path) -> bool {
+    root.join("chapters.tex").is_file() && root.join("metadata.tex").is_file()
+}
+
+/// Open entry point used by the `open_project` command. Managed → ready project;
+/// otherwise → a `needsMigration` signal (requires a discoverable main `.tex`).
+pub fn detect_and_open(root: &Path) -> Result<OpenOutcome, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("cannot open project root {}: {e}", root.display()))?;
+
+    if is_managed(&root) {
+        let project = open_managed(&root)?;
+        return Ok(OpenOutcome {
+            status: "managed".into(),
+            project: Some(project),
+            main_file: None,
+            detected_chapters: None,
+        });
+    }
+
+    // Unmanaged: there must be a legacy main file to migrate, or it isn't a project.
+    let main_rel = project::find_main_tex(&root)?;
+    let source = fs::read_to_string(root.join(&main_rel)).unwrap_or_default();
+    let detected = project::parse_chapters(&source, &root).len();
+
+    Ok(OpenOutcome {
+        status: "needsMigration".into(),
+        project: None,
+        main_file: Some(main_rel),
+        detected_chapters: Some(detected),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +266,53 @@ mod tests {
             fs::write(content.join(name), "").unwrap();
         }
         assert_eq!(max_content_index(&content), 13);
+    }
+
+    /// Write a minimal managed project (main.tex/metadata.tex/chapters.tex/content/)
+    /// into a fresh temp dir and return it.
+    fn managed_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("content")).unwrap();
+        fs::write(root.join("main.tex"), MAIN_TEX).unwrap();
+        fs::write(root.join("metadata.tex"), render_metadata(&meta())).unwrap();
+        fs::write(
+            root.join("chapters.tex"),
+            render_chapters(&[("Terry".into(), "content/chapter-001.tex".into())]),
+        )
+        .unwrap();
+        fs::write(root.join("content/chapter-001.tex"), "Hello world.\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn detect_managed_returns_project() {
+        let dir = managed_fixture();
+        let outcome = detect_and_open(dir.path()).unwrap();
+        assert_eq!(outcome.status, "managed");
+        let project = outcome.project.unwrap();
+        assert_eq!(project.metadata.title, "Prelude To Darkness");
+        assert_eq!(project.chapters.len(), 1);
+        assert_eq!(project.chapters[0].title, "Terry");
+        assert_eq!(project.chapters[0].file, "content/chapter-001.tex");
+    }
+
+    #[test]
+    fn detect_unmanaged_signals_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("content")).unwrap();
+        fs::write(
+            root.join("main.tex"),
+            "\\documentclass{book}\n\\begin{document}\n\\mainmatter\n\
+             \\chapter{One}\n\\input{content/chapter0.tex}\n\
+             \\chapter{Two}\n\\input{content/chapter1.tex}\n\\end{document}\n",
+        )
+        .unwrap();
+        fs::write(root.join("content/chapter0.tex"), "a").unwrap();
+        fs::write(root.join("content/chapter1.tex"), "b").unwrap();
+        let outcome = detect_and_open(root).unwrap();
+        assert_eq!(outcome.status, "needsMigration");
+        assert_eq!(outcome.detected_chapters, Some(2));
     }
 }

@@ -270,6 +270,98 @@ pub fn delete_chapter(root: &Path, model: &SkeletonModel, file: &str) -> Result<
     open_managed(&root)
 }
 
+/// A filesystem-safe folder name from a display name (lowercase, runs of
+/// non-alphanumerics collapse to a single dash).
+fn folder_slug(name: &str) -> String {
+    let mut s = String::with_capacity(name.len());
+    let mut prev_dash = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            s.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            s.push('-');
+            prev_dash = true;
+        }
+    }
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() { "untitled-novel".to_string() } else { s }
+}
+
+/// Write the baked static files into `root`, skipping any that already exist
+/// (so a migration never clobbers a customized frontmatter/options file).
+fn scaffold_missing(root: &Path) -> Result<(), String> {
+    fs::create_dir_all(root.join("frontmatter")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("misc")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("content")).map_err(|e| e.to_string())?;
+    let files = [
+        ("frontmatter/titlepage.tex", TITLEPAGE),
+        ("frontmatter/copyrightpage.tex", COPYRIGHTPAGE),
+        ("frontmatter/preface.tex", PREFACE),
+        ("frontmatter/tocpage.tex", TOCPAGE),
+        ("misc/options.sty", OPTIONS_STY),
+    ];
+    for (rel, body) in files {
+        let abs = root.join(rel);
+        if !abs.exists() {
+            fs::write(&abs, body).map_err(|e| format!("cannot write {}: {e}", abs.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Create a new managed novel under `parent` and return the opened project.
+pub fn create_project(parent: &Path, name: &str, metadata: &NovelMetadata) -> Result<ProjectInfo, String> {
+    let parent = parent
+        .canonicalize()
+        .map_err(|e| format!("invalid location {}: {e}", parent.display()))?;
+    let root = parent.join(folder_slug(name));
+    if root.exists() {
+        return Err(format!("{} already exists", root.display()));
+    }
+    fs::create_dir(&root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
+
+    fs::write(root.join("main.tex"), MAIN_TEX).map_err(|e| e.to_string())?;
+    scaffold_missing(&root)?;
+    fs::write(root.join("metadata.tex"), render_metadata(metadata)).map_err(|e| e.to_string())?;
+    fs::write(root.join("chapters.tex"), render_chapters(&[])).map_err(|e| e.to_string())?;
+
+    open_managed(&root)
+}
+
+/// Migrate a legacy project (inline metadata macros + mainmatter chapter pairs in
+/// `main.tex`) to the managed layout. Backs up `main.tex` → `main.tex.bak`,
+/// extracts metadata + chapters, writes `metadata.tex`/`chapters.tex` (preserving
+/// existing chapter filenames), fills any missing baked files, then overwrites
+/// `main.tex` with the managed template.
+pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
+
+    let main_rel = project::find_main_tex(&root)?;
+    let main_abs = root.join(&main_rel);
+    let source = fs::read_to_string(&main_abs)
+        .map_err(|e| format!("cannot read {}: {e}", main_abs.display()))?;
+
+    let metadata = read_metadata(&source);
+    let chapters: Vec<(String, String)> = project::parse_chapters(&source, &root)
+        .into_iter()
+        .map(|c| (c.title, c.file))
+        .collect();
+
+    // Back up the original before we overwrite it.
+    fs::copy(&main_abs, root.join("main.tex.bak"))
+        .map_err(|e| format!("cannot back up main.tex: {e}"))?;
+
+    fs::write(root.join("metadata.tex"), render_metadata(&metadata)).map_err(|e| e.to_string())?;
+    fs::write(root.join("chapters.tex"), render_chapters(&chapters)).map_err(|e| e.to_string())?;
+    scaffold_missing(&root)?;
+    fs::write(&main_abs, MAIN_TEX).map_err(|e| format!("cannot write {}: {e}", main_abs.display()))?;
+
+    open_managed(&root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +510,60 @@ mod tests {
         let project = delete_chapter(root, &model, "content/chapter-001.tex").unwrap();
         assert_eq!(project.chapters.len(), 0);
         assert!(!root.join("content/chapter-001.tex").exists());
+    }
+
+    #[test]
+    fn create_project_scaffolds_and_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = create_project(dir.path(), "My New Book", &meta()).unwrap();
+        let root = std::path::Path::new(&project.root);
+        assert!(root.join("main.tex").is_file());
+        assert!(root.join("metadata.tex").is_file());
+        assert!(root.join("chapters.tex").is_file());
+        assert!(root.join("frontmatter/titlepage.tex").is_file());
+        assert!(root.join("misc/options.sty").is_file());
+        assert!(root.join("content").is_dir());
+        assert_eq!(project.chapters.len(), 0);
+        // Folder is slugged.
+        assert!(project.root.ends_with("my-new-book"));
+    }
+
+    #[test]
+    fn migrate_extracts_metadata_and_chapters() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("content")).unwrap();
+        fs::create_dir_all(root.join("frontmatter")).unwrap();
+        fs::create_dir_all(root.join("misc")).unwrap();
+        fs::write(root.join("misc/options.sty"), "% custom options\n").unwrap();
+        fs::write(
+            root.join("main.tex"),
+            "\\documentclass{book}\n\
+             \\newcommand{\\authorname}{Jarred Parr}\n\
+             \\newcommand{\\booktitle}{Prelude}\n\
+             \\newcommand{\\subtitle}{}\n\
+             \\newcommand{\\publisher}{Pub}\n\
+             \\newcommand{\\isbn}{123}\n\
+             \\begin{document}\n\\mainmatter\n\
+             \\chapter{One}\n\\input{content/chapter0.tex}\n\
+             \\chapter{Two}\n\\input{content/chapter1.tex}\n\\end{document}\n",
+        )
+        .unwrap();
+        fs::write(root.join("content/chapter0.tex"), "a").unwrap();
+        fs::write(root.join("content/chapter1.tex"), "b").unwrap();
+
+        let project = migrate_to_managed(root).unwrap();
+
+        assert!(root.join("main.tex.bak").is_file());
+        assert_eq!(project.metadata.title, "Prelude");
+        assert_eq!(project.metadata.author, "Jarred Parr");
+        assert_eq!(project.chapters.len(), 2);
+        // Existing filenames preserved (not renamed).
+        assert_eq!(project.chapters[0].file, "content/chapter0.tex");
+        // metadata.tex/chapters.tex now exist; main.tex is the managed template.
+        assert!(root.join("metadata.tex").is_file());
+        assert!(fs::read_to_string(root.join("main.tex")).unwrap().contains("\\input{chapters}"));
+        // A customized options.sty is NOT clobbered.
+        assert_eq!(fs::read_to_string(root.join("misc/options.sty")).unwrap(), "% custom options\n");
     }
 }

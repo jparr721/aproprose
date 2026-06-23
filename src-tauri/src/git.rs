@@ -10,7 +10,8 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
-/// Network git ops (push/pull) can be slow; local ops are instant. One limit.
+/// Network git ops (push/pull) can be slow; local ops are instant. One limit for
+/// all — local ops finish well under it, so the loose ceiling only bites a hung network op.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Serialize)]
@@ -686,6 +687,31 @@ mod tests {
         assert!(first.contains("*.pdf"));
         // Running again changes nothing.
         assert_eq!(gitignore_with_defaults(&first), first);
+    }
+
+    #[test]
+    fn gitignore_handles_empty_and_no_trailing_newline() {
+        let from_empty = gitignore_with_defaults("");
+        assert!(from_empty.starts_with("# LaTeX build artifacts"));
+        assert!(from_empty.contains("*.pdf"));
+        assert_eq!(gitignore_with_defaults(&from_empty), from_empty); // idempotent
+        let from_no_nl = gitignore_with_defaults("foo");
+        assert!(from_no_nl.starts_with("foo\n")); // separator inserted
+        assert!(from_no_nl.contains("*.fdb_latexmk"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DNS to NXDOMAIN .invalid"]
+    async fn sync_unreachable_remote_returns_offline() {
+        let dir = temp_repo();
+        std::fs::write(dir.join("a.tex"), "x\n").unwrap();
+        StdCommand::new("git").args(["add", "-A"]).current_dir(&dir).output().unwrap();
+        StdCommand::new("git").args(["commit", "-qm", "init"]).current_dir(&dir).output().unwrap();
+        StdCommand::new("git").args(["remote", "add", "origin", "https://nonexistent.invalid/x.git"]).current_dir(&dir).output().unwrap();
+        std::fs::write(dir.join("a.tex"), "y\n").unwrap();
+        let out = sync(&dir, "msg").await.unwrap();
+        assert!(matches!(out, SyncOutcome::Offline), "expected Offline, got {out:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

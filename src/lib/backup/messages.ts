@@ -1,3 +1,4 @@
+// messages.ts — backup commit-message formatting + engine-outcome → UI status/message mapping.
 import type { RepoStatus, SyncOutcome, SyncStatus } from "@/lib/types";
 
 /** The auto-commit message for a timer/manual backup. */

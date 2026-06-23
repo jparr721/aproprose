@@ -119,7 +119,7 @@ export function BackupSetupDialog({
             <DialogHeader>
               <DialogTitle>Back up to GitHub</DialogTitle>
               <DialogDescription>
-                Create a private repository and push your book. Uses your local GitHub login.
+                Create a {isPrivate ? "private" : "public"} repository and push your book. Uses your local GitHub login.
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-4 py-2">

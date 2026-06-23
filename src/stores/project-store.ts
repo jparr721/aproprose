@@ -133,8 +133,7 @@ const capPush = (stack: Block[][], snapshot: Block[]): Block[][] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
 
 export const useProjectStore = create<ProjectState>((set, get) => {
-  // Persist the current project's metadata (debounced via microtask coalescing
-  // would be overkill; writes are cheap and infrequent).
+  // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
     if (project) void writeProjectMeta(project.root, JSON.stringify(meta));

@@ -18,11 +18,13 @@ import {
 } from "@/components/ui/popover";
 import { TypographyMuted, TypographySmall } from "@/components/ui/typography";
 import { useSyncStore } from "@/stores/sync-store";
+import type { SyncStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const TONE: Record<string, string> = {
+const TONE: Record<SyncStatus, string> = {
   clean: "bg-success",
   synced: "bg-success",
+  syncing: "bg-success",
   dirty: "bg-warning",
   conflict: "bg-destructive",
   error: "bg-destructive",
@@ -85,7 +87,7 @@ export function SyncStatus({
           ) : status === "conflict" ? (
             <IconGitMerge className="size-3 text-destructive" />
           ) : (
-            <span className={cn("size-1.5 rounded-full", TONE[status] ?? "bg-faint")} />
+            <span className={cn("size-1.5 rounded-full", TONE[status])} />
           )}
           {label}
         </button>

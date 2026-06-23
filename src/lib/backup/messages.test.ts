@@ -2,10 +2,11 @@ import { test, expect } from "bun:test";
 import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from "./messages";
 import type { RepoStatus } from "@/lib/types";
 
-test("backupMessage embeds a readable timestamp", () => {
-  const msg = backupMessage(new Date("2026-06-22T14:30:00"));
+test("backupMessage embeds the given date", () => {
+  const d = new Date("2026-06-22T14:30:00");
+  const msg = backupMessage(d);
   expect(msg.startsWith("Backup —")).toBe(true);
-  expect(msg.length).toBeGreaterThan("Backup —".length + 3);
+  expect(msg).toContain(d.toLocaleString());
 });
 
 test("outcomeToStatus maps each variant", () => {

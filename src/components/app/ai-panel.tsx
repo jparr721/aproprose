@@ -83,10 +83,12 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
  * panel/focus toggles, reopening the panel) without re-burning tokens, while a
  * new key (different scene / cursor) reads as idle until the author asks.
  *
- * `op` is read through a ref so run() (stable per key) always uses the latest
- * closure — e.g. the current ask-box instruction. An in-flight run writes to the
- * key it was started for, so moving the cursor mid-flight can never land a stale
- * result against the new anchor; it just populates the old scene's cache entry.
+ * Two things keep runs correct. `op` is read through `opRef`, so each run invokes
+ * the latest closure — picking up the current ask-box instruction — while `run`
+ * itself is memoised on `cacheKey` and therefore writes its result back under the
+ * key it was created for. So moving the cursor mid-flight (which yields a new key)
+ * can never land a stale result against the new anchor; the in-flight run just
+ * populates the old scene's cache entry.
  */
 function useAi<T>(op: () => Promise<T>, cacheKey: string) {
   const entry = useAiCacheStore((s) => s.entries[cacheKey]);
@@ -103,6 +105,8 @@ function useAi<T>(op: () => Promise<T>, cacheKey: string) {
   }, [cacheKey, patch]);
 
   return {
+    // The cache stores `data` as `unknown`; this cast is sound because only this
+    // hook writes `cacheKey`, and it only ever writes the `T` its own `op` produced.
     data: (entry?.data ?? null) as T | null,
     loading: entry?.loading ?? false,
     error: entry?.error ?? null,
@@ -110,7 +114,7 @@ function useAi<T>(op: () => Promise<T>, cacheKey: string) {
   };
 }
 
-/** Persistent "you are here": the block the next AI action anchors to. */
+/** Display strip — the "you are here": the block the AI operations anchor to. */
 function CursorAnchor() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const blocks = useProjectStore((s) => s.blocks);

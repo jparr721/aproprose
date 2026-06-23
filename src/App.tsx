@@ -87,9 +87,10 @@ function App() {
   const saveChapter = useProjectStore((s) => s.saveChapter);
   const compileNow = useProjectStore((s) => s.compileNow);
 
-  // Keyboard: ⌘/Ctrl+S saves, ⌘/Ctrl+Enter compiles, ⌘/Ctrl+Z / +Shift+Z (or
-  // Ctrl+Y) undo/redo the editor. Undo/redo is skipped when focus is inside the
-  // AI panel or a dialog so those inputs keep their own behavior.
+  // Keyboard: ⌘/Ctrl+S saves, ⌘/Ctrl+Enter compiles, ⌘/Ctrl+Shift+P / +Shift+A
+  // toggle the PDF / AI panels, ⌘/Ctrl+Z / +Shift+Z (or Ctrl+Y) undo/redo the
+  // editor. Undo/redo is skipped when focus is inside the AI panel or a dialog so
+  // those inputs keep their own behavior.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -101,6 +102,12 @@ function App() {
       } else if (key === "enter") {
         e.preventDefault();
         void compileNow();
+      } else if (e.shiftKey && key === "p") {
+        e.preventDefault();
+        useViewStore.getState().togglePdf();
+      } else if (e.shiftKey && key === "a") {
+        e.preventDefault();
+        useViewStore.getState().toggleAi();
       } else if (key === "z" || key === "y") {
         const inAux = (document.activeElement as HTMLElement | null)?.closest(
           '[data-ai-root],[role="dialog"],[role="alertdialog"]',

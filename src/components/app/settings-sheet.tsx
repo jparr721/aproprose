@@ -230,6 +230,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
     if (!keyConfigured) {
       setModels([]);
       setError(null);
+      setLoading(false);
       return;
     }
     let active = true;

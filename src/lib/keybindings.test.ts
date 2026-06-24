@@ -13,6 +13,11 @@ describe("keybindings registry", () => {
     expect(keybindingParts(KEYBINDINGS.SPLIT_BLOCK, true)).toEqual(["⌘", "⇧", "↵"]);
     expect(keybindingParts(KEYBINDINGS.SPLIT_BLOCK, false)).toEqual(["⌃", "⇧", "↵"]);
   });
+  it("opens the command palette on mod+k with platform glyphs", () => {
+    expect(toHotkeyString(KEYBINDINGS.OPEN_COMMAND_PALETTE)).toBe("mod+k");
+    expect(keybindingParts(KEYBINDINGS.OPEN_COMMAND_PALETTE, true)).toEqual(["⌘", "K"]);
+    expect(keybindingParts(KEYBINDINGS.OPEN_COMMAND_PALETTE, false)).toEqual(["⌃", "K"]);
+  });
 });
 
 describe("block nav/edit keybindings", () => {

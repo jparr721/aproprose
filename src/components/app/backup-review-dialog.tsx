@@ -133,7 +133,7 @@ export function BackupReviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-5 py-4">
+        <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
           {changedFiles.length === 0 ? (
             <TypographyMuted className="text-xs">No changes since the last backup.</TypographyMuted>
           ) : (

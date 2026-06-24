@@ -274,11 +274,15 @@ function BackupSyncField() {
 }
 
 export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
-  // Open state lives here: only this component reads or writes it, so it's local
-  // state, not a store. ⌘/Ctrl+, flips it — co-located with the action per the
-  // keybinding convention; the controlled Sheet means the trigger still works.
-  const [open, setOpen] = useState(false);
-  useKeybinding(KEYBINDING_IDS.TOGGLE_SETTINGS, () => setOpen((o) => !o));
+  // Open state is lifted to the view store so the command palette can open the
+  // sheet too; the sidebar gear, Cmd/Ctrl+,, and the palette all drive one flag.
+  // The controlled Sheet means the trigger still works.
+  const open = useViewStore((s) => s.settingsOpen);
+  const setOpen = useViewStore((s) => s.setSettingsOpen);
+  useKeybinding(KEYBINDING_IDS.TOGGLE_SETTINGS, () => {
+    const v = useViewStore.getState();
+    v.setSettingsOpen(!v.settingsOpen);
+  });
 
   const { theme, layout, blockStyle, proseSize } = useSettingsStore();
   const setTheme = useSettingsStore((s) => s.setTheme);

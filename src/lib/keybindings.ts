@@ -29,6 +29,14 @@ export interface KeybindingDefinition {
 }
 
 export const KEYBINDINGS = {
+  OPEN_COMMAND_PALETTE: {
+    id: "open-command-palette",
+    key: "k",
+    modifiers: { ctrl: true },
+    description: "Open the command palette",
+    category: "view",
+    label: "Command palette",
+  },
   SAVE_CHAPTER: {
     id: "save-chapter",
     key: "s",

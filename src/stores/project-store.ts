@@ -134,6 +134,8 @@ interface ProjectState {
   // block editing
   select: (id: string | null) => void;
   updateBlockText: (id: string, text: string) => void;
+  /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
+  applyBlockEdits: (edits: { id: string; text: string }[]) => void;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
@@ -487,6 +489,24 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             : s.past,
           future: startGroup ? [] : s.future,
           lastTextEditId: id,
+        };
+      }),
+
+    // Apply a batch of text edits as ONE undo step, so an AI "Accept all" backs
+    // out with a single undo instead of N (one per touched block).
+    applyBlockEdits: (edits) =>
+      set((s) => {
+        if (edits.length === 0) return {};
+        const byId = new Map(edits.map((e) => [e.id, e.text]));
+        return {
+          blocks: s.blocks.map((b) => {
+            const text = byId.get(b.id);
+            return text !== undefined ? { ...b, text, dirty: true } : b;
+          }),
+          chapterDirty: true,
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+          future: [],
+          lastTextEditId: null,
         };
       }),
 

@@ -5,7 +5,8 @@
 // the known cast. Lore/scratchpad/raw-latex blocks are intentionally excluded —
 // they don't render and shouldn't pollute the prose the model reasons about.
 
-import type { AiContext } from "@/lib/ai/operations";
+import type { AiContext, EditRequest } from "@/lib/ai/operations";
+import type { Block } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
 export function buildAiContext(uptoId?: string): AiContext {
@@ -57,5 +58,43 @@ export function buildAiContext(uptoId?: string): AiContext {
     blocksText: lines.join("\n\n"),
     cursorSummary,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
+  };
+}
+
+/** Blocks the Edit tab may revise: rendered prose only (no notes/latex/breaks). */
+function isEditable(b: Block): boolean {
+  return (
+    b.type === "narration" ||
+    b.type === "dialogue" ||
+    (b.type === "chapter" && b.level !== "break")
+  );
+}
+
+/**
+ * Build the request for `editBlocks`. `"block"` scope targets the selected block
+ * (empty when none is selected or it is ineligible); `"chapter"` targets every
+ * eligible block. Chapter title + cast are included so revisions keep voice.
+ */
+export function buildEditRequest(
+  scope: "block" | "chapter",
+  instruction: string,
+): EditRequest {
+  const { project, activeChapterId, blocks, meta, selectedId } =
+    useProjectStore.getState();
+  const chapter = project?.chapters.find((c) => c.id === activeChapterId);
+
+  let targets: Block[];
+  if (scope === "block") {
+    const sel = selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
+    targets = sel && isEditable(sel) ? [sel] : [];
+  } else {
+    targets = blocks.filter(isEditable);
+  }
+
+  return {
+    chapterTitle: chapter?.title,
+    characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
+    blocks: targets.map((b) => ({ id: b.id, type: b.type, text: b.text })),
+    instruction,
   };
 }

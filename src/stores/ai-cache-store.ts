@@ -1,15 +1,15 @@
-// ai-cache-store.ts — in-memory cache for the right-panel AI results.
+// ai-cache-store.ts -- in-memory cache for the right-panel AI results.
 //
-// The generating AI tabs (Suggest, Critique, Continuity, Cast) are idle-first:
-// nothing runs until the author clicks Generate. Radix unmounts inactive tabs and
-// App.tsx unmounts the whole panel whenever the AI panel or focus mode toggles,
-// so without a cache a generated result would be lost on every tab switch / panel
+// The generating AI functions (Suggest, Critique, Continuity, Cast) are idle-first:
+// nothing runs until the author submits. The panel mounts only the active function
+// and App.tsx unmounts the whole panel whenever the AI panel or focus mode toggles,
+// so without a cache a generated result would be lost on every switch / panel
 // toggle / reopen and the author would have to re-ask. Entries are keyed by
 // "<op>:<chapter>:<block>" so a genuine change of scene/cursor reads as idle, but
 // a remount within the same scene reuses the result. A request fires only from an
-// explicit run() — the tabs' Generate / Try again / Refresh. The ask-box
-// instruction that produced a result is stored alongside it so a remounted tab
-// can restore the box and keep it in sync with the result shown.
+// explicit run(). The instruction that produced a result is stored alongside it so
+// a remounted tab can caption it (see AskedCaption); ai-persistence snapshots these
+// entries so results also survive an app restart.
 
 import { create } from "zustand";
 
@@ -29,6 +29,11 @@ interface AiCacheState {
   entries: Record<string, AiCacheEntry>;
   /** Merge a partial entry into the cache for `key`. */
   patch: (key: string, entry: Partial<AiCacheEntry>) => void;
+  /** Replace all entries (used when a project's saved AI state loads). Any
+   *  persisted `loading` flag is forced false -- a request can't be in flight. */
+  hydrate: (entries: Record<string, AiCacheEntry>) => void;
+  /** Drop all entries (used when the open project changes or closes). */
+  reset: () => void;
 }
 
 export const useAiCacheStore = create<AiCacheState>((set) => ({
@@ -37,4 +42,13 @@ export const useAiCacheStore = create<AiCacheState>((set) => ({
     set((s) => ({
       entries: { ...s.entries, [key]: { ...s.entries[key], ...entry } },
     })),
+  hydrate: (entries) =>
+    set(() => {
+      const next: Record<string, AiCacheEntry> = {};
+      for (const [key, e] of Object.entries(entries)) {
+        next[key] = { ...e, loading: false };
+      }
+      return { entries: next };
+    }),
+  reset: () => set(() => ({ entries: {} })),
 }));

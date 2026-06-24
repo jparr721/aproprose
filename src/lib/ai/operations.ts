@@ -17,6 +17,8 @@ import { generateObject, streamText } from "ai";
 import { z } from "zod";
 
 import type {
+  BlockEdit,
+  BlockType,
   CastResult,
   ChatMessage,
   CritiqueNote,
@@ -30,6 +32,7 @@ import {
   CLEAN_TRANSCRIPT_SYSTEM,
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
+  EDIT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
 
@@ -51,6 +54,16 @@ export interface AiContext {
   characters?: { name: string; role?: string }[];
   /** Optional free-text steering from the author's ask box; honoured when present. */
   instruction?: string;
+}
+
+/** What the Edit tab hands `editBlocks`: the blocks it may revise + the request. */
+export interface EditRequest {
+  chapterTitle?: string;
+  characters?: { name: string; role?: string }[];
+  /** Blocks the model may revise (already scoped + filtered to eligible types). */
+  blocks: { id: string; type: BlockType; text: string }[];
+  /** The author's instruction (required for an edit). */
+  instruction: string;
 }
 
 /**
@@ -87,6 +100,24 @@ function buildGrounding(ctx: AiContext): string {
     parts.push(`AUTHOR'S REQUEST (follow this):\n${ctx.instruction.trim()}`);
   }
 
+  return parts.join("\n\n");
+}
+
+/** Grounding for editBlocks: list each editable block by id, then the request. */
+function buildEditGrounding(req: EditRequest): string {
+  const parts: string[] = [];
+  if (req.chapterTitle) parts.push(`CHAPTER: ${req.chapterTitle}`);
+  if (req.characters && req.characters.length > 0) {
+    const roster = req.characters
+      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
+      .join("\n");
+    parts.push(`KNOWN CAST:\n${roster}`);
+  }
+  const blocks = req.blocks
+    .map((b) => `[${b.id}] (${b.type}): ${b.text}`)
+    .join("\n\n");
+  parts.push(`EDITABLE BLOCKS (revise only these, by id):\n${blocks}`);
+  parts.push(`AUTHOR'S REQUEST (apply to the blocks above):\n${req.instruction.trim()}`);
   return parts.join("\n\n");
 }
 
@@ -179,6 +210,22 @@ const castResultSchema = z.object({
     .describe("characters referenced but not present (offPage = true)"),
 });
 
+const blockEditSchema = z.object({
+  blockId: z
+    .string()
+    .describe("the id of a block to revise, copied exactly from EDITABLE BLOCKS"),
+  newText: z
+    .string()
+    .describe("the FULL revised text for that block, cleaned prose (no LaTeX)"),
+  reason: z.string().describe("short phrase: what changed and why"),
+});
+
+const editResultSchema = z.object({
+  edits: z
+    .array(blockEditSchema)
+    .describe("only the blocks that need changes; empty if none do"),
+});
+
 // ── Structured operations ─────────────────────────────────────────────────────
 // Each delegates to `generateObject` with its schema and returns the validated
 // `object`, shaped to the domain type. We pass `system` (the operation's
@@ -264,6 +311,40 @@ export async function detectCast(ctx: AiContext): Promise<CastResult> {
     inScene: object.inScene.map(norm),
     offPage: object.offPage.map(norm),
   };
+}
+
+/**
+ * Drop edits the UI can't safely apply: ones targeting a block that wasn't
+ * offered, and no-ops where the revised text matches the current text (trimmed).
+ */
+export function sanitizeEdits(
+  edits: BlockEdit[],
+  blocks: { id: string; text: string }[],
+): BlockEdit[] {
+  const textById = new Map(blocks.map((b) => [b.id, b.text]));
+  return edits.filter((e) => {
+    const current = textById.get(e.blockId);
+    return current !== undefined && e.newText.trim() !== current.trim();
+  });
+}
+
+/**
+ * Propose in-place revisions for the supplied blocks that satisfy the author's
+ * instruction. Returns the full revised text per changed block, already
+ * sanitized (unknown ids and no-ops removed).
+ */
+export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
+  // Nothing to act on without a direction or an eligible block: skip the model
+  // call entirely (the UI also guards this, but defend the boundary too).
+  if (!req.instruction.trim() || req.blocks.length === 0) return [];
+  const model = await getModel();
+  const { object } = await generateObject({
+    model,
+    schema: editResultSchema,
+    system: EDIT_SYSTEM,
+    prompt: buildEditGrounding(req),
+  });
+  return sanitizeEdits(object.edits, req.blocks);
 }
 
 // ── Streaming + freeform operations ─────────────────────────────────────────

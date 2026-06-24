@@ -32,6 +32,7 @@ import { AiPanel } from "@/components/app/ai-panel";
 import { Welcome } from "@/components/app/welcome";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useAiPersistence } from "@/stores/ai-persistence";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -55,7 +56,7 @@ function Workspace() {
       ) : null}
 
       {showAi ? (
-        <div className="w-[360px] shrink-0">
+        <div className="shrink-0">
           <AiPanel />
         </div>
       ) : null}
@@ -116,6 +117,7 @@ function MigrationGuard() {
 }
 
 function App() {
+  useAiPersistence();
   const status = useProjectStore((s) => s.status);
 
   return (

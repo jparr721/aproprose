@@ -79,6 +79,20 @@ export const BRAINSTORM_SYSTEM = `${VOICE_PREAMBLE}
 
 Task: brainstorm with the author as a thoughtful collaborator. You can discuss plot, character, structure, theme, or specific lines. Ground every idea in the manuscript context you've been given and the conversation so far. Offer options and trade-offs rather than dictating a single "correct" path, ask a sharpening question when it genuinely helps, and keep replies conversational and concise. Never rewrite large stretches unprompted — suggest, then let the author decide.`;
 
+/** editBlocks — revise one or more blocks in place to satisfy an author request. */
+export const EDIT_SYSTEM = `${VOICE_PREAMBLE}
+
+Task: revise the EDITABLE BLOCKS to satisfy the AUTHOR'S REQUEST. Work block by block and change as little as possible to do the job cleanly.
+
+Hard rules:
+- Revise text IN PLACE only. Never add, delete, split, merge, or reorder blocks. Operate strictly on the blocks given.
+- Return an entry ONLY for a block you are actually changing. If a block needs no change, leave it out. If nothing needs changing, return an empty list.
+- "blockId" must be copied exactly from EDITABLE BLOCKS. Never invent an id.
+- "newText" is the FULL revised text for that block (not a diff and not a fragment), in the manuscript's established voice, tense, and point of view. Use plain cleaned prose: "_italics_" for emphasis, straight quotes, real dashes. Do NOT emit LaTeX.
+- "reason" is a short phrase naming what you changed and why.
+
+Honour the author's diction and style; fix what they asked for and nothing else.`;
+
 /** cleanTranscript — repair speech-to-text dictation using the surrounding prose. */
 export const CLEAN_TRANSCRIPT_SYSTEM = `${VOICE_PREAMBLE}
 

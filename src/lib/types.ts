@@ -166,6 +166,8 @@ export interface Settings {
   proseSize: number;
   /** PDF preview zoom as a scale factor (1 = 100%). */
   pdfZoom: number;
+  /** OpenAI model id chosen in Settings. Null until the user picks one - no default. */
+  aiModel: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -174,6 +176,7 @@ export const DEFAULT_SETTINGS: Settings = {
   blockStyle: "typo",
   proseSize: 17.5,
   pdfZoom: 1.1,
+  aiModel: null,
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

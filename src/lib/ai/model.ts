@@ -1,24 +1,23 @@
-// model.ts — the single source of the AI model + provider.
+// model.ts - builds the OpenAI provider and resolves the user-selected model.
 //
-// ALL AI operations in the app go through the Vercel AI SDK (`ai` + `@ai-sdk/openai`).
+// ALL AI operations go through the Vercel AI SDK (`ai` + `@ai-sdk/openai`).
 // Two deliberate choices reconcile the SDK with the Tauri secrets rule:
 //
-//   1. The API key is read from .env on the RUST side (`get_ai_config`) and handed
-//      over at runtime — it is never inlined into frontend source or the bundle.
-//   2. HTTP egress is routed through Tauri's http plugin `fetch`, not the webview's
-//      global fetch. That bypasses webview CORS (OpenAI doesn't send CORS headers)
-//      and works uniformly across WebKitGTK / WKWebView / WebView2.
+//   1. The API key is read on the RUST side (`get_ai_config`) from the value the
+//      user saved in Settings, and handed over at runtime - never inlined into
+//      frontend source or the bundle.
+//   2. HTTP egress is routed through Tauri's http plugin `fetch`, not the
+//      webview's global fetch, to bypass webview CORS (OpenAI sends no CORS
+//      headers) uniformly across WebKitGTK / WKWebView / WebView2.
 //
-// The model is pinned per the product requirement: the newest available `nano`
-// tier. (`gpt-5.5-nano` does not exist; verified against the models endpoint — the
-// 5.5 family ships only base + pro, so the newest nano is gpt-5.4-nano.)
+// The model is NOT hardcoded: it is whatever the user selected in Settings
+// (`settings-store.aiModel`). Until they pick one, `getModel()` throws so AI
+// features cannot run.
 
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getAiConfig } from "@/lib/tauri";
-
-/** The one model id used for every AI operation. */
-export const AI_MODEL = "gpt-5.4-nano" as const;
+import { useSettingsStore } from "@/stores/settings-store";
 
 let providerPromise: Promise<OpenAIProvider> | null = null;
 
@@ -43,15 +42,22 @@ function getProvider(): Promise<OpenAIProvider> {
 
 /**
  * Drop the cached provider so the next AI call rebuilds it with a freshly read
- * key. Call this after the key changes in Settings — otherwise a provider built
+ * key. Call this after the key changes in Settings - otherwise a provider built
  * with the old key (or no key) would persist for the rest of the session.
  */
 export function resetAiProvider(): void {
   providerPromise = null;
 }
 
-/** The configured language model, ready to pass to generateObject/streamText. */
+/**
+ * The configured language model, ready to pass to generateText/streamText.
+ * Throws when no model is selected in Settings - AI is unusable until then.
+ */
 export async function getModel() {
+  const model = useSettingsStore.getState().aiModel;
+  if (!model) {
+    throw new Error("Select an AI model in Settings before using AI features.");
+  }
   const provider = await getProvider();
-  return provider(AI_MODEL);
+  return provider(model);
 }

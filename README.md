@@ -19,8 +19,9 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
   content is preserved byte-for-byte and only blocks you actually touch are
   re-serialized. Lore and scratchpad blocks are stored as LaTeX comments, so they
   travel with the file but never render.
-- **A real AI assistant** (right panel, powered by `gpt-5.4-nano` via the Vercel
-  AI SDK): **Suggest** the next block, **Critique** tone/pacing/voice,
+- **A real AI assistant** (right panel, powered by the OpenAI model you pick in
+  Settings, via the Vercel AI SDK): **Suggest** the next block, **Critique**
+  tone/pacing/voice,
   **Brainstorm** in a streaming chat, run **Continuity** checks, and track the
   **Cast** in the scene — all grounded on the prose up to your cursor. The mic
   dictates into a block; "Clean up with AI" fixes transcription errors in context.
@@ -67,7 +68,8 @@ After the first open it launches normally. Intel Macs are not supported yet.
 - **AI** uses the Vercel AI SDK in the frontend, but the API key — entered in
   Settings and stored in the app-config dir — is read in Rust (never bundled into
   JS) and HTTP egress is routed through Tauri's `http` plugin so it isn't subject
-  to webview CORS. The model is pinned in `src/lib/ai/model.ts`.
+  to webview CORS. The model is the one you select in Settings
+  (`settings-store.aiModel`), read by `getModel()` in `src/lib/ai/model.ts`.
 - **State** is [zustand](https://github.com/pmndrs/zustand): `project-store`
   (open project, blocks, save, compile), `settings-store` (persisted appearance),
   `view-store` (panels + the unsaved-edits guard).
@@ -80,9 +82,7 @@ After the first open it launches normally. Intel Macs are not supported yet.
 - A TeX distribution with `latexmk` and the usual book packages. On Arch:
   `sudo pacman -S --needed texlive-binextra texlive-latexextra texlive-fontsrecommended texlive-fontsextra`.
 - An OpenAI API key. Set it in the app — **Settings (gear) → OpenAI key** — where
-  it is saved to your OS app-config dir, never to this repo. (For local dev you can
-  instead drop `OPENAI_API_KEY=sk-...` into a `.env` at the repo root; copy
-  `.env.example` to get started. `.env` is gitignored.)
+  it is saved to your OS app-config dir, never to this repo.
 
 ## Commands
 

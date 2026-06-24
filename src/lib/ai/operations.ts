@@ -3,17 +3,18 @@
 // This is the seam between the editor UI and the language model. Every function
 // here takes the manuscript context the editor assembles (the chapter, the prose
 // around the cursor, the known cast) and turns it into a *grounded* request:
-// structured operations go through `generateObject` with a zod schema that
-// mirrors the return type from `@/lib/types`, and the open-ended brainstorm chat
-// goes through `streamText` so the UI can render tokens as they arrive.
+// structured operations go through `generateText` with an `Output.object` zod
+// schema that mirrors the return type from `@/lib/types`, and the open-ended
+// brainstorm chat goes through `streamText` so the UI can render tokens as they
+// arrive.
 //
 // The model + provider come from `./model` (`getModel()`), which reads the API
-// key on the Rust side and routes HTTP through Tauri — see that file. We never
-// set provider params the chosen model might reject (e.g. `temperature` on the
-// reasoning-nano tier): we let the SDK defaults apply so a single pinned model
-// works without per-operation tuning.
+// key on the Rust side and routes HTTP through Tauri - see that file. We never
+// set provider params the chosen model might reject (e.g. `temperature` on a
+// reasoning model): we let the SDK defaults apply so whatever model the user
+// selected works without per-operation tuning.
 
-import { generateObject, streamText } from "ai";
+import { generateText, Output, streamText } from "ai";
 import { z } from "zod";
 
 import type {
@@ -227,10 +228,10 @@ const editResultSchema = z.object({
 });
 
 // ── Structured operations ─────────────────────────────────────────────────────
-// Each delegates to `generateObject` with its schema and returns the validated
-// `object`, shaped to the domain type. We pass `system` (the operation's
-// instructions) and `prompt` (the grounding) separately so the framing stays
-// stable while the manuscript varies.
+// Each delegates to `generateText` with an `Output.object` schema and returns
+// the validated `output`, shaped to the domain type. We pass `system` (the
+// operation's instructions) and `prompt` (the grounding) separately so the
+// framing stays stable while the manuscript varies.
 
 /**
  * Propose three distinct continuations (a mix of dialogue and narration), each
@@ -240,21 +241,21 @@ export async function suggestContinuation(
   ctx: AiContext,
 ): Promise<SuggestResult> {
   const model = await getModel();
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: suggestResultSchema,
+    output: Output.object({ schema: suggestResultSchema }),
     system: SUGGEST_SYSTEM,
     prompt: buildGrounding(ctx),
   });
   // Normalize null -> undefined to match the domain type's optional fields.
   return {
-    suggestions: object.suggestions.map((s) => ({
+    suggestions: output.suggestions.map((s) => ({
       type: s.type,
       text: s.text,
       rationale: s.rationale,
       speaker: s.speaker ?? undefined,
     })),
-    followups: object.followups,
+    followups: output.followups,
   };
 }
 
@@ -264,13 +265,13 @@ export async function suggestContinuation(
  */
 export async function critique(ctx: AiContext): Promise<CritiqueNote[]> {
   const model = await getModel();
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: critiqueResultSchema,
+    output: Output.object({ schema: critiqueResultSchema }),
     system: CRITIQUE_SYSTEM,
     prompt: buildGrounding(ctx),
   });
-  return object.notes;
+  return output.notes;
 }
 
 /**
@@ -281,13 +282,13 @@ export async function continuityCheck(
   ctx: AiContext,
 ): Promise<ContinuityFlag[]> {
   const model = await getModel();
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: continuityResultSchema,
+    output: Output.object({ schema: continuityResultSchema }),
     system: CONTINUITY_SYSTEM,
     prompt: buildGrounding(ctx),
   });
-  return object.flags;
+  return output.flags;
 }
 
 /**
@@ -296,20 +297,20 @@ export async function continuityCheck(
  */
 export async function detectCast(ctx: AiContext): Promise<CastResult> {
   const model = await getModel();
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: castResultSchema,
+    output: Output.object({ schema: castResultSchema }),
     system: CAST_SYSTEM,
     prompt: buildGrounding(ctx),
   });
   // Normalize null -> undefined so an absent colour renders as a ghost avatar.
-  const norm = (m: (typeof object.inScene)[number]) => ({
+  const norm = (m: (typeof output.inScene)[number]) => ({
     ...m,
     color: m.color ?? undefined,
   });
   return {
-    inScene: object.inScene.map(norm),
-    offPage: object.offPage.map(norm),
+    inScene: output.inScene.map(norm),
+    offPage: output.offPage.map(norm),
   };
 }
 
@@ -338,13 +339,13 @@ export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
   // call entirely (the UI also guards this, but defend the boundary too).
   if (!req.instruction.trim() || req.blocks.length === 0) return [];
   const model = await getModel();
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: editResultSchema,
+    output: Output.object({ schema: editResultSchema }),
     system: EDIT_SYSTEM,
     prompt: buildEditGrounding(req),
   });
-  return sanitizeEdits(object.edits, req.blocks);
+  return sanitizeEdits(output.edits, req.blocks);
 }
 
 // ── Streaming + freeform operations ─────────────────────────────────────────

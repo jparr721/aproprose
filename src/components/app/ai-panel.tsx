@@ -1,5 +1,5 @@
 // ai-panel.tsx -- the right-side assistant. Six functions, each backed by a real
-// gpt-5.4-nano call grounded on the current scene:
+// call to the model you picked in Settings, grounded on the current scene:
 //   Suggest / Edit / Critique / Brainstorm / Continuity / Cast
 // Reached from a vertical icon rail on the far-right edge; clicking the active
 // icon collapses the panel to just the rail. Nothing infers on its own: each
@@ -51,6 +51,8 @@ import {
 import { ColorAvatar } from "@/components/app/color-dot";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { TypographyMuted } from "@/components/ui/typography";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { buildAiContext, buildEditRequest } from "@/lib/ai/context";
@@ -927,11 +929,28 @@ function ActivePanel({ tab }: { tab: AiTab }) {
   }
 }
 
+/** Shown in place of any tab body when no AI model is selected in Settings. */
+function NoModelNotice() {
+  const setSettingsOpen = useViewStore((s) => s.setSettingsOpen);
+  return (
+    <div className="flex h-full flex-col items-start justify-center gap-3 p-6">
+      <TypographyMuted className="font-sans text-sm">
+        Pick an AI model in Settings to turn on the assistant.
+      </TypographyMuted>
+      <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
+        Open Settings
+      </Button>
+    </div>
+  );
+}
+
 export function AiPanel() {
   const tab = useViewStore((s) => s.aiTab);
   const setTab = useViewStore((s) => s.setAiTab);
   const collapsed = useViewStore((s) => s.aiCollapsed);
   const setCollapsed = useViewStore((s) => s.setAiCollapsed);
+  const aiModel = useSettingsStore((s) => s.aiModel);
+  const hydrated = useSettingsStore((s) => s.hydrated);
 
   // Click the active icon -> collapse/expand; click another -> switch + expand.
   const pick = (id: AiTab) => {
@@ -948,7 +967,7 @@ export function AiPanel() {
         <div className="flex w-80 min-w-0 flex-col border-l border-border bg-card">
           <CursorAnchor />
           <div className="min-h-0 flex-1">
-            <ActivePanel tab={tab} />
+            {hydrated && !aiModel ? <NoModelNotice /> : <ActivePanel tab={tab} />}
           </div>
         </div>
       )}

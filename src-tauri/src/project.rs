@@ -1,13 +1,13 @@
 //! Project discovery + LaTeX preamble/chapter parsing.
 //!
-//! `open_project` locates the main `.tex` file, reads title/author from the
-//! preamble (resolving the `\booktitle` / `\authorname` indirection the real
-//! manuscripts use), and enumerates the `\chapter{…}` / `\input{…}` pairs in
-//! reading order. The shapes here mirror `src/lib/types.ts` exactly; serde
-//! renames every field to camelCase so the JSON the webview receives matches
-//! the `ProjectInfo` / `ChapterRef` interfaces byte-for-byte.
+//! Provides the shared types (`ProjectInfo`, `ChapterRef`, `NovelMetadata`) and
+//! parsing helpers (`find_main_tex`, `parse_chapters`, `newcommand_value`) used
+//! by `novel.rs` for the managed open/create/migrate flow. The shapes mirror
+//! `src/lib/types.ts` exactly; serde renames every field to camelCase so the
+//! JSON the webview receives matches the `ProjectInfo` / `ChapterRef` interfaces
+//! byte-for-byte.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// A chapter as discovered in the project's main `.tex` file.
@@ -28,8 +28,20 @@ pub struct ChapterRef {
     pub word_count: usize,
 }
 
-/// The shape returned by the `open_project` command.
-/// Mirrors `ProjectInfo` in `src/lib/types.ts`.
+/// The editable manuscript metadata, mirrored from `metadata.tex`.
+/// Mirrors `NovelMetadata` in `src/lib/types.ts`. `editionyear` is intentionally
+/// absent — the template always renders it as `\the\year{}` (current year).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NovelMetadata {
+    pub title: String,
+    pub subtitle: String,
+    pub author: String,
+    pub publisher: String,
+    pub isbn: String,
+}
+
+/// The opened project shape, mirroring `ProjectInfo` in `src/lib/types.ts`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
@@ -38,48 +50,15 @@ pub struct ProjectInfo {
     pub main_file: String,
     pub title: Option<String>,
     pub author: Option<String>,
+    pub metadata: NovelMetadata,
     pub chapters: Vec<ChapterRef>,
-}
-
-/// Parse a project directory into a [`ProjectInfo`].
-pub fn open_project(root: &Path) -> Result<ProjectInfo, String> {
-    let root = root
-        .canonicalize()
-        .map_err(|e| format!("cannot open project root {}: {e}", root.display()))?;
-
-    let main_rel = find_main_tex(&root)?;
-    let main_abs = root.join(&main_rel);
-    let source = std::fs::read_to_string(&main_abs)
-        .map_err(|e| format!("cannot read {}: {e}", main_abs.display()))?;
-
-    // Title / author, resolving \booktitle{} / \authorname{} indirection.
-    let title = resolve_meta(&source, "title", "booktitle");
-    let author = resolve_meta(&source, "author", "authorname");
-
-    let chapters = parse_chapters(&source, &root);
-
-    // Display name: the book title if we have one, else the directory name.
-    let name = title.clone().unwrap_or_else(|| {
-        root.file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| root.display().to_string())
-    });
-
-    Ok(ProjectInfo {
-        root: root.display().to_string(),
-        name,
-        main_file: main_rel,
-        title,
-        author,
-        chapters,
-    })
 }
 
 /// Locate the main `.tex` file relative to `root`.
 ///
 /// Prefers `main.tex`; otherwise the first `*.tex` (sorted, top level first)
 /// that contains both `\documentclass` and `\begin{document}`.
-fn find_main_tex(root: &Path) -> Result<String, String> {
+pub(crate) fn find_main_tex(root: &Path) -> Result<String, String> {
     let main = root.join("main.tex");
     if main.is_file() {
         return Ok("main.tex".to_string());
@@ -132,87 +111,9 @@ fn collect_tex(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<std::pa
     }
 }
 
-/// Resolve a metadata field that may be defined directly (`\title{X}`) or via a
-/// `\newcommand` alias (`\title{\booktitle}` + `\newcommand{\booktitle}{X}`).
-///
-/// `cmd` is the LaTeX command (e.g. `title`), `alias` the conventional macro
-/// name the manuscripts use (e.g. `booktitle`). Returns `None` when neither is
-/// present or the value resolves to empty.
-fn resolve_meta(source: &str, cmd: &str, alias: &str) -> Option<String> {
-    // Prefer the explicit alias \newcommand (it holds the literal value), then
-    // fall back to whatever \title{…}/\author{…} contains.
-    if let Some(val) = newcommand_value(source, alias) {
-        let trimmed = strip_inline(&val);
-        if !trimmed.is_empty() {
-            return Some(trimmed);
-        }
-    }
-
-    let raw = command_arg(source, cmd)?;
-    let raw = raw.trim();
-
-    // If the field just points at the alias macro (e.g. \title{\booktitle}),
-    // resolve through the \newcommand definition.
-    let macro_ref = raw.trim_start_matches('\\');
-    if raw.starts_with('\\') {
-        if let Some(val) = newcommand_value(source, macro_ref) {
-            let trimmed = strip_inline(&val);
-            if !trimmed.is_empty() {
-                return Some(trimmed);
-            }
-        }
-    }
-
-    let trimmed = strip_inline(raw);
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
-}
-
-/// Extract the brace-balanced argument of `\<cmd>{…}` (the first occurrence
-/// that is not inside a `\newcommand` definition of that same command).
-fn command_arg(source: &str, cmd: &str) -> Option<String> {
-    let needle = format!("\\{cmd}");
-    let bytes = source.as_bytes();
-    let mut search_from = 0;
-
-    while let Some(rel) = source[search_from..].find(&needle) {
-        let at = search_from + rel;
-        // Ensure the match is the whole command token, not a prefix of a longer
-        // command (e.g. \titlepage when looking for \title).
-        let after = at + needle.len();
-        let next = bytes.get(after).copied();
-        let is_boundary = next.map(|c| !c.is_ascii_alphabetic()).unwrap_or(true);
-
-        // Skip `\newcommand{\title}` style definitions of the command itself.
-        let is_def = source[..at].trim_end().ends_with('{')
-            && source[..at]
-                .trim_end()
-                .trim_end_matches('{')
-                .trim_end()
-                .ends_with("\\newcommand");
-
-        if is_boundary && !is_def {
-            // Find the opening brace following the command name.
-            if let Some(open_rel) = source[after..].find('{') {
-                let open = after + open_rel;
-                if source[after..open].trim().is_empty() {
-                    if let Some(arg) = balanced_braces(source, open) {
-                        return Some(arg);
-                    }
-                }
-            }
-        }
-        search_from = after;
-    }
-    None
-}
-
 /// Extract the value `\newcommand{\<name>}{VALUE}` (also accepts the
 /// `\newcommand\name{VALUE}` form and an optional `[n]` arity argument).
-fn newcommand_value(source: &str, name: &str) -> Option<String> {
+pub(crate) fn newcommand_value(source: &str, name: &str) -> Option<String> {
     let name = name.trim_start_matches('\\');
     for kw in ["\\newcommand", "\\renewcommand", "\\providecommand"] {
         let mut search_from = 0;
@@ -297,11 +198,14 @@ fn match_brace_end(source: &str, open: usize) -> Option<usize> {
 
 /// Scan the main file for `\chapter{TITLE}` commands, each optionally followed
 /// (next non-empty, non-comment line) by `\input{FILE}`.
-fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
-    // Restrict to the document body so preamble \chapter redefinitions (rare)
-    // and example code don't pollute the list.
+pub(crate) fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
+    // Restrict to \mainmatter so inline frontmatter \chapter{} entries (e.g.
+    // \chapter{Preface} before \mainmatter in a legacy main.tex) are excluded.
+    // Falls back to \begin{document}, then the whole source (for chapters.tex
+    // which has neither marker).
     let body = source
-        .find("\\begin{document}")
+        .find("\\mainmatter")
+        .or_else(|| source.find("\\begin{document}"))
         .map(|i| &source[i..])
         .unwrap_or(source);
 
@@ -569,7 +473,10 @@ mod meta_tests {
         let d = temp_dir();
         write_meta(&d, "{\"characters\":[]}").unwrap();
         assert!(d.join(".aproprose").join("meta.json").exists());
-        assert_eq!(read_meta(&d).unwrap().as_deref(), Some("{\"characters\":[]}"));
+        assert_eq!(
+            read_meta(&d).unwrap().as_deref(),
+            Some("{\"characters\":[]}")
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }

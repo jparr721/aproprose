@@ -16,9 +16,11 @@ import type {
   Character,
   CompileError,
   LoreEntry,
+  NovelMetadata,
   ProjectInfo,
   ProjectMeta,
   RecentProject,
+  SkeletonModel,
 } from "@/lib/types";
 import {
   countWords,
@@ -27,6 +29,9 @@ import {
 } from "@/lib/latex";
 import {
   compileProject,
+  createProject as createProjectCmd,
+  deleteChapterCmd,
+  migrateToManaged,
   openProject as openProjectCmd,
   pickProjectDir,
   readAppData,
@@ -35,6 +40,7 @@ import {
   readTextFile,
   writeAppData,
   writeProjectMeta,
+  writeSkeleton,
   writeTextFile,
 } from "@/lib/tauri";
 import { uid } from "@/lib/id";
@@ -66,6 +72,23 @@ const EMPTY_COMPILE: CompileState = {
   at: null,
 };
 
+/** The state reset applied whenever we begin loading a project. */
+const LOADING_RESET = {
+  status: "loading" as const,
+  project: null,
+  meta: EMPTY_META,
+  needsMigration: null,
+  activeChapterId: null,
+  blocks: [],
+  selectedId: null,
+  chapterDirty: false,
+  compile: EMPTY_COMPILE,
+  error: null,
+  past: [],
+  future: [],
+  lastTextEditId: null,
+};
+
 const RECENTS_KEY = "recents";
 const LAST_PROJECT_KEY = "last-project";
 
@@ -79,6 +102,8 @@ interface ProjectState {
   project: ProjectInfo | null;
   meta: ProjectMeta;
   recents: RecentProject[];
+  /** Set when an opened folder is a legacy project that needs conversion. */
+  needsMigration: { root: string; mainFile: string; detectedChapters: number } | null;
 
   activeChapterId: string | null;
   blocks: Block[];
@@ -97,6 +122,14 @@ interface ProjectState {
 
   // chapters
   selectChapter: (id: string) => Promise<void>;
+  createProject: (parent: string, name: string, author: string) => Promise<void>;
+  addChapter: (title: string) => Promise<void>;
+  renameChapter: (id: string, title: string) => Promise<void>;
+  moveChapter: (id: string, dir: -1 | 1) => Promise<void>;
+  deleteChapter: (id: string) => Promise<void>;
+  updateMetadata: (fields: Partial<NovelMetadata>) => Promise<void>;
+  migrateProject: () => Promise<void>;
+  cancelMigration: () => void;
 
   // block editing
   select: (id: string | null) => void;
@@ -115,8 +148,8 @@ interface ProjectState {
   reorderBlock: (fromId: string, toId: string) => void;
 
   // history (undo/redo of the block list within the current chapter)
-  past: Block[][];
-  future: Block[][];
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   /** The block id of the in-progress text edit, so consecutive typing coalesces
    *  into a single undo step. Null after any structural edit or undo/redo. */
   lastTextEditId: string | null;
@@ -137,7 +170,15 @@ interface ProjectState {
 }
 
 const HISTORY_CAP = 100;
-const capPush = (stack: Block[][], snapshot: Block[]): Block[][] =>
+
+/** A history snapshot: the block list plus the selection active at capture time,
+ *  so undo/redo restore the user's place instead of guessing it. */
+interface HistoryEntry {
+  blocks: Block[];
+  selectedId: string | null;
+}
+
+const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -156,11 +197,61 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     });
   };
 
+  // Shared tail of loading a ready project (used by loadProjectAt + migrate +
+  // create): record recents, remember for relaunch, select first chapter, PDF.
+  const finishLoad = async (root: string, project: ProjectInfo) => {
+    // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
+    // In-repo metadata wins; a corrupt meta.json must not brick the open — fall
+    // back to the legacy app-config record (or empty), migrating that record into
+    // the repo once when no in-repo file exists yet.
+    let meta: ProjectMeta;
+    const inRepo = await readProjectMeta(root);
+    let parsed: ProjectMeta | null = null;
+    if (inRepo) {
+      try {
+        parsed = JSON.parse(inRepo) as ProjectMeta;
+      } catch {
+        parsed = null;
+      }
+    }
+    if (parsed) {
+      meta = parsed;
+    } else {
+      const legacy = await readAppData<ProjectMeta>(metaKey(root));
+      meta = legacy ?? EMPTY_META;
+      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
+    }
+
+    const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
+    const recents = [entry, ...get().recents.filter((r) => r.root !== root)].slice(0, 12);
+    persistRecents(recents);
+    void writeAppData(LAST_PROJECT_KEY, root);
+    set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
+    void useSyncStore.getState().init(root);
+
+    const first = project.chapters[0];
+    if (first) await get().selectChapter(first.id);
+
+    const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
+    const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
+      if (import.meta.env.DEV) console.warn(`readPdf(${pdfName}) failed:`, e);
+      return null;
+    });
+    if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
+  };
+
+  /** Build a regeneration model from the current project (order-preserving). */
+  const toModel = (project: ProjectInfo): SkeletonModel => ({
+    metadata: project.metadata,
+    chapters: project.chapters.map((c) => ({ title: c.title, file: c.file })),
+  });
+
   return {
     status: "empty",
     project: null,
     meta: EMPTY_META,
     recents: [],
+    needsMigration: null,
     activeChapterId: null,
     blocks: [],
     selectedId: null,
@@ -193,76 +284,24 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     loadProjectAt: async (root) => {
       // Wipe everything — this is the multi-project reset.
-      set({
-        status: "loading",
-        project: null,
-        meta: EMPTY_META,
-        activeChapterId: null,
-        blocks: [],
-        selectedId: null,
-        chapterDirty: false,
-        compile: EMPTY_COMPILE,
-        error: null,
-        past: [],
-        future: [],
-        lastTextEditId: null,
-      });
+      set(LOADING_RESET);
       try {
-        const project = await openProjectCmd(root);
-        // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
-        // First open of a project that predates this: migrate the legacy app-config
-        // record into the repo once.
-        // In-repo metadata wins; a corrupt/conflicted meta.json must not brick the
-        // project open — fall back to the legacy record (or empty) in that case.
-        let meta: ProjectMeta;
-        const inRepo = await readProjectMeta(root);
-        let parsed: ProjectMeta | null = null;
-        if (inRepo) {
-          try {
-            parsed = JSON.parse(inRepo) as ProjectMeta;
-          } catch {
-            parsed = null;
-          }
+        const outcome = await openProjectCmd(root);
+        if (outcome.status === "needsMigration") {
+          set({
+            status: "empty",
+            needsMigration: {
+              root,
+              mainFile: outcome.mainFile ?? "main.tex",
+              detectedChapters: outcome.detectedChapters ?? 0,
+            },
+          });
+          return;
         }
-        if (parsed) {
-          meta = parsed;
-        } else {
-          const legacy = await readAppData<ProjectMeta>(metaKey(root));
-          meta = legacy ?? EMPTY_META;
-          // Migrate the legacy record into the repo only when there is no in-repo
-          // file at all (don't overwrite a present-but-corrupt one).
-          if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
+        if (!outcome.project) {
+          throw new Error("managed project returned without data");
         }
-
-        // Record in recents (most-recent first, de-duped, capped).
-        const entry: RecentProject = {
-          root,
-          name: project.name,
-          openedAt: Date.now(),
-        };
-        const recents = [
-          entry,
-          ...get().recents.filter((r) => r.root !== root),
-        ].slice(0, 12);
-        persistRecents(recents);
-        // Remember this as the project to auto-reopen on next launch.
-        void writeAppData(LAST_PROJECT_KEY, root);
-
-        set({ project, meta, recents, status: "ready" });
-        void useSyncStore.getState().init(root);
-
-        // Load the first chapter (if any) and any already-built PDF.
-        const first = project.chapters[0];
-        if (first) await get().selectChapter(first.id);
-
-        const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
-        const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
-          if (import.meta.env.DEV) console.warn(`readPdf(${pdfName}) failed:`, e);
-          return null;
-        });
-        if (pdfBase64) {
-          set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
-        }
+        await finishLoad(root, outcome.project);
       } catch (e) {
         set({ status: "empty", error: String(e) });
       }
@@ -276,6 +315,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         status: "empty",
         project: null,
         meta: EMPTY_META,
+        needsMigration: null,
         activeChapterId: null,
         blocks: [],
         selectedId: null,
@@ -311,6 +351,126 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
+    createProject: async (parent, name, author) => {
+      set(LOADING_RESET);
+      try {
+        const metadata: NovelMetadata = {
+          title: name,
+          subtitle: "",
+          author,
+          publisher: "",
+          isbn: "",
+        };
+        const project = await createProjectCmd(parent, name, metadata);
+        await finishLoad(project.root, project);
+      } catch (e) {
+        toast.error("Couldn't create the project", { description: String(e) });
+        set({ status: "empty", error: String(e) });
+      }
+    },
+
+    addChapter: async (title) => {
+      const { project } = get();
+      if (!project) return;
+      const model = toModel(project);
+      model.chapters.push({ title, file: null });
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+        const created = updated.chapters[updated.chapters.length - 1];
+        if (created) await get().selectChapter(created.id);
+      } catch (e) {
+        toast.error("Couldn't add the chapter", { description: String(e) });
+        set({ error: String(e) });
+      }
+    },
+
+    renameChapter: async (id, title) => {
+      const { project } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      if (idx < 0) return;
+      const model = toModel(project);
+      model.chapters[idx] = { ...model.chapters[idx], title };
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        toast.error("Couldn't rename the chapter", { description: String(e) });
+        set({ error: String(e) });
+      }
+    },
+
+    moveChapter: async (id, dir) => {
+      const { project } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      const to = idx + dir;
+      if (idx < 0 || to < 0 || to >= project.chapters.length) return;
+      const model = toModel(project);
+      const [m] = model.chapters.splice(idx, 1);
+      model.chapters.splice(to, 0, m);
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        toast.error("Couldn't reorder chapters", { description: String(e) });
+        set({ error: String(e) });
+      }
+    },
+
+    deleteChapter: async (id) => {
+      const { project, activeChapterId } = get();
+      if (!project) return;
+      const idx = project.chapters.findIndex((c) => c.id === id);
+      if (idx < 0) return;
+      const file = project.chapters[idx].file;
+      const model = toModel(project);
+      model.chapters.splice(idx, 1);
+      try {
+        const updated = await deleteChapterCmd(project.root, model, file);
+        set({ project: updated });
+        if (activeChapterId === id) {
+          const first = updated.chapters[0];
+          if (first) await get().selectChapter(first.id);
+          else set({ activeChapterId: null, blocks: [], selectedId: null });
+        }
+      } catch (e) {
+        toast.error("Couldn't delete the chapter", { description: String(e) });
+        set({ error: String(e) });
+      }
+    },
+
+    updateMetadata: async (fields) => {
+      const { project } = get();
+      if (!project) return;
+      const model = toModel(project);
+      model.metadata = { ...project.metadata, ...fields };
+      try {
+        const updated = await writeSkeleton(project.root, model);
+        set({ project: updated });
+      } catch (e) {
+        toast.error("Couldn't save project settings", { description: String(e) });
+        set({ error: String(e) });
+      }
+    },
+
+    migrateProject: async () => {
+      const nm = get().needsMigration;
+      if (!nm) return;
+      set(LOADING_RESET);
+      try {
+        const project = await migrateToManaged(nm.root);
+        await finishLoad(project.root, project);
+      } catch (e) {
+        // Restore the migration prompt so the user can retry without reopening.
+        toast.error("Migration failed", { description: String(e) });
+        set({ status: "empty", error: String(e), needsMigration: nm });
+      }
+    },
+
+    cancelMigration: () => set({ needsMigration: null }),
+
     select: (id) => set({ selectedId: id }),
 
     // Text edits coalesce: a run of typing in the same block is ONE undo step.
@@ -324,7 +484,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             b.id === id ? { ...b, text, dirty: true } : b,
           ),
           chapterDirty: true,
-          past: startGroup ? capPush(s.past, s.blocks) : s.past,
+          past: startGroup
+            ? capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId })
+            : s.past,
           future: startGroup ? [] : s.future,
           lastTextEditId: id,
         };
@@ -342,7 +504,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             return text !== undefined ? { ...b, text, dirty: true } : b;
           }),
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -356,7 +518,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             b.id === id ? { ...b, ...patch, dirty: true } : b,
           ),
           chapterDirty: true,
-          past: startGroup ? capPush(s.past, s.blocks) : s.past,
+          past: startGroup
+            ? capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId })
+            : s.past,
           future: startGroup ? [] : s.future,
           lastTextEditId: id,
         };
@@ -369,7 +533,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           b.id === id ? { ...b, type, dirty: true } : b,
         ),
         chapterDirty: true,
-        past: capPush(s.past, s.blocks),
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
         future: [],
         lastTextEditId: null,
       })),
@@ -380,7 +544,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           b.id === id ? { ...b, speaker, dirty: true } : b,
         ),
         chapterDirty: true,
-        past: capPush(s.past, s.blocks),
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
         future: [],
         lastTextEditId: null,
       })),
@@ -406,7 +570,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: id,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -426,7 +590,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -445,7 +609,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -463,7 +627,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks,
           selectedId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -482,7 +646,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -505,7 +669,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: fromId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -515,16 +679,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (s.past.length === 0) return {};
         const prev = s.past[s.past.length - 1];
-        const selectedId = prev.some((b) => b.id === s.selectedId)
-          ? s.selectedId
-          : (prev[prev.length - 1]?.id ?? null);
         return {
-          blocks: prev,
+          blocks: prev.blocks,
+          selectedId: prev.selectedId,
           past: s.past.slice(0, -1),
-          future: capPush(s.future, s.blocks),
+          future: capPush(s.future, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
-          selectedId,
         };
       }),
 
@@ -532,16 +693,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (s.future.length === 0) return {};
         const next = s.future[s.future.length - 1];
-        const selectedId = next.some((b) => b.id === s.selectedId)
-          ? s.selectedId
-          : (next[next.length - 1]?.id ?? null);
         return {
-          blocks: next,
+          blocks: next.blocks,
+          selectedId: next.selectedId,
           future: s.future.slice(0, -1),
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
-          selectedId,
         };
       }),
 

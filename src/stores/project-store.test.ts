@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
   openProject: vi.fn(),
+  createProject: vi.fn(),
+  writeSkeleton: vi.fn(),
+  deleteChapterCmd: vi.fn(),
+  migrateToManaged: vi.fn(),
   pickProjectDir: vi.fn(),
   readAppData: vi.fn().mockResolvedValue(null),
   readPdf: vi.fn().mockRejectedValue(new Error("no pdf")),
@@ -152,6 +156,58 @@ describe("undo / redo", () => {
     expect(useProjectStore.getState().blocks).toHaveLength(1);
     expect(useProjectStore.getState().blocks[0]).toBe(b);
   });
+
+  it("restores selection to the split block (not the last block) on undo", () => {
+    const first = mkBlock({ id: "first", text: "Hello world" });
+    const last = mkBlock({ id: "last", text: "Tail block" });
+    useProjectStore.setState({
+      blocks: [first, last],
+      selectedId: "first",
+      past: [],
+      future: [],
+    });
+
+    useProjectStore.getState().splitBlock("first", 5);
+    useProjectStore.getState().undo();
+
+    // The split block is restored and re-selected — selection must NOT jump to
+    // the last block (which would scroll the viewport to the bottom).
+    expect(useProjectStore.getState().selectedId).toBe("first");
+  });
+
+  it("restores selection to the carved block (not the last block) on undo", () => {
+    const first = mkBlock({ id: "first", text: "abc def ghi" });
+    const last = mkBlock({ id: "last", text: "Tail block" });
+    useProjectStore.setState({
+      blocks: [first, last],
+      selectedId: "first",
+      past: [],
+      future: [],
+    });
+
+    useProjectStore.getState().convertSelection("first", 4, 7, "lore");
+    useProjectStore.getState().undo();
+
+    expect(useProjectStore.getState().selectedId).toBe("first");
+  });
+
+  it("restores the post-split selection on redo", () => {
+    const first = mkBlock({ id: "first", text: "Hello world" });
+    const last = mkBlock({ id: "last", text: "Tail block" });
+    useProjectStore.setState({
+      blocks: [first, last],
+      selectedId: "first",
+      past: [],
+      future: [],
+    });
+
+    useProjectStore.getState().splitBlock("first", 5);
+    const afterSplitSelection = useProjectStore.getState().selectedId;
+    useProjectStore.getState().undo();
+    useProjectStore.getState().redo();
+
+    expect(useProjectStore.getState().selectedId).toBe(afterSplitSelection);
+  });
 });
 
 describe("applyBlockEdits", () => {
@@ -164,7 +220,7 @@ describe("applyBlockEdits", () => {
     useProjectStore.setState({
       blocks: [a, b, c],
       past: [],
-      future: [[a]],
+      future: [{ blocks: [a], selectedId: null }],
       chapterDirty: false,
     });
 

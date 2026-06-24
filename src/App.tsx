@@ -25,6 +25,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { CommandPalette } from "@/components/app/command-palette";
 import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
@@ -86,6 +87,35 @@ function UnsavedGuard() {
   );
 }
 
+function MigrationGuard() {
+  const needsMigration = useProjectStore((s) => s.needsMigration);
+  const migrate = useProjectStore((s) => s.migrateProject);
+  const cancel = useProjectStore((s) => s.cancelMigration);
+  return (
+    <AlertDialog
+      open={needsMigration != null}
+      onOpenChange={(o) => !o && cancel()}
+    >
+      <AlertDialogContent className="font-sans">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Convert to managed structure?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This project uses an older layout. Aproprose can convert it (found{" "}
+            {needsMigration?.detectedChapters ?? 0} chapters): metadata and the
+            chapter list move into <code>metadata.tex</code> / <code>chapters.tex</code>,
+            and <code>main.tex</code> is backed up to <code>main.tex.bak</code>. Your
+            chapter files are left untouched.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Not now</AlertDialogCancel>
+          <AlertDialogAction onClick={() => void migrate()}>Convert</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function App() {
   useAiPersistence();
   const status = useProjectStore((s) => s.status);
@@ -100,11 +130,13 @@ function App() {
             <TopBar />
             <Workspace />
           </SidebarInset>
+          <CommandPalette />
         </SidebarProvider>
       ) : (
         <Welcome />
       )}
       <UnsavedGuard />
+      <MigrationGuard />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

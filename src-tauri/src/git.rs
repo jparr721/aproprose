@@ -55,7 +55,13 @@ fn parse_gh_auth(stdout: &str, stderr: &str, ok: bool) -> (bool, Option<String>)
         .lines()
         .find(|l| l.contains("Logged in to") && l.contains("account"))
         .and_then(|l| l.split("account").nth(1))
-        .map(|rest| rest.trim().split_whitespace().next().unwrap_or("").to_string())
+        .map(|rest| {
+            rest.trim()
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string()
+        })
         .filter(|s| !s.is_empty());
     (ok, login)
 }
@@ -80,7 +86,13 @@ pub async fn run(root: &Path, program: &str, args: &[&str]) -> GitOut {
         .spawn();
     let child = match spawn {
         Ok(c) => c,
-        Err(e) => return GitOut { ok: false, stdout: String::new(), stderr: format!("failed to launch {program}: {e}") },
+        Err(e) => {
+            return GitOut {
+                ok: false,
+                stdout: String::new(),
+                stderr: format!("failed to launch {program}: {e}"),
+            }
+        }
     };
     match tokio::time::timeout(TIMEOUT, child.wait_with_output()).await {
         Ok(Ok(o)) => GitOut {
@@ -88,8 +100,16 @@ pub async fn run(root: &Path, program: &str, args: &[&str]) -> GitOut {
             stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
         },
-        Ok(Err(e)) => GitOut { ok: false, stdout: String::new(), stderr: format!("{program} error: {e}") },
-        Err(_) => GitOut { ok: false, stdout: String::new(), stderr: format!("{program} timed out after {}s", TIMEOUT.as_secs()) },
+        Ok(Err(e)) => GitOut {
+            ok: false,
+            stdout: String::new(),
+            stderr: format!("{program} error: {e}"),
+        },
+        Err(_) => GitOut {
+            ok: false,
+            stdout: String::new(),
+            stderr: format!("{program} timed out after {}s", TIMEOUT.as_secs()),
+        },
     }
 }
 
@@ -168,12 +188,20 @@ pub fn parse_status(porcelain_branch: &str) -> RepoStatus {
         let code = &line[0..2];
         // Path begins at column 3; handle rename "R  old -> new" by taking new.
         let raw_path = line[3..].trim();
-        let path = raw_path.rsplit(" -> ").next().unwrap_or(raw_path).to_string();
+        let path = raw_path
+            .rsplit(" -> ")
+            .next()
+            .unwrap_or(raw_path)
+            .to_string();
         let is_conflict = code.contains('U') || code == "AA" || code == "DD";
         if is_conflict {
             conflicted.push(path.clone());
         }
-        changed.push(ChangedFile { path, status: code.to_string(), conflicted: is_conflict });
+        changed.push(ChangedFile {
+            path,
+            status: code.to_string(),
+            conflicted: is_conflict,
+        });
     }
 
     RepoStatus {
@@ -204,11 +232,29 @@ pub async fn origin_url(root: &Path) -> Option<String> {
 pub async fn repo_status(root: &Path) -> RepoStatus {
     if !is_repo(root).await {
         return RepoStatus {
-            is_repo: false, has_remote: false, remote_url: None, branch: None,
-            ahead: 0, behind: 0, dirty: false, changed_files: Vec::new(), conflicted_files: Vec::new(),
+            is_repo: false,
+            has_remote: false,
+            remote_url: None,
+            branch: None,
+            ahead: 0,
+            behind: 0,
+            dirty: false,
+            changed_files: Vec::new(),
+            conflicted_files: Vec::new(),
         };
     }
-    let out = run(root, "git", &["-c", "core.quotePath=false", "status", "--porcelain=v1", "--branch"]).await;
+    let out = run(
+        root,
+        "git",
+        &[
+            "-c",
+            "core.quotePath=false",
+            "status",
+            "--porcelain=v1",
+            "--branch",
+        ],
+    )
+    .await;
     let mut status = parse_status(&out.stdout);
     let remote = origin_url(root).await;
     status.has_remote = remote.is_some();
@@ -276,8 +322,23 @@ fn looks_like_conflict(text: &str) -> bool {
 }
 
 pub async fn unmerged_files(root: &Path) -> Vec<String> {
-    let out = run(root, "git", &["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U"]).await;
-    out.stdout.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    let out = run(
+        root,
+        "git",
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+        ],
+    )
+    .await;
+    out.stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// The backup sequence: stage → commit → pull/merge → push. Steps short-circuit
@@ -285,10 +346,14 @@ pub async fn unmerged_files(root: &Path) -> Vec<String> {
 /// leaves a recoverable partial state, surfaced to the UI — it is not atomic.
 pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     if !is_repo(root).await {
-        return Ok(SyncOutcome::NeedsSetup { reason: "not a git repository".into() });
+        return Ok(SyncOutcome::NeedsSetup {
+            reason: "not a git repository".into(),
+        });
     }
     if origin_url(root).await.is_none() {
-        return Ok(SyncOutcome::NeedsSetup { reason: "no 'origin' remote".into() });
+        return Ok(SyncOutcome::NeedsSetup {
+            reason: "no 'origin' remote".into(),
+        });
     }
 
     let pre = repo_status(root).await;
@@ -296,7 +361,9 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     // Already conflicted (e.g. reopened mid-conflict): surface it directly
     // rather than transiting an error state on a refused commit.
     if !pre.conflicted_files.is_empty() {
-        return Ok(SyncOutcome::Conflict { files: pre.conflicted_files });
+        return Ok(SyncOutcome::Conflict {
+            files: pre.conflicted_files,
+        });
     }
 
     // Stage + commit anything local.
@@ -311,7 +378,9 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
             && !commit.stdout.contains("nothing to commit")
             && !commit.stderr.contains("nothing to commit")
         {
-            return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
+            return Err(format!("{}{}", commit.stdout, commit.stderr)
+                .trim()
+                .to_string());
         }
     }
 
@@ -320,7 +389,9 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     if !pull.ok {
         let blob = format!("{}{}", pull.stdout, pull.stderr);
         if looks_like_conflict(&blob) {
-            return Ok(SyncOutcome::Conflict { files: unmerged_files(root).await });
+            return Ok(SyncOutcome::Conflict {
+                files: unmerged_files(root).await,
+            });
         }
         if let Some(o) = classify_transport_error(&blob.to_lowercase()) {
             return Ok(o);
@@ -339,8 +410,10 @@ pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
     }
 
     let nothing_local = !pre.dirty;
-    let pull_noop = pull.stdout.contains("Already up to date") || pull.stderr.contains("Already up to date");
-    let push_noop = push.stderr.contains("Everything up-to-date") || push.stdout.contains("Everything up-to-date");
+    let pull_noop =
+        pull.stdout.contains("Already up to date") || pull.stderr.contains("Already up to date");
+    let push_noop = push.stderr.contains("Everything up-to-date")
+        || push.stdout.contains("Everything up-to-date");
     if nothing_local && pull_noop && push_noop && pre.ahead == 0 {
         Ok(SyncOutcome::Clean)
     } else {
@@ -369,9 +442,19 @@ pub struct RepoCreated {
 
 const GITIGNORE_BLOCK: &[&str] = &[
     "# LaTeX build artifacts (aproprose)",
-    "*.aux", "*.log", "*.out", "*.toc", "*.lof", "*.lot",
-    "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.bbl", "*.blg",
-    "*.run.xml", "*-blx.bib",
+    "*.aux",
+    "*.log",
+    "*.out",
+    "*.toc",
+    "*.lof",
+    "*.lot",
+    "*.fls",
+    "*.fdb_latexmk",
+    "*.synctex.gz",
+    "*.bbl",
+    "*.blg",
+    "*.run.xml",
+    "*-blx.bib",
     "# Compiled output (regenerable from source)",
     "*.pdf",
 ];
@@ -379,13 +462,16 @@ const GITIGNORE_BLOCK: &[&str] = &[
 /// Append our default ignore lines to `existing`, skipping any already present.
 /// Idempotent; never reorders or removes the user's lines.
 pub fn gitignore_with_defaults(existing: &str) -> String {
-    let have: std::collections::HashSet<&str> =
-        existing.lines().map(|l| l.trim()).collect();
+    let have: std::collections::HashSet<&str> = existing.lines().map(|l| l.trim()).collect();
     let mut out = existing.to_string();
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
-    let missing: Vec<&str> = GITIGNORE_BLOCK.iter().copied().filter(|l| !have.contains(l)).collect();
+    let missing: Vec<&str> = GITIGNORE_BLOCK
+        .iter()
+        .copied()
+        .filter(|l| !have.contains(l))
+        .collect();
     for line in missing {
         out.push_str(line);
         out.push('\n');
@@ -415,14 +501,24 @@ pub async fn init_local_repo(root: &Path) -> Result<(), String> {
     let commit = run(
         root,
         "git",
-        &["-c", "user.email=backup@aproprose.local", "-c", "user.name=aproprose",
-          "commit", "-m", "chore: initial backup"],
-    ).await;
+        &[
+            "-c",
+            "user.email=backup@aproprose.local",
+            "-c",
+            "user.name=aproprose",
+            "commit",
+            "-m",
+            "chore: initial backup",
+        ],
+    )
+    .await;
     if !commit.ok
         && !commit.stdout.contains("nothing to commit")
         && !commit.stderr.contains("nothing to commit")
     {
-        return Err(format!("{}{}", commit.stdout, commit.stderr).trim().to_string());
+        return Err(format!("{}{}", commit.stdout, commit.stderr)
+            .trim()
+            .to_string());
     }
     Ok(())
 }
@@ -432,22 +528,39 @@ pub async fn init_local_repo(root: &Path) -> Result<(), String> {
 pub async fn check_repo_name(name: &str) -> Result<NameCheck, String> {
     let valid = !name.is_empty()
         && name.len() <= 100
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
     if !valid {
-        return Ok(NameCheck { available: false, reason: Some("Use letters, numbers, '-', '_', '.'".into()) });
+        return Ok(NameCheck {
+            available: false,
+            reason: Some("Use letters, numbers, '-', '_', '.'".into()),
+        });
     }
     let login = {
-        let auth = run(&std::env::temp_dir(), "gh", &["api", "user", "--jq", ".login"]).await;
+        let auth = run(
+            &std::env::temp_dir(),
+            "gh",
+            &["api", "user", "--jq", ".login"],
+        )
+        .await;
         if !auth.ok {
             return Err("gh is not authenticated — run `gh auth login`".into());
         }
         auth.stdout.trim().to_string()
     };
-    let probe = run(&std::env::temp_dir(), "gh", &["api", &format!("repos/{login}/{name}"), "--silent"]).await;
+    let probe = run(
+        &std::env::temp_dir(),
+        "gh",
+        &["api", &format!("repos/{login}/{name}"), "--silent"],
+    )
+    .await;
     // Exit 0 → repo exists (taken); non-zero (404) → available.
     Ok(NameCheck {
         available: !probe.ok,
-        reason: probe.ok.then(|| "A repo with that name already exists".to_string()),
+        reason: probe
+            .ok
+            .then(|| "A repo with that name already exists".to_string()),
     })
 }
 
@@ -458,12 +571,26 @@ pub async fn enable_backup(root: &Path, name: &str, private: bool) -> Result<Rep
     let out = run(
         root,
         "gh",
-        &["repo", "create", name, vis, "--source=.", "--remote=origin", "--push"],
-    ).await;
+        &[
+            "repo",
+            "create",
+            name,
+            vis,
+            "--source=.",
+            "--remote=origin",
+            "--push",
+        ],
+    )
+    .await;
     if !out.ok {
         return Err(format!("{}{}", out.stdout, out.stderr).trim().to_string());
     }
-    let login = run(&std::env::temp_dir(), "gh", &["api", "user", "--jq", ".login"]).await;
+    let login = run(
+        &std::env::temp_dir(),
+        "gh",
+        &["api", "user", "--jq", ".login"],
+    )
+    .await;
     if !login.ok {
         return Err("could not resolve gh owner after repo creation".into());
     }
@@ -480,7 +607,11 @@ pub async fn gh_check_repo_name(name: String) -> Result<NameCheck, String> {
 }
 
 #[tauri::command]
-pub async fn enable_backup_cmd(root: String, name: String, private: bool) -> Result<RepoCreated, String> {
+pub async fn enable_backup_cmd(
+    root: String,
+    name: String,
+    private: bool,
+) -> Result<RepoCreated, String> {
     enable_backup(Path::new(&root), &name, private).await
 }
 
@@ -505,7 +636,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let git = |args: &[&str]| {
-            StdCommand::new("git").args(args).current_dir(&dir).output().unwrap();
+            StdCommand::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
         git(&["init", "-q"]);
         git(&["config", "user.email", "t@t.t"]);
@@ -601,8 +736,16 @@ mod tests {
     async fn diff_shows_modified_tracked_file() {
         let dir = temp_repo();
         std::fs::write(dir.join("a.tex"), "one\n").unwrap();
-        StdCommand::new("git").args(["add", "-A"]).current_dir(&dir).output().unwrap();
-        StdCommand::new("git").args(["commit", "-qm", "init"]).current_dir(&dir).output().unwrap();
+        StdCommand::new("git")
+            .args(["add", "-A"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        StdCommand::new("git")
+            .args(["commit", "-qm", "init"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
         std::fs::write(dir.join("a.tex"), "two\n").unwrap();
         let d = diff(&dir, None).await.unwrap();
         assert!(d.contains("-one"));
@@ -613,16 +756,34 @@ mod tests {
     #[test]
     fn classify_transport_error_ignores_rejected() {
         assert!(classify_transport_error(" ! [rejected] main -> main (fetch first)").is_none());
-        assert!(matches!(classify_transport_error("fatal: authentication failed"), Some(SyncOutcome::AuthMissing)));
-        assert!(matches!(classify_transport_error("could not resolve host: github.com"), Some(SyncOutcome::Offline)));
+        assert!(matches!(
+            classify_transport_error("fatal: authentication failed"),
+            Some(SyncOutcome::AuthMissing)
+        ));
+        assert!(matches!(
+            classify_transport_error("could not resolve host: github.com"),
+            Some(SyncOutcome::Offline)
+        ));
     }
 
     #[test]
     fn classify_recognizes_auth_offline_rejected() {
-        assert!(matches!(classify_git_error("fatal: Authentication failed for 'https://...'"), Some(SyncOutcome::AuthMissing)));
-        assert!(matches!(classify_git_error("Permission denied (publickey)."), Some(SyncOutcome::AuthMissing)));
-        assert!(matches!(classify_git_error("fatal: unable to access ... Could not resolve host: github.com"), Some(SyncOutcome::Offline)));
-        assert!(matches!(classify_git_error(" ! [rejected] main -> main (fetch first)"), Some(SyncOutcome::PushRejected)));
+        assert!(matches!(
+            classify_git_error("fatal: Authentication failed for 'https://...'"),
+            Some(SyncOutcome::AuthMissing)
+        ));
+        assert!(matches!(
+            classify_git_error("Permission denied (publickey)."),
+            Some(SyncOutcome::AuthMissing)
+        ));
+        assert!(matches!(
+            classify_git_error("fatal: unable to access ... Could not resolve host: github.com"),
+            Some(SyncOutcome::Offline)
+        ));
+        assert!(matches!(
+            classify_git_error(" ! [rejected] main -> main (fetch first)"),
+            Some(SyncOutcome::PushRejected)
+        ));
         assert!(classify_git_error("some unrelated error").is_none());
     }
 
@@ -634,8 +795,18 @@ mod tests {
         let work = base.join("work");
         std::fs::create_dir_all(&origin).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        StdCommand::new("git").args(["init", "--bare", "-q", "-b", "main"]).current_dir(&origin).output().unwrap();
-        let g = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work).output().unwrap(); };
+        StdCommand::new("git")
+            .args(["init", "--bare", "-q", "-b", "main"])
+            .current_dir(&origin)
+            .output()
+            .unwrap();
+        let g = |args: &[&str]| {
+            StdCommand::new("git")
+                .args(args)
+                .current_dir(&work)
+                .output()
+                .unwrap();
+        };
         g(&["init", "-q", "-b", "main"]);
         g(&["config", "user.email", "t@t.t"]);
         g(&["config", "user.name", "t"]);
@@ -663,7 +834,11 @@ mod tests {
         let out = sync(&work, "Backup test").await.unwrap();
         assert!(matches!(out, SyncOutcome::Synced));
         // The change reached origin:
-        let log = StdCommand::new("git").args(["log", "--oneline"]).current_dir(&origin).output().unwrap();
+        let log = StdCommand::new("git")
+            .args(["log", "--oneline"])
+            .current_dir(&origin)
+            .output()
+            .unwrap();
         let log = String::from_utf8_lossy(&log.stdout);
         assert!(log.contains("Backup test"));
         let _ = std::fs::remove_dir_all(work.parent().unwrap());
@@ -705,12 +880,32 @@ mod tests {
     async fn sync_unreachable_remote_returns_offline() {
         let dir = temp_repo();
         std::fs::write(dir.join("a.tex"), "x\n").unwrap();
-        StdCommand::new("git").args(["add", "-A"]).current_dir(&dir).output().unwrap();
-        StdCommand::new("git").args(["commit", "-qm", "init"]).current_dir(&dir).output().unwrap();
-        StdCommand::new("git").args(["remote", "add", "origin", "https://nonexistent.invalid/x.git"]).current_dir(&dir).output().unwrap();
+        StdCommand::new("git")
+            .args(["add", "-A"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        StdCommand::new("git")
+            .args(["commit", "-qm", "init"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        StdCommand::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://nonexistent.invalid/x.git",
+            ])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
         std::fs::write(dir.join("a.tex"), "y\n").unwrap();
         let out = sync(&dir, "msg").await.unwrap();
-        assert!(matches!(out, SyncOutcome::Offline), "expected Offline, got {out:?}");
+        assert!(
+            matches!(out, SyncOutcome::Offline),
+            "expected Offline, got {out:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -724,7 +919,11 @@ mod tests {
         init_local_repo(&dir).await.unwrap();
         assert!(dir.join(".git").exists());
         assert!(dir.join(".gitignore").exists());
-        let log = StdCommand::new("git").args(["log", "--oneline"]).current_dir(&dir).output().unwrap();
+        let log = StdCommand::new("git")
+            .args(["log", "--oneline"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
         assert!(String::from_utf8_lossy(&log.stdout).contains("backup"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -734,8 +933,22 @@ mod tests {
         let (origin, work_a) = repo_with_origin();
         // Second clone B advances origin on the same line.
         let work_b = work_a.parent().unwrap().join("work_b");
-        StdCommand::new("git").args(["clone", "-q", origin.to_str().unwrap(), work_b.to_str().unwrap()]).output().unwrap();
-        let gb = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work_b).output().unwrap(); };
+        StdCommand::new("git")
+            .args([
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                work_b.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        let gb = |args: &[&str]| {
+            StdCommand::new("git")
+                .args(args)
+                .current_dir(&work_b)
+                .output()
+                .unwrap();
+        };
         gb(&["config", "user.email", "b@b.b"]);
         gb(&["config", "user.name", "b"]);
         std::fs::write(work_b.join("a.tex"), "from-b\n").unwrap();
@@ -744,7 +957,9 @@ mod tests {
         // A changes the same line and syncs → conflict.
         std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
         let out = sync(&work_a, "a-change").await.unwrap();
-        assert!(matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()]));
+        assert!(
+            matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()])
+        );
         let _ = std::fs::remove_dir_all(work_a.parent().unwrap());
     }
 
@@ -752,8 +967,22 @@ mod tests {
     async fn sync_on_already_conflicted_tree_returns_conflict() {
         let (origin, work_a) = repo_with_origin();
         let work_b = work_a.parent().unwrap().join("work_b");
-        StdCommand::new("git").args(["clone", "-q", origin.to_str().unwrap(), work_b.to_str().unwrap()]).output().unwrap();
-        let gb = |args: &[&str]| { StdCommand::new("git").args(args).current_dir(&work_b).output().unwrap(); };
+        StdCommand::new("git")
+            .args([
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                work_b.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        let gb = |args: &[&str]| {
+            StdCommand::new("git")
+                .args(args)
+                .current_dir(&work_b)
+                .output()
+                .unwrap();
+        };
         gb(&["config", "user.email", "b@b.b"]);
         gb(&["config", "user.name", "b"]);
         std::fs::write(work_b.join("a.tex"), "from-b\n").unwrap();
@@ -764,7 +993,9 @@ mod tests {
         assert!(matches!(first, SyncOutcome::Conflict { .. }));
         // Tree is still conflicted; a second sync must early-return Conflict, not Err.
         let second = sync(&work_a, "retry").await.unwrap();
-        assert!(matches!(second, SyncOutcome::Conflict { ref files } if files.contains(&"a.tex".to_string())));
+        assert!(
+            matches!(second, SyncOutcome::Conflict { ref files } if files.contains(&"a.tex".to_string()))
+        );
         let _ = std::fs::remove_dir_all(work_a.parent().unwrap());
     }
 }

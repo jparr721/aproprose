@@ -20,6 +20,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@fontsource-variable/lora": "^5.2.8",
     "@fontsource-variable/noto-serif": "^5.2.9",
+    "@pierre/diffs": "^1.2.11",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
     "@rive-app/react-webgl2": "^4.29.1",
     "@streamdown/cjk": "^1.0.3",

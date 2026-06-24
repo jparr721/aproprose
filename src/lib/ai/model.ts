@@ -50,7 +50,7 @@ export function resetAiProvider(): void {
 }
 
 /**
- * The configured language model, ready to pass to generateObject/streamText.
+ * The configured language model, ready to pass to generateText/streamText.
  * Throws when no model is selected in Settings - AI is unusable until then.
  */
 export async function getModel() {

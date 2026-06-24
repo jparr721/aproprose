@@ -35,11 +35,14 @@ interface ViewState {
   aiTab: AiTab;
   /** Bumped to focus the Suggest ask box (e.g. from the spark). Never runs the model. */
   suggestFocusTick: number;
+  /** True when the panel is collapsed to just the icon rail (ephemeral). */
+  aiCollapsed: boolean;
 
   toggleAi: () => void;
   togglePdf: () => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
+  setAiCollapsed: (v: boolean) => void;
   /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
   triggerSuggest: () => void;
 
@@ -60,6 +63,7 @@ export const useViewStore = create<ViewState>()(
 
       aiTab: "suggest",
       suggestFocusTick: 0,
+      aiCollapsed: false,
 
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
@@ -71,11 +75,13 @@ export const useViewStore = create<ViewState>()(
       },
 
       setAiTab: (tab) => set({ aiTab: tab }),
+      setAiCollapsed: (v) => set({ aiCollapsed: v }),
       triggerSuggest: () =>
         set((s) => ({
           aiOpen: true,
           focus: false,
           aiTab: "suggest",
+          aiCollapsed: false,
           suggestFocusTick: s.suggestFocusTick + 1,
         })),
 

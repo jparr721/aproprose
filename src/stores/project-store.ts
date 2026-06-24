@@ -81,6 +81,8 @@ const LOADING_RESET = {
   activeChapterId: null,
   blocks: [],
   selectedId: null,
+  editing: false,
+  editCaret: null,
   chapterDirty: false,
   compile: EMPTY_COMPILE,
   error: null,
@@ -107,7 +109,20 @@ interface ProjectState {
 
   activeChapterId: string | null;
   blocks: Block[];
+  /** The highlighted block, or null. "Selected" means highlighted, not editing. */
   selectedId: string | null;
+  /**
+   * Whether the selected block's textarea has the caret (edit mode). Selection
+   * and editing are distinct states: a block can be selected (nav mode) without
+   * its prose being swapped for a textarea. Invariant: `editing ⇒ selectedId != null`.
+   */
+  editing: boolean;
+  /**
+   * One-shot caret request consumed by the editing block's textarea on mount:
+   * `"start"` places the caret at the beginning (used by `i` / new-block insert);
+   * `null` leaves the native caret (click-to-edit lands it at the click point).
+   */
+  editCaret: "start" | null;
   chapterDirty: boolean;
   saving: boolean;
 
@@ -131,8 +146,16 @@ interface ProjectState {
   migrateProject: () => Promise<void>;
   cancelMigration: () => void;
 
-  // block editing
+  // block selection / editing (the nav vs edit modal model)
   select: (id: string | null) => void;
+  /** Enter edit mode on the selected block (no-op if none / a chapter break). */
+  beginEdit: (caret?: "start") => void;
+  /** Leave edit mode but keep the block highlighted (nav mode). */
+  stopEdit: () => void;
+  /** Clear the selection entirely. */
+  deselect: () => void;
+  /** Move the highlight to the prev/next block in nav mode, clamped at the ends. */
+  moveSelection: (dir: -1 | 1) => void;
   updateBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: { id: string; text: string }[]) => void;
@@ -255,6 +278,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     activeChapterId: null,
     blocks: [],
     selectedId: null,
+    editing: false,
+    editCaret: null,
     chapterDirty: false,
     saving: false,
     compile: EMPTY_COMPILE,
@@ -319,6 +344,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         activeChapterId: null,
         blocks: [],
         selectedId: null,
+        editing: false,
+        editCaret: null,
         chapterDirty: false,
         compile: EMPTY_COMPILE,
         error: null,
@@ -339,7 +366,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({
           activeChapterId: id,
           blocks,
+          // Highlight the last block in nav mode — no caret/autofocus on load.
           selectedId: blocks.length ? blocks[blocks.length - 1].id : null,
+          editing: false,
+          editCaret: null,
           chapterDirty: false,
           error: null,
           past: [],
@@ -433,7 +463,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
-          else set({ activeChapterId: null, blocks: [], selectedId: null });
+          else set({ activeChapterId: null, blocks: [], selectedId: null, editing: false, editCaret: null });
         }
       } catch (e) {
         toast.error("Couldn't delete the chapter", { description: String(e) });
@@ -471,7 +501,33 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     cancelMigration: () => set({ needsMigration: null }),
 
-    select: (id) => set({ selectedId: id }),
+    // Selecting always lands in nav mode — highlighted, not editing. Click-to-edit
+    // and `i` promote to edit mode explicitly via beginEdit.
+    select: (id) => set({ selectedId: id, editing: false, editCaret: null }),
+
+    beginEdit: (caret) =>
+      set((s) => {
+        if (!s.selectedId) return {};
+        const block = s.blocks.find((b) => b.id === s.selectedId);
+        // Chapter breaks (`* * *`) have no editable text.
+        if (!block || (block.type === "chapter" && block.level === "break"))
+          return {};
+        return { editing: true, editCaret: caret ?? null };
+      }),
+
+    stopEdit: () => set({ editing: false, editCaret: null }),
+
+    deselect: () => set({ selectedId: null, editing: false, editCaret: null }),
+
+    moveSelection: (dir) =>
+      set((s) => {
+        if (!s.selectedId) return {};
+        const idx = s.blocks.findIndex((b) => b.id === s.selectedId);
+        if (idx < 0) return {};
+        const to = idx + dir;
+        if (to < 0 || to >= s.blocks.length) return {}; // clamp at the ends, no wrap
+        return { selectedId: s.blocks[to].id, editing: false, editCaret: null };
+      }),
 
     // Text edits coalesce: a run of typing in the same block is ONE undo step.
     // The first edit to a block snapshots the prior state; subsequent keystrokes
@@ -569,6 +625,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: id,
+          // A freshly inserted block is ready to type into, caret at the start.
+          editing: true,
+          editCaret: "start",
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -589,6 +648,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: plan.focusId,
+          // Splitting happens mid-edit; stay in edit mode on the focused piece.
+          editing: true,
+          editCaret: null,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -608,6 +670,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: plan.focusId,
+          // Carving happens mid-edit; stay in edit mode on the carved piece.
+          editing: true,
+          editCaret: null,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -626,6 +691,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks,
           selectedId,
+          // After a delete the neighbour is highlighted in nav mode, not editing.
+          editing: false,
+          editCaret: null,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -668,6 +736,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: fromId,
+          // A dropped block is highlighted in nav mode, not editing.
+          editing: false,
+          editCaret: null,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -686,6 +757,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           future: capPush(s.future, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
+          // Undo restores the captured selection (above) but always lands in nav
+          // mode — highlighted, not editing.
+          editing: false,
+          editCaret: null,
         };
       }),
 
@@ -700,6 +775,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
+          // Redo restores the captured selection (above) but always lands in nav
+          // mode — highlighted, not editing.
+          editing: false,
+          editCaret: null,
         };
       }),
 

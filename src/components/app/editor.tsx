@@ -1,5 +1,6 @@
 // editor.tsx — the center column: the chapter as an editable block stream.
 
+import { useMemo } from "react";
 import {
   IconGitMerge,
   IconSparkles,
@@ -44,6 +45,16 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
   ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
 };
 
+// After a nav-key move, bring the newly-selected block into view. The block node
+// already exists (selection only restyles it), so a synchronous query is fine.
+function scrollSelectedIntoView() {
+  const id = useProjectStore.getState().selectedId;
+  if (!id) return;
+  document
+    .querySelector(`[data-block-id="${id}"]`)
+    ?.scrollIntoView({ block: "nearest" });
+}
+
 function AddBlockRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
@@ -79,6 +90,8 @@ export function Editor() {
   const activeId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const editing = useProjectStore((s) => s.editing);
   const select = useProjectStore((s) => s.select);
   const reorderBlock = useProjectStore((s) => s.reorderBlock);
 
@@ -141,6 +154,58 @@ export function Editor() {
       store.splitBlock(blockId, selectionStart);
     }
   });
+
+  // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
+  // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders
+  // and powers on-screen hints. All four bow out of the AI panel / dialogs.
+  const navOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: selectedId != null && !editing,
+      ignoreEventWhen: (e) => isInAuxSurface(e.target as Element | null),
+    }),
+    [selectedId, editing],
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.NAV_PREV_BLOCK,
+    () => {
+      useProjectStore.getState().moveSelection(-1);
+      scrollSelectedIntoView();
+    },
+    navOptions,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.NAV_NEXT_BLOCK,
+    () => {
+      useProjectStore.getState().moveSelection(1);
+      scrollSelectedIntoView();
+    },
+    navOptions,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.EDIT_BLOCK,
+    () => useProjectStore.getState().beginEdit("start"),
+    navOptions,
+  );
+
+  // Esc exits edit mode (back to nav), or deselects when already in nav mode. It
+  // fires from inside the block textarea (firesWhileEditing) but bows out of the
+  // AI panel / dialogs, which own their own Esc.
+  const exitOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: selectedId != null,
+      ignoreEventWhen: (e) => isInAuxSurface(e.target as Element | null),
+    }),
+    [selectedId],
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.EXIT_BLOCK,
+    () => {
+      const st = useProjectStore.getState();
+      if (st.editing) st.stopEdit();
+      else st.deselect();
+    },
+    exitOptions,
+  );
 
   const conflictedFiles = useSyncStore((s) => s.conflictedFiles);
 

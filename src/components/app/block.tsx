@@ -143,10 +143,13 @@ function BlockBody({
   block,
   editing,
   speaker,
+  caret,
 }: {
   block: BlockT;
   editing: boolean;
   speaker?: Character;
+  /** One-shot caret placement for the block's primary textarea on edit-mode mount. */
+  caret?: "start" | "end";
 }) {
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const updateBlock = useProjectStore((s) => s.updateBlock);
@@ -165,6 +168,7 @@ function BlockBody({
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
+          caret={caret}
           placeholder="Scene heading"
           className="text-center font-heading text-2xl font-medium tracking-wide text-foreground"
         />
@@ -189,6 +193,7 @@ function BlockBody({
                 value={block.text}
                 onChange={(v) => updateBlockText(block.id, v)}
                 autoFocus
+                caret={caret}
                 placeholder="What do they say?"
                 className={PROSE}
                 proseBody
@@ -251,6 +256,7 @@ function BlockBody({
               value={block.text}
               onChange={(v) => updateBlockText(block.id, v)}
               autoFocus
+              caret={caret}
               placeholder={isLore ? "Worldbuilding note…" : "Brainstorm, reminders…"}
               className="font-sans text-[13px] leading-[1.55]"
               proseBody
@@ -268,6 +274,7 @@ function BlockBody({
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
+          caret={caret}
           className="rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground"
         />
       ) : (
@@ -283,6 +290,7 @@ function BlockBody({
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
+          caret={caret}
           placeholder="Write…"
           className={PROSE}
           proseBody
@@ -325,8 +333,11 @@ function BlockImpl({
   dictation: { supported: boolean; listening: boolean; toggle: () => void };
 }) {
   const selected = useProjectStore((s) => s.selectedId === block.id);
+  const storeEditing = useProjectStore((s) => s.editing);
+  const editCaret = useProjectStore((s) => s.editCaret);
   const characters = useProjectStore((s) => s.meta.characters);
   const select = useProjectStore((s) => s.select);
+  const beginEdit = useProjectStore((s) => s.beginEdit);
   const moveBlock = useProjectStore((s) => s.moveBlock);
   const deleteBlock = useProjectStore((s) => s.deleteBlock);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
@@ -348,7 +359,13 @@ function BlockImpl({
   const speaker = block.speaker
     ? characters.find((c) => c.id === block.speaker)
     : undefined;
-  const editing = selected && !(block.type === "chapter" && block.level === "break");
+  // Selection (highlight) and editing (caret in the textarea) are now distinct:
+  // a block is only editing when it's the selected block AND the store's editing
+  // flag is set. Chapter breaks have no editable text, so they never edit.
+  const isBreak = block.type === "chapter" && block.level === "break";
+  const editing = selected && storeEditing && !isBreak;
+  // The one-shot caret hint only applies to the block currently in edit mode.
+  const caret = editing && editCaret ? editCaret : undefined;
   const isProse = block.type === "narration" || block.type === "dialogue";
   const cardChrome = blockStyle === "cards" && isProse;
 
@@ -400,11 +417,15 @@ function BlockImpl({
         <div
           ref={setNodeRef}
           data-block-id={block.id}
-          // Left press selects (and enters edit mode); right press must NOT, or
-          // selecting the block swaps the prose for textareas and drops the
-          // highlight the user is trying to copy.
+          // First left press highlights the block (nav mode, prose stays). A
+          // second press on the already-selected block enters edit mode, the
+          // mouseup landing the caret at the click point (beginEdit passes no
+          // caret hint). Right press must NOT select, or swapping prose for
+          // textareas drops the highlight the user is trying to copy.
           onMouseDown={(e) => {
-            if (e.button === 0) select(block.id);
+            if (e.button !== 0) return;
+            if (!selected) select(block.id);
+            else if (!storeEditing) beginEdit();
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
           // dnd-kit drives the live drag offset; surface it as a CSS var (per the
@@ -437,7 +458,7 @@ function BlockImpl({
 
           {/* body */}
           <div className="min-w-0 flex-1">
-            <BlockBody block={block} editing={editing} speaker={speaker} />
+            <BlockBody block={block} editing={editing} speaker={speaker} caret={caret} />
           </div>
 
           {/* actions */}

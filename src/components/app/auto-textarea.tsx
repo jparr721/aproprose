@@ -13,6 +13,7 @@ export function AutoGrowTextarea({
   placeholder,
   onKeyDown,
   proseBody,
+  caret,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -22,6 +23,11 @@ export function AutoGrowTextarea({
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Mark this as a carve-eligible prose body (selection toolbar + split shortcut). */
   proseBody?: boolean;
+  /**
+   * One-shot caret placement on mount: `"start"` for `i` / new-block insert,
+   * `"end"` to land at the end. Omit to leave the native caret (click-to-edit).
+   */
+  caret?: "start" | "end";
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -31,6 +37,17 @@ export function AutoGrowTextarea({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [value]);
+
+  // Place the caret once when the textarea mounts (i.e. when the block enters
+  // edit mode). Mount-only by design — typing must not yank the caret around.
+  useLayoutEffect(() => {
+    if (!caret) return;
+    const el = ref.current;
+    if (!el) return;
+    const pos = caret === "start" ? 0 : el.value.length;
+    el.setSelectionRange(pos, pos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on mount
+  }, []);
 
   return (
     <textarea

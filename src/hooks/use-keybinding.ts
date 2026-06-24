@@ -40,6 +40,11 @@ export function useKeybindingWithOptions(
   // `ignoreEventWhen` still narrows that — editor undo/redo bows out inside the AI
   // panel and dialogs so their inputs keep native history.
   const isChord = Boolean(definition.modifiers.ctrl || definition.modifiers.alt);
+  // `firesWhileEditing` (Esc) fires from inside a focused textarea/input so it can
+  // exit a block's edit mode — but only those form tags, so Radix menus / dialogs
+  // keep their own Esc. Chords already fire across every form tag.
+  const enableOnFormTags: boolean | ("input" | "textarea")[] =
+    definition.firesWhileEditing ? ["input", "textarea"] : isChord;
 
   useHotkeys(
     hotkey,
@@ -47,7 +52,7 @@ export function useKeybindingWithOptions(
     {
       preventDefault: true,
       enabled: options.enabled,
-      enableOnFormTags: isChord,
+      enableOnFormTags,
       enableOnContentEditable: isChord,
       ignoreEventWhen: (event) => {
         if (isKeyboardCaptured(event.target as Element | null)) return true;

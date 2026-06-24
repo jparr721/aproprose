@@ -19,6 +19,13 @@ export interface KeybindingDefinition {
   description: string;
   category: "document" | "view" | "editor";
   label: string;
+  /**
+   * Opt this binding into firing while a `textarea`/`input` is focused (the
+   * default leaves non-chord keys inert in form fields). Used by `Esc` so it can
+   * exit a block's edit mode from inside the textarea; scoped to form tags only,
+   * so Radix menus / dialogs still own their own `Esc`.
+   */
+  firesWhileEditing?: boolean;
 }
 
 export const KEYBINDINGS = {
@@ -94,6 +101,41 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Split block",
   },
+  // Block nav/edit modal keys. Unmodified so they're inert while a textarea is
+  // focused (the editing surface), and so they read like vim motions in nav mode.
+  NAV_PREV_BLOCK: {
+    id: "nav-prev-block",
+    key: "up",
+    modifiers: {},
+    description: "Select the previous block",
+    category: "editor",
+    label: "Previous block",
+  },
+  NAV_NEXT_BLOCK: {
+    id: "nav-next-block",
+    key: "down",
+    modifiers: {},
+    description: "Select the next block",
+    category: "editor",
+    label: "Next block",
+  },
+  EDIT_BLOCK: {
+    id: "edit-block",
+    key: "i",
+    modifiers: {},
+    description: "Edit the selected block",
+    category: "editor",
+    label: "Edit block",
+  },
+  EXIT_BLOCK: {
+    id: "exit-block",
+    key: "escape",
+    modifiers: {},
+    description: "Exit edit mode, or deselect the block",
+    category: "editor",
+    label: "Exit block",
+    firesWhileEditing: true,
+  },
 } satisfies Record<string, KeybindingDefinition>;
 
 export type KeybindingId = keyof typeof KEYBINDINGS;
@@ -124,7 +166,12 @@ export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "m
 // Compact glyphs for on-screen hints. Only the command modifier differs by
 // platform — ⌘ on macOS, ⌃ (control) elsewhere; shift / alt and the key glyphs
 // are shared.
-const KEY_SYMBOLS: Record<string, string> = { enter: "↵" };
+const KEY_SYMBOLS: Record<string, string> = {
+  enter: "↵",
+  up: "↑",
+  down: "↓",
+  escape: "⎋",
+};
 
 function formatKey(key: string): string {
   if (KEY_SYMBOLS[key]) return KEY_SYMBOLS[key];

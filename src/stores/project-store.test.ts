@@ -36,6 +36,8 @@ beforeEach(() => {
   useProjectStore.setState({
     blocks: [],
     selectedId: null,
+    editing: false,
+    editCaret: null,
     chapterDirty: false,
     past: [],
     future: [],
@@ -141,6 +143,120 @@ describe("reorderBlock", () => {
     expect(blocks.map((x) => x.id)).toEqual(["a", "b"]);
     expect(past).toHaveLength(0);
     expect(chapterDirty).toBe(false);
+  });
+});
+
+describe("modal selection / editing", () => {
+  it("select highlights a block in nav mode (not editing)", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: null, editing: true });
+
+    useProjectStore.getState().select("a");
+
+    const { selectedId, editing, editCaret } = useProjectStore.getState();
+    expect(selectedId).toBe("a");
+    expect(editing).toBe(false);
+    expect(editCaret).toBeNull();
+  });
+
+  it("beginEdit enters edit mode on the selected editable block", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: "a", editing: false });
+
+    useProjectStore.getState().beginEdit();
+
+    expect(useProjectStore.getState().editing).toBe(true);
+    expect(useProjectStore.getState().editCaret).toBeNull();
+  });
+
+  it("beginEdit('start') requests the caret at the start", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: "a", editing: false });
+
+    useProjectStore.getState().beginEdit("start");
+
+    expect(useProjectStore.getState().editing).toBe(true);
+    expect(useProjectStore.getState().editCaret).toBe("start");
+  });
+
+  it("beginEdit is a no-op on a chapter break", () => {
+    const brk = mkBlock({ id: "b", type: "chapter", level: "break", text: "" });
+    useProjectStore.setState({ blocks: [brk], selectedId: "b", editing: false });
+
+    useProjectStore.getState().beginEdit();
+
+    expect(useProjectStore.getState().editing).toBe(false);
+  });
+
+  it("beginEdit is a no-op when nothing is selected", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: null, editing: false });
+
+    useProjectStore.getState().beginEdit();
+
+    expect(useProjectStore.getState().editing).toBe(false);
+  });
+
+  it("stopEdit exits edit mode but keeps the selection", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: "a", editing: true, editCaret: "start" });
+
+    useProjectStore.getState().stopEdit();
+
+    const { selectedId, editing, editCaret } = useProjectStore.getState();
+    expect(selectedId).toBe("a");
+    expect(editing).toBe(false);
+    expect(editCaret).toBeNull();
+  });
+
+  it("deselect clears both the selection and editing", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: "a", editing: true });
+
+    useProjectStore.getState().deselect();
+
+    const { selectedId, editing } = useProjectStore.getState();
+    expect(selectedId).toBeNull();
+    expect(editing).toBe(false);
+  });
+
+  it("moveSelection moves to the next/previous block in nav mode", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    const c = mkBlock({ id: "c" });
+    useProjectStore.setState({ blocks: [a, b, c], selectedId: "b", editing: true });
+
+    useProjectStore.getState().moveSelection(1);
+    expect(useProjectStore.getState().selectedId).toBe("c");
+    expect(useProjectStore.getState().editing).toBe(false);
+
+    useProjectStore.getState().moveSelection(-1);
+    expect(useProjectStore.getState().selectedId).toBe("b");
+  });
+
+  it("moveSelection clamps at the ends (no wrap)", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    useProjectStore.setState({ blocks: [a, b], selectedId: "a" });
+
+    useProjectStore.getState().moveSelection(-1);
+    expect(useProjectStore.getState().selectedId).toBe("a");
+
+    useProjectStore.setState({ selectedId: "b" });
+    useProjectStore.getState().moveSelection(1);
+    expect(useProjectStore.getState().selectedId).toBe("b");
+  });
+
+  it("insertAfter opens the new block directly in edit mode with caret at start", () => {
+    const a = mkBlock({ id: "a" });
+    useProjectStore.setState({ blocks: [a], selectedId: "a", editing: false });
+
+    const newId = useProjectStore.getState().insertAfter("a");
+
+    const { selectedId, editing, editCaret } = useProjectStore.getState();
+    expect(selectedId).toBe(newId);
+    expect(editing).toBe(true);
+    expect(editCaret).toBe("start");
   });
 });
 

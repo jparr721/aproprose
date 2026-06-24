@@ -5,6 +5,13 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   guard:
     name: version guard
@@ -41,6 +48,8 @@ jobs:
   build:
     name: build ${{ matrix.platform }}
     needs: guard
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

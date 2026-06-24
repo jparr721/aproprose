@@ -23,6 +23,7 @@ interface SettingsState extends Settings {
   setBlockStyle: (blockStyle: BlockStyle) => void;
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
+  setAiModel: (aiModel: string | null) => void;
   reset: () => void;
 }
 
@@ -36,17 +37,19 @@ export const useSettingsStore = create<SettingsState>()(
       setBlockStyle: (blockStyle) => set({ blockStyle }),
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
+      setAiModel: (aiModel) => set({ aiModel }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, layout, blockStyle, proseSize, pdfZoom }) => ({
+      partialize: ({ theme, layout, blockStyle, proseSize, pdfZoom, aiModel }) => ({
         theme,
         layout,
         blockStyle,
         proseSize,
         pdfZoom,
+        aiModel,
       }),
       onRehydrateStorage: () => (state) => {
         // Mark hydrated once the async read resolves (or fails).

@@ -39,6 +39,13 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { useKeybinding } from "@/hooks/use-keybinding";
@@ -48,6 +55,8 @@ import { useViewStore } from "@/stores/view-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { hasOpenAiKey, setOpenAiKey, gitToolingStatus } from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
+import { listTextModels } from "@/lib/ai/models";
+import { describeAiError } from "@/lib/ai/errors";
 import type { BlockStyle, LayoutMode, Theme, ToolingStatus } from "@/lib/types";
 
 function Field({
@@ -77,19 +86,16 @@ function Field({
  * and is never read back into the UI — we only surface whether a key is set. The
  * cached AI provider is reset on every change so the next call uses the new key.
  */
-function OpenAiKeyField() {
-  const [configured, setConfigured] = useState(false);
+function OpenAiKeyField({
+  configured,
+  onConfiguredChange,
+}: {
+  configured: boolean;
+  onConfiguredChange: (configured: boolean) => void;
+}) {
   const [draft, setDraft] = useState("");
   const [show, setShow] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  const refresh = () => {
-    void hasOpenAiKey()
-      .then(setConfigured)
-      .catch(() => setConfigured(false));
-  };
-
-  useEffect(refresh, []);
 
   const save = async () => {
     const key = draft.trim();
@@ -100,7 +106,7 @@ function OpenAiKeyField() {
       resetAiProvider();
       setDraft("");
       setShow(false);
-      setConfigured(true);
+      onConfiguredChange(true);
       toast.success("OpenAI key saved");
     } catch (e) {
       toast.error(`Couldn't save key: ${String(e)}`);
@@ -113,7 +119,7 @@ function OpenAiKeyField() {
     try {
       await setOpenAiKey("");
       resetAiProvider();
-      setConfigured(false);
+      onConfiguredChange(false);
       toast.success("OpenAI key removed");
     } catch (e) {
       toast.error(`Couldn't remove key: ${String(e)}`);
@@ -207,6 +213,93 @@ function OpenAiKeyField() {
   );
 }
 
+/**
+ * Model picker. Lists the text-capable models available to the configured key
+ * (fetched live from OpenAI through Rust) and persists the choice to the settings
+ * store. Disabled until a key is configured; AI stays unusable until a model is
+ * chosen (no default).
+ */
+function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
+  const aiModel = useSettingsStore((s) => s.aiModel);
+  const setAiModel = useSettingsStore((s) => s.setAiModel);
+  const [models, setModels] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!keyConfigured) {
+      setModels([]);
+      setError(null);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    setError(null);
+    listTextModels()
+      .then((m) => {
+        if (active) setModels(m);
+      })
+      .catch((e) => {
+        if (active) setError(describeAiError(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [keyConfigured]);
+
+  // Keep a stored selection visible even when it is not in the fetched list
+  // (e.g. the key changed accounts), so the current choice still shows.
+  const options =
+    aiModel && !models.includes(aiModel) ? [aiModel, ...models] : models;
+
+  if (!keyConfigured) {
+    return (
+      <Field label="AI model">
+        <TypographyMuted className="font-sans text-xs">
+          Add a key above to choose a model.
+        </TypographyMuted>
+      </Field>
+    );
+  }
+
+  return (
+    <Field label="AI model">
+      <Select
+        value={aiModel ?? undefined}
+        onValueChange={(v) => setAiModel(v)}
+        disabled={loading || options.length === 0}
+      >
+        <SelectTrigger className="w-full font-mono">
+          <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
+        </SelectTrigger>
+        <SelectContent className="font-mono">
+          {options.map((id) => (
+            <SelectItem key={id} value={id}>
+              {id}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {loading ? (
+        <span className="flex items-center gap-1.5 font-sans text-xs text-muted-foreground">
+          <Spinner /> Loading models
+        </span>
+      ) : null}
+      {error ? (
+        <span className="font-sans text-xs text-destructive">{error}</span>
+      ) : null}
+      {!loading && !error && !aiModel ? (
+        <TypographyMuted className="font-sans text-xs">
+          AI features are off until you pick a model.
+        </TypographyMuted>
+      ) : null}
+    </Field>
+  );
+}
+
 /** The one-line tooling status under the Backup heading; nothing until probed. */
 function ToolingNotice({ tooling }: { tooling: ToolingStatus | null }) {
   if (!tooling) return null;
@@ -290,6 +383,13 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const setBlockStyle = useSettingsStore((s) => s.setBlockStyle);
   const setProseSize = useSettingsStore((s) => s.setProseSize);
   const applyLayoutPreset = useViewStore((s) => s.applyLayoutPreset);
+
+  const [keyConfigured, setKeyConfigured] = useState(false);
+  useEffect(() => {
+    void hasOpenAiKey()
+      .then(setKeyConfigured)
+      .catch(() => setKeyConfigured(false));
+  }, []);
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -385,7 +485,12 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
 
           <Separator />
 
-          <OpenAiKeyField />
+          <OpenAiKeyField
+            configured={keyConfigured}
+            onConfiguredChange={setKeyConfigured}
+          />
+
+          <AiModelField keyConfigured={keyConfigured} />
 
           <Separator />
 

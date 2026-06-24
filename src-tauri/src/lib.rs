@@ -128,9 +128,8 @@ fn read_pdf(root: String, path: String) -> Result<Option<String>, String> {
 // The OpenAI key is entered by the user in the app's Settings and stored as a
 // plaintext JSON file in the app-config dir (`openai_key.json`). It is read here
 // and handed to the frontend AI layer at runtime — never written into the JS
-// bundle, never logged. Two dev-only fallbacks remain so contributors can run the
-// app without clicking through Settings: the `OPENAI_API_KEY` process env var and
-// a `.env` file. The stored key always wins so the in-app choice is authoritative.
+// bundle, never logged. There is no environment or `.env` fallback: the key comes
+// only from what the user saved in Settings.
 
 /// The OpenAI key handed to the frontend AI layer. Mirrors `AiConfig` in
 /// `src/lib/tauri.ts`. The key is read here and never logged.
@@ -165,18 +164,9 @@ fn read_stored_key(app: &tauri::AppHandle) -> Option<String> {
     (!key.is_empty()).then_some(key)
 }
 
-/// Resolve the API key by precedence: the key saved in Settings wins, then the
-/// `OPENAI_API_KEY` process env var, then a `.env` file (both dev fallbacks).
+/// Return the API key the user saved in Settings, or `None` when none is stored.
 fn resolve_api_key(app: &tauri::AppHandle) -> Option<String> {
-    if let Some(key) = read_stored_key(app) {
-        return Some(key);
-    }
-    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        if !key.trim().is_empty() {
-            return Some(key);
-        }
-    }
-    load_env_key("OPENAI_API_KEY")
+    read_stored_key(app)
 }
 
 /// Return the resolved OpenAI key for the frontend AI layer, or an actionable
@@ -228,37 +218,6 @@ fn set_openai_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-/// Find a `.env` file by walking up from the manifest dir and the current dir,
-/// and return the requested key's value. Never logs the value.
-///
-/// Public so integration tests can exercise the exact resolution the
-/// `get_ai_config` command relies on without going through the Tauri bridge.
-pub fn load_env_key(key: &str) -> Option<String> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd);
-    }
-
-    for start in roots {
-        let mut dir: Option<&Path> = Some(start.as_path());
-        while let Some(d) = dir {
-            let candidate = d.join(".env");
-            if candidate.is_file() {
-                if let Ok(iter) = dotenvy::from_path_iter(&candidate) {
-                    for (k, v) in iter.flatten() {
-                        if k == key && !v.trim().is_empty() {
-                            return Some(v);
-                        }
-                    }
-                }
-            }
-            dir = d.parent();
-        }
-    }
-    None
 }
 
 // ── App data (recents, per-project metadata) ─────────────────────────────────

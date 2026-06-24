@@ -55,13 +55,7 @@ fn parse_gh_auth(stdout: &str, stderr: &str, ok: bool) -> (bool, Option<String>)
         .lines()
         .find(|l| l.contains("Logged in to") && l.contains("account"))
         .and_then(|l| l.split("account").nth(1))
-        .map(|rest| {
-            rest.trim()
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string()
-        })
+        .map(|rest| rest.split_whitespace().next().unwrap_or("").to_string())
         .filter(|s| !s.is_empty());
     (ok, login)
 }

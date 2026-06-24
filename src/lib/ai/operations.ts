@@ -8,10 +8,10 @@
 // goes through `streamText` so the UI can render tokens as they arrive.
 //
 // The model + provider come from `./model` (`getModel()`), which reads the API
-// key on the Rust side and routes HTTP through Tauri — see that file. We never
-// set provider params the chosen model might reject (e.g. `temperature` on the
-// reasoning-nano tier): we let the SDK defaults apply so a single pinned model
-// works without per-operation tuning.
+// key on the Rust side and routes HTTP through Tauri - see that file. We never
+// set provider params the chosen model might reject (e.g. `temperature` on a
+// reasoning model): we let the SDK defaults apply so whatever model the user
+// selected works without per-operation tuning.
 
 import { generateObject, streamText } from "ai";
 import { z } from "zod";

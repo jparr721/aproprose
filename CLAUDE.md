@@ -148,7 +148,7 @@ Shortcuts go through the **keybinding registry**, not ad-hoc `window` keydown li
 | Native bridge | `@tauri-apps/api` (commands, events) + Tauri plugins (`@tauri-apps/plugin-opener`). |
 | Keyboard shortcuts | `react-hotkeys-hook` via the registry in `src/lib/keybindings.ts` + `useKeybinding`. No raw `window` keydown listeners. |
 
-AI inference goes through the Vercel AI SDK (`ai` + `@ai-sdk/openai`), not hand-rolled `fetch`. The `OPENAI_API_KEY` is entered in Settings and resolved on the Rust side (`get_ai_config`) per the Tauri secrets rule above; HTTP egress is routed through the Tauri `http` plugin to dodge webview CORS.
+AI inference goes through the Vercel AI SDK (`ai` + `@ai-sdk/openai`), not hand-rolled `fetch`. The OpenAI API key is entered in Settings and resolved on the Rust side (`get_ai_config`) per the Tauri secrets rule above; HTTP egress is routed through the Tauri `http` plugin to dodge webview CORS. The model is not hardcoded - the user selects one in Settings (`settings-store.aiModel`) and `getModel()` reads it.
 
 ## Quality bar
 

@@ -37,4 +37,12 @@ describe("diffWords", () => {
     expect(diffWords("", "abc")).toEqual([{ type: "add", text: "abc" }]);
     expect(diffWords("abc", "")).toEqual([{ type: "del", text: "abc" }]);
   });
+
+  it("handles whitespace-only and trailing-whitespace tokens", () => {
+    expect(diffWords("   ", "   ")).toEqual([{ type: "same", text: "   " }]);
+    expect(diffWords("a", "a ")).toEqual([
+      { type: "del", text: "a" },
+      { type: "add", text: "a " },
+    ]);
+  });
 });

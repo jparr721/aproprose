@@ -1,13 +1,15 @@
-// ai-panel.tsx -- the right-side assistant. Five tabs, each backed by a real
+// ai-panel.tsx -- the right-side assistant. Six functions, each backed by a real
 // gpt-5.4-nano call grounded on the current scene:
-//   Suggest / Critique / Brainstorm / Continuity / Cast
-// Nothing infers on its own: each generating tab waits for an explicit composer
-// submit (with an optional steering instruction); Brainstorm streams a reply per
-// turn. Results for the four generating tabs are cached per scene (useAi /
-// ai-cache-store) and Brainstorm threads live in brainstorm-store keyed by
-// chapter. Both are persisted to disk per project (ai-persistence) so they
-// survive tab switches, panel toggles, and full app restarts. Every tab's
-// composer is pinned to the bottom (ai-elements/prompt-input).
+//   Suggest / Edit / Critique / Brainstorm / Continuity / Cast
+// Reached from a vertical icon rail on the far-right edge; clicking the active
+// icon collapses the panel to just the rail. Nothing infers on its own: each
+// generating function waits for an explicit composer submit (with an optional
+// steering instruction); Brainstorm streams a reply per turn; Edit returns
+// per-block revisions. Results are cached per scene (useAi / ai-cache-store) and
+// Brainstorm threads live in brainstorm-store keyed by chapter; both persist to
+// disk per project (ai-persistence) so they survive switches, panel toggles, and
+// full app restarts. Every function's composer is pinned to the bottom
+// (ai-elements/prompt-input).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -153,9 +155,9 @@ function useAi<T>(op: (instruction?: string) => Promise<T>, cacheKey: string) {
   };
 }
 
-/** Bottom-pinned composer shared by every tab (ai-elements/prompt-input).
- *  Enter submits, Shift+Enter newlines. `allowEmpty` lets the generating tabs
- *  fire with no instruction (it's optional); Brainstorm requires text. */
+/** Bottom-pinned composer shared by every function (ai-elements/prompt-input,
+ *  which owns Enter-to-submit / Shift+Enter-newline). `allowEmpty` lets the
+ *  generating tabs fire with no instruction; Brainstorm and Edit require text. */
 function AiComposer({
   placeholder,
   loading,
@@ -643,8 +645,7 @@ function EditTab() {
     return block ? [{ edit, block }] : [];
   });
 
-  // How many blocks the current scope can actually edit. Single source of truth:
-  // buildEditRequest's eligibility filter. Used to avoid firing an empty model call.
+  // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the call.
   const targetCount = buildEditRequest(scope, "").blocks.length;
 
   // Remove one edit from the cached set, reading the LATEST cached value (not the
@@ -759,9 +760,15 @@ function CopyButton({ text }: { text: string }) {
         tooltip={copied ? "Copied" : "Copy"}
         label="Copy reply"
         onClick={() => {
-          void navigator.clipboard.writeText(text);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
+          // Only show the "copied" checkmark once the write actually succeeds;
+          // a blocked/unavailable clipboard logs instead of flashing false success.
+          navigator.clipboard
+            .writeText(text)
+            .then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            })
+            .catch((e) => console.warn("[ai-panel] copy failed:", e));
         }}
       >
         {copied ? <IconCheck className="size-3.5" /> : <IconCopy className="size-3.5" />}
@@ -882,17 +889,27 @@ function BrainstormTab() {
 }
 
 // -- Panel shell --------------------------------------------------------------
-const TABS: { id: AiTab; label: string; Icon: typeof IconSparkles }[] = [
-  { id: "suggest", label: "Suggest", Icon: IconSparkles },
-  { id: "edit", label: "Edit", Icon: IconPencil },
-  { id: "critique", label: "Critique", Icon: IconNotes },
-  { id: "brainstorm", label: "Brainstorm", Icon: IconMessages },
-  { id: "continuity", label: "Continuity", Icon: IconTimeline },
-  { id: "cast", label: "Cast", Icon: IconUsers },
-];
+type TabMeta = { label: string; Icon: typeof IconSparkles };
 
-/** Render the body for the active function. Only the active one is mounted, so the
- *  bodies keep relying on the stores (ai-cache / brainstorm) to survive switches. */
+// Keyed by AiTab: adding a member to the union without a rail entry is a type error,
+// so the icon rail can never silently omit a function.
+const TAB_META: Record<AiTab, TabMeta> = {
+  suggest: { label: "Suggest", Icon: IconSparkles },
+  edit: { label: "Edit", Icon: IconPencil },
+  critique: { label: "Critique", Icon: IconNotes },
+  brainstorm: { label: "Brainstorm", Icon: IconMessages },
+  continuity: { label: "Continuity", Icon: IconTimeline },
+  cast: { label: "Cast", Icon: IconUsers },
+};
+
+// The ordered list the rail renders (insertion order of the meta map).
+const TABS = (Object.entries(TAB_META) as [AiTab, TabMeta][]).map(
+  ([id, meta]) => ({ id, ...meta }),
+);
+
+/** Render the body for the active tab. Only the active one is mounted at a time
+ *  (intentional); each body reads its data from the stores (ai-cache / brainstorm)
+ *  so results survive switching tabs and panel toggles. */
 function ActivePanel({ tab }: { tab: AiTab }) {
   switch (tab) {
     case "suggest":

@@ -159,18 +159,27 @@ describe("applyBlockEdits", () => {
     const a = mkBlock({ id: "a", text: "alpha" });
     const b = mkBlock({ id: "b", text: "bravo" });
     const c = mkBlock({ id: "c", text: "charlie" });
-    useProjectStore.setState({ blocks: [a, b, c], past: [], future: [] });
+    // Seed a redo stack + clean flag so we can prove the batch clears future and
+    // marks the chapter dirty.
+    useProjectStore.setState({
+      blocks: [a, b, c],
+      past: [],
+      future: [[a]],
+      chapterDirty: false,
+    });
 
     useProjectStore.getState().applyBlockEdits([
       { id: "a", text: "ALPHA" },
       { id: "c", text: "CHARLIE" },
     ]);
 
-    const { blocks, past } = useProjectStore.getState();
+    const { blocks, past, future, chapterDirty } = useProjectStore.getState();
     expect(blocks.map((x) => x.text)).toEqual(["ALPHA", "bravo", "CHARLIE"]);
     expect(blocks[0].dirty).toBe(true);
     expect(blocks[1].dirty).toBe(false); // untouched block keeps its flag
     expect(past).toHaveLength(1); // single undo entry for the whole batch
+    expect(chapterDirty).toBe(true);
+    expect(future).toEqual([]); // redo stack cleared
 
     useProjectStore.getState().undo();
     expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([

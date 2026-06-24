@@ -57,6 +57,18 @@ describe("fromSnapshot", () => {
       threads: { ch: [{ role: "assistant", content: "y" }] },
     });
   });
+
+  it("tolerates a v1 blob missing the threads field", () => {
+    expect(
+      fromSnapshot({
+        v: 1,
+        entries: { a: { data: 7, loading: false, error: null } },
+      } as unknown as PersistedAiState),
+    ).toEqual({
+      entries: { a: { data: 7, instruction: undefined, loading: false, error: null } },
+      threads: {},
+    });
+  });
 });
 
 describe("loadAiState / saveAiState", () => {
@@ -74,11 +86,13 @@ describe("loadAiState / saveAiState", () => {
     expect(useBrainstormStore.getState().threads.ch1).toEqual([{ role: "user", content: "hi" }]);
   });
 
-  it("loadAiState resets to empty when no saved state exists", async () => {
+  it("loadAiState resets BOTH stores to empty when no saved state exists", async () => {
     useAiCacheStore.setState({ entries: { stale: { data: 1, loading: false, error: null } } });
+    useBrainstormStore.setState({ threads: { old: [{ role: "user", content: "x" }] } });
     readAppData.mockResolvedValue(null);
     await loadAiState("/proj");
     expect(useAiCacheStore.getState().entries).toEqual({});
+    expect(useBrainstormStore.getState().threads).toEqual({});
   });
 
   it("saveAiState writes the filtered snapshot under the project key", async () => {

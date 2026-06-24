@@ -334,6 +334,9 @@ export function sanitizeEdits(
  * sanitized (unknown ids and no-ops removed).
  */
 export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
+  // Nothing to act on without a direction or an eligible block: skip the model
+  // call entirely (the UI also guards this, but defend the boundary too).
+  if (!req.instruction.trim() || req.blocks.length === 0) return [];
   const model = await getModel();
   const { object } = await generateObject({
     model,

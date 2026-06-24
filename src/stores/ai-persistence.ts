@@ -65,10 +65,12 @@ export async function loadAiState(root: string): Promise<void> {
   let snapshot: PersistedAiState | null = null;
   try {
     snapshot = await readAppData<PersistedAiState>(aiStateKey(root));
-  } catch {
+  } catch (e) {
     // A corrupt / unreadable blob (e.g. non-JSON) must not wedge persistence for
     // the whole session: treat it as empty so the load still settles (loadedRoot
-    // gets set) and the next save simply overwrites it with good data.
+    // gets set) and the next save simply overwrites it with good data. Log it so
+    // a "my AI panel state vanished" report is at least diagnosable in devtools.
+    console.warn("[ai-persistence] failed to load AI state for", root, "-", e);
     snapshot = null;
   }
   const { entries, threads } = fromSnapshot(snapshot);
@@ -114,19 +116,27 @@ export function useAiPersistence(): void {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Run a save now, surfacing (rather than silently dropping) a write failure so
+    // a lost-state bug is at least diagnosable. The guard is the caller's job.
+    const saveNow = () => {
+      if (root == null) return;
+      void saveAiState(root).catch((e) =>
+        console.error("[ai-persistence] failed to save AI state for", root, "-", e),
+      );
+    };
     // Write a pending debounced save immediately instead of dropping it.
     const flush = () => {
       if (!timer) return;
       clearTimeout(timer);
       timer = null;
-      if (root != null && loadedRoot.current === root) void saveAiState(root);
+      if (loadedRoot.current === root) saveNow();
     };
     const schedule = () => {
       if (root == null || loadedRoot.current !== root) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        void saveAiState(root);
+        saveNow();
       }, SAVE_DEBOUNCE_MS);
     };
     const onVisibility = () => {

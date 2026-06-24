@@ -26,10 +26,11 @@ describe("view-store aiCollapsed", () => {
     expect(useViewStore.getState().aiCollapsed).toBe(true);
   });
 
-  it("triggerSuggest expands the panel and selects Suggest", () => {
-    useViewStore.setState({ aiCollapsed: true, aiTab: "cast" });
+  it("triggerSuggest expands the panel, selects Suggest, and bumps the focus tick", () => {
+    useViewStore.setState({ aiCollapsed: true, aiTab: "cast", suggestFocusTick: 4 });
     useViewStore.getState().triggerSuggest();
     expect(useViewStore.getState().aiCollapsed).toBe(false);
     expect(useViewStore.getState().aiTab).toBe("suggest");
+    expect(useViewStore.getState().suggestFocusTick).toBe(5);
   });
 });

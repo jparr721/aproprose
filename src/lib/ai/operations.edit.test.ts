@@ -9,11 +9,17 @@ import type { BlockEdit } from "@/lib/types";
 const blocks = [
   { id: "b1", text: "the cat sat" },
   { id: "b2", text: "hello world" },
+  { id: "empty", text: "" },
 ];
 
 describe("sanitizeEdits", () => {
   it("drops edits whose blockId is not a provided block", () => {
     const edits: BlockEdit[] = [{ blockId: "nope", newText: "x", reason: "r" }];
+    expect(sanitizeEdits(edits, blocks)).toEqual([]);
+  });
+
+  it("drops a whitespace-for-empty no-op (both trim to empty)", () => {
+    const edits: BlockEdit[] = [{ blockId: "empty", newText: "   ", reason: "r" }];
     expect(sanitizeEdits(edits, blocks)).toEqual([]);
   });
 

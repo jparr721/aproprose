@@ -14,7 +14,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 import { buildEditRequest } from "@/lib/ai/context";
 import { useProjectStore } from "@/stores/project-store";
-import type { Block } from "@/lib/types";
+import type { Block, ProjectInfo } from "@/lib/types";
 
 const mk = (p: Partial<Block>): Block => ({
   id: "x",
@@ -62,5 +62,20 @@ describe("buildEditRequest", () => {
   it("block scope returns empty when nothing is selected", () => {
     useProjectStore.setState({ selectedId: null });
     expect(buildEditRequest("block", "x").blocks).toEqual([]);
+  });
+
+  it("forwards the active chapter title and cast to the request", () => {
+    useProjectStore.setState({
+      project: { chapters: [{ id: "ch1", title: "The Gate" }] } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      selectedId: "n1",
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [{ id: "c1", name: "Mara", color: "oklch(0.7 0.1 30)", role: "PI" }],
+      },
+    });
+    const req = buildEditRequest("block", "tighten");
+    expect(req.chapterTitle).toBe("The Gate");
+    expect(req.characters).toEqual([{ name: "Mara", role: "PI" }]);
   });
 });

@@ -612,6 +612,7 @@ function EditTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
+  const applyBlockEdits = useProjectStore((s) => s.applyBlockEdits);
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
@@ -631,14 +632,25 @@ function EditTab() {
     return block ? [{ edit, block }] : [];
   });
 
-  const dismiss = (blockId: string) =>
-    patch(cacheKey, { data: edits.filter((e) => e.blockId !== blockId) });
+  // How many blocks the current scope can actually edit. Single source of truth:
+  // buildEditRequest's eligibility filter. Used to avoid firing an empty model call.
+  const targetCount = buildEditRequest(scope, "").blocks.length;
+
+  // Remove one edit from the cached set, reading the LATEST cached value (not the
+  // render-time `edits` closure) so two rapid accept/reject clicks in the same
+  // frame can't clobber each other.
+  const dismiss = (blockId: string) => {
+    const cur =
+      (useAiCacheStore.getState().entries[cacheKey]?.data as BlockEdit[] | null) ?? [];
+    patch(cacheKey, { data: cur.filter((e) => e.blockId !== blockId) });
+  };
   const accept = (e: BlockEdit) => {
     updateBlockText(e.blockId, e.newText);
     dismiss(e.blockId);
   };
+  // Apply every proposed edit as a SINGLE undo step, then clear the set.
   const acceptAll = () => {
-    for (const { edit } of live) updateBlockText(edit.blockId, edit.newText);
+    applyBlockEdits(live.map(({ edit }) => ({ id: edit.blockId, text: edit.newText })));
     patch(cacheKey, { data: [] });
   };
   const rejectAll = () => patch(cacheKey, { data: [] });
@@ -707,12 +719,17 @@ function EditTab() {
       </div>
       <AiComposer
         placeholder={
-          scope === "block" && !selectedId
-            ? "Place your cursor in a block to edit it"
+          targetCount === 0
+            ? scope === "block"
+              ? "Place your cursor in an editable block"
+              : "No editable prose in this chapter yet"
             : "Describe the edit, e.g. fix typos, tighten, make her colder"
         }
         loading={loading}
-        onSubmit={(t) => run(t)}
+        onSubmit={(t) => {
+          if (targetCount === 0) return; // nothing eligible in scope; skip the model call
+          run(t);
+        }}
         toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} />}
       />
     </div>
@@ -759,8 +776,14 @@ function BrainstormTab() {
   }, [activeChapterId]);
 
   // Stream a reply for a history whose last turn is the user message being answered.
+  // Pinned to the chapter it was started for: if the author switches chapters mid
+  // stream, the committed reply still lands on the right chapter, but the transient
+  // streaming/error display does not leak into the now-visible chapter.
   const streamReply = async (history: ChatMessage[]) => {
     if (!activeChapterId) return;
+    const chapterId = activeChapterId;
+    const onThisChapter = () =>
+      useProjectStore.getState().activeChapterId === chapterId;
     setStreaming("");
     setError(null);
     let acc = "";
@@ -771,18 +794,18 @@ function BrainstormTab() {
       );
       for await (const delta of result.textStream) {
         acc += delta;
-        setStreaming(acc);
+        if (onThisChapter()) setStreaming(acc);
       }
-      setThread(activeChapterId, [...history, { role: "assistant", content: acc }]);
+      setThread(chapterId, [...history, { role: "assistant", content: acc }]);
     } catch (e) {
       // Keep whatever streamed before the failure; surface the error alongside it.
       setThread(
-        activeChapterId,
+        chapterId,
         acc ? [...history, { role: "assistant", content: acc }] : history,
       );
-      setError(describeAiError(e));
+      if (onThisChapter()) setError(describeAiError(e));
     } finally {
-      setStreaming(null);
+      if (onThisChapter()) setStreaming(null);
     }
   };
 

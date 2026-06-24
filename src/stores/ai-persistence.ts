@@ -62,7 +62,15 @@ export function resetAiStores(): void {
 
 /** Load a project's saved AI state into the live stores (empty if none). */
 export async function loadAiState(root: string): Promise<void> {
-  const snapshot = await readAppData<PersistedAiState>(aiStateKey(root));
+  let snapshot: PersistedAiState | null = null;
+  try {
+    snapshot = await readAppData<PersistedAiState>(aiStateKey(root));
+  } catch {
+    // A corrupt / unreadable blob (e.g. non-JSON) must not wedge persistence for
+    // the whole session: treat it as empty so the load still settles (loadedRoot
+    // gets set) and the next save simply overwrites it with good data.
+    snapshot = null;
+  }
   const { entries, threads } = fromSnapshot(snapshot);
   useAiCacheStore.getState().hydrate(entries);
   useBrainstormStore.getState().hydrate(threads);
@@ -106,17 +114,37 @@ export function useAiPersistence(): void {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Write a pending debounced save immediately instead of dropping it.
+    const flush = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      if (root != null && loadedRoot.current === root) void saveAiState(root);
+    };
     const schedule = () => {
       if (root == null || loadedRoot.current !== root) return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void saveAiState(root), SAVE_DEBOUNCE_MS);
+      timer = setTimeout(() => {
+        timer = null;
+        void saveAiState(root);
+      }, SAVE_DEBOUNCE_MS);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
     };
     const unsubCache = useAiCacheStore.subscribe(schedule);
     const unsubChat = useBrainstormStore.subscribe(schedule);
+    // Best-effort flush when the window is hidden / closing (app quit).
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      if (timer) clearTimeout(timer);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
       unsubCache();
       unsubChat();
+      // Persist any pending change before this project's effect tears down (e.g.
+      // a project switch/close) instead of dropping the debounced save.
+      flush();
     };
   }, [root]);
 }

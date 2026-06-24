@@ -98,4 +98,14 @@ describe("loadAiState / saveAiState", () => {
       threads: { ch1: [{ role: "user", content: "hi" }] },
     });
   });
+
+  it("loadAiState swallows a corrupt/unreadable blob and hydrates empty (does not throw)", async () => {
+    useAiCacheStore.setState({ entries: { stale: { data: 1, loading: false, error: null } } });
+    useBrainstormStore.setState({ threads: { old: [{ role: "user", content: "x" }] } });
+    readAppData.mockRejectedValue(new Error("Unexpected token in JSON"));
+
+    await expect(loadAiState("/proj")).resolves.toBeUndefined();
+    expect(useAiCacheStore.getState().entries).toEqual({});
+    expect(useBrainstormStore.getState().threads).toEqual({});
+  });
 });

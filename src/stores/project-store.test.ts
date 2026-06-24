@@ -153,3 +153,37 @@ describe("undo / redo", () => {
     expect(useProjectStore.getState().blocks[0]).toBe(b);
   });
 });
+
+describe("applyBlockEdits", () => {
+  it("applies many edits as ONE undo step", () => {
+    const a = mkBlock({ id: "a", text: "alpha" });
+    const b = mkBlock({ id: "b", text: "bravo" });
+    const c = mkBlock({ id: "c", text: "charlie" });
+    useProjectStore.setState({ blocks: [a, b, c], past: [], future: [] });
+
+    useProjectStore.getState().applyBlockEdits([
+      { id: "a", text: "ALPHA" },
+      { id: "c", text: "CHARLIE" },
+    ]);
+
+    const { blocks, past } = useProjectStore.getState();
+    expect(blocks.map((x) => x.text)).toEqual(["ALPHA", "bravo", "CHARLIE"]);
+    expect(blocks[0].dirty).toBe(true);
+    expect(blocks[1].dirty).toBe(false); // untouched block keeps its flag
+    expect(past).toHaveLength(1); // single undo entry for the whole batch
+
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+    ]);
+  });
+
+  it("is a no-op (no history push) for an empty edit list", () => {
+    const a = mkBlock({ id: "a", text: "alpha" });
+    useProjectStore.setState({ blocks: [a], past: [] });
+    useProjectStore.getState().applyBlockEdits([]);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+});

@@ -46,7 +46,7 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
   Settings and stored in the app-config dir — is read in Rust (never bundled into
   JS) and HTTP egress is routed through Tauri's `http` plugin so it isn't subject
   to webview CORS. The model is the one you select in Settings
-(`settings-store.aiModel`), read by `getModel()` in `src/lib/ai/model.ts`.
+  (`settings-store.aiModel`), read by `getModel()` in `src/lib/ai/model.ts`.
 - **State** is [zustand](https://github.com/pmndrs/zustand): `project-store`
   (open project, blocks, save, compile), `settings-store` (persisted appearance),
   `view-store` (panels + the unsaved-edits guard).

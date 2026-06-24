@@ -8,7 +8,7 @@ vi.mock("@/stores/settings-store", () => ({
   useSettingsStore: { getState: vi.fn() },
 }));
 
-import { getModel } from "@/lib/ai/model";
+import { getModel, resetAiProvider } from "@/lib/ai/model";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const setSelected = (aiModel: string | null) =>
@@ -17,7 +17,10 @@ const setSelected = (aiModel: string | null) =>
   });
 
 describe("getModel", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAiProvider();
+  });
 
   it("throws when no model is selected", async () => {
     setSelected(null);

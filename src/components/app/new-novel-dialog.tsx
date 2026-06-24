@@ -61,7 +61,7 @@ export function NewNovelDialog({ trigger }: { trigger: React.ReactNode }) {
               value={name}
               autoFocus
               onChange={(e) => setName(e.currentTarget.value)}
-              placeholder="Prelude To Darkness"
+              placeholder="Novel title"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -70,7 +70,7 @@ export function NewNovelDialog({ trigger }: { trigger: React.ReactNode }) {
               id="novel-author"
               value={author}
               onChange={(e) => setAuthor(e.currentTarget.value)}
-              placeholder="Jarred Parr"
+              placeholder="Author name"
             />
           </div>
           <div className="flex flex-col gap-1.5">

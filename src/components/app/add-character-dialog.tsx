@@ -86,7 +86,7 @@ export function AddCharacterDialog({
               autoFocus
               onChange={(e) => setName(e.currentTarget.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="Det. Marlow"
+              placeholder="Character name"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -95,7 +95,7 @@ export function AddCharacterDialog({
               id="char-role"
               value={role}
               onChange={(e) => setRole(e.currentTarget.value)}
-              placeholder="Interrogator"
+              placeholder="Character role"
             />
           </div>
           <div className="flex flex-col gap-1.5">

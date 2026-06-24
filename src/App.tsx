@@ -55,7 +55,7 @@ function Workspace() {
       ) : null}
 
       {showAi ? (
-        <div className="w-[360px] shrink-0">
+        <div className="shrink-0">
           <AiPanel />
         </div>
       ) : null}

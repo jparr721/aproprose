@@ -10,9 +10,20 @@
 // composer is pinned to the bottom (ai-elements/prompt-input).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconArrowRight, IconCheck, IconCopy, IconRefresh } from "@tabler/icons-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  IconArrowRight,
+  IconCheck,
+  IconCopy,
+  IconMessages,
+  IconNotes,
+  IconPencil,
+  IconRefresh,
+  IconSparkles,
+  IconTimeline,
+  IconUsers,
+} from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
@@ -871,63 +882,83 @@ function BrainstormTab() {
 }
 
 // -- Panel shell --------------------------------------------------------------
-const TABS: { id: AiTab; label: string }[] = [
-  { id: "suggest", label: "Suggest" },
-  { id: "edit", label: "Edit" },
-  { id: "critique", label: "Critique" },
-  { id: "brainstorm", label: "Brainstorm" },
-  { id: "continuity", label: "Continuity" },
-  { id: "cast", label: "Cast" },
+const TABS: { id: AiTab; label: string; Icon: typeof IconSparkles }[] = [
+  { id: "suggest", label: "Suggest", Icon: IconSparkles },
+  { id: "edit", label: "Edit", Icon: IconPencil },
+  { id: "critique", label: "Critique", Icon: IconNotes },
+  { id: "brainstorm", label: "Brainstorm", Icon: IconMessages },
+  { id: "continuity", label: "Continuity", Icon: IconTimeline },
+  { id: "cast", label: "Cast", Icon: IconUsers },
 ];
+
+/** Render the body for the active function. Only the active one is mounted, so the
+ *  bodies keep relying on the stores (ai-cache / brainstorm) to survive switches. */
+function ActivePanel({ tab }: { tab: AiTab }) {
+  switch (tab) {
+    case "suggest":
+      return <SuggestTab />;
+    case "edit":
+      return <EditTab />;
+    case "critique":
+      return <CritiqueTab />;
+    case "brainstorm":
+      return <BrainstormTab />;
+    case "continuity":
+      return <ContinuityTab />;
+    case "cast":
+      return <CastTab />;
+  }
+}
 
 export function AiPanel() {
   const tab = useViewStore((s) => s.aiTab);
   const setTab = useViewStore((s) => s.setAiTab);
+  const collapsed = useViewStore((s) => s.aiCollapsed);
+  const setCollapsed = useViewStore((s) => s.setAiCollapsed);
+
+  // Click the active icon -> collapse/expand; click another -> switch + expand.
+  const pick = (id: AiTab) => {
+    if (id === tab) setCollapsed(!collapsed);
+    else {
+      setTab(id);
+      setCollapsed(false);
+    }
+  };
 
   return (
-    <aside
-      data-ai-root
-      className="flex h-full min-h-0 flex-col border-l border-border bg-card font-sans"
-    >
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as AiTab)}
-        className="flex min-h-0 flex-1 flex-col gap-0"
-      >
-        <TabsList className="h-auto w-full justify-start gap-0 rounded-none border-b border-border bg-transparent px-2 pt-1.5">
-          {TABS.map((t) => (
-            <TabsTrigger
-              key={t.id}
-              value={t.id}
-              className="rounded-none border-0 border-b-[1.5px] border-transparent bg-transparent px-2.5 py-1.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-            >
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <CursorAnchor />
-
-        {/* Each tab is a flex column: a scrollable body and a bottom-pinned composer. */}
-        <TabsContent value="suggest" className="min-h-0 flex-1">
-          <SuggestTab />
-        </TabsContent>
-        <TabsContent value="edit" className="min-h-0 flex-1">
-          <EditTab />
-        </TabsContent>
-        <TabsContent value="critique" className="min-h-0 flex-1">
-          <CritiqueTab />
-        </TabsContent>
-        <TabsContent value="brainstorm" className="min-h-0 flex-1">
-          <BrainstormTab />
-        </TabsContent>
-        <TabsContent value="continuity" className="min-h-0 flex-1">
-          <ContinuityTab />
-        </TabsContent>
-        <TabsContent value="cast" className="min-h-0 flex-1">
-          <CastTab />
-        </TabsContent>
-      </Tabs>
+    <aside data-ai-root className="flex h-full min-h-0 font-sans">
+      {collapsed ? null : (
+        <div className="flex w-80 min-w-0 flex-col border-l border-border bg-card">
+          <CursorAnchor />
+          <div className="min-h-0 flex-1">
+            <ActivePanel tab={tab} />
+          </div>
+        </div>
+      )}
+      <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-card py-2">
+        {TABS.map(({ id, label, Icon }) => {
+          const active = id === tab && !collapsed;
+          return (
+            <Tooltip key={id}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={label}
+                  onClick={() => pick(id)}
+                  className={cn(
+                    "text-muted-foreground hover:text-foreground",
+                    active && "bg-accent text-foreground",
+                  )}
+                >
+                  <Icon className="size-[18px]" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </nav>
     </aside>
   );
 }

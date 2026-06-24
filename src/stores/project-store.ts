@@ -146,8 +146,8 @@ interface ProjectState {
   reorderBlock: (fromId: string, toId: string) => void;
 
   // history (undo/redo of the block list within the current chapter)
-  past: Block[][];
-  future: Block[][];
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   /** The block id of the in-progress text edit, so consecutive typing coalesces
    *  into a single undo step. Null after any structural edit or undo/redo. */
   lastTextEditId: string | null;
@@ -168,7 +168,15 @@ interface ProjectState {
 }
 
 const HISTORY_CAP = 100;
-const capPush = (stack: Block[][], snapshot: Block[]): Block[][] =>
+
+/** A history snapshot: the block list plus the selection active at capture time,
+ *  so undo/redo restore the user's place instead of guessing it. */
+interface HistoryEntry {
+  blocks: Block[];
+  selectedId: string | null;
+}
+
+const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -474,7 +482,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             b.id === id ? { ...b, text, dirty: true } : b,
           ),
           chapterDirty: true,
-          past: startGroup ? capPush(s.past, s.blocks) : s.past,
+          past: startGroup
+            ? capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId })
+            : s.past,
           future: startGroup ? [] : s.future,
           lastTextEditId: id,
         };
@@ -488,7 +498,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             b.id === id ? { ...b, ...patch, dirty: true } : b,
           ),
           chapterDirty: true,
-          past: startGroup ? capPush(s.past, s.blocks) : s.past,
+          past: startGroup
+            ? capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId })
+            : s.past,
           future: startGroup ? [] : s.future,
           lastTextEditId: id,
         };
@@ -501,7 +513,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           b.id === id ? { ...b, type, dirty: true } : b,
         ),
         chapterDirty: true,
-        past: capPush(s.past, s.blocks),
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
         future: [],
         lastTextEditId: null,
       })),
@@ -512,7 +524,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           b.id === id ? { ...b, speaker, dirty: true } : b,
         ),
         chapterDirty: true,
-        past: capPush(s.past, s.blocks),
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
         future: [],
         lastTextEditId: null,
       })),
@@ -538,7 +550,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: id,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -558,7 +570,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -577,7 +589,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -595,7 +607,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks,
           selectedId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -614,7 +626,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -637,7 +649,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: fromId,
           chapterDirty: true,
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
           lastTextEditId: null,
         };
@@ -647,16 +659,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (s.past.length === 0) return {};
         const prev = s.past[s.past.length - 1];
-        const selectedId = prev.some((b) => b.id === s.selectedId)
-          ? s.selectedId
-          : (prev[prev.length - 1]?.id ?? null);
         return {
-          blocks: prev,
+          blocks: prev.blocks,
+          selectedId: prev.selectedId,
           past: s.past.slice(0, -1),
-          future: capPush(s.future, s.blocks),
+          future: capPush(s.future, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
-          selectedId,
         };
       }),
 
@@ -664,16 +673,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (s.future.length === 0) return {};
         const next = s.future[s.future.length - 1];
-        const selectedId = next.some((b) => b.id === s.selectedId)
-          ? s.selectedId
-          : (next[next.length - 1]?.id ?? null);
         return {
-          blocks: next,
+          blocks: next.blocks,
+          selectedId: next.selectedId,
           future: s.future.slice(0, -1),
-          past: capPush(s.past, s.blocks),
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           chapterDirty: true,
           lastTextEditId: null,
-          selectedId,
         };
       }),
 

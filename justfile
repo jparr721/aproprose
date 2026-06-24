@@ -28,6 +28,10 @@ build:
 bundle:
     bun run tauri build
 
+# Bump the app version across all files (X.Y.Z, must be greater than the current version).
+version VERSION:
+    bun run scripts/set-version.ts {{VERSION}}
+
 # Type-check the frontend without emitting.
 typecheck:
     bun x tsc --noEmit

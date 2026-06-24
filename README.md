@@ -34,6 +34,29 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
 - **Light · Sepia · Dark**, 2-/3-pane and Focus layouts, typographic or card
   blocks, adjustable prose size.
 
+## Install
+
+Download the latest installer from the [Releases page](https://github.com/jparr721/aproprose/releases).
+
+### macOS (Apple Silicon)
+
+The `.dmg` is not notarized (no Apple Developer account yet), so Gatekeeper blocks it
+on first launch. Open it once with either method:
+
+- Right-click `aproprose.app` in Applications and choose **Open**, then confirm; or
+- Clear the download quarantine from a terminal:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/aproprose.app
+  ```
+
+After the first open it launches normally. Intel Macs are not supported yet.
+
+### Linux
+
+- **AppImage** (any distro): `chmod +x aproprose_*.AppImage` then run it.
+- **Debian / Ubuntu** (`.deb`): `sudo apt install ./aproprose_*.deb`.
+
 ## Architecture notes
 
 - **Privileged work lives in Rust** (`src-tauri/src`): project discovery + LaTeX
@@ -72,3 +95,20 @@ just fmt        # cargo fmt + clippy
 ```
 
 See `CLAUDE.md` for the full project guide and conventions.
+
+## Releasing
+
+Versions are kept in sync across `package.json`, `src-tauri/Cargo.toml`,
+`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.lock` by one tool. Versions can
+only increase.
+
+```bash
+just version 0.2.0          # rewrites all four files (rejects a non-increasing version)
+git commit -am "release 0.2.0"
+git tag v0.2.0              # tag must equal the version and be newer than every prior tag
+git push origin main --tags
+```
+
+Pushing the tag triggers `.github/workflows/release.yml`: a guard verifies the tag
+matches `tauri.conf.json` and is the newest version, then macOS and Linux installers
+build and attach to a **draft** GitHub Release. Review the draft and publish it.

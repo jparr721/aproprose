@@ -126,7 +126,7 @@ Shortcuts go through the **keybinding registry**, not ad-hoc `window` keydown li
 - **Frontend <-> Rust goes through commands.** Define `#[tauri::command]` functions in `src-tauri/src/lib.rs`, register them in the `invoke_handler![...]` list, and call them from the frontend via `invoke("command_name", { args })` from `@tauri-apps/api/core`. Keep `main.rs` a thin entry that calls `run()`.
 - **Permissions are explicit.** Any capability the webview needs (fs, shell, opener, etc.) must be granted in `src-tauri/capabilities/default.json`. If a plugin call fails silently in the webview, check the capability grant first.
 - Keep heavy/privileged work (filesystem, network to third-party APIs, secrets) on the Rust side and expose a narrow command surface. The webview is untrusted UI.
-- Secrets (the `OPENAI_API_KEY`) must not be bundled into the frontend. The key is entered in the in-app Settings and stored in the OS app-config dir on the Rust side (`set_openai_key`; resolved by `get_ai_config` with optional `OPENAI_API_KEY` env / `.env` dev fallbacks). It is read in Rust and exposed only as the resolved value through a command - never inlined into `src/` code shipped to the webview, and never committed (`.env` is gitignored).
+- Secrets (the OpenAI API key) must not be bundled into the frontend. The key is entered in the in-app Settings and stored in the OS app-config dir on the Rust side (`set_openai_key`; resolved by `get_ai_config` from that stored value only - no environment or `.env` fallback). It is read in Rust and exposed only as the resolved value through a command - never inlined into `src/` code shipped to the webview.
 
 ## Window shell & custom titlebar
 

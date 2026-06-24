@@ -57,9 +57,7 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
 - A TeX distribution with `latexmk` and the usual book packages. On Arch:
   `sudo pacman -S --needed texlive-binextra texlive-latexextra texlive-fontsrecommended texlive-fontsextra`.
 - An OpenAI API key. Set it in the app — **Settings (gear) → OpenAI key** — where
-  it is saved to your OS app-config dir, never to this repo. (For local dev you can
-  instead drop `OPENAI_API_KEY=sk-...` into a `.env` at the repo root; copy
-  `.env.example` to get started. `.env` is gitignored.)
+  it is saved to your OS app-config dir, never to this repo.
 
 ## Commands
 

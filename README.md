@@ -98,17 +98,21 @@ See `CLAUDE.md` for the full project guide and conventions.
 
 ## Releasing
 
-Versions are kept in sync across `package.json`, `src-tauri/Cargo.toml`,
-`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.lock` by one tool. Versions can
-only increase.
+A release is one command, cut from `main`:
 
 ```bash
-just version 0.2.0          # rewrites all four files (rejects a non-increasing version)
-git commit -am "release 0.2.0"
-git tag v0.2.0              # tag must equal the version and be newer than every prior tag
-git push origin main --tags
+just version 0.2.0
 ```
 
-Pushing the tag triggers `.github/workflows/release.yml`: a guard verifies the tag
-matches `tauri.conf.json` and is the newest version, then macOS and Linux installers
-build and attach to a **draft** GitHub Release. Review the draft and publish it.
+`just version` will only run from a **clean, up-to-date `main`** (it aborts otherwise
+and fast-forwards to `origin/main`). It then runs the full gate (typecheck, frontend
+tests, `cargo test`, `clippy -D warnings`), bumps the version across `package.json`,
+`src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.lock` (a
+non-increasing version is rejected), and - after a `y/N` confirmation - commits, tags
+`v0.2.0`, and pushes `main` + the tag. Declining the prompt reverts the bump and
+changes nothing.
+
+Pushing the tag triggers `.github/workflows/release.yml`: a guard re-verifies the tag
+matches `tauri.conf.json`, is newly created (not an overwrite), and is the newest
+version, then macOS and Linux installers build and attach to a **draft** GitHub
+Release. Review the draft and publish it.

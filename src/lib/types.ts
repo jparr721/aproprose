@@ -10,7 +10,7 @@
 // the AI reads the block stream to know what each section *is*.
 
 export type BlockType =
-  | "chapter" // a centered scene label or a `* * *` break
+  | "chapter" // a centered scene label or freeform separator
   | "narration" // a prose paragraph
   | "dialogue" // a quoted utterance (+ optional action beat)
   | "lore" // worldbuilding note — never rendered (stored as a LaTeX comment)
@@ -25,9 +25,13 @@ export interface Block {
   type: BlockType;
   /**
    * The editable / displayable text.
-   * - prose types (`narration`, `dialogue`, `chapter`, `lore`, `scratchpad`):
-   *   cleaned of LaTeX — inline emphasis is written as `_italics_`, quotes as
-   *   straight `"…"`, dashes as real `—` / `–`.
+   * - `narration` / `dialogue`: cleaned prose - inline emphasis is written as
+   *   `**bold**` / `_italics_` (mapped to \textbf / \emph), quotes as straight
+   *   `"` / `'`, dashes as real Unicode dashes.
+   * - `chapter`: a plain centered label (scene) or separator (break). Markdown
+   *   markers are literal here, never emphasis, so a break can't masquerade as a
+   *   scene heading.
+   * - `lore` / `scratchpad`: note text, stored verbatim in a non-rendering comment.
    * - `latex`: the raw LaTeX source, edited verbatim.
    */
   text: string;
@@ -50,7 +54,7 @@ export interface Block {
   beat?: string;
   /** lore: optional short title. */
   title?: string;
-  /** chapter: `scene` (centered label) or `break` (`* * *` separator). */
+  /** chapter: `scene` (centered label) or `break` (freeform centered separator). */
   level?: ChapterLevel;
 }
 

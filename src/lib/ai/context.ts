@@ -24,7 +24,9 @@ export function buildAiContext(uptoId?: string): AiContext {
     if (b.type === "narration") {
       lines.push(b.text);
     } else if (b.type === "chapter") {
-      lines.push(b.level === "break" ? "* * *" : b.text.toUpperCase());
+      // A break carries the writer's own freeform separator text (`Interlude`, a
+      // fleuron, `* * *`); fall back to the canonical mark only when it is empty.
+      lines.push(b.level === "break" ? b.text.trim() || "* * *" : b.text.toUpperCase());
     } else if (b.type === "dialogue") {
       const sp = b.speaker ? charById.get(b.speaker)?.name : undefined;
       lines.push(`${sp ? `${sp}: ` : ""}"${b.text}"${b.beat ? ` ${b.beat}` : ""}`);

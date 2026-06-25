@@ -109,6 +109,22 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Split block",
   },
+  FORMAT_BOLD: {
+    id: "format-bold",
+    key: "b",
+    modifiers: { ctrl: true },
+    description: "Bold the selected text",
+    category: "editor",
+    label: "Bold",
+  },
+  FORMAT_ITALIC: {
+    id: "format-italic",
+    key: "i",
+    modifiers: { ctrl: true },
+    description: "Italicize the selected text",
+    category: "editor",
+    label: "Italic",
+  },
   // Block nav/edit modal keys. Unmodified so they're inert while a textarea is
   // focused (the editing surface), and so they read like vim motions in nav mode.
   NAV_PREV_BLOCK: {

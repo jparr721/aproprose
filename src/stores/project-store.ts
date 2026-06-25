@@ -149,7 +149,7 @@ interface ProjectState {
 
   // block selection / editing (the nav vs edit modal model)
   select: (id: string | null) => void;
-  /** Enter edit mode on the selected block (no-op if none / a chapter break). */
+  /** Enter edit mode on the selected block (no-op if nothing is selected). */
   beginEdit: (caret?: "start") => void;
   /** Leave edit mode but keep the block highlighted (nav mode). */
   stopEdit: () => void;
@@ -158,6 +158,7 @@ interface ProjectState {
   /** Move the highlight to the prev/next block in nav mode, clamped at the ends. */
   moveSelection: (dir: -1 | 1) => void;
   updateBlockText: (id: string, text: string) => void;
+  formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: { id: string; text: string }[]) => void;
   updateBlock: (id: string, patch: Partial<Block>) => void;
@@ -525,9 +526,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (!s.selectedId) return {};
         const block = s.blocks.find((b) => b.id === s.selectedId);
-        // Chapter breaks (`* * *`) have no editable text.
-        if (!block || (block.type === "chapter" && block.level === "break"))
-          return {};
+        if (!block) return {};
         return { editing: true, editCaret: caret ?? null };
       }),
 
@@ -563,6 +562,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: id,
         };
       }),
+
+    // Like updateBlockText but always its own undo step - a format toggle should
+    // undo cleanly, not fold into the run of typing that preceded it.
+    formatBlockText: (id, text) =>
+      set((s) => ({
+        blocks: s.blocks.map((b) => (b.id === id ? { ...b, text, dirty: true } : b)),
+        chapterDirty: true,
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+        future: [],
+        lastTextEditId: null,
+      })),
 
     // Apply a batch of text edits as ONE undo step, so an AI "Accept all" backs
     // out with a single undo instead of N (one per touched block).

@@ -17,3 +17,18 @@ export function isInAuxSurface(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;
   return element.closest(AUX_SURFACE_SELECTOR) !== null;
 }
+
+/**
+ * True when the event/focus target is an editable field (`<input>`, `<textarea>`,
+ * or contenteditable). Used by global single-letter chords that must yield to
+ * in-field editing - e.g. the sidebar's Cmd+B must not fire while the writer is
+ * bolding text in a block.
+ */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable
+  );
+}

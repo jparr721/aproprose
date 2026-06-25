@@ -5,7 +5,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { IconScissors } from "@tabler/icons-react";
+import { IconScissors, IconBold, IconItalic } from "@tabler/icons-react";
+import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
 import { selectionRect } from "@/lib/textarea-caret";
@@ -31,6 +32,7 @@ export function SelectionToolbar() {
   const [sel, setSel] = useState<Selection | null>(null);
   const blocks = useProjectStore((s) => s.blocks);
   const convertSelection = useProjectStore((s) => s.convertSelection);
+  const formatBlockText = useProjectStore((s) => s.formatBlockText);
 
   const recompute = useCallback(() => {
     const el = document.activeElement;
@@ -92,6 +94,21 @@ export function SelectionToolbar() {
     setSel(null);
   };
 
+  const format = (marker: InlineMarker) => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const res = toggleInlineWrap({ text: el.value, start: el.selectionStart, end: el.selectionEnd }, marker);
+    formatBlockText(sel.blockId, res.text);
+    // Restore the selection after React commits the new value, mirroring the
+    // editor's Cmd+B path - so the writer keeps their selection and can chain
+    // formats. The selectionchange listener then repositions this toolbar.
+    requestAnimationFrame(() => {
+      if (!el.isConnected) return;
+      el.focus();
+      el.setSelectionRange(res.start, res.end);
+    });
+  };
+
   // Flip below the selection when there isn't room above. 56px ≈ the block
   // action-row height that sits above a selected block near the viewport top.
   const below = sel.rect.top < 56;
@@ -109,6 +126,24 @@ export function SelectionToolbar() {
         "flex items-center gap-0.5 rounded-lg border border-border bg-card p-1 font-sans shadow-md",
       )}
     >
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => format("**")}
+        title="Bold"
+        aria-label="Bold selection"
+      >
+        <IconBold className="size-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => format("_")}
+        title="Italic"
+        aria-label="Italic selection"
+      >
+        <IconItalic className="size-3.5" />
+      </Button>
       {targets.map((t) => (
         <Button
           key={t.type}
@@ -118,7 +153,7 @@ export function SelectionToolbar() {
           title={`Convert selection to ${t.label}`}
           aria-label={`Convert selection to ${t.label}`}
         >
-          → {t.label}
+          {t.label}
         </Button>
       ))}
       <Button

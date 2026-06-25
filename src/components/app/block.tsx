@@ -157,9 +157,18 @@ function BlockBody({
   switch (block.type) {
     case "chapter":
       if (block.level === "break") {
-        return (
-          <div className="py-4 text-center font-serif tracking-[0.6em] text-muted-foreground">
-            ∗ ∗ ∗
+        return editing ? (
+          <AutoGrowTextarea
+            value={block.text}
+            onChange={(v) => updateBlockText(block.id, v)}
+            autoFocus
+            caret={caret}
+            placeholder="* * *"
+            className="text-center font-serif text-muted-foreground"
+          />
+        ) : (
+          <div className="py-4 text-center font-serif tracking-[0.3em] text-muted-foreground">
+            {block.text || <span className="text-faint">* * *</span>}
           </div>
         );
       }
@@ -307,7 +316,7 @@ function BlockBody({
 function blockPlainText(block: BlockT, characters: Character[]): string {
   switch (block.type) {
     case "chapter":
-      return block.level === "break" ? "* * *" : block.text;
+      return block.text;
     case "dialogue": {
       const sp = block.speaker ? characters.find((c) => c.id === block.speaker) : undefined;
       const quote = `"${block.text}"`;
@@ -361,9 +370,8 @@ function BlockImpl({
     : undefined;
   // Selection (highlight) and editing (caret in the textarea) are now distinct:
   // a block is only editing when it's the selected block AND the store's editing
-  // flag is set. Chapter breaks have no editable text, so they never edit.
-  const isBreak = block.type === "chapter" && block.level === "break";
-  const editing = selected && storeEditing && !isBreak;
+  // flag is set.
+  const editing = selected && storeEditing;
   // The one-shot caret hint only applies to the block currently in edit mode.
   const caret = editing && editCaret ? editCaret : undefined;
   const isProse = block.type === "narration" || block.type === "dialogue";

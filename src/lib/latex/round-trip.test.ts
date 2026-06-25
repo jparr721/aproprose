@@ -94,3 +94,15 @@ test("re-saving an existing star break is byte-identical", () => {
   const src = "\\begin{center}\n* * *\n\\end{center}\n";
   expect(serializeChapter(parseChapter(src))).toBe(src);
 });
+
+test("bold containing an underscore round-trips (underscore renders italic)", () => {
+  const [reparsed] = save([dirty({ text: "**it's_a_trap**" })]);
+  expect(reparsed.type).toBe("narration");
+  expect(reparsed.text).toBe("**it's_a_trap**");
+});
+
+test("a freeform break with a LaTeX special round-trips", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "break", text: "50% done" })]);
+  expect(reparsed.level).toBe("break");
+  expect(reparsed.text).toBe("50% done");
+});

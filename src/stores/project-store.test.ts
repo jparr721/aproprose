@@ -389,6 +389,15 @@ describe("formatBlockText", () => {
     expect(future).toHaveLength(0);
     expect(lastTextEditId).toBeNull();
   });
+
+  it("captures the pre-format text in the undo snapshot", () => {
+    const b = mkBlock({ text: "abc" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id, past: [], lastTextEditId: null });
+    useProjectStore.getState().formatBlockText(b.id, "a**b**c");
+    const { past } = useProjectStore.getState();
+    expect(past).toHaveLength(1);
+    expect(past[0].blocks[0].text).toBe("abc");
+  });
 });
 
 describe("editable breaks", () => {

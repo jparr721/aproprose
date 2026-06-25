@@ -27,4 +27,14 @@ describe("renderInline", () => {
     const children = (strong.props as { children?: unknown }).children;
     expect(tags(children)).toContain("em");
   });
+
+  it("returns plain text unchanged", () => {
+    const t = tags(renderInline("just words"));
+    expect(t).not.toContain("strong");
+    expect(t).not.toContain("em");
+  });
+  it("renders empty input as no elements", () => {
+    const out = renderInline("");
+    expect(Array.isArray(out) ? out.length : 0).toBe(0);
+  });
 });

@@ -402,5 +402,6 @@ describe("compileNow exception path", () => {
     expect(compile.errors).toEqual([]);
     expect(compile.status).toBe("error");
     expect(compile.log).toContain("latexmk not found");
+    expect(compile.durationMs).toBe(0);
   });
 });

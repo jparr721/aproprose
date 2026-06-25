@@ -856,6 +856,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             status: "error",
             log: String(e),
             errors: [],
+            durationMs: 0,
             at: Date.now(),
           },
           error: String(e),

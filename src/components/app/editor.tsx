@@ -32,6 +32,7 @@ import { useViewStore } from "@/stores/view-store";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
+import { toggleInlineWrap } from "@/lib/blocks/format";
 import { isInAuxSurface } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/lib/use-dictation";
@@ -154,6 +155,26 @@ export function Editor() {
       store.splitBlock(blockId, selectionStart);
     }
   });
+
+  // Inline emphasis: Cmd/Ctrl+B bold, Cmd/Ctrl+I italic. Toggle the marker around
+  // the focused prose-body textarea's selection, mirroring SPLIT_BLOCK's read of
+  // document.activeElement. The textarea is controlled, so the new selection is
+  // restored on the next frame, after React commits the new value.
+  const applyFormat = (marker: string) => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
+    const host = el.closest("[data-block-id]");
+    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+    if (!blockId) return;
+    const res = toggleInlineWrap(el.value, el.selectionStart, el.selectionEnd, marker);
+    useProjectStore.getState().formatBlockText(blockId, res.text);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(res.start, res.end);
+    });
+  };
+  useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_BOLD, () => applyFormat("**"), EDITOR_HISTORY_OPTIONS);
+  useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_ITALIC, () => applyFormat("_"), EDITOR_HISTORY_OPTIONS);
 
   // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
   // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders

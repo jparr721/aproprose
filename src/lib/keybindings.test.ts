@@ -20,6 +20,15 @@ describe("keybindings registry", () => {
   });
 });
 
+describe("inline format keybindings", () => {
+  it("binds bold to mod+b and italic to mod+i", () => {
+    expect(toHotkeyString(KEYBINDINGS.FORMAT_BOLD)).toBe("mod+b");
+    expect(toHotkeyString(KEYBINDINGS.FORMAT_ITALIC)).toBe("mod+i");
+    expect(KEYBINDINGS.FORMAT_BOLD.label).toBe("Bold");
+    expect(KEYBINDINGS.FORMAT_ITALIC.label).toBe("Italic");
+  });
+});
+
 describe("block nav/edit keybindings", () => {
   it("binds the unmodified nav and edit keys", () => {
     expect(toHotkeyString(KEYBINDINGS.NAV_PREV_BLOCK)).toBe("up");

@@ -172,6 +172,7 @@ export function Editor() {
     const res = toggleInlineWrap(el.value, el.selectionStart, el.selectionEnd, marker);
     useProjectStore.getState().formatBlockText(blockId, res.text);
     requestAnimationFrame(() => {
+      if (!el.isConnected) return;
       el.focus();
       el.setSelectionRange(res.start, res.end);
     });

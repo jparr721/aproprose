@@ -95,7 +95,9 @@ export function SelectionToolbar() {
   };
 
   const format = (marker: InlineMarker) => {
-    const res = toggleInlineWrap(block.text, sel.start, sel.end, marker);
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const res = toggleInlineWrap(el.value, el.selectionStart, el.selectionEnd, marker);
     formatBlockText(sel.blockId, res.text);
     setSel(null);
   };

@@ -46,6 +46,7 @@ import {
 import { uid } from "@/lib/id";
 import { pathHash } from "@/lib/path-hash";
 import { useSyncStore } from "@/stores/sync-store";
+import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 
 type ProjectStatus = "empty" | "loading" | "ready";
@@ -203,6 +204,21 @@ interface HistoryEntry {
 
 const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
+
+function notifyBuildFailed(errorCount: number): void {
+  toast.error(
+    errorCount > 0
+      ? `Build failed - ${errorCount} error${errorCount === 1 ? "" : "s"}`
+      : "Build failed",
+    {
+      description: "Open the build log to see the details.",
+      action: {
+        label: "View",
+        onClick: () => useViewStore.getState().setBuildErrorsOpen(true),
+      },
+    },
+  );
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => {
   // Writes are cheap and infrequent, so persist eagerly (no debounce).
@@ -832,16 +848,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             at: Date.now(),
           },
         });
+        if (!result.ok) notifyBuildFailed(result.errors.length);
       } catch (e) {
         set((s) => ({
           compile: {
             ...s.compile,
             status: "error",
             log: String(e),
+            errors: [],
+            durationMs: 0,
             at: Date.now(),
           },
           error: String(e),
         }));
+        notifyBuildFailed(0);
       }
     },
 

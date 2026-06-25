@@ -16,6 +16,7 @@ import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
 import { BackupReviewDialog } from "@/components/app/backup-review-dialog";
 import { BackupSetupDialog } from "@/components/app/backup-setup-dialog";
+import { BuildErrorsDialog } from "@/components/app/build-errors-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
@@ -28,6 +29,7 @@ function BuildBadge() {
   const status = useProjectStore((s) => s.compile.status);
   const errors = useProjectStore((s) => s.compile.errors);
   const at = useProjectStore((s) => s.compile.at);
+  const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
 
   const tone =
     status === "clean"
@@ -49,16 +51,34 @@ function BuildBadge() {
           ? "compiling"
           : "not built";
 
-  return (
-    <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground">
+  const inner = (
+    <>
       {status === "compiling" ? (
         <Spinner className="size-3 text-warning" />
       ) : (
         <span className={cn("size-1.5 rounded-full", tone)} />
       )}
       {label}
-    </span>
+    </>
   );
+
+  const base =
+    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground";
+
+  if (status === "error") {
+    return (
+      <button
+        type="button"
+        aria-label="View build errors"
+        onClick={() => setBuildErrorsOpen(true)}
+        className={cn(base, "cursor-pointer transition-colors hover:bg-accent")}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <span className={base}>{inner}</span>;
 }
 
 export function TopBar() {
@@ -88,6 +108,8 @@ export function TopBar() {
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
   const togglePdf = useViewStore((s) => s.togglePdf);
+  const buildErrorsOpen = useViewStore((s) => s.buildErrorsOpen);
+  const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
 
   // Shortcuts for the chrome actions live with their buttons. (Save / undo / redo
   // are bound in the editor.)
@@ -180,6 +202,7 @@ export function TopBar() {
       </div>
       <BackupReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
       <BackupSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
+      <BuildErrorsDialog open={buildErrorsOpen} onOpenChange={setBuildErrorsOpen} />
     </header>
   );
 }

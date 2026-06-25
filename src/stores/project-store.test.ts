@@ -21,7 +21,8 @@ vi.mock("sonner", () => ({
 }));
 
 import { useProjectStore } from "@/stores/project-store";
-import type { Block } from "@/lib/types";
+import { compileProject } from "@/lib/tauri";
+import type { Block, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
   id: Math.random().toString(36).slice(2),
@@ -421,5 +422,41 @@ describe("editable breaks", () => {
     expect(created?.type).toBe("chapter");
     expect(created?.level).toBe("break");
     expect(created?.text).toBe("* * *");
+  });
+});
+
+describe("compileNow exception path", () => {
+  const project: ProjectInfo = {
+    root: "/tmp/book",
+    name: "Book",
+    mainFile: "main.tex",
+    title: null,
+    author: null,
+    chapters: [],
+  };
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      project,
+      chapterDirty: false,
+      compile: {
+        status: "error",
+        pdfBase64: null,
+        log: "stale log",
+        errors: [{ file: "main.tex", line: 1, message: "stale error" }],
+        durationMs: 7,
+        at: 1,
+      },
+    });
+  });
+
+  it("clears stale parsed errors when the build throws", async () => {
+    vi.mocked(compileProject).mockRejectedValueOnce(new Error("latexmk not found"));
+    await useProjectStore.getState().compileNow();
+    const compile = useProjectStore.getState().compile;
+    expect(compile.errors).toEqual([]);
+    expect(compile.status).toBe("error");
+    expect(compile.log).toContain("latexmk not found");
+    expect(compile.durationMs).toBe(0);
   });
 });

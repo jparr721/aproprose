@@ -35,6 +35,29 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
 - **Light · Sepia · Dark**, 2-/3-pane and Focus layouts, typographic or card
   blocks, adjustable prose size.
 
+## Install
+
+Download the latest installer from the [Releases page](https://github.com/jparr721/aproprose/releases).
+
+### macOS (Apple Silicon)
+
+The `.dmg` is not notarized (no Apple Developer account yet), so Gatekeeper blocks it
+on first launch. Open it once with either method:
+
+- Right-click `aproprose.app` in Applications and choose **Open**, then confirm; or
+- Clear the download quarantine from a terminal:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/aproprose.app
+  ```
+
+After the first open it launches normally. Intel Macs are not supported yet.
+
+### Linux
+
+- **AppImage** (any distro): `chmod +x aproprose_*.AppImage` then run it.
+- **Debian / Ubuntu** (`.deb`): `sudo apt install ./aproprose_*.deb`.
+
 ## Architecture notes
 
 - **Privileged work lives in Rust** (`src-tauri/src`): project discovery + LaTeX
@@ -72,3 +95,24 @@ just fmt        # cargo fmt + clippy
 ```
 
 See `CLAUDE.md` for the full project guide and conventions.
+
+## Releasing
+
+A release is one command, cut from `main`:
+
+```bash
+just version 0.2.0
+```
+
+`just version` will only run from a **clean, up-to-date `main`** (it aborts otherwise
+and fast-forwards to `origin/main`). It then runs the full gate (typecheck, frontend
+tests, `cargo test`, `clippy -D warnings`), bumps the version across `package.json`,
+`src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.lock` (a
+non-increasing version is rejected), and - after a `y/N` confirmation - commits, tags
+`v0.2.0`, and pushes `main` + the tag. Declining the prompt reverts the bump and
+changes nothing.
+
+Pushing the tag triggers `.github/workflows/release.yml`: a guard re-verifies the tag
+matches `tauri.conf.json`, is newly created (not an overwrite), and is the newest
+version, then macOS and Linux installers build and attach to a **draft** GitHub
+Release. Review the draft and publish it.

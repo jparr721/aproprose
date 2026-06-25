@@ -85,4 +85,30 @@ describe("command registry", () => {
     });
     expect(buildRootCommands().map((c) => c.id)).not.toContain("doc.compile");
   });
+
+  it("offers View build errors only after a failed build", () => {
+    useProjectStore.setState({
+      compile: {
+        status: "clean",
+        pdfBase64: null,
+        log: "",
+        errors: [],
+        durationMs: 0,
+        at: null,
+      },
+    });
+    expect(buildRootCommands().map((c) => c.id)).not.toContain("doc.build-errors");
+
+    useProjectStore.setState({
+      compile: {
+        status: "error",
+        pdfBase64: null,
+        log: "! Undefined control sequence",
+        errors: [{ file: "main.tex", line: 12, message: "Undefined control sequence" }],
+        durationMs: 5,
+        at: 1,
+      },
+    });
+    expect(buildRootCommands().map((c) => c.id)).toContain("doc.build-errors");
+  });
 });

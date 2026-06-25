@@ -24,6 +24,7 @@ describe("renderInline", () => {
     const out = renderInline("**_x_**") as ReactElement[];
     const strong = out.find((n) => isValidElement(n) && n.type === "strong") as ReactElement;
     expect(strong).toBeDefined();
-    expect(tags(strong.props.children)).toContain("em");
+    const children = (strong.props as { children?: unknown }).children;
+    expect(tags(children)).toContain("em");
   });
 });

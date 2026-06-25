@@ -193,17 +193,17 @@ function classify(content: string, raw: string): Block {
 }
 
 function chapterBlock(inner: string, raw: string): Block {
-  // A `* * *` (any spacing / star count, asterisks only) is a scene break.
-  if (/^[*\s]+$/.test(inner) && /\*/.test(inner)) {
-    return base("chapter", "∗ ∗ ∗", raw, { level: "break" });
-  }
-  // \textbf{X} → scene label X (cleaned). Plain short text also a scene label.
+  // A centered line wrapped entirely in \textbf is a scene heading (bold, Lora).
   const bf = RE_TEXTBF.exec(inner);
-  const labelSrc = bf ? bf[1] : inner;
-  // The label may itself contain only \emph; clean it for display. If it carries
-  // other macros, fall back to the raw inner so we never mangle it.
-  const label = isSimpleProse(labelSrc) ? cleanToText(labelSrc) : labelSrc;
-  return base("chapter", label, raw, { level: "scene" });
+  if (bf) {
+    const labelSrc = bf[1];
+    const label = isSimpleProse(labelSrc) ? cleanToText(labelSrc) : labelSrc;
+    return base("chapter", label, raw, { level: "scene" });
+  }
+  // Any other centered content is a freeform break / separator: `* * *`, a
+  // fleuron, `Interlude`, etc. Cleaned for editing when it is simple prose.
+  const text = isSimpleProse(inner) ? cleanToText(inner) : inner;
+  return base("chapter", text, raw, { level: "break" });
 }
 
 /**

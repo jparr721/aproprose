@@ -49,9 +49,10 @@ function renderBody(block: Block): string {
 
     case "chapter": {
       if (block.level === "break") {
-        return "\\begin{center}\n* * *\n\\end{center}";
+        // Freeform centered separator: render whatever text the writer put there.
+        return `\\begin{center}\n${textToLatex(block.text)}\n\\end{center}`;
       }
-      // scene label
+      // Scene label: centered + bold.
       return `\\begin{center}\n\\textbf{${textToLatex(block.text)}}\n\\end{center}`;
     }
 

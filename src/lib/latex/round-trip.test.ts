@@ -74,3 +74,23 @@ test("a space-delimited number alongside emphasis is untouched", () => {
   const [reparsed] = save([dirty({ text: "the year _1984_ and 3 stars" })]);
   expect(reparsed.text).toBe("the year _1984_ and 3 stars");
 });
+
+test("a freeform break round-trips its text", () => {
+  for (const text of ["* * *", "Interlude", "INTERLUDE"]) {
+    const [reparsed] = save([dirty({ type: "chapter", level: "break", text })]);
+    expect(reparsed.type).toBe("chapter");
+    expect(reparsed.level).toBe("break");
+    expect(reparsed.text).toBe(text);
+  }
+});
+
+test("a bold-wrapped centered line is a scene heading", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "scene", text: "Chapter One" })]);
+  expect(reparsed.level).toBe("scene");
+  expect(reparsed.text).toBe("Chapter One");
+});
+
+test("re-saving an existing star break is byte-identical", () => {
+  const src = "\\begin{center}\n* * *\n\\end{center}\n";
+  expect(serializeChapter(parseChapter(src))).toBe(src);
+});

@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: version guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must match tauri.conf.json and be strictly newest
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          tag_ver="${tag#v}"
+          conf_ver="$(jq -r .version src-tauri/tauri.conf.json)"
+          if [ "$tag_ver" != "$conf_ver" ]; then
+            echo "::error::tag $tag (=$tag_ver) does not match tauri.conf.json version $conf_ver"
+            exit 1
+          fi
+          if [ "${{ github.event.created }}" != "true" ]; then
+            echo "::error::tag $tag already existed (force-update/overwrite); published releases cannot be overwritten"
+            exit 1
+          fi
+          others="$(git tag --list 'v*' | grep -vxF "$tag" || true)"
+          if [ -n "$others" ]; then
+            highest="$(printf '%s\n' "$others" | sed 's/^v//' | sort -V | tail -n1)"
+            newest="$(printf '%s\n%s\n' "$tag_ver" "$highest" | sort -V | tail -n1)"
+            if [ "$tag_ver" = "$highest" ] || [ "$newest" != "$tag_ver" ]; then
+              echo "::error::version $tag_ver is not greater than the highest existing tag $highest"
+              exit 1
+            fi
+          fi
+          echo "guard ok: $tag_ver matches config and is the newest version"
+
+  build:
+    name: build ${{ matrix.platform }}
+    needs: guard
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin --bundles dmg"
+          - platform: ubuntu-22.04
+            target: ""
+            args: "--bundles deb,appimage"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri system deps (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - run: bun install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "aproprose ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

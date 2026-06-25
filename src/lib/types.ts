@@ -10,7 +10,7 @@
 // the AI reads the block stream to know what each section *is*.
 
 export type BlockType =
-  | "chapter" // a centered scene label or a `* * *` break
+  | "chapter" // a centered scene label or freeform separator
   | "narration" // a prose paragraph
   | "dialogue" // a quoted utterance (+ optional action beat)
   | "lore" // worldbuilding note — never rendered (stored as a LaTeX comment)
@@ -50,7 +50,7 @@ export interface Block {
   beat?: string;
   /** lore: optional short title. */
   title?: string;
-  /** chapter: `scene` (centered label) or `break` (`* * *` separator). */
+  /** chapter: `scene` (centered label) or `break` (freeform centered separator). */
   level?: ChapterLevel;
 }
 

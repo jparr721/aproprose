@@ -183,7 +183,7 @@ function classify(content: string, raw: string): Block {
   const dialogue = tryDialogue(trimmed, raw);
   if (dialogue) return dialogue;
 
-  // 4. Simple prose narration: only \emph macros, no other LaTeX, no comments.
+  // 4. Simple prose narration: only \emph and \textbf macros, no other LaTeX, no comments.
   if (isSimpleProse(content)) {
     return base("narration", cleanToText(content), raw);
   }

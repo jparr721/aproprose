@@ -148,7 +148,7 @@ interface ProjectState {
 
   // block selection / editing (the nav vs edit modal model)
   select: (id: string | null) => void;
-  /** Enter edit mode on the selected block (no-op if none / a chapter break). */
+  /** Enter edit mode on the selected block (no-op if nothing is selected). */
   beginEdit: (caret?: "start") => void;
   /** Leave edit mode but keep the block highlighted (nav mode). */
   stopEdit: () => void;

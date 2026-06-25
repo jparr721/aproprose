@@ -2,7 +2,7 @@
 // "prose" text the editor shows.
 //
 // The editor never displays raw LaTeX for simple prose: emphasis becomes
-// `_italics_`, TeX quotes become straight `"…"` / `'…'`, and the dash ligatures
+// `_italics_`, bold becomes `**bold**`, TeX quotes become straight `"…"` / `'…'`, and the dash ligatures
 // become real Unicode dashes. The two functions here are exact inverses for the
 // constructs we recognise, so a no-op edit of a narration/dialogue block still
 // round-trips byte-for-byte (the serializer reverses the cleaning before diffing
@@ -19,7 +19,7 @@ import { parseInline, type InlineNode } from "./markup";
 // The six characters TeX treats specially in normal text and that a writer might
 // type literally. `\` and `{`/`}` are deliberately excluded: a backslash in a
 // "simple" paragraph means a macro (which disqualifies it from prose), and the
-// parser refuses braces outside of the `\emph{…}` we explicitly unwrap. We keep
+// parser refuses braces outside of the `\emph{…}` and `\textbf{…}` we explicitly unwrap. We keep
 // the set minimal so the inverse is unambiguous.
 const LATEX_ESCAPES: ReadonlyArray<readonly [string, string]> = [
   ["&", "\\&"],
@@ -33,9 +33,7 @@ const LATEX_ESCAPES: ReadonlyArray<readonly [string, string]> = [
  * Convert cleaned editor text into LaTeX source. The inverse of
  * {@link cleanToText}. Applied only when re-serializing a *dirty* prose block.
  *
- * Order matters: escape specials first (so a literal `_` the user typed becomes
- * `\_` and is not mistaken for an emphasis delimiter), then map the
- * higher-level constructs.
+ * The inline tree is built first (so `_` and `**` markers are recognised), then LaTeX special characters are escaped on the resulting text leaves.
  */
 export function textToLatex(text: string): string {
   let out = nodesToLatex(parseInline(text));

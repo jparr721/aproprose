@@ -45,4 +45,18 @@ describe("parseInline", () => {
       { kind: "italic", children: [{ kind: "text", value: "b" }] },
     ]);
   });
+
+  it("uses the first closer for italic (shortest match)", () => {
+    expect(parseInline("_a_b_")).toEqual([
+      { kind: "italic", children: [{ kind: "text", value: "a" }] },
+      { kind: "text", value: "b_" },
+    ]);
+  });
+
+  it("uses the first closer for bold, leaving a trailing star literal", () => {
+    expect(parseInline("**foo***")).toEqual([
+      { kind: "bold", children: [{ kind: "text", value: "foo" }] },
+      { kind: "text", value: "*" },
+    ]);
+  });
 });

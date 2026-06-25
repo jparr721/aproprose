@@ -1,11 +1,13 @@
 // commands/document.ts - save & build, undo, redo.
 
 import {
+  IconAlertTriangle,
   IconArrowBackUp,
   IconArrowForwardUp,
   IconPlayerPlayFilled,
 } from "@tabler/icons-react";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import type { Command } from "./types";
 
 export const documentCommands: Command[] = [
@@ -18,6 +20,15 @@ export const documentCommands: Command[] = [
     keywords: ["compile", "build", "save"],
     enabled: () => useProjectStore.getState().compile.status !== "compiling",
     run: () => void useProjectStore.getState().compileNow(),
+  },
+  {
+    id: "doc.build-errors",
+    group: "Document",
+    title: "View build errors",
+    icon: IconAlertTriangle,
+    keywords: ["build", "errors", "log", "compile", "failures"],
+    enabled: () => useProjectStore.getState().compile.status === "error",
+    run: () => useViewStore.getState().setBuildErrorsOpen(true),
   },
   {
     id: "doc.undo",

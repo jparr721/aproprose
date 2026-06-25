@@ -115,7 +115,7 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
 /** Read-only note of the instruction that produced the shown result. */
 function AskedCaption({ instruction }: { instruction?: string }) {
   if (!instruction) return null;
-  return <p className="font-sans text-xs italic text-faint">Asked: {instruction}</p>;
+  return <TypographyMuted className="text-xs">Asked: {instruction}</TypographyMuted>;
 }
 
 /**
@@ -214,16 +214,11 @@ function CursorAnchor() {
         {block ? `Continuing after ${block.type}` : "Cursor"}
       </span>
       <div className="min-w-0 flex-1">
-        <p
-          className={cn(
-            "line-clamp-1",
-            text
-              ? "font-serif text-xs italic text-muted-foreground"
-              : "font-sans text-xs text-faint",
-          )}
+        <TypographyMuted
+          className={cn("line-clamp-1 text-xs", text ? "font-serif" : "text-faint")}
         >
           {text || "Place your cursor in the manuscript."}
-        </p>
+        </TypographyMuted>
       </div>
     </div>
   );
@@ -305,7 +300,7 @@ function SuggestTab() {
                 <p
                   className={cn(
                     "font-serif text-sm leading-[1.55] text-foreground",
-                    v.type === "narration" && "italic text-muted-foreground",
+                    v.type === "narration" && "text-muted-foreground",
                   )}
                 >
                   {v.type === "dialogue" ? `"${v.text}"` : v.text}

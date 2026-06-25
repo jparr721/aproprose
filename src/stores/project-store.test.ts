@@ -179,13 +179,13 @@ describe("modal selection / editing", () => {
     expect(useProjectStore.getState().editCaret).toBe("start");
   });
 
-  it("beginEdit is a no-op on a chapter break", () => {
+  it("beginEdit enters edit mode on a chapter break", () => {
     const brk = mkBlock({ id: "b", type: "chapter", level: "break", text: "" });
     useProjectStore.setState({ blocks: [brk], selectedId: "b", editing: false });
 
     useProjectStore.getState().beginEdit();
 
-    expect(useProjectStore.getState().editing).toBe(false);
+    expect(useProjectStore.getState().editing).toBe(true);
   });
 
   it("beginEdit is a no-op when nothing is selected", () => {
@@ -388,5 +388,29 @@ describe("formatBlockText", () => {
     expect(past).toHaveLength(1);
     expect(future).toHaveLength(0);
     expect(lastTextEditId).toBeNull();
+  });
+});
+
+describe("editable breaks", () => {
+  it("lets a selected break enter edit mode", () => {
+    const b = mkBlock({ type: "chapter", level: "break", text: "* * *" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id, editing: false });
+
+    useProjectStore.getState().beginEdit("start");
+
+    expect(useProjectStore.getState().editing).toBe(true);
+  });
+
+  it("inserts a break after the selected block", () => {
+    const b = mkBlock({ text: "para" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id });
+
+    const id = useProjectStore.getState().insertAfter(b.id, { type: "chapter", level: "break", text: "* * *" });
+
+    const { blocks } = useProjectStore.getState();
+    const created = blocks.find((x) => x.id === id);
+    expect(created?.type).toBe("chapter");
+    expect(created?.level).toBe("break");
+    expect(created?.text).toBe("* * *");
   });
 });

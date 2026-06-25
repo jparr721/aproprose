@@ -74,6 +74,9 @@ function AddBlockRow() {
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
         + Scratchpad
       </Button>
+      <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => insertAfter(selectedId, { type: "chapter", level: "break", text: "* * *" })}>
+        + Scene break
+      </Button>
       <Button
         size="sm"
         className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"

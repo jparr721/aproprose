@@ -510,9 +510,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         if (!s.selectedId) return {};
         const block = s.blocks.find((b) => b.id === s.selectedId);
-        // Chapter breaks (`* * *`) have no editable text.
-        if (!block || (block.type === "chapter" && block.level === "break"))
-          return {};
+        if (!block) return {};
         return { editing: true, editCaret: caret ?? null };
       }),
 

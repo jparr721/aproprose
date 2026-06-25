@@ -24,4 +24,12 @@ describe("toggleInlineWrap", () => {
   it("inserts an empty pair with the caret between on an empty selection", () => {
     expect(toggleInlineWrap("ab", 1, 1, "**")).toEqual({ text: "a****b", start: 3, end: 3 });
   });
+
+  it("wraps a selection that starts at index 0", () => {
+    expect(toggleInlineWrap("abc", 0, 3, "**")).toEqual({ text: "**abc**", start: 2, end: 5 });
+  });
+
+  it("unwraps inside-markers when the selection starts at index 0", () => {
+    expect(toggleInlineWrap("**abc**", 0, 7, "**")).toEqual({ text: "abc", start: 0, end: 3 });
+  });
 });

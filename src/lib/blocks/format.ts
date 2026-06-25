@@ -32,11 +32,15 @@ export function toggleInlineWrap(
     selected.endsWith(marker)
   ) {
     const inner = selected.slice(len, selected.length - len);
-    return { text: text.slice(0, start) + inner + text.slice(end), start, end: start + inner.length };
+    return {
+      text: text.slice(0, start) + inner + text.slice(end),
+      start,
+      end: start + inner.length,
+    };
   }
 
   // Already wrapped, markers just outside the selection -> strip them.
-  if (text.slice(start - len, start) === marker && text.slice(end, end + len) === marker) {
+  if (start >= len && text.slice(start - len, start) === marker && text.slice(end, end + len) === marker) {
     return {
       text: text.slice(0, start - len) + selected + text.slice(end + len),
       start: start - len,

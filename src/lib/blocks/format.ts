@@ -2,6 +2,8 @@
 // selection. Pure: returns the new text plus the selection to restore. Toggling
 // off recognises markers both inside the selection and immediately outside it.
 
+export type InlineMarker = "**" | "_";
+
 export interface WrapResult {
   text: string;
   start: number;
@@ -12,7 +14,7 @@ export function toggleInlineWrap(
   text: string,
   start: number,
   end: number,
-  marker: string,
+  marker: InlineMarker,
 ): WrapResult {
   const len = marker.length;
 

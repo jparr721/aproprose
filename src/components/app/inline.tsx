@@ -10,7 +10,9 @@ function nodesToReact(nodes: InlineNode[]): ReactNode {
   return nodes.map((n, i) => {
     if (n.kind === "text") return <Fragment key={i}>{n.value}</Fragment>;
     if (n.kind === "bold") return <strong key={i}>{nodesToReact(n.children)}</strong>;
-    return <em key={i}>{nodesToReact(n.children)}</em>;
+    if (n.kind === "italic") return <em key={i}>{nodesToReact(n.children)}</em>;
+    const _exhaustive: never = n;
+    return _exhaustive;
   });
 }
 

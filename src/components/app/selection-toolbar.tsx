@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconScissors, IconBold, IconItalic } from "@tabler/icons-react";
-import { toggleInlineWrap } from "@/lib/blocks/format";
+import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
 import { selectionRect } from "@/lib/textarea-caret";
@@ -94,7 +94,7 @@ export function SelectionToolbar() {
     setSel(null);
   };
 
-  const format = (marker: string) => {
+  const format = (marker: InlineMarker) => {
     const res = toggleInlineWrap(block.text, sel.start, sel.end, marker);
     formatBlockText(sel.blockId, res.text);
     setSel(null);

@@ -49,7 +49,9 @@ function nodesToLatex(nodes: InlineNode[]): string {
     .map((n) => {
       if (n.kind === "text") return escapeSpecials(n.value);
       if (n.kind === "bold") return `\\textbf{${nodesToLatex(n.children)}}`;
-      return `\\emph{${nodesToLatex(n.children)}}`;
+      if (n.kind === "italic") return `\\emph{${nodesToLatex(n.children)}}`;
+      const _exhaustive: never = n;
+      return _exhaustive;
     })
     .join("");
 }

@@ -2,21 +2,25 @@
 // selection. Pure: returns the new text plus the selection to restore. Toggling
 // off recognises markers both inside the selection and immediately outside it.
 
-export type InlineMarker = "**" | "_";
+import { type InlineMarker } from "@/lib/latex/markup";
 
-export interface WrapResult {
+export type { InlineMarker };
+
+/** A textarea's value plus a [start, end) selection into it. Both the input the
+ *  toggle reads and the result it returns, so call sites never transpose offsets. */
+export interface TextSelection {
   text: string;
   start: number;
   end: number;
 }
 
-export function toggleInlineWrap(
-  text: string,
-  start: number,
-  end: number,
-  marker: InlineMarker,
-): WrapResult {
+export function toggleInlineWrap(sel: TextSelection, marker: InlineMarker): TextSelection {
   const len = marker.length;
+  const { text } = sel;
+  // Clamp to valid bounds so the returned selection is always in range, whatever
+  // a stale caller passes; `start <= end <= text.length`.
+  const start = Math.max(0, Math.min(sel.start, text.length));
+  const end = Math.max(start, Math.min(sel.end, text.length));
 
   // Empty selection: drop an empty pair, caret between the markers.
   if (start === end) {

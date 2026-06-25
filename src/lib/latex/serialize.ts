@@ -7,7 +7,7 @@
 // still produces identical bytes.
 
 import type { Block } from "@/lib/types";
-import { textToLatex } from "./inline";
+import { textToLatex, plainToLatex } from "./inline";
 
 /** Render a whole chapter. Concatenation of per-block output, in order. */
 export function serializeChapter(blocks: Block[]): string {
@@ -49,11 +49,15 @@ function renderBody(block: Block): string {
 
     case "chapter": {
       if (block.level === "break") {
-        // Freeform centered separator: render whatever text the writer put there.
-        return `\\begin{center}\n${textToLatex(block.text)}\n\\end{center}`;
+        // Freeform centered separator, rendered as plain text (markup is literal
+        // here). An empty break falls back to the canonical `* * *` so it never
+        // emits a blank interior line that the parser would tear into two blocks.
+        const inner = block.text.trim().length > 0 ? plainToLatex(block.text) : "* * *";
+        return `\\begin{center}\n${inner}\n\\end{center}`;
       }
-      // Scene label: centered + bold.
-      return `\\begin{center}\n\\textbf{${textToLatex(block.text)}}\n\\end{center}`;
+      // Scene label: centered + bold. Plain text - the whole-line \textbf is the
+      // discriminator, so its content must not itself carry \textbf spans.
+      return `\\begin{center}\n\\textbf{${plainToLatex(block.text)}}\n\\end{center}`;
     }
 
     case "lore": {

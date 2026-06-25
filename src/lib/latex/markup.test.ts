@@ -59,4 +59,15 @@ describe("parseInline", () => {
       { kind: "text", value: "*" },
     ]);
   });
+
+  it("resolves interleaved markers by shortest match (characterization)", () => {
+    // `**_**x**_**` is ambiguous; the shortest-match rule pairs the first `**`
+    // with the next `**`, so the body is empty `_` text, not a nested span. Pinned
+    // so a future parser tweak can't silently change this without a failing test.
+    expect(parseInline("**_**x**_**")).toEqual([
+      { kind: "bold", children: [{ kind: "text", value: "_" }] },
+      { kind: "text", value: "x" },
+      { kind: "bold", children: [{ kind: "text", value: "_" }] },
+    ]);
+  });
 });

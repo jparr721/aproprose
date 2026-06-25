@@ -2,25 +2,25 @@
 // "prose" text the editor shows.
 //
 // The editor never displays raw LaTeX for simple prose: emphasis becomes
-// `_italics_`, bold becomes `**bold**`, TeX quotes become straight `"…"` / `'…'`, and the dash ligatures
-// become real Unicode dashes. The two functions here are exact inverses for the
-// constructs we recognise, so a no-op edit of a narration/dialogue block still
-// round-trips byte-for-byte (the serializer reverses the cleaning before diffing
-// against the original `raw`).
+// `_italics_`, bold becomes `**bold**`, TeX quotes become straight `"` / `'`, and
+// the dash ligatures become real Unicode dashes. The two functions here are exact
+// inverses for the constructs we recognise, so a no-op edit of a narration/dialogue
+// block still round-trips byte-for-byte (the serializer reverses the cleaning
+// before diffing against the original `raw`).
 //
 // Anything *not* covered here is the parser's signal that a paragraph is not
-// "simple prose" — those paragraphs are classified as `latex` and edited
+// "simple prose" - those paragraphs are classified as `latex` and edited
 // verbatim, never run through these helpers. So we only need to handle the small
 // closed vocabulary that simple prose is allowed to contain.
 
-import { parseInline, type InlineNode } from "./markup";
+import { parseInline, assertNever, type InlineNode } from "./markup";
 
 // ── LaTeX special characters ────────────────────────────────────────────────
 // The six characters TeX treats specially in normal text and that a writer might
 // type literally. `\` and `{`/`}` are deliberately excluded: a backslash in a
 // "simple" paragraph means a macro (which disqualifies it from prose), and the
-// parser refuses braces outside of the `\emph{…}` and `\textbf{…}` we explicitly unwrap. We keep
-// the set minimal so the inverse is unambiguous.
+// parser refuses braces outside of the `\emph{x}` and `\textbf{x}` we explicitly
+// unwrap. We keep the set minimal so the inverse is unambiguous.
 const LATEX_ESCAPES: ReadonlyArray<readonly [string, string]> = [
   ["&", "\\&"],
   ["%", "\\%"],
@@ -33,11 +33,29 @@ const LATEX_ESCAPES: ReadonlyArray<readonly [string, string]> = [
  * Convert cleaned editor text into LaTeX source. The inverse of
  * {@link cleanToText}. Applied only when re-serializing a *dirty* prose block.
  *
- * The inline tree is built first (so `_` and `**` markers are recognised), then LaTeX special characters are escaped on the resulting text leaves.
+ * The inline tree is built first (so `_` and `**` markers become \emph / \textbf
+ * with specials escaped on the text leaves), then the dash ligatures and straight
+ * quotes are mapped to their TeX forms.
  */
 export function textToLatex(text: string): string {
-  let out = nodesToLatex(parseInline(text));
-  out = out.replace(/—/g, "---").replace(/–/g, "--");
+  return applyTypography(nodesToLatex(parseInline(text)));
+}
+
+/**
+ * Convert plain (non-prose) text into LaTeX. Used for `chapter` scene/break text,
+ * which is a centered label/separator, NOT prose: `**`/`_` stay literal here, so
+ * a break can never serialize to a `\textbf` span that the parser would misread as
+ * a scene heading. Escapes specials, then maps dashes/quotes - the inverse of
+ * {@link cleanToText} for text with no emphasis macros.
+ */
+export function plainToLatex(text: string): string {
+  return applyTypography(escapeSpecials(text));
+}
+
+/** Map dash ligatures and straight quotes to their TeX forms. Shared tail of the
+ *  prose and plain converters. */
+function applyTypography(latex: string): string {
+  let out = latex.replace(/—/g, "---").replace(/–/g, "--");
   out = doubleStraightToTeX(out);
   out = singleStraightToTeX(out);
   return out;
@@ -50,8 +68,7 @@ function nodesToLatex(nodes: InlineNode[]): string {
       if (n.kind === "text") return escapeSpecials(n.value);
       if (n.kind === "bold") return `\\textbf{${nodesToLatex(n.children)}}`;
       if (n.kind === "italic") return `\\emph{${nodesToLatex(n.children)}}`;
-      const _exhaustive: never = n;
-      return _exhaustive;
+      return assertNever(n);
     })
     .join("");
 }
@@ -59,13 +76,12 @@ function nodesToLatex(nodes: InlineNode[]): string {
 /**
  * Convert LaTeX source into cleaned editor text. The inverse of
  * {@link textToLatex}. Applied to a paragraph the parser has already judged to
- * be "simple prose".
+ * be "simple prose" (narration / dialogue).
  */
 export function cleanToText(latex: string): string {
-  let out = latex;
-
   // 1. Unwrap \emph -> _x_ and \textbf -> **x**, innermost first. Repeat until
   //    stable so a nested `\textbf{\emph{x}}` (and the reverse) fully unwraps.
+  let out = latex;
   let prev: string;
   do {
     prev = out;
@@ -73,17 +89,25 @@ export function cleanToText(latex: string): string {
     out = out.replace(/\\textbf\{([^{}]*)\}/g, (_m, inner: string) => `**${inner}**`);
   } while (out !== prev);
 
-  // 2. Quotes. Doubles first (``…''), then singles (`…').
-  out = out.replace(/``(.*?)''/gs, (_m, inner: string) => `"${inner}"`);
+  // 2. Quotes, dashes, and specials - shared with the plain (non-prose) inverse.
+  return latexToPlain(out);
+}
+
+/**
+ * Convert plain LaTeX back to editor text: the inverse of {@link plainToLatex},
+ * used for `chapter` scene/break labels. TeX quotes and dash ligatures map back
+ * and specials unescape, but \emph / \textbf are deliberately NOT unwrapped -
+ * chapter text is literal, so any macro a writer hand-authored in a heading
+ * round-trips byte-exact rather than being reinterpreted as markdown (which
+ * plainToLatex would then escape away, losing it on the next edit).
+ */
+export function latexToPlain(latex: string): string {
+  // Quotes. Doubles first (``x''), then singles (`x').
+  let out = latex.replace(/``(.*?)''/gs, (_m, inner: string) => `"${inner}"`);
   out = out.replace(/`(.*?)'/gs, (_m, inner: string) => `'${inner}'`);
-
-  // 3. Dashes — em before en so `---` is consumed as one token.
+  // Dashes - em before en so `---` is consumed as one token.
   out = out.replace(/---/g, "—").replace(/--/g, "–");
-
-  // 4. Unescape LaTeX specials.
-  out = unescapeSpecials(out);
-
-  return out;
+  return unescapeSpecials(out);
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

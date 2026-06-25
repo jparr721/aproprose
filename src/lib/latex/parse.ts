@@ -13,7 +13,7 @@
 
 import type { Block, BlockType, ChapterLevel } from "@/lib/types";
 import { uid } from "@/lib/id";
-import { cleanToText } from "./inline";
+import { cleanToText, latexToPlain } from "./inline";
 
 /**
  * Parse a chapter body into an ordered list of blocks.
@@ -130,7 +130,6 @@ function matchSeparator(source: string, at: number): number | null {
 // ── classification ────────────────────────────────────────────────────────────
 
 const RE_CENTER = /^\\begin\{center\}([\s\S]*?)\\end\{center\}$/;
-const RE_TEXTBF = /^\\textbf\{([\s\S]*)\}$/;
 // A lore comment: `% @lore[Optional Title]: body` on a single line.
 const RE_LORE = /^%\s*@lore(?:\[([^\]]*)\])?:\s?([\s\S]*)$/;
 // A scratchpad comment: `% @scratch: body`.
@@ -138,7 +137,7 @@ const RE_SCRATCH = /^%\s*@scratch:\s?([\s\S]*)$/;
 // A speaker tag: `% @speaker: <id>` on its own line, immediately above the
 // dialogue it labels (see serialize.ts). The id references a Character.
 const RE_SPEAKER = /^\s*%\s*@speaker:\s?(\S+)\s*\n([\s\S]*)$/;
-// A backslash macro that is NOT \emph or \textbf — its presence disqualifies
+// A backslash macro that is NOT \emph or \textbf - its presence disqualifies
 // simple prose. (\emph and \textbf are the inline macros prose is allowed to carry.)
 const RE_NON_EMPH_MACRO = /\\(?!emph\b)(?!textbf\b)[a-zA-Z@]+/;
 
@@ -193,17 +192,42 @@ function classify(content: string, raw: string): Block {
 }
 
 function chapterBlock(inner: string, raw: string): Block {
-  // A centered line wrapped entirely in \textbf is a scene heading (bold, Lora).
-  const bf = RE_TEXTBF.exec(inner);
-  if (bf) {
-    const labelSrc = bf[1];
-    const label = isSimpleProse(labelSrc) ? cleanToText(labelSrc) : labelSrc;
+  // A centered line that is exactly ONE whole-line \textbf is a scene heading
+  // (bold, Lora). The serializer only ever produces that form for scenes; break
+  // text is plain, so this is the sole discriminator and a break can never flip.
+  const labelSrc = sceneLabel(inner);
+  if (labelSrc !== null) {
+    // Plain inverse of plainToLatex: chapter labels are literal, so a hand-authored
+    // \emph/\textbf inside the heading survives a round-trip unchanged.
+    const label = isSimpleProse(labelSrc) ? latexToPlain(labelSrc) : labelSrc;
     return base("chapter", label, raw, { level: "scene" });
   }
   // Any other centered content is a freeform break / separator: `* * *`, a
   // fleuron, `Interlude`, etc. Cleaned for editing when it is simple prose.
-  const text = isSimpleProse(inner) ? cleanToText(inner) : inner;
+  const text = isSimpleProse(inner) ? latexToPlain(inner) : inner;
   return base("chapter", text, raw, { level: "break" });
+}
+
+/**
+ * If `inner` is exactly one `\textbf{...}` wrapping the entire centered body
+ * (balanced braces, the matching close at the very end), return the wrapped label;
+ * otherwise null. Two adjacent `\textbf` spans, or `\textbf` with surrounding text,
+ * are NOT a scene - so a break whose text merely contains bold stays a break.
+ */
+function sceneLabel(inner: string): string | null {
+  const open = "\\textbf{";
+  if (!inner.startsWith(open) || !inner.endsWith("}")) return null;
+  let depth = 0;
+  for (let i = open.length - 1; i < inner.length; i++) {
+    if (inner[i] === "{") depth++;
+    else if (inner[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        return i === inner.length - 1 ? inner.slice(open.length, inner.length - 1) : null;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -241,7 +265,7 @@ function tryDialogue(trimmed: string, raw: string): Block | null {
 }
 
 export function isSimpleProse(content: string): boolean {
-  // Strip the recognised \emph{…} and \textbf{…} spans, innermost first, then
+  // Strip the recognised \emph{x} and \textbf{x} spans, innermost first, then
   // check what remains. Repeat until stable so nested macros fully strip.
   let stripped = content;
   let prev: string;
@@ -257,7 +281,7 @@ export function isSimpleProse(content: string): boolean {
   // Any remaining unescaped specials (braces, %, &, $, #, _) disqualify it.
   if (/(?<!\\)[{}]/.test(stripped)) return false;
   if (/(?<!\\)%/.test(stripped)) return false;
-  // A non-\emph/\textbf macro anywhere (defensive — caught above too).
+  // A non-\emph/\textbf macro anywhere (defensive - caught above too).
   if (RE_NON_EMPH_MACRO.test(stripped)) return false;
 
   return true;

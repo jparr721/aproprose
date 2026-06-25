@@ -25,9 +25,13 @@ export interface Block {
   type: BlockType;
   /**
    * The editable / displayable text.
-   * - prose types (`narration`, `dialogue`, `chapter`, `lore`, `scratchpad`):
-   *   cleaned of LaTeX — inline emphasis is written as `_italics_`, quotes as
-   *   straight `"…"`, dashes as real `—` / `–`.
+   * - `narration` / `dialogue`: cleaned prose - inline emphasis is written as
+   *   `**bold**` / `_italics_` (mapped to \textbf / \emph), quotes as straight
+   *   `"` / `'`, dashes as real Unicode dashes.
+   * - `chapter`: a plain centered label (scene) or separator (break). Markdown
+   *   markers are literal here, never emphasis, so a break can't masquerade as a
+   *   scene heading.
+   * - `lore` / `scratchpad`: note text, stored verbatim in a non-rendering comment.
    * - `latex`: the raw LaTeX source, edited verbatim.
    */
   text: string;

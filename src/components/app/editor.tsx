@@ -169,7 +169,7 @@ export function Editor() {
     const host = el.closest("[data-block-id]");
     const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
     if (!blockId) return;
-    const res = toggleInlineWrap(el.value, el.selectionStart, el.selectionEnd, marker);
+    const res = toggleInlineWrap({ text: el.value, start: el.selectionStart, end: el.selectionEnd }, marker);
     useProjectStore.getState().formatBlockText(blockId, res.text);
     requestAnimationFrame(() => {
       if (!el.isConnected) return;

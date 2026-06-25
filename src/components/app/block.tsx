@@ -168,7 +168,7 @@ function BlockBody({
           />
         ) : (
           <div className="py-4 text-center font-serif tracking-[0.3em] text-muted-foreground">
-            {block.text ? renderInline(block.text) : <span className="text-faint">* * *</span>}
+            {block.text || <span className="text-faint">* * *</span>}
           </div>
         );
       }

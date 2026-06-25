@@ -106,3 +106,59 @@ test("a freeform break with a LaTeX special round-trips", () => {
   expect(reparsed.level).toBe("break");
   expect(reparsed.text).toBe("50% done");
 });
+
+// Chapter blocks are plain centered text, not prose: `**`/`_` are literal, never
+// \textbf/\emph. This keeps a break disjoint from a scene heading (the only thing
+// the parser reads as a scene is a whole-body \textbf), so break text can never
+// masquerade as a scene and flip its level or corrupt.
+
+test("an empty break round-trips as a break (canonical separator)", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "break", text: "" })]);
+  expect(reparsed.type).toBe("chapter");
+  expect(reparsed.level).toBe("break");
+  expect(reparsed.text).toBe("* * *");
+});
+
+test("a fully-bold break stays a break, not a scene heading", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "break", text: "**Interlude**" })]);
+  expect(reparsed.type).toBe("chapter");
+  expect(reparsed.level).toBe("break");
+  expect(reparsed.text).toBe("**Interlude**");
+});
+
+test("a break with multiple bold spans stays a break and keeps its text", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "break", text: "a **b** c" })]);
+  expect(reparsed.level).toBe("break");
+  expect(reparsed.text).toBe("a **b** c");
+});
+
+test("a scene heading with markdown markers keeps them literal", () => {
+  const [reparsed] = save([dirty({ type: "chapter", level: "scene", text: "**One**" })]);
+  expect(reparsed.level).toBe("scene");
+  expect(reparsed.text).toBe("**One**");
+});
+
+test("an unedited scene heading round-trips byte-identical", () => {
+  const src = "\\begin{center}\n\\textbf{Chapter One}\n\\end{center}\n";
+  expect(serializeChapter(parseChapter(src))).toBe(src);
+});
+
+test("an edited scene heading with inner emphasis round-trips byte-exact", () => {
+  // Chapter labels are plain: a hand-authored \emph inside a heading must survive
+  // a no-op edit unchanged, not be reinterpreted as `_x_` and escaped away.
+  const src = "\\begin{center}\n\\textbf{The \\emph{Real} End}\n\\end{center}\n";
+  const [parsed] = parseChapter(src);
+  expect(parsed.level).toBe("scene");
+  expect(serializeChapter([{ ...parsed, dirty: true }])).toBe(src);
+});
+
+test("two adjacent \\textbf spans are a break, not a corrupted scene", () => {
+  // Greedy classification would capture across both spans and corrupt the text.
+  // The body is not a single whole-body \textbf, so it is a freeform break whose
+  // raw latex is preserved verbatim (byte-exact on a no-op edit).
+  const src = "\\begin{center}\n\\textbf{a} \\textbf{b}\n\\end{center}\n";
+  const [reparsed] = parseChapter(src);
+  expect(reparsed.type).toBe("chapter");
+  expect(reparsed.level).toBe("break");
+  expect(serializeChapter([{ ...reparsed, dirty: true }])).toBe(src);
+});

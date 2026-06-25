@@ -4,6 +4,7 @@ import { Slot } from "radix-ui"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
+import { isEditableTarget } from "@/lib/dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -90,12 +91,15 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
-  // Adds a keyboard shortcut to toggle the sidebar.
+  // Adds a keyboard shortcut to toggle the sidebar. Cmd/Ctrl+B is shared with the
+  // editor's bold toggle, so it yields while an editable field is focused - bold
+  // wins inside a block textarea, the sidebar toggles everywhere else.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-        (event.metaKey || event.ctrlKey)
+        (event.metaKey || event.ctrlKey) &&
+        !isEditableTarget(event.target)
       ) {
         event.preventDefault()
         toggleSidebar()

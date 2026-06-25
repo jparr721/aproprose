@@ -547,7 +547,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    // Like updateBlockText but always its own undo step — a format toggle should
+    // Like updateBlockText but always its own undo step - a format toggle should
     // undo cleanly, not fold into the run of typing that preceded it.
     formatBlockText: (id, text) =>
       set((s) => ({

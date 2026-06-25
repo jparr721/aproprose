@@ -97,9 +97,16 @@ export function SelectionToolbar() {
   const format = (marker: InlineMarker) => {
     const el = document.activeElement;
     if (!(el instanceof HTMLTextAreaElement)) return;
-    const res = toggleInlineWrap(el.value, el.selectionStart, el.selectionEnd, marker);
+    const res = toggleInlineWrap({ text: el.value, start: el.selectionStart, end: el.selectionEnd }, marker);
     formatBlockText(sel.blockId, res.text);
-    setSel(null);
+    // Restore the selection after React commits the new value, mirroring the
+    // editor's Cmd+B path - so the writer keeps their selection and can chain
+    // formats. The selectionchange listener then repositions this toolbar.
+    requestAnimationFrame(() => {
+      if (!el.isConnected) return;
+      el.focus();
+      el.setSelectionRange(res.start, res.end);
+    });
   };
 
   // Flip below the selection when there isn't room above. 56px ≈ the block
@@ -146,7 +153,7 @@ export function SelectionToolbar() {
           title={`Convert selection to ${t.label}`}
           aria-label={`Convert selection to ${t.label}`}
         >
-          → {t.label}
+          {t.label}
         </Button>
       ))}
       <Button

@@ -368,3 +368,17 @@ describe("applyBlockEdits", () => {
     expect(useProjectStore.getState().past).toHaveLength(0);
   });
 });
+
+describe("formatBlockText", () => {
+  it("sets text and records exactly one undo step", () => {
+    const b = mkBlock({ text: "abc" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id, past: [], lastTextEditId: b.id });
+
+    useProjectStore.getState().formatBlockText(b.id, "a**b**c");
+
+    const { blocks, past } = useProjectStore.getState();
+    expect(blocks[0].text).toBe("a**b**c");
+    expect(blocks[0].dirty).toBe(true);
+    expect(past).toHaveLength(1);
+  });
+});

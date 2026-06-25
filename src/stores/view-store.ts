@@ -32,6 +32,9 @@ interface ViewState {
   /** Whether the settings sheet is open. Lifted here so the command palette can
    *  open it; the sidebar's gear button drives the same flag. */
   settingsOpen: boolean;
+  /** Whether the build-error viewer dialog is open. Lifted here so the badge,
+   *  the failure toast, and the command palette can all open the same viewer. */
+  buildErrorsOpen: boolean;
   /** A pending state-wiping action awaiting confirmation, or null. */
   pending: (() => void) | null;
 
@@ -45,6 +48,7 @@ interface ViewState {
   toggleAi: () => void;
   togglePdf: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
   setAiCollapsed: (v: boolean) => void;
@@ -66,6 +70,7 @@ export const useViewStore = create<ViewState>()(
       pdfOpen: false,
       focus: false,
       settingsOpen: false,
+      buildErrorsOpen: false,
 
       pending: null,
 
@@ -76,6 +81,7 @@ export const useViewStore = create<ViewState>()(
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {
         if (preset === "focus") set({ focus: true });

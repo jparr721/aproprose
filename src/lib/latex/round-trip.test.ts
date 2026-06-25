@@ -52,3 +52,25 @@ test("re-saving an unedited parsed chapter is byte-identical", () => {
   const src = '% @speaker: c-marlow\n``Where were you?\'\'\n\nPlain narration.\n';
   expect(serializeChapter(parseChapter(src))).toBe(src);
 });
+
+test("bold survives a save round-trip and stays narration", () => {
+  const [reparsed] = save([dirty({ text: "He said **stop**." })]);
+  expect(reparsed.type).toBe("narration");
+  expect(reparsed.text).toBe("He said **stop**.");
+});
+
+test("bold wrapping italic round-trips", () => {
+  const [reparsed] = save([dirty({ text: "a **_b_** c" })]);
+  expect(reparsed.type).toBe("narration");
+  expect(reparsed.text).toBe("a **_b_** c");
+});
+
+test("italic wrapping bold round-trips", () => {
+  const [reparsed] = save([dirty({ text: "_**x**_" })]);
+  expect(reparsed.text).toBe("_**x**_");
+});
+
+test("a space-delimited number alongside emphasis is untouched", () => {
+  const [reparsed] = save([dirty({ text: "the year _1984_ and 3 stars" })]);
+  expect(reparsed.text).toBe("the year _1984_ and 3 stars");
+});

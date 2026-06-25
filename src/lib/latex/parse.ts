@@ -138,9 +138,9 @@ const RE_SCRATCH = /^%\s*@scratch:\s?([\s\S]*)$/;
 // A speaker tag: `% @speaker: <id>` on its own line, immediately above the
 // dialogue it labels (see serialize.ts). The id references a Character.
 const RE_SPEAKER = /^\s*%\s*@speaker:\s?(\S+)\s*\n([\s\S]*)$/;
-// A backslash macro that is NOT \emph — its presence disqualifies simple prose.
-// (\emph is the one inline macro prose is allowed to carry.)
-const RE_NON_EMPH_MACRO = /\\(?!emph\b)[a-zA-Z@]+/;
+// A backslash macro that is NOT \emph or \textbf — its presence disqualifies
+// simple prose. (\emph and \textbf are the inline macros prose is allowed to carry.)
+const RE_NON_EMPH_MACRO = /\\(?!emph\b)(?!textbf\b)[a-zA-Z@]+/;
 
 function classify(content: string, raw: string): Block {
   // A leading `% @speaker: <id>` line tags the dialogue beneath it. Honor it only
@@ -240,23 +240,24 @@ function tryDialogue(trimmed: string, raw: string): Block | null {
   });
 }
 
-/**
- * "Simple prose" = no LaTeX we don't understand. Concretely: no non-\emph
- * backslash macros, no braces outside a balanced `\emph{…}`, no comment `%`
- * (unescaped), no environments. \emph{…}, escaped specials (\&, \%, …), the TeX
- * dash ligatures and quote glyphs are all fine.
- */
 export function isSimpleProse(content: string): boolean {
-  // Strip the recognised \emph{…} spans, then check what remains.
-  const stripped = content.replace(/\\emph\{[^{}]*\}/g, "");
+  // Strip the recognised \emph{…} and \textbf{…} spans, innermost first, then
+  // check what remains. Repeat until stable so nested macros fully strip.
+  let stripped = content;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped
+      .replace(/\\emph\{[^{}]*\}/g, "")
+      .replace(/\\textbf\{[^{}]*\}/g, "");
+  } while (stripped !== prev);
 
   // Any remaining backslash that isn't a recognised escaped special is a macro.
   if (/\\(?![&%$#_])/.test(stripped)) return false;
-  // Any remaining unescaped specials (braces, %, &, $, #, _) disqualify it: they
-  // would not survive the clean/serialize round-trip unambiguously.
+  // Any remaining unescaped specials (braces, %, &, $, #, _) disqualify it.
   if (/(?<!\\)[{}]/.test(stripped)) return false;
   if (/(?<!\\)%/.test(stripped)) return false;
-  // A non-\emph macro anywhere (defensive — caught above too).
+  // A non-\emph/\textbf macro anywhere (defensive — caught above too).
   if (RE_NON_EMPH_MACRO.test(stripped)) return false;
 
   return true;

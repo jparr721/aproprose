@@ -282,16 +282,24 @@ function ProviderField() {
  */
 function CliStatusField({ kind }: { kind: CliKind }) {
   const [status, setStatus] = useState<CliProviderStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const label = kind === "codex" ? "Codex CLI" : "Claude Code";
 
   const check = useCallback(() => {
     setLoading(true);
+    setError(null);
     cliProviderStatus(kind)
-      .then(setStatus)
-      .catch(() =>
-        setStatus({ installed: false, authenticated: false, model: null, version: null }),
-      )
+      .then((s) => {
+        setStatus(s);
+      })
+      .catch((e) => {
+        // A rejected status command is a real backend failure, not a verdict
+        // that the CLI is missing - surface the cause instead of faking "not
+        // installed".
+        setError(describeAiError(e));
+        setStatus(null);
+      })
       .finally(() => setLoading(false));
   }, [kind]);
 
@@ -305,6 +313,16 @@ function CliStatusField({ kind }: { kind: CliKind }) {
         <TypographyMutedSpan className="flex items-center gap-1.5 font-sans text-xs">
           <Spinner /> Checking
         </TypographyMutedSpan>
+      ) : error ? (
+        <div className="flex flex-col gap-2">
+          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-destructive">
+            <IconAlertTriangle className="size-3.5" /> Could not check the {kind} CLI
+          </TypographyForeground>
+          <TypographyMuted className="font-sans text-xs">{error}</TypographyMuted>
+          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
+            <IconRefresh className="size-3.5" /> Recheck
+          </Button>
+        </div>
       ) : ready ? (
         <div className="flex flex-col gap-1">
           <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-success">

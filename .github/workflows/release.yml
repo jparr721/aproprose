@@ -55,22 +55,29 @@ jobs:
       release_id: ${{ steps.create-release.outputs.result }}
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
       - name: Create the draft release
         id: create-release
         uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
-            const fs = require('fs');
+            const { execFileSync } = require('child_process');
             const tag = context.ref.replace('refs/tags/', '');
             const version = tag.replace(/^v/, '');
-            const changelog = JSON.parse(fs.readFileSync('changelog.json', 'utf8'));
-            const entry = changelog.find((e) => e.version === version);
-            if (!entry) {
-              core.setFailed(`changelog.json has no entry for ${version}`);
-              throw new Error(`no changelog entry for ${version}`);
+            // scripts/release-body.ts validates the changelog entry and builds the body
+            // (the same format the in-app parseUpdateNotes inverts). It exits non-zero with
+            // an actionable message if the entry is missing or malformed.
+            let body;
+            try {
+              body = execFileSync('bun', ['run', 'scripts/release-body.ts', version], {
+                encoding: 'utf8',
+              });
+            } catch (e) {
+              const detail = e.stderr ? e.stderr.toString() : e.message;
+              core.setFailed(`failed to build release body for ${version}: ${detail}`);
+              throw e;
             }
-            const body = [entry.summary, '', ...entry.highlights.map((h) => `- ${h}`)].join('\n');
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

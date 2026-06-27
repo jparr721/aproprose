@@ -3,6 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+// ChangelogEntry is intentionally duplicated from src/lib/changelog.ts: the scripts and
+// app TS projects are separate module graphs (see tsconfig.node.json), and this producer
+// type is mutable while the app's consumer type is readonly. The shared on-disk format is
+// the JSON shape, pinned by tests on both sides.
 export interface ChangelogEntry {
   version: string;
   date: string;
@@ -11,6 +15,13 @@ export interface ChangelogEntry {
 }
 
 export type DraftEntry = Pick<ChangelogEntry, "summary" | "highlights">;
+
+// The empty git tree object. Diffing against it yields the full project history for the
+// first release, where there is no prior tag to diff from (`git diff HEAD` on a clean
+// tree compares the worktree to HEAD and is empty, so it cannot be used here).
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const SEMVER = /^\d+\.\d+\.\d+$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function buildPrompt(commitSubjects: string[], diff: string): string {
   const commits = commitSubjects.map((s) => `- ${s}`).join("\n");
@@ -30,7 +41,7 @@ export function buildPrompt(commitSubjects: string[], diff: string): string {
   ].join("\n");
 }
 
-function stripCodeFences(s: string): string {
+export function stripCodeFences(s: string): string {
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
   return fence ? fence[1] : s;
 }
@@ -87,8 +98,12 @@ function gitLastTag(): string | null {
   }
 }
 
-function gitRange(lastTag: string | null): string {
+export function commitRange(lastTag: string | null): string {
   return lastTag ? `${lastTag}..HEAD` : "HEAD";
+}
+
+export function diffRange(lastTag: string | null): string {
+  return `${lastTag ?? EMPTY_TREE}..HEAD`;
 }
 
 function collectCommits(range: string): string[] {
@@ -146,12 +161,21 @@ function main(): void {
   if (!version || !date) {
     throw new Error("Usage: bun run scripts/generate-changelog.ts <X.Y.Z> <YYYY-MM-DD>");
   }
+  if (!SEMVER.test(version)) {
+    throw new Error(`Invalid version "${version}": expected X.Y.Z (e.g. 0.4.0)`);
+  }
+  if (!ISO_DATE.test(date)) {
+    throw new Error(`Invalid date "${date}": expected YYYY-MM-DD`);
+  }
   const root = resolve(import.meta.dirname, "..");
   const changelogPath = resolve(root, "changelog.json");
   const existing = JSON.parse(readFileSync(changelogPath, "utf8")) as ChangelogEntry[];
 
-  const range = gitRange(gitLastTag());
-  const prompt = buildPrompt(collectCommits(range), collectDiff(range));
+  const lastTag = gitLastTag();
+  const prompt = buildPrompt(
+    collectCommits(commitRange(lastTag)),
+    collectDiff(diffRange(lastTag)),
+  );
   const draft = parseEntry(runClaude(prompt));
   const reviewed = reviewInEditor(draft);
 

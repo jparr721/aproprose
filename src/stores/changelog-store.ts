@@ -6,8 +6,8 @@ import { create } from "zustand";
 import type { IncomingNotes } from "@/lib/changelog";
 
 export interface IncomingVersion {
-  version: string;
-  notes: IncomingNotes;
+  readonly version: string;
+  readonly notes: IncomingNotes;
 }
 
 interface ChangelogState {

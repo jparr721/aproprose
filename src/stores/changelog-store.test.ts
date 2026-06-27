@@ -26,4 +26,14 @@ describe("changelog store", () => {
     useChangelogStore.getState().close();
     expect(useChangelogStore.getState().isOpen).toBe(false);
   });
+
+  it("clears stale incoming when reopened from the menu/settings", () => {
+    useChangelogStore
+      .getState()
+      .open({ version: "0.4.0", notes: { summary: "s", highlights: ["a"] } });
+    useChangelogStore.getState().open(null);
+    const s = useChangelogStore.getState();
+    expect(s.isOpen).toBe(true);
+    expect(s.incoming).toBeNull();
+  });
 });

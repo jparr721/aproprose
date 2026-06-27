@@ -3,6 +3,9 @@ import {
   buildPrompt,
   parseEntry,
   prependEntry,
+  stripCodeFences,
+  commitRange,
+  diffRange,
   type ChangelogEntry,
 } from "./generate-changelog";
 
@@ -41,6 +44,42 @@ describe("generate-changelog", () => {
   it("parseEntry throws on empty highlights", () => {
     expect(() => parseEntry('{"summary":"X","highlights":[]}')).toThrow(/highlights/);
     expect(() => parseEntry('{"summary":"X","highlights":["",""]}')).toThrow(/highlights/);
+  });
+
+  it("parseEntry throws when the JSON is not an object", () => {
+    expect(() => parseEntry('"just a string"')).toThrow(/JSON object/);
+    expect(() => parseEntry("null")).toThrow(/JSON object/);
+  });
+
+  it("parseEntry throws on a missing or non-string summary", () => {
+    expect(() => parseEntry('{"highlights":["A"]}')).toThrow(/summary/);
+    expect(() => parseEntry('{"summary":5,"highlights":["A"]}')).toThrow(/summary/);
+  });
+
+  it("parseEntry throws on a non-array or non-string highlights", () => {
+    expect(() => parseEntry('{"summary":"X","highlights":"A"}')).toThrow(/highlights/);
+    expect(() => parseEntry('{"summary":"X","highlights":[1,2]}')).toThrow(/highlights/);
+  });
+
+  it("stripCodeFences extracts JSON from a fenced block surrounded by prose", () => {
+    expect(
+      parseEntry('Here you go:\n```json\n{"summary":"S","highlights":["A"]}\n```\nHope that helps'),
+    ).toEqual({ summary: "S", highlights: ["A"] });
+  });
+
+  it("stripCodeFences returns the input unchanged when there is no closing fence", () => {
+    expect(stripCodeFences("```json\n{}")).toBe("```json\n{}");
+    expect(() => parseEntry('```json\n{"summary":"S","highlights":["A"]}')).toThrow(/valid JSON/);
+  });
+
+  it("commitRange lists all commits with no prior tag, else the tag range", () => {
+    expect(commitRange(null)).toBe("HEAD");
+    expect(commitRange("v0.3.0")).toBe("v0.3.0..HEAD");
+  });
+
+  it("diffRange diffs the empty tree with no prior tag, else the tag range", () => {
+    expect(diffRange(null)).toBe("4b825dc642cb6eb9a060e54bf8d69288fbee4904..HEAD");
+    expect(diffRange("v0.3.0")).toBe("v0.3.0..HEAD");
   });
 
   it("prependEntry puts the new entry first", () => {

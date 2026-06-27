@@ -5,6 +5,7 @@
 
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { isTauri } from "@tauri-apps/api/core";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +27,7 @@ function EntryView({
   version: string;
   date: string | null;
   summary: string;
-  highlights: string[];
+  highlights: readonly string[];
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -48,18 +49,17 @@ function EntryView({
 
 function IncomingSection({ incoming }: { incoming: IncomingVersion }) {
   const { summary, highlights } = incoming.notes;
-  if (summary === "" && highlights.length === 0) return null;
+  const isEmpty = summary === "" && highlights.length === 0;
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-3">
       <TypographyMuted className="font-sans text-xs uppercase tracking-wide">
         Coming in this update
       </TypographyMuted>
-      <EntryView
-        version={incoming.version}
-        date={null}
-        summary={summary}
-        highlights={highlights}
-      />
+      {isEmpty ? (
+        <TypographyMuted>No release notes for v{incoming.version}.</TypographyMuted>
+      ) : (
+        <EntryView version={incoming.version} date={null} summary={summary} highlights={highlights} />
+      )}
     </div>
   );
 }
@@ -71,12 +71,16 @@ export function WhatsNewDialog() {
   const open = useChangelogStore((s) => s.open);
 
   useEffect(() => {
-    // The native menu only exists in the desktop app; skip the IPC listen in the
-    // browser dev server (just dev), where the settings button still drives the store.
-    if (import.meta.env.DEV) return;
+    // "show-whats-new" is emitted by the native menu, so only listen when the Tauri
+    // runtime is present. That covers the production app and the dev desktop app
+    // (just run); it skips only the pure browser preview (just dev), where the settings
+    // button drives the store directly. import.meta.env.DEV would wrongly disable the
+    // menu in `just run` too, since that also runs under the Vite dev server.
+    if (!isTauri()) return;
     const unlisten = listen("show-whats-new", () => open(null));
+    unlisten.catch((e) => console.error("failed to register show-whats-new listener:", e));
     return () => {
-      void unlisten.then((fn) => fn());
+      void unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [open]);
 

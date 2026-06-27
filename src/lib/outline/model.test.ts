@@ -8,6 +8,7 @@ import {
   addBeat,
   removeBeat,
   moveBeat,
+  moveBeatTo,
   editBeat,
   editPremise,
   actPacing,
@@ -207,6 +208,31 @@ describe("setBeatContinuityFlags", () => {
     const next = setBeatContinuityFlags(o, id, flags);
     expect(next.acts[0].beats[0].continuityFlags).toEqual(flags);
     expect(o.acts[0].beats[0].continuityFlags).toEqual([]);
+  });
+});
+
+describe("moveBeatTo", () => {
+  it("reorders within the same act, clamping the index", () => {
+    const o = defaultOutline();
+    const firstId = o.acts[0].beats[0].id;
+    const moved = moveBeatTo(o, firstId, "setup", 2);
+    expect(moved.acts[0].beats[2].id).toBe(firstId);
+    const clampedHigh = moveBeatTo(o, firstId, "setup", 99);
+    expect(clampedHigh.acts[0].beats.at(-1)!.id).toBe(firstId);
+    const clampedLow = moveBeatTo(o, firstId, "setup", -5);
+    expect(clampedLow.acts[0].beats[0].id).toBe(firstId);
+    expect(clampedLow.acts[0].beats).toHaveLength(3); // no growth
+  });
+
+  it("moves a beat across acts, preserving its fields", () => {
+    let o = defaultOutline();
+    o = setBeatType(o, o.acts[0].beats[0].id, "climax");
+    const beatId = o.acts[0].beats[0].id;
+    const next = moveBeatTo(o, beatId, "resolution", 0);
+    expect(next.acts[0].beats.find((b) => b.id === beatId)).toBeUndefined();
+    expect(next.acts[2].beats[0].id).toBe(beatId);
+    expect(next.acts[2].beats[0].type).toBe("climax"); // carried over
+    expect(o.acts[0].beats[0].id).toBe(beatId); // input untouched
   });
 });
 

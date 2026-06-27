@@ -207,6 +207,34 @@ export function moveBeat(outline: Outline, beatId: string, dir: -1 | 1): Outline
   };
 }
 
+/** Move a beat to `toActKind` at a clamped `toIndex`. Unified within-act reorder
+ *  and cross-act move; a no-op if the beat isn't found. Pure.
+ *  `toIndex` is interpreted against the destination beats array after the beat
+ *  is removed from its source (i.e. final insertion position). */
+export function moveBeatTo(
+  outline: Outline,
+  beatId: string,
+  toActKind: ActKind,
+  toIndex: number,
+): Outline {
+  let moved: Beat | null = null;
+  const stripped = outline.acts.map((act) => {
+    const idx = act.beats.findIndex((b) => b.id === beatId);
+    if (idx < 0) return act;
+    moved = act.beats[idx];
+    return { ...act, beats: act.beats.filter((b) => b.id !== beatId) };
+  }) as Outline["acts"];
+  if (!moved) return outline;
+  const acts = stripped.map((act) => {
+    if (act.kind !== toActKind) return act;
+    const beats = [...act.beats];
+    const clamped = Math.max(0, Math.min(toIndex, beats.length));
+    beats.splice(clamped, 0, moved!);
+    return { ...act, beats };
+  }) as Outline["acts"];
+  return { ...outline, acts };
+}
+
 export function editBeat(
   outline: Outline,
   beatId: string,

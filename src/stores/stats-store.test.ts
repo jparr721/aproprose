@@ -108,3 +108,27 @@ describe("hydration ordering", () => {
     expect(useStatsStore.getState().baselines["/b"]).toBe(100);
   });
 });
+
+describe("merge classification", () => {
+  it("absent persisted data hydrates silently (no false corruption warning)", async () => {
+    storage.value = null; // first run: nothing stored yet
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await useStatsStore.persist.rehydrate();
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("genuinely corrupt persisted data warns and keeps current state", async () => {
+    storage.value = JSON.stringify({ state: { baselines: "not-an-object" }, version: 1 });
+    useStatsStore.setState({ baselines: { "/x": 1 }, days: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await useStatsStore.persist.rehydrate();
+
+    expect(warn).toHaveBeenCalled();
+    expect(useStatsStore.getState().baselines).toEqual({ "/x": 1 });
+    warn.mockRestore();
+  });
+});

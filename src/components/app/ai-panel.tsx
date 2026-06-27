@@ -49,7 +49,7 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { ColorAvatar } from "@/components/app/color-dot";
-import { useProjectStore } from "@/stores/project-store";
+import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-store";
@@ -117,6 +117,16 @@ function LoadingLines({ rows = 3 }: { rows?: number }) {
 function AskedCaption({ instruction }: { instruction?: string }) {
   if (!instruction) return null;
   return <TypographyMuted className="text-xs">Asked: {instruction}</TypographyMuted>;
+}
+
+/** Idle / empty-state helper copy shown before (or in place of) a result. Uses
+ *  foreground ink -- not muted -- so it reads clearly against the panel in every theme. */
+function PanelHint({ children }: { children: React.ReactNode }) {
+  return (
+    <TypographyMuted className="font-sans text-xs leading-relaxed text-foreground">
+      {children}
+    </TypographyMuted>
+  );
 }
 
 /**
@@ -265,11 +275,11 @@ function SuggestTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
+            <PanelHint>
               Generate reads the scene up to your cursor and proposes three ways to continue.
-            </p>
+            </PanelHint>
           ) : !v ? (
-            <p className="font-sans text-xs text-faint">No suggestion.</p>
+            <PanelHint>No suggestion.</PanelHint>
           ) : (
             <>
               <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
@@ -386,9 +396,7 @@ function CritiqueTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate reads the scene up to your cursor and returns craft notes.
-            </p>
+            <PanelHint>Generate reads the scene up to your cursor and returns craft notes.</PanelHint>
           ) : (
             data.map((n, i) => (
               <div key={i} className="rounded-lg border border-border bg-background p-3">
@@ -451,9 +459,7 @@ function ContinuityTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate sweeps the scene up to your cursor for continuity issues.
-            </p>
+            <PanelHint>Generate sweeps the scene up to your cursor for continuity issues.</PanelHint>
           ) : (
             data.map((f, i) => (
               <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
@@ -533,9 +539,7 @@ function CastTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate reads the scene up to your cursor and lists who's present.
-            </p>
+            <PanelHint>Generate reads the scene up to your cursor and lists who's present.</PanelHint>
           ) : (
             <>
               <div className="flex flex-col gap-2.5">
@@ -591,13 +595,15 @@ function ScopeToggle({
   scope,
   onChange,
   disabled,
+  blockLabel,
 }: {
   scope: "block" | "chapter";
   onChange: (s: "block" | "chapter") => void;
   disabled?: boolean;
+  blockLabel: string;
 }) {
   const opts: { id: "block" | "chapter"; label: string }[] = [
-    { id: "block", label: "This block" },
+    { id: "block", label: blockLabel },
     { id: "chapter", label: "Whole chapter" },
   ];
   return (
@@ -620,6 +626,7 @@ function ScopeToggle({
 
 function EditTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
+  const selectedIds = useProjectStore((s) => s.selectedIds);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
@@ -627,8 +634,12 @@ function EditTab() {
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
+  // Identity of the block scope: the same targets buildEditRequest resolves,
+  // sorted so the key tracks set membership, not click order, matching its
+  // order-independent target list.
+  const blockKey = [...selectionTargetIds(selectedIds, selectedId)].sort().join(",");
   const cacheKey = `edit:${activeChapterId ?? ""}:${scope}:${
-    scope === "block" ? selectedId ?? "" : ""
+    scope === "block" ? blockKey : ""
   }`;
   const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
     (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
@@ -645,6 +656,12 @@ function EditTab() {
 
   // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the call.
   const targetCount = buildEditRequest(scope, "").blocks.length;
+  // The block-scope button names the editable targets it will act on: "This
+  // block" for one, "These N blocks" for a multi-selection. Reuse targetCount
+  // under block scope rather than recomputing the same request.
+  const blockTargetCount =
+    scope === "block" ? targetCount : buildEditRequest("block", "").blocks.length;
+  const blockLabel = blockTargetCount > 1 ? `These ${blockTargetCount} blocks` : "This block";
 
   // Remove one edit from the cached set, reading the LATEST cached value (not the
   // render-time `edits` closure) so two rapid accept/reject clicks in the same
@@ -675,12 +692,12 @@ function EditTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Describe an edit and pick a scope. Changes come back block by block
-              as before/after diffs you can accept or reject.
-            </p>
+            <PanelHint>
+              Describe an edit and pick a scope. Changes come back block by block as before/after
+              diffs you can accept or reject.
+            </PanelHint>
           ) : live.length === 0 ? (
-            <p className="font-sans text-xs text-faint">No changes suggested.</p>
+            <PanelHint>No changes suggested.</PanelHint>
           ) : (
             <>
               <div className="flex items-center justify-between">
@@ -740,7 +757,7 @@ function EditTab() {
           if (targetCount === 0) return; // nothing eligible in scope; skip the model call
           run(t);
         }}
-        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} />}
+        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} blockLabel={blockLabel} />}
       />
     </div>
   );
@@ -847,10 +864,10 @@ function BrainstormTab() {
       <Conversation>
         <ConversationContent className="gap-4 p-4">
           {messages.length === 0 && streaming == null ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Riff on the scene: ask about motivations, plant a thread, pressure-test a
-              beat. The AI reads everything up to your cursor.
-            </p>
+            <PanelHint>
+              Riff on the scene: ask about motivations, plant a thread, pressure-test a beat. The AI
+              reads everything up to your cursor.
+            </PanelHint>
           ) : null}
           {messages.map((m, i) => (
             <Message key={i} from={m.role}>

@@ -31,6 +31,7 @@ import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
 import { Welcome } from "@/components/app/welcome";
+import { UpdateChecker } from "@/components/app/update-checker";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
@@ -71,7 +72,7 @@ function UnsavedGuard() {
   const cancel = useViewStore((s) => s.cancelPending);
   return (
     <AlertDialog open={pending != null} onOpenChange={(o) => !o && cancel()}>
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -97,7 +98,7 @@ function MigrationGuard() {
       open={needsMigration != null}
       onOpenChange={(o) => !o && cancel()}
     >
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Convert to managed structure?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -139,6 +140,7 @@ function App() {
       )}
       <UnsavedGuard />
       <MigrationGuard />
+      <UpdateChecker />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

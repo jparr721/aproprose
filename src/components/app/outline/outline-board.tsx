@@ -27,18 +27,11 @@ import { PacingGuide } from "@/components/app/outline/pacing-guide";
 import { BoardActColumn } from "@/components/app/outline/board-act-column";
 import { BoardBeatCard } from "@/components/app/outline/board-beat-card";
 import { resolveBeatDrop } from "@/lib/outline/board-dnd";
+import { findBeat } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
-import type { ActKind, Beat } from "@/lib/types";
+import type { ActKind } from "@/lib/types";
 
 const ACTS: ActKind[] = ["setup", "confrontation", "resolution"];
-
-function findBeat(outline: { acts: { beats: Beat[] }[] }, id: string): Beat | null {
-  for (const act of outline.acts) {
-    const beat = act.beats.find((b) => b.id === id);
-    if (beat) return beat;
-  }
-  return null;
-}
 
 export function OutlineBoard() {
   const premise = useProjectStore((s) => s.meta.outline.premise);

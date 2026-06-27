@@ -128,6 +128,14 @@ export function beatForChapter(
   return null;
 }
 
+export function findBeat(outline: Outline, beatId: string): Beat | null {
+  for (const act of outline.acts) {
+    const beat = act.beats.find((b) => b.id === beatId);
+    if (beat) return beat;
+  }
+  return null;
+}
+
 /** Map over acts/beats producing a new Outline; helper for the editors below. */
 function mapBeats(outline: Outline, fn: (beat: Beat, act: OutlineAct) => Beat): Outline {
   return {

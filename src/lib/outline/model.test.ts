@@ -3,6 +3,7 @@ import {
   ACT_TARGETS,
   defaultOutline,
   beatForChapter,
+  findBeat,
   assignChapter,
   unassignChapter,
   addBeat,
@@ -233,6 +234,18 @@ describe("moveBeatTo", () => {
     expect(next.acts[2].beats[0].id).toBe(beatId);
     expect(next.acts[2].beats[0].type).toBe("climax"); // carried over
     expect(o.acts[0].beats[0].id).toBe(beatId); // input untouched
+  });
+});
+
+describe("findBeat", () => {
+  it("returns the beat across any act", () => {
+    const o = defaultOutline();
+    const target = o.acts[1].beats[0];
+    expect(findBeat(o, target.id)).toEqual(target);
+  });
+
+  it("returns null when the id is absent", () => {
+    expect(findBeat(defaultOutline(), "nope")).toBeNull();
   });
 });
 

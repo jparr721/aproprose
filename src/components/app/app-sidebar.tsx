@@ -50,12 +50,12 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
-import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { ChapterList } from "@/components/app/chapter-list";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +78,7 @@ function AddLoreDialog() {
       </DialogTrigger>
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Add lore note</DialogTitle>
+          <DialogTitle>Add lore note</DialogTitle>
           <DialogDescription>A worldbuilding entry to track.</DialogDescription>
         </DialogHeader>
         <Input
@@ -134,7 +134,7 @@ export function AppSidebar() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-60 font-sans">
                 <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
-                  <IconFolderOpen /> Open project…
+                  <IconFolderOpen /> Open project
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={compiling}
@@ -143,7 +143,7 @@ export function AppSidebar() {
                   <IconDeviceFloppy /> Save &amp; build PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
-                  <IconAdjustments /> Project settings…
+                  <IconAdjustments /> Project settings
                 </DropdownMenuItem>
                 {recents.length > 0 ? (
                   <>
@@ -245,14 +245,12 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SettingsSheet
-              trigger={
-                <SidebarMenuButton>
-                  <IconSettings />
-                  <span>Settings</span>
-                </SidebarMenuButton>
-              }
-            />
+            <SidebarMenuButton
+              onClick={() => useSettingsDialogStore.getState().setOpen(true)}
+            >
+              <IconSettings />
+              <span>Settings</span>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

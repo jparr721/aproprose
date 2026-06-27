@@ -11,6 +11,7 @@ import { AppearanceTab } from "@/components/app/settings/appearance-tab";
 import { AiTab } from "@/components/app/settings/ai-tab";
 import { BackupTab } from "@/components/app/settings/backup-tab";
 import { KeyboardTab } from "@/components/app/settings/keyboard-tab";
+import { StatsTab } from "@/components/app/settings/stats-tab";
 import { useKeybinding } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import {
@@ -48,6 +49,7 @@ export function SettingsDialog() {
             <TabsTrigger value={SETTINGS_TABS.AI}>AI</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.BACKUP}>Backup</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.KEYBOARD}>Keyboard</TabsTrigger>
+            <TabsTrigger value={SETTINGS_TABS.STATS}>Stats</TabsTrigger>
           </TabsList>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.APPEARANCE}>
             <ScrollArea className="h-full pr-4"><div className="p-1"><AppearanceTab /></div></ScrollArea>
@@ -60,6 +62,9 @@ export function SettingsDialog() {
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.KEYBOARD}>
             <ScrollArea className="h-full pr-4"><div className="p-1"><KeyboardTab /></div></ScrollArea>
+          </TabsContent>
+          <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.STATS}>
+            <ScrollArea className="h-full pr-4"><div className="p-1"><StatsTab /></div></ScrollArea>
           </TabsContent>
         </Tabs>
       </DialogContent>

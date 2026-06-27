@@ -47,7 +47,7 @@ export function NewNovelDialog({ trigger }: { trigger: React.ReactNode }) {
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">New novel</DialogTitle>
+          <DialogTitle>New novel</DialogTitle>
           <DialogDescription>
             Scaffolds a LaTeX book from the template. You can edit author, ISBN, and
             more later in Project settings.

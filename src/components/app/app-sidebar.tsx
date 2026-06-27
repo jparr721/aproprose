@@ -78,7 +78,7 @@ function AddLoreDialog() {
       </DialogTrigger>
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Add lore note</DialogTitle>
+          <DialogTitle>Add lore note</DialogTitle>
           <DialogDescription>A worldbuilding entry to track.</DialogDescription>
         </DialogHeader>
         <Input

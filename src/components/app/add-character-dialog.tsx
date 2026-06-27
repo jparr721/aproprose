@@ -72,7 +72,7 @@ export function AddCharacterDialog({
       {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Add character</DialogTitle>
+          <DialogTitle>Add character</DialogTitle>
           <DialogDescription>
             Characters power dialogue speaker chips and the AI cast tracker.
           </DialogDescription>

@@ -34,7 +34,7 @@ export function SettingsDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="flex h-[80vh] flex-col gap-4 font-sans sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle className="font-heading">Settings</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
           <DialogDescription>Appearance, AI, backup, and keyboard shortcuts.</DialogDescription>
         </DialogHeader>
         <Tabs

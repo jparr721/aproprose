@@ -47,7 +47,7 @@ export function ProjectSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="font-sans sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="font-heading">Project settings</DialogTitle>
+          <DialogTitle>Project settings</DialogTitle>
           <DialogDescription>
             These populate the title page, headers, and copyright page. Edition year
             is always the current year.

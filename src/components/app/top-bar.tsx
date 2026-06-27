@@ -5,6 +5,7 @@
 import { useState, useEffect } from "react";
 import {
   IconFileTypePdf,
+  IconListTree,
   IconPlayerPlayFilled,
   IconSparkles,
 } from "@tabler/icons-react";
@@ -108,6 +109,8 @@ export function TopBar() {
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
   const togglePdf = useViewStore((s) => s.togglePdf);
+  const openOutline = useViewStore((s) => s.openAiTab);
+  const aiTab = useViewStore((s) => s.aiTab);
   const buildErrorsOpen = useViewStore((s) => s.buildErrorsOpen);
   const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
 
@@ -182,6 +185,19 @@ export function TopBar() {
             >
               <IconFileTypePdf /> PDF
               <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={aiOpen && !focus && aiTab === "outline"}
+              onClick={() => openOutline("outline")}
+              className={cn(
+                "font-sans",
+                aiOpen && !focus && aiTab === "outline" &&
+                  "border-accent-ink/30 bg-accent text-accent-foreground",
+              )}
+            >
+              <IconListTree /> Outline
             </Button>
             <Button
               variant="outline"

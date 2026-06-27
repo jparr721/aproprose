@@ -118,6 +118,16 @@ function AskedCaption({ instruction }: { instruction?: string }) {
   return <TypographyMuted className="text-xs">Asked: {instruction}</TypographyMuted>;
 }
 
+/** Idle / empty-state helper copy shown before (or in place of) a result. Uses
+ *  foreground ink -- not muted -- so it reads clearly against the panel in every theme. */
+function PanelHint({ children }: { children: React.ReactNode }) {
+  return (
+    <TypographyMuted className="font-sans text-xs leading-relaxed text-foreground">
+      {children}
+    </TypographyMuted>
+  );
+}
+
 /**
  * Cache-backed, manual async result. Idle-first: a request fires only on an
  * explicit run(instruction?) (a tab's composer submit / Try again). Results live
@@ -264,11 +274,11 @@ function SuggestTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
+            <PanelHint>
               Generate reads the scene up to your cursor and proposes three ways to continue.
-            </p>
+            </PanelHint>
           ) : !v ? (
-            <p className="font-sans text-xs text-faint">No suggestion.</p>
+            <PanelHint>No suggestion.</PanelHint>
           ) : (
             <>
               <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
@@ -385,9 +395,7 @@ function CritiqueTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate reads the scene up to your cursor and returns craft notes.
-            </p>
+            <PanelHint>Generate reads the scene up to your cursor and returns craft notes.</PanelHint>
           ) : (
             data.map((n, i) => (
               <div key={i} className="rounded-lg border border-border bg-background p-3">
@@ -450,9 +458,7 @@ function ContinuityTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate sweeps the scene up to your cursor for continuity issues.
-            </p>
+            <PanelHint>Generate sweeps the scene up to your cursor for continuity issues.</PanelHint>
           ) : (
             data.map((f, i) => (
               <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
@@ -532,9 +538,7 @@ function CastTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Generate reads the scene up to your cursor and lists who's present.
-            </p>
+            <PanelHint>Generate reads the scene up to your cursor and lists who's present.</PanelHint>
           ) : (
             <>
               <div className="flex flex-col gap-2.5">
@@ -687,12 +691,12 @@ function EditTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Describe an edit and pick a scope. Changes come back block by block
-              as before/after diffs you can accept or reject.
-            </p>
+            <PanelHint>
+              Describe an edit and pick a scope. Changes come back block by block as before/after
+              diffs you can accept or reject.
+            </PanelHint>
           ) : live.length === 0 ? (
-            <p className="font-sans text-xs text-faint">No changes suggested.</p>
+            <PanelHint>No changes suggested.</PanelHint>
           ) : (
             <>
               <div className="flex items-center justify-between">
@@ -859,10 +863,10 @@ function BrainstormTab() {
       <Conversation>
         <ConversationContent className="gap-4 p-4">
           {messages.length === 0 && streaming == null ? (
-            <p className="font-sans text-xs leading-relaxed text-faint">
-              Riff on the scene: ask about motivations, plant a thread, pressure-test a
-              beat. The AI reads everything up to your cursor.
-            </p>
+            <PanelHint>
+              Riff on the scene: ask about motivations, plant a thread, pressure-test a beat. The AI
+              reads everything up to your cursor.
+            </PanelHint>
           ) : null}
           {messages.map((m, i) => (
             <Message key={i} from={m.role}>

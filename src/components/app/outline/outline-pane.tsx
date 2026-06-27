@@ -1,13 +1,13 @@
-// outline-pane.tsx -- the full-page Outline view.
+// outline-pane.tsx -- full-page storyboard surface (mirrors pdf-pane.tsx).
 //
-// Replaces the editor in the main pane when outlineOpen (and not focus). Mirrors
-// pdf-pane.tsx's shell: a titled header with a close button that flips
-// outlineOpen, over a scroll body. For now the body is the existing
-// OutlineSurface full-width; the storyboard <OutlineBoard/> lands in Phase 3.
+// A frameless aside: a thin header (title + close, which routes through the same
+// toggleOutline the sidebar button uses) over the OutlineBoard. The board owns its
+// own scrolling; the pane is just the chrome around it.
 
-import { IconLayoutList, IconX } from "@tabler/icons-react";
+import { IconLayoutKanban, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { OutlineSurface } from "@/components/app/outline/outline-surface";
+import { TypographySmall } from "@/components/ui/typography";
+import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { useViewStore } from "@/stores/view-store";
 
 export function OutlinePane() {
@@ -17,16 +17,15 @@ export function OutlinePane() {
     <aside className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <IconLayoutList className="size-4" />
-          <span className="font-sans text-xs">Storyboard</span>
+          <IconLayoutKanban className="size-4" />
+          <TypographySmall className="font-medium">Storyboard</TypographySmall>
         </div>
-        <Button variant="ghost" size="icon-sm" title="Close outline" onClick={closeOutline}>
+        <Button variant="ghost" size="icon-sm" title="Close storyboard" onClick={closeOutline}>
           <IconX />
         </Button>
       </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <OutlineSurface />
+      <div className="min-h-0 flex-1">
+        <OutlineBoard />
       </div>
     </aside>
   );

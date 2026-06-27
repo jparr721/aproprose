@@ -15,8 +15,10 @@
 // features cannot run.
 
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
+import type { LanguageModel } from "ai";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getAiConfig } from "@/lib/tauri";
+import { createCliModel } from "@/lib/ai/cli-provider";
 import { useSettingsStore } from "@/stores/settings-store";
 
 let providerPromise: Promise<OpenAIProvider> | null = null;
@@ -53,11 +55,14 @@ export function resetAiProvider(): void {
  * The configured language model, ready to pass to generateText/streamText.
  * Throws when no model is selected in Settings - AI is unusable until then.
  */
-export async function getModel() {
-  const model = useSettingsStore.getState().aiModel;
-  if (!model) {
+export async function getModel(): Promise<LanguageModel> {
+  const { aiProvider, aiModel } = useSettingsStore.getState();
+  if (aiProvider === "codex" || aiProvider === "claude") {
+    return createCliModel(aiProvider);
+  }
+  if (!aiModel) {
     throw new Error("Select an AI model in Settings before using AI features.");
   }
   const provider = await getProvider();
-  return provider(model);
+  return provider(aiModel);
 }

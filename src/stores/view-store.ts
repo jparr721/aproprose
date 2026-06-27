@@ -79,14 +79,18 @@ export const useViewStore = create<ViewState>()(
       aiCollapsed: false,
       rightPanelWidth: 360,
 
-      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
+      // Clear aiCollapsed on every toggle so reopening always restores the panel
+      // content, never a bare icon rail (aiOpen + aiCollapsed must agree on "is
+      // content visible"). Matches openAiTab / triggerSuggest.
+      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false, aiCollapsed: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {
         if (preset === "focus") set({ focus: true });
-        else if (preset === "two") set({ focus: false, aiOpen: true, pdfOpen: false });
-        else set({ focus: false, aiOpen: true, pdfOpen: true });
+        else if (preset === "two")
+          set({ focus: false, aiOpen: true, pdfOpen: false, aiCollapsed: false });
+        else set({ focus: false, aiOpen: true, pdfOpen: true, aiCollapsed: false });
       },
 
       setAiTab: (tab) => set({ aiTab: tab }),

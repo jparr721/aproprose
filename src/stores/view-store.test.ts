@@ -40,6 +40,29 @@ describe("view-store aiCollapsed", () => {
     expect(useViewStore.getState().aiTab).toBe("suggest");
     expect(useViewStore.getState().suggestFocusTick).toBe(5);
   });
+
+  it("toggleAi reopening a collapsed panel restores content, not a bare rail", () => {
+    // Collapse to the rail, close via the toggle, then reopen: the content must
+    // show. Otherwise aiOpen + aiCollapsed disagree and the panel reopens collapsed.
+    useViewStore.setState({ aiOpen: true, aiCollapsed: true });
+    useViewStore.getState().toggleAi(); // close
+    expect(useViewStore.getState().aiOpen).toBe(false);
+    useViewStore.getState().toggleAi(); // reopen
+    expect(useViewStore.getState().aiOpen).toBe(true);
+    expect(useViewStore.getState().aiCollapsed).toBe(false);
+  });
+});
+
+describe("view-store applyLayoutPreset", () => {
+  it("the two/three presets clear the collapse flag so panel content shows", () => {
+    useViewStore.setState({ aiCollapsed: true });
+    useViewStore.getState().applyLayoutPreset("two");
+    expect(useViewStore.getState().aiCollapsed).toBe(false);
+
+    useViewStore.setState({ aiCollapsed: true });
+    useViewStore.getState().applyLayoutPreset("three");
+    expect(useViewStore.getState().aiCollapsed).toBe(false);
+  });
 });
 
 describe("view-store buildErrorsOpen", () => {

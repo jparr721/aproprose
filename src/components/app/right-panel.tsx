@@ -975,7 +975,7 @@ export function RightPanelContent() {
   const hydrated = useSettingsStore((s) => s.hydrated);
 
   return (
-    <aside data-right-panel className="flex h-full min-h-0 w-full flex-col bg-card font-sans">
+    <aside data-right-panel className="flex h-full min-h-0 w-full flex-col bg-card">
       <CursorAnchor />
       <div className="min-h-0 flex-1">
         {tab === "outline" || !(hydrated && !aiModel) ? (
@@ -1006,7 +1006,7 @@ export function RightPanelRail() {
   };
 
   return (
-    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-card py-2 font-sans">
+    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-card py-2">
       {TABS.map(({ id, label, Icon }) => {
         const active = id === tab && !collapsed;
         const button = (

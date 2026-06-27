@@ -109,7 +109,7 @@ The right panel / outline surfaces are **authoring** surfaces, not information d
 
 - **Cards are `Card` / `CardHeader` / `CardTitle` / `CardContent` / `CardAction`** - never a hand-rolled `rounded-* border bg-card` div. If it reads as a card, use the component.
 - **Hierarchy comes from the typography components** (`TypographyEyebrow`, `CardTitle`, `TypographyMuted`, ...), never from decoration - no colored status dots, no Roman numerals, no ornament-as-structure. Make levels distinct with type, not chrome.
-- **No ad-hoc type at call sites**: no `text-[Npx]`, no `tracking-[...]`, no `font-serif` / `font-heading` / `font-mono` overrides, no `italic`. The component and the Tailwind type scale (`text-xs`, `text-sm`, ...) own it. (Dense chrome panels still opt into `font-sans` once at their root per the typography section - that's the one allowed family class, set on the panel, not per element.)
+- **No ad-hoc type at call sites**: no `text-[Npx]`, no `tracking-[...]`, no font-family overrides (`font-serif` / `font-heading` / `font-mono` / `font-sans`), no `italic`. The component and the Tailwind type scale (`text-xs`, `text-sm`, ...) own it - the font family is set centrally, never sprinkled onto panels or elements.
 - **Choosing a value is a `Select`** (reach for `DropdownMenu` only for *actions*) - never a custom-styled trigger with a clamped width or a custom font.
 
 ### Required data handling

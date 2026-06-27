@@ -26,6 +26,7 @@ import type {
   ProjectMeta,
   RecentProject,
   SkeletonModel,
+  SculptProposal,
 } from "@/lib/types";
 import {
   countWords,
@@ -58,6 +59,7 @@ import {
   addBeat as addBeatModel,
   addCharacterToBeat as addCharacterToBeatModel,
   addLoreToBeat as addLoreToBeatModel,
+  applySculpt as applySculptModel,
   assignChapter,
   defaultOutline,
   editActSummary,
@@ -288,6 +290,7 @@ interface ProjectState {
   setBeatContinuityFlags: (beatId: string, flags: ContinuityFlag[]) => void;
   moveBeatTo: (beatId: string, toActKind: ActKind, toIndex: number) => void;
   setChapterBeat: (chapterId: string, patch: { goal?: string; conflict?: string; turn?: string }) => void;
+  applySculpt: (proposal: SculptProposal, kept: number[]) => void;
 }
 
 const HISTORY_CAP = 100;
@@ -1258,6 +1261,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ...s.meta,
           chapterBeats: { ...s.meta.chapterBeats, [chapterId]: { ...prev, ...patch } },
         };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    applySculpt: (proposal, kept) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: applySculptModel(s.meta.outline, proposal, kept) };
         persistMeta(meta);
         return { meta };
       }),

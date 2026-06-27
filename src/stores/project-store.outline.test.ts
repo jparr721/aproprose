@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { SculptProposal } from "@/lib/types";
 
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
@@ -155,6 +156,47 @@ describe("deleteChapter cleanup", () => {
     const meta = useProjectStore.getState().meta;
     expect(beatForChapter(meta.outline, "c2")).toBeNull();
     expect(meta.chapterBeats.c2).toBeUndefined();
+  });
+});
+
+describe("store.applySculpt", () => {
+  it("applies kept changes through the model and persists meta", () => {
+    const store = useProjectStore.getState();
+    const setupAct = store.meta.outline.acts[0];
+    const rewriteId = setupAct.beats[0].id;
+    const proposal: SculptProposal = {
+      actKind: "setup",
+      summary: "Tighten.",
+      changes: [
+        {
+          kind: "rewrite",
+          beatId: rewriteId,
+          title: "Cold Open",
+          intention: "Mid-action.",
+          type: "inciting",
+          toIndex: null,
+          reason: "Hook faster.",
+        },
+        {
+          kind: "remove",
+          beatId: setupAct.beats[1].id,
+          title: null,
+          intention: null,
+          type: null,
+          toIndex: null,
+          reason: "Cut.",
+        },
+      ],
+    };
+
+    // Keep only the rewrite (index 0).
+    store.applySculpt(proposal, [0]);
+
+    const after = useProjectStore.getState().meta.outline.acts[0];
+    expect(after.beats.find((b) => b.id === rewriteId)?.title).toBe("Cold Open");
+    expect(after.beats.find((b) => b.id === rewriteId)?.type).toBe("inciting");
+    // skipped remove left the beat in place
+    expect(after.beats.find((b) => b.id === setupAct.beats[1].id)).toBeDefined();
   });
 });
 

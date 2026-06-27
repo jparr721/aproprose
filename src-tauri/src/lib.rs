@@ -6,6 +6,7 @@
 //! defined by `src/lib/tauri.ts`; Tauri maps the JS camelCase argument keys to
 //! these snake_case parameters.
 
+pub mod ai_cli;
 pub mod compile;
 pub mod git;
 pub mod novel;
@@ -400,6 +401,8 @@ pub fn run() {
             get_ai_config,
             has_openai_key,
             set_openai_key,
+            ai_cli::cli_provider_status,
+            ai_cli::cli_generate,
             read_app_data,
             write_app_data,
             git::git_tooling_status,

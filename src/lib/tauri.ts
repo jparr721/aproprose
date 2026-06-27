@@ -10,7 +10,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type { JSONSchema7 } from "@ai-sdk/provider";
 import type {
+  CliKind,
   CompileResult,
   NameCheck,
   NovelMetadata,
@@ -128,6 +130,43 @@ export function hasOpenAiKey(): Promise<boolean> {
 /** Persist the OpenAI key to the app-config dir; an empty string clears it. */
 export function setOpenAiKey(key: string): Promise<void> {
   return invoke<void>("set_openai_key", { key });
+}
+
+// ── CLI subscription providers (codex, claude) ────────────────────────────────
+// Subscription auth lives in each CLI's own login; the webview cannot spawn
+// processes, so detection + generation run on the Rust side.
+
+export type { CliKind };
+
+export interface CliProviderStatus {
+  /** Whether the binary is on PATH; independent of `version`. */
+  installed: boolean;
+  authenticated: boolean;
+  /** Resolved default model, best-effort; null when unknown. */
+  model: string | null;
+  version: string | null;
+}
+
+export function cliProviderStatus(kind: CliKind): Promise<CliProviderStatus> {
+  return invoke<CliProviderStatus>("cli_provider_status", { kind });
+}
+
+export interface CliGenerateArgs {
+  kind: CliKind;
+  /** System instructions; codex prepends them, claude uses --system-prompt. */
+  system: string | null;
+  prompt: string;
+  /** JSON Schema the output must conform to, or null for free text. */
+  schema: JSONSchema7 | null;
+}
+
+export interface CliGenerateResult {
+  text: string;
+  model: string | null;
+}
+
+export function cliGenerate(args: CliGenerateArgs): Promise<CliGenerateResult> {
+  return invoke<CliGenerateResult>("cli_generate", { args });
 }
 
 // ── App data (recents, per-project metadata) ───────────────────────────────────

@@ -1,4 +1,4 @@
-// settings-store.ts — appearance preferences.
+// settings-store.ts - user preferences: appearance and AI provider/model.
 //
 // One store, one concern (per CLAUDE.md). Persisted to the app config dir via the
 // Tauri-backed storage adapter. The ThemeController subscribes to apply the theme
@@ -8,6 +8,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
+  type AiProvider,
   type BlockStyle,
   type Settings,
   type Theme,
@@ -22,6 +23,7 @@ interface SettingsState extends Settings {
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
   setAiModel: (aiModel: string | null) => void;
+  setAiProvider: (aiProvider: AiProvider) => void;
   reset: () => void;
 }
 
@@ -35,17 +37,19 @@ export const useSettingsStore = create<SettingsState>()(
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
       setAiModel: (aiModel) => set({ aiModel }),
+      setAiProvider: (aiProvider) => set({ aiProvider }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, blockStyle, proseSize, pdfZoom, aiModel }) => ({
+      partialize: ({ theme, blockStyle, proseSize, pdfZoom, aiModel, aiProvider }) => ({
         theme,
         blockStyle,
         proseSize,
         pdfZoom,
         aiModel,
+        aiProvider,
       }),
       onRehydrateStorage: () => (state) => {
         // Mark hydrated once the async read resolves (or fails).

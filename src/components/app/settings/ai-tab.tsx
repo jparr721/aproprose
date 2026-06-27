@@ -238,9 +238,9 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
           {error}
         </TypographyForeground>
       ) : null}
-      {!loading && !error && !aiModel ? (
+      {!loading && !error ? (
         <TypographyMuted className="text-xs">
-          AI features are off until you pick a model.
+          {aiModel ? `Using ${aiModel}.` : "AI features are off until you pick a model."}
         </TypographyMuted>
       ) : null}
     </Field>
@@ -330,9 +330,8 @@ function CliStatusField({ kind }: { kind: CliKind }) {
           </TypographyForeground>
           <TypographyMuted className="text-xs">
             {status?.model
-              ? `Model: ${status.model} (your ${kind} default).`
-              : `Uses your ${kind} default model.`}{" "}
-            Auth is handled by {kind} login - nothing to enter here.
+              ? `Using ${status.model}, your ${kind} default model.`
+              : `Using your ${kind} default model.`}
           </TypographyMuted>
         </div>
       ) : (

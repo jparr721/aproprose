@@ -130,6 +130,24 @@ export function setOpenAiKey(key: string): Promise<void> {
   return invoke<void>("set_openai_key", { key });
 }
 
+// ── CLI subscription providers (codex, claude) ────────────────────────────────
+// Subscription auth lives in each CLI's own login; the webview cannot spawn
+// processes, so detection + generation run on the Rust side.
+
+export type CliKind = "codex" | "claude";
+
+export interface CliProviderStatus {
+  installed: boolean;
+  authenticated: boolean;
+  /** Resolved default model, best-effort; null when unknown. */
+  model: string | null;
+  version: string | null;
+}
+
+export function cliProviderStatus(kind: CliKind): Promise<CliProviderStatus> {
+  return invoke<CliProviderStatus>("cli_provider_status", { kind });
+}
+
 // ── App data (recents, per-project metadata) ───────────────────────────────────
 // Generic key/value JSON blobs stored under the app config dir. The frontend
 // owns the schema; Rust only does the file IO so nothing lands in the user repo.

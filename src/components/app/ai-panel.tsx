@@ -82,7 +82,7 @@ import { cn } from "@/lib/utils";
 // -- shared bits --------------------------------------------------------------
 function ContextLine({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 font-sans text-xs text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
       <span className="size-1.5 rounded-full bg-ai-edge shadow-[0_0_0_2px_var(--ai-tint)]" />
       {children}
     </div>
@@ -91,7 +91,7 @@ function ContextLine({ children }: { children: React.ReactNode }) {
 
 function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 font-sans text-xs text-muted-foreground">
+    <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
       <span className="text-destructive">Couldn't reach the model.</span>
       <span className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words text-faint">
         {error}
@@ -123,7 +123,7 @@ function AskedCaption({ instruction }: { instruction?: string }) {
  *  foreground ink -- not muted -- so it reads clearly against the panel in every theme. */
 function PanelHint({ children }: { children: React.ReactNode }) {
   return (
-    <TypographyMuted className="font-sans text-xs leading-relaxed text-foreground">
+    <TypographyMuted className="text-xs leading-relaxed text-foreground">
       {children}
     </TypographyMuted>
   );
@@ -221,7 +221,7 @@ function CursorAnchor() {
 
   return (
     <div className="flex items-center gap-2 border-b border-border bg-ai-tint/40 px-3 py-1.5">
-      <span className="shrink-0 font-sans text-xs font-semibold uppercase tracking-[0.08em] text-ai-ink">
+      <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-ai-ink">
         {block ? `Continuing after ${block.type}` : "Cursor"}
       </span>
       <div className="min-w-0 flex-1">
@@ -284,7 +284,7 @@ function SuggestTab() {
             <>
               <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-sans text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                  <span className="text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
                     {v.type === "dialogue"
                       ? v.speaker
                         ? `Dialogue: ${v.speaker}`
@@ -297,7 +297,7 @@ function SuggestTab() {
                         key={i}
                         onClick={() => setVariant(i)}
                         className={cn(
-                          "size-[18px] rounded font-sans text-xs tabular-nums text-ai-ink transition-opacity",
+                          "size-[18px] rounded text-xs tabular-nums text-ai-ink transition-opacity",
                           i === variant
                             ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]"
                             : "opacity-55 hover:opacity-100",
@@ -317,10 +317,10 @@ function SuggestTab() {
                   {v.type === "dialogue" ? `"${v.text}"` : v.text}
                 </p>
                 <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                  <span className="font-sans text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                  <span className="text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
                     Why
                   </span>
-                  <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
+                  <p className="text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Button size="sm" onClick={() => insert(v)}>
@@ -336,13 +336,13 @@ function SuggestTab() {
                 <>
                   <Separator />
                   <div className="flex flex-col gap-1">
-                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
+                    <span className="text-xs uppercase tracking-[0.08em] text-faint">
                       After this, you could:
                     </span>
                     {data.followups.map((f, i) => (
                       <div
                         key={i}
-                        className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 font-sans text-xs text-muted-foreground"
+                        className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground"
                       >
                         <IconArrowRight className="size-3 shrink-0 text-faint" />
                         {f}
@@ -403,17 +403,17 @@ function CritiqueTab() {
                 <div className="mb-1 flex items-baseline gap-2">
                   <span
                     className={cn(
-                      "rounded px-1.5 py-0.5 font-sans text-xs font-semibold uppercase tracking-[0.08em]",
+                      "rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-[0.08em]",
                       NOTE_TONE[n.kind],
                     )}
                   >
                     {NOTE_WORD[n.kind]}
                   </span>
-                  <span className="font-sans text-xs uppercase tracking-[0.06em] text-muted-foreground">
+                  <span className="text-xs uppercase tracking-[0.06em] text-muted-foreground">
                     {n.tag}
                   </span>
                 </div>
-                <p className="font-sans text-sm leading-[1.55] text-muted-foreground">{n.text}</p>
+                <p className="text-sm leading-[1.55] text-muted-foreground">{n.text}</p>
               </div>
             ))
           )}
@@ -466,12 +466,12 @@ function ContinuityTab() {
                 <span className={cn("mt-1 size-2 rounded-full", SEV_DOT[f.sev])} />
                 <div>
                   <div className="mb-0.5 flex items-baseline gap-2">
-                    <span className="font-sans text-xs font-semibold text-foreground">{f.tag}</span>
-                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
+                    <span className="text-xs font-semibold text-foreground">{f.tag}</span>
+                    <span className="text-xs uppercase tracking-[0.08em] text-faint">
                       {SEV_WORD[f.sev]}
                     </span>
                   </div>
-                  <p className="font-sans text-xs leading-[1.5] text-muted-foreground">{f.text}</p>
+                  <p className="text-xs leading-[1.5] text-muted-foreground">{f.text}</p>
                 </div>
               </div>
             ))
@@ -509,13 +509,13 @@ function CastRow({ m }: { m: CastMember }) {
         </span>
       )}
       <div>
-        <div className="flex items-baseline gap-2 font-sans text-sm font-medium text-foreground">
+        <div className="flex items-baseline gap-2 text-sm font-medium text-foreground">
           <span className="truncate">{m.name}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-xs uppercase tracking-[0.06em] text-muted-foreground">
             {m.state}
           </span>
         </div>
-        <div className="font-sans text-xs leading-[1.45] text-muted-foreground">{m.detail}</div>
+        <div className="text-xs leading-[1.45] text-muted-foreground">{m.detail}</div>
       </div>
     </div>
   );
@@ -701,7 +701,7 @@ function EditTab() {
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <span className="font-sans text-xs uppercase tracking-[0.08em] text-faint">
+                <span className="text-xs uppercase tracking-[0.08em] text-faint">
                   {live.length} proposed {live.length === 1 ? "edit" : "edits"}
                 </span>
                 <div className="flex gap-1.5">
@@ -718,15 +718,15 @@ function EditTab() {
                   key={edit.blockId}
                   className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3"
                 >
-                  <span className="font-sans text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                  <span className="text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
                     {block.type}
                   </span>
                   <DiffText segments={diffWords(block.text, edit.newText)} />
                   <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                    <span className="font-sans text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                    <span className="text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
                       Why
                     </span>
-                    <p className="font-sans text-xs leading-snug text-muted-foreground">
+                    <p className="text-xs leading-snug text-muted-foreground">
                       {edit.reason}
                     </p>
                   </div>
@@ -875,7 +875,7 @@ function BrainstormTab() {
                 {m.role === "assistant" ? (
                   <MessageResponse>{m.content}</MessageResponse>
                 ) : (
-                  <span className="whitespace-pre-wrap font-sans text-sm leading-[1.55]">
+                  <span className="whitespace-pre-wrap text-sm leading-[1.55]">
                     {m.content}
                   </span>
                 )}
@@ -946,7 +946,7 @@ function ActivePanel({ tab }: { tab: AiTab }) {
 function NoModelNotice() {
   return (
     <div className="flex h-full flex-col items-start justify-center gap-3 p-6">
-      <TypographyMuted className="font-sans text-sm">
+      <TypographyMuted className="text-sm">
         Pick an AI model in Settings to turn on the assistant.
       </TypographyMuted>
       <Button
@@ -978,7 +978,7 @@ export function AiPanel() {
   };
 
   return (
-    <aside data-ai-root className="flex h-full min-h-0 font-sans">
+    <aside data-ai-root className="flex h-full min-h-0">
       {collapsed ? null : (
         <div className="flex w-80 min-w-0 flex-col border-l border-border bg-card">
           <CursorAnchor />

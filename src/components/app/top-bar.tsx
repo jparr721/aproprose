@@ -63,7 +63,7 @@ function BuildBadge() {
   );
 
   const base =
-    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground";
+    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground";
 
   if (status === "error") {
     return (
@@ -123,7 +123,7 @@ export function TopBar() {
     <header
       data-tauri-drag-region
       className={cn(
-        "flex h-11 items-center gap-3 border-b border-border bg-background px-3 font-sans",
+        "flex h-11 items-center gap-3 border-b border-border bg-background px-3",
         IS_MAC && sidebarState === "collapsed" && "pl-20",
       )}
     >
@@ -158,7 +158,6 @@ export function TopBar() {
           size="sm"
           onClick={() => void compileNow()}
           disabled={compiling}
-          className="font-sans"
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile
@@ -176,7 +175,6 @@ export function TopBar() {
               aria-pressed={pdfOpen && !focus}
               onClick={togglePdf}
               className={cn(
-                "font-sans",
                 pdfOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >
@@ -189,7 +187,6 @@ export function TopBar() {
               aria-pressed={aiOpen && !focus}
               onClick={toggleAi}
               className={cn(
-                "font-sans",
                 aiOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >

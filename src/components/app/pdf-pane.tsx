@@ -311,7 +311,7 @@ export function PdfPane() {
   const compiling = status === "compiling";
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-muted font-sans">
+    <aside className="flex h-full min-h-0 flex-col bg-muted">
       <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
         <div className="flex items-center gap-2.5">
           <span className="font-mono text-xs text-muted-foreground">preview.pdf</span>

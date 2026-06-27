@@ -100,7 +100,7 @@ export function SyncStatus({
         variant="ghost"
         size="sm"
         onClick={onSetup}
-        className="h-6 gap-1.5 px-2 font-sans text-[11px] text-muted-foreground"
+        className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground"
       >
         <IconCloudUp className="size-3.5" /> Back up to GitHub
       </Button>
@@ -114,13 +114,13 @@ export function SyncStatus({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground"
+          className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground"
         >
           <TriggerGlyph status={status} />
           {label}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 font-sans">
+      <PopoverContent align="start" className="w-72">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <StatusIcon status={status} />

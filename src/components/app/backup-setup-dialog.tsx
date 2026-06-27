@@ -76,7 +76,7 @@ export function BackupSetupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="font-sans">
+      <DialogContent>
         {alreadyBackedUp ? (
           <>
             <DialogHeader>

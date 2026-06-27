@@ -28,7 +28,7 @@ function StatCell({
       <TypographyEyebrow>{label}</TypographyEyebrow>
       <TypographyStat>{value}</TypographyStat>
       {caption ? (
-        <TypographyMuted className="font-sans text-xs">{caption}</TypographyMuted>
+        <TypographyMuted className="text-xs">{caption}</TypographyMuted>
       ) : null}
     </div>
   );

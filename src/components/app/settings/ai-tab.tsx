@@ -126,7 +126,7 @@ function OpenAiKeyField({
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-success">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-success">
             <IconCheck className="size-3.5" /> A key is configured.
           </TypographyForeground>
           <AlertDialog>
@@ -139,7 +139,7 @@ function OpenAiKeyField({
                 <IconTrash className="size-3.5" /> Remove
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="font-sans">
+            <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -157,7 +157,7 @@ function OpenAiKeyField({
           </AlertDialog>
         </div>
       ) : (
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           Stored locally in your app config dir - never written into the app bundle or your
           manuscript.
         </TypographyMuted>
@@ -203,7 +203,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
   if (!keyConfigured) {
     return (
       <Field label="AI model">
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           Add a key above to choose a model.
         </TypographyMuted>
       </Field>
@@ -229,17 +229,17 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         </SelectContent>
       </Select>
       {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans text-xs">
+        <TypographyMutedSpan className="flex items-center gap-1.5 text-xs">
           <Spinner /> Loading models
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="font-sans text-xs text-destructive">
+        <TypographyForeground className="text-xs text-destructive">
           {error}
         </TypographyForeground>
       ) : null}
       {!loading && !error && !aiModel ? (
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           AI features are off until you pick a model.
         </TypographyMuted>
       ) : null}
@@ -263,10 +263,10 @@ function ProviderField() {
           resetAiProvider();
         }}
       >
-        <SelectTrigger className="w-full font-sans">
+        <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className="font-sans">
+        <SelectContent>
           <SelectItem value="openai">OpenAI (API key)</SelectItem>
           <SelectItem value="codex">Codex CLI (subscription)</SelectItem>
           <SelectItem value="claude">Claude Code (subscription)</SelectItem>
@@ -310,25 +310,25 @@ function CliStatusField({ kind }: { kind: CliKind }) {
   return (
     <Field label={`${label} (subscription)`}>
       {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans text-xs">
+        <TypographyMutedSpan className="flex items-center gap-1.5 text-xs">
           <Spinner /> Checking
         </TypographyMutedSpan>
       ) : error ? (
         <div className="flex flex-col gap-2">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-destructive">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-destructive">
             <IconAlertTriangle className="size-3.5" /> Could not check the {kind} CLI
           </TypographyForeground>
-          <TypographyMuted className="font-sans text-xs">{error}</TypographyMuted>
+          <TypographyMuted className="text-xs">{error}</TypographyMuted>
           <Button variant="ghost" size="sm" className="self-start" onClick={check}>
             <IconRefresh className="size-3.5" /> Recheck
           </Button>
         </div>
       ) : ready ? (
         <div className="flex flex-col gap-1">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-success">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-success">
             <IconCheck className="size-3.5" /> Connected through the {kind} CLI
           </TypographyForeground>
-          <TypographyMuted className="font-sans text-xs">
+          <TypographyMuted className="text-xs">
             {status?.model
               ? `Model: ${status.model} (your ${kind} default).`
               : `Uses your ${kind} default model.`}{" "}
@@ -337,13 +337,13 @@ function CliStatusField({ kind }: { kind: CliKind }) {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-warning">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-warning">
             <IconAlertTriangle className="size-3.5" />
             {status && !status.installed
               ? `${kind} CLI not found on PATH`
               : `${kind} is installed, but not signed in`}
           </TypographyForeground>
-          <TypographyMuted className="font-sans text-xs">
+          <TypographyMuted className="text-xs">
             {status && !status.installed
               ? `Install it, then sign in with ${kind} login and recheck. Uses your subscription - no API key needed.`
               : `Run ${kind} login in your terminal, then recheck. Uses your subscription - no API key needed.`}

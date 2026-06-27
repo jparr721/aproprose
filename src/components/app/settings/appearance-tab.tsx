@@ -50,7 +50,7 @@ export function AppearanceTab() {
           <ToggleGroupItem value="three" className="flex-1">3-pane</ToggleGroupItem>
           <ToggleGroupItem value="focus" className="flex-1">Focus</ToggleGroupItem>
         </ToggleGroup>
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           2-pane shows the AI panel · 3-pane adds the PDF · Focus hides both.
         </TypographyMuted>
       </Field>

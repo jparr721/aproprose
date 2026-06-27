@@ -13,7 +13,7 @@ import type { ToolingStatus } from "@/lib/types";
 
 function ToolingNotice({ tooling }: { tooling: ToolingStatus | null }) {
   if (!tooling) return null;
-  const cls = "font-sans text-xs";
+  const cls = "text-xs";
   if (!tooling.gitInstalled) {
     return <TypographyMuted className={cls}>git isn't installed - backup is unavailable.</TypographyMuted>;
   }
@@ -60,12 +60,12 @@ export function BackupTab() {
       <ToolingNotice tooling={tooling} />
 
       <div className="flex items-center justify-between">
-        <TypographyForeground className="font-sans text-sm">Auto-sync this project</TypographyForeground>
+        <TypographyForeground className="text-sm">Auto-sync this project</TypographyForeground>
         <Switch checked={autoSync} disabled={!isRepo} onCheckedChange={setAutoSync} />
       </div>
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <TypographyMutedSpan className="font-sans text-sm">Every</TypographyMutedSpan>
+          <TypographyMutedSpan className="text-sm">Every</TypographyMutedSpan>
           <TypographyMutedSpan className="font-mono text-xs tabular-nums">{intervalMinutes} min</TypographyMutedSpan>
         </div>
         <Slider

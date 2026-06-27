@@ -77,7 +77,7 @@ function AddChapterDialog() {
           <IconPlus />
         </SidebarGroupAction>
       </DialogTrigger>
-      <DialogContent className="font-sans sm:max-w-sm">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Add chapter</DialogTitle>
         </DialogHeader>
@@ -120,7 +120,7 @@ function RenameChapterDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="font-sans sm:max-w-sm">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Rename chapter</DialogTitle>
         </DialogHeader>
@@ -172,7 +172,7 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
             <IconDots />
           </SidebarMenuAction>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" className="font-sans">
+        <DropdownMenuContent side="right" align="start">
           <DropdownMenuItem onSelect={() => setRenaming(true)}>
             <IconPencil /> Rename
           </DropdownMenuItem>
@@ -200,7 +200,7 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
       ) : null}
 
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
-        <AlertDialogContent className="font-sans">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{chapter.title}"?</AlertDialogTitle>
             <AlertDialogDescription>

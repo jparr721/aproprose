@@ -9,6 +9,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import type {
+  ActKind,
   Block,
   BlockType,
   ChapterRef,
@@ -48,6 +49,18 @@ import { pathHash } from "@/lib/path-hash";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import {
+  addBeat as addBeatModel,
+  assignChapter,
+  defaultOutline,
+  editActSummary,
+  editActTitle,
+  editBeat as editBeatModel,
+  editPremise,
+  moveBeat as moveBeatModel,
+  removeBeat as removeBeatModel,
+  unassignChapter,
+} from "@/lib/outline/model";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -62,7 +75,25 @@ interface CompileState {
   at: number | null;
 }
 
-const EMPTY_META: ProjectMeta = { characters: [], lore: [], statuses: {} };
+const EMPTY_META: ProjectMeta = {
+  characters: [],
+  lore: [],
+  statuses: {},
+  outline: defaultOutline(),
+  chapterBeats: {},
+};
+
+/** Backfill any fields an older meta.json predates, so an open never crashes on a
+ *  meta blob written before outlines existed. */
+function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
+  return {
+    characters: m?.characters ?? [],
+    lore: m?.lore ?? [],
+    statuses: m?.statuses ?? {},
+    outline: m?.outline ?? defaultOutline(),
+    chapterBeats: m?.chapterBeats ?? {},
+  };
+}
 
 const EMPTY_COMPILE: CompileState = {
   status: "idle",
@@ -192,6 +223,18 @@ interface ProjectState {
   removeCharacter: (id: string) => void;
   addLore: (title: string) => void;
   setChapterStatus: (id: string, status: ChapterStatus) => void;
+
+  // outline
+  setPremise: (premise: string) => void;
+  addBeat: (act: ActKind, afterBeatId: string | null) => string;
+  removeBeat: (beatId: string) => void;
+  moveBeat: (beatId: string, dir: -1 | 1) => void;
+  editBeat: (beatId: string, patch: { title?: string; intention?: string }) => void;
+  setActSummary: (act: ActKind, summary: string) => void;
+  setActTitle: (act: ActKind, title: string) => void;
+  assignChapterToBeat: (chapterId: string, beatId: string) => void;
+  unassignChapterFromBeat: (chapterId: string) => void;
+  setChapterBeat: (chapterId: string, patch: { goal?: string; conflict?: string; turn?: string }) => void;
 }
 
 const HISTORY_CAP = 100;
@@ -255,11 +298,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     }
     if (parsed) {
-      meta = parsed;
+      meta = normalizeMeta(parsed);
     } else {
       const legacy = await readAppData<ProjectMeta>(metaKey(root));
-      meta = legacy ?? EMPTY_META;
-      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
+      meta = normalizeMeta(legacy);
+      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(meta));
     }
 
     const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
@@ -479,6 +522,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await deleteChapterCmd(project.root, model, file);
         set({ project: updated });
+        set((s) => {
+          const meta = {
+            ...s.meta,
+            outline: unassignChapter(s.meta.outline, id),
+            chapterBeats: Object.fromEntries(
+              Object.entries(s.meta.chapterBeats).filter(([k]) => k !== id),
+            ),
+          };
+          persistMeta(meta);
+          return { meta };
+        });
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
@@ -922,6 +976,83 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const meta = {
           ...s.meta,
           statuses: { ...s.meta.statuses, [id]: status },
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setPremise: (premise) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editPremise(s.meta.outline, premise) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addBeat: (act, afterBeatId) => {
+      const { outline, beatId } = addBeatModel(get().meta.outline, act, afterBeatId);
+      set((s) => {
+        const meta = { ...s.meta, outline };
+        persistMeta(meta);
+        return { meta };
+      });
+      return beatId;
+    },
+
+    removeBeat: (beatId) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: removeBeatModel(s.meta.outline, beatId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    moveBeat: (beatId, dir) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: moveBeatModel(s.meta.outline, beatId, dir) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    editBeat: (beatId, patch) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editBeatModel(s.meta.outline, beatId, patch) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setActSummary: (act, summary) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editActSummary(s.meta.outline, act, summary) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setActTitle: (act, title) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editActTitle(s.meta.outline, act, title) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    assignChapterToBeat: (chapterId, beatId) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: assignChapter(s.meta.outline, chapterId, beatId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    unassignChapterFromBeat: (chapterId) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: unassignChapter(s.meta.outline, chapterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setChapterBeat: (chapterId, patch) =>
+      set((s) => {
+        const prev = s.meta.chapterBeats[chapterId] ?? { goal: "", conflict: "", turn: "" };
+        const meta = {
+          ...s.meta,
+          chapterBeats: { ...s.meta.chapterBeats, [chapterId]: { ...prev, ...patch } },
         };
         persistMeta(meta);
         return { meta };

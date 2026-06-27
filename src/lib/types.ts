@@ -193,6 +193,10 @@ export interface ProjectMeta {
   lore: LoreEntry[];
   /** chapter id -> status override. */
   statuses: Record<string, ChapterStatus>;
+  /** The whole-novel three-act story spine. */
+  outline: Outline;
+  /** chapter id -> that chapter's own Goal/Conflict/Turn (sparse). */
+  chapterBeats: Record<string, ChapterBeat>;
 }
 
 /** A previously opened project, for the recents list / switcher. */

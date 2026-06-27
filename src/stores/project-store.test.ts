@@ -11,8 +11,10 @@ vi.mock("@/lib/tauri", () => ({
   pickProjectDir: vi.fn(),
   readAppData: vi.fn().mockResolvedValue(null),
   readPdf: vi.fn().mockRejectedValue(new Error("no pdf")),
+  readProjectMeta: vi.fn().mockResolvedValue(null),
   readTextFile: vi.fn(),
   writeAppData: vi.fn().mockResolvedValue(undefined),
+  writeProjectMeta: vi.fn().mockResolvedValue(undefined),
   writeTextFile: vi.fn(),
 }));
 
@@ -21,7 +23,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { useProjectStore } from "@/stores/project-store";
-import { compileProject } from "@/lib/tauri";
+import { compileProject, openProject, readPdf } from "@/lib/tauri";
 import type { Block, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
@@ -422,6 +424,65 @@ describe("editable breaks", () => {
     expect(created?.type).toBe("chapter");
     expect(created?.level).toBe("break");
     expect(created?.text).toBe("* * *");
+  });
+});
+
+describe("loading a project with an existing PDF on disk", () => {
+  const project: ProjectInfo = {
+    root: "/tmp/book",
+    name: "Book",
+    mainFile: "main.tex",
+    title: null,
+    author: null,
+    chapters: [],
+  };
+
+  beforeEach(() => {
+    // Simulate a relaunch landing on an empty/idle compile state.
+    useProjectStore.setState({
+      compile: {
+        status: "idle",
+        pdfBase64: null,
+        log: "",
+        errors: [],
+        durationMs: 0,
+        at: null,
+      },
+    });
+  });
+
+  it("reflects the on-disk PDF as a built (clean) state, not 'not built'", async () => {
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project,
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readPdf).mockResolvedValueOnce("JVBERi0xLjQK");
+
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+
+    const { compile } = useProjectStore.getState();
+    expect(compile.pdfBase64).toBe("JVBERi0xLjQK");
+    // The badge renders "idle" as "not built"; a loaded-from-disk PDF must
+    // surface as a clean build so the badge reads "loaded", not "not built".
+    expect(compile.status).toBe("clean");
+  });
+
+  it("leaves the compile state idle when no PDF exists on disk", async () => {
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project,
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readPdf).mockResolvedValueOnce(null);
+
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+
+    const { compile } = useProjectStore.getState();
+    expect(compile.pdfBase64).toBeNull();
+    expect(compile.status).toBe("idle");
   });
 });
 

@@ -30,6 +30,7 @@ import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
 import { Welcome } from "@/components/app/welcome";
+import { UpdateChecker } from "@/components/app/update-checker";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
@@ -137,6 +138,7 @@ function App() {
       )}
       <UnsavedGuard />
       <MigrationGuard />
+      <UpdateChecker />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

@@ -277,7 +277,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       if (import.meta.env.DEV) console.warn(`readPdf(${pdfName}) failed:`, e);
       return null;
     });
-    if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64 } }));
+    // A PDF on disk means a prior build exists: surface it as "clean" (the
+    // "loaded" badge state) rather than leaving the idle "not built" status.
+    if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64, status: "clean" } }));
   };
 
   /** Build a regeneration model from the current project (order-preserving). */

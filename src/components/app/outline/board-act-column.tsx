@@ -10,11 +10,16 @@ import { IconSparkles } from "@tabler/icons-react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { Button } from "@/components/ui/button";
-import { TypographyEyebrow, TypographyStat } from "@/components/ui/typography";
+import { Spinner } from "@/components/ui/spinner";
+import { TypographyEyebrow, TypographyMuted, TypographyStat } from "@/components/ui/typography";
 import { BoardBeatCard } from "@/components/app/outline/board-beat-card";
 import { COLUMN_IDS } from "@/lib/outline/board-dnd";
 import { actPacing } from "@/lib/outline/model";
+import { sculptAct } from "@/lib/ai/operations";
+import { buildSculptContext } from "@/lib/ai/sculpt-context";
+import { describeAiError } from "@/lib/ai/errors";
 import { useProjectStore } from "@/stores/project-store";
+import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { cn } from "@/lib/utils";
 import type { ActKind } from "@/lib/types";
 
@@ -22,9 +27,26 @@ export function BoardActColumn({ actKind }: { actKind: ActKind }) {
   const outline = useProjectStore((s) => s.meta.outline);
   const chapters = useProjectStore((s) => s.project?.chapters ?? []);
 
+  const sculptingAct = useOutlineBoardStore((s) => s.sculptingAct);
+  const proposal = useOutlineBoardStore((s) => s.proposal);
+  const sculptError = useOutlineBoardStore((s) => s.sculptError);
+  const startSculpt = useOutlineBoardStore((s) => s.startSculpt);
+  const setProposal = useOutlineBoardStore((s) => s.setProposal);
+  const setSculptError = useOutlineBoardStore((s) => s.setSculptError);
+
   const act = outline.acts.find((a) => a.kind === actKind)!;
   const pacing = actPacing(outline, chapters)[actKind];
   const sharePct = Math.round(pacing.actualShare * 100);
+
+  // Loading: this act's sculpt is in flight (started, no proposal back yet, no error).
+  const loading = sculptingAct === actKind && proposal === null && sculptError === null;
+
+  const runSculpt = () => {
+    startSculpt(actKind);
+    sculptAct(buildSculptContext(actKind))
+      .then((p) => setProposal(p))
+      .catch((e: unknown) => setSculptError(describeAiError(e)));
+  };
 
   const { setNodeRef, isOver } = useDroppable({ id: COLUMN_IDS[actKind] });
 
@@ -35,16 +57,21 @@ export function BoardActColumn({ actKind }: { actKind: ActKind }) {
           <TypographyEyebrow>{act.title}</TypographyEyebrow>
           <TypographyStat className="text-xs text-muted-foreground">{sharePct}%</TypographyStat>
         </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="text-muted-foreground"
-          // Phase 5 wires this to startSculpt(actKind); inert placeholder for now.
-          onClick={() => undefined}
-        >
-          <IconSparkles className="text-ai-ink" />
-          Sculpt this act
-        </Button>
+        <div className="flex flex-col items-end gap-0.5">
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground"
+            onClick={runSculpt}
+            disabled={loading}
+          >
+            {loading ? <Spinner /> : <IconSparkles className="text-ai-ink" />}
+            Sculpt this act
+          </Button>
+          {sculptError !== null && sculptingAct === actKind ? (
+            <TypographyMuted className="text-xs">{sculptError}</TypographyMuted>
+          ) : null}
+        </div>
       </div>
       <div
         ref={setNodeRef}

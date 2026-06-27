@@ -29,6 +29,7 @@ import { BoardBeatCard } from "@/components/app/outline/board-beat-card";
 import { BeatDetailRail } from "@/components/app/outline/beat-detail-rail";
 import { resolveBeatDrop } from "@/lib/outline/board-dnd";
 import { findBeat } from "@/lib/outline/model";
+import { SculptReview } from "@/components/app/outline/sculpt-review";
 import { useProjectStore } from "@/stores/project-store";
 import type { ActKind } from "@/lib/types";
 
@@ -58,7 +59,8 @@ export function OutlineBoard() {
   const activeBeat = activeId ? findBeat(outline, activeId) : null;
 
   return (
-    <div className="flex min-h-0 h-full bg-background">
+    <div className="relative flex min-h-0 h-full bg-background">
+      <SculptReview />
       <ScrollArea className="flex-1 min-w-0">
         <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-6 py-6">
           <div className="flex flex-col gap-3">

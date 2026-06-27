@@ -30,6 +30,8 @@ export type AiTab =
 interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
+  /** Whether the full-page Outline storyboard replaces the editor (ephemeral). */
+  outlineOpen: boolean;
   focus: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
@@ -48,6 +50,7 @@ interface ViewState {
 
   toggleAi: () => void;
   togglePdf: () => void;
+  toggleOutline: () => void;
   setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
@@ -69,6 +72,7 @@ export const useViewStore = create<ViewState>()(
     (set, get) => ({
       aiOpen: true,
       pdfOpen: false,
+      outlineOpen: false,
       focus: false,
       buildErrorsOpen: false,
 
@@ -84,6 +88,7 @@ export const useViewStore = create<ViewState>()(
       // content visible"). Matches openAiTab / triggerSuggest.
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false, aiCollapsed: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
+      toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen, focus: false })),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {

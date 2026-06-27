@@ -15,12 +15,17 @@ export interface UpdateFlowDeps {
   readonly check: () => Promise<AvailableUpdate | null>;
   readonly install: (update: AvailableUpdate) => Promise<void>;
   readonly promptToInstall: (update: AvailableUpdate) => Promise<boolean>;
+  readonly notifyChecking: () => void;
   readonly notifyUpToDate: () => void;
   readonly notifyError: (error: unknown) => void;
 }
 
 export async function runUpdateFlow(mode: UpdateMode, deps: UpdateFlowDeps): Promise<void> {
   if (deps.isDev) return;
+
+  // Manual checks get immediate feedback that the check is running; auto checks
+  // on launch stay silent until they have something to report.
+  if (mode === "manual") deps.notifyChecking();
 
   let update: AvailableUpdate | null;
   try {

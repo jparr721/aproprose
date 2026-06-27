@@ -9,6 +9,7 @@ function makeDeps(overrides: Partial<UpdateFlowDeps>): UpdateFlowDeps {
     check: vi.fn(async () => null),
     install: vi.fn(async () => {}),
     promptToInstall: vi.fn(async () => false),
+    notifyChecking: vi.fn(),
     notifyUpToDate: vi.fn(),
     notifyError: vi.fn(),
     ...overrides,
@@ -21,11 +22,19 @@ describe("runUpdateFlow", () => {
     await runUpdateFlow("auto", deps);
     expect(deps.check).not.toHaveBeenCalled();
     expect(deps.promptToInstall).not.toHaveBeenCalled();
+    expect(deps.notifyChecking).not.toHaveBeenCalled();
+  });
+
+  it("manual: announces the check before querying", async () => {
+    const deps = makeDeps({ check: vi.fn(async () => null) });
+    await runUpdateFlow("manual", deps);
+    expect(deps.notifyChecking).toHaveBeenCalledOnce();
   });
 
   it("auto: stays silent when already up to date", async () => {
     const deps = makeDeps({ check: vi.fn(async () => null) });
     await runUpdateFlow("auto", deps);
+    expect(deps.notifyChecking).not.toHaveBeenCalled();
     expect(deps.notifyUpToDate).not.toHaveBeenCalled();
     expect(deps.promptToInstall).not.toHaveBeenCalled();
   });

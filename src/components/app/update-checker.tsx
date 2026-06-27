@@ -70,8 +70,11 @@ function buildDeps(): UpdateFlowDeps {
       await handle.downloadAndInstall();
       await relaunch();
     },
+    notifyChecking: () => {
+      toast.loading("Checking for updates", { id: UPDATE_TOAST_ID });
+    },
     notifyUpToDate: () => {
-      toast.success("You are on the latest version");
+      toast.success("You are on the latest version", { id: UPDATE_TOAST_ID });
     },
     notifyError: (error: unknown) => {
       toast.error("Update failed", {

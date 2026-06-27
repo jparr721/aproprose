@@ -26,6 +26,7 @@ import { TypographyLead, TypographyMuted } from "@/components/ui/typography";
 import { PacingGuide } from "@/components/app/outline/pacing-guide";
 import { BoardActColumn } from "@/components/app/outline/board-act-column";
 import { BoardBeatCard } from "@/components/app/outline/board-beat-card";
+import { BeatDetailRail } from "@/components/app/outline/beat-detail-rail";
 import { resolveBeatDrop } from "@/lib/outline/board-dnd";
 import { findBeat } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
@@ -57,34 +58,39 @@ export function OutlineBoard() {
   const activeBeat = activeId ? findBeat(outline, activeId) : null;
 
   return (
-    <ScrollArea className="h-full bg-background">
-      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-6 py-6">
-        <div className="flex flex-col gap-3">
-          {premise ? (
-            <TypographyLead className="text-base">{premise}</TypographyLead>
-          ) : (
-            <TypographyMuted className="text-sm">
-              No logline yet. Set the premise from the outline panel.
-            </TypographyMuted>
-          )}
-          <PacingGuide />
-        </div>
-
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onDragCancel={() => setActiveId(null)}
-        >
-          <div className="flex items-start gap-4">
-            {ACTS.map((kind) => (
-              <BoardActColumn key={kind} actKind={kind} />
-            ))}
+    <div className="flex min-h-0 h-full bg-background">
+      <ScrollArea className="flex-1 min-w-0">
+        <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-6 py-6">
+          <div className="flex flex-col gap-3">
+            {premise ? (
+              <TypographyLead className="text-base">{premise}</TypographyLead>
+            ) : (
+              <TypographyMuted className="text-sm">
+                No logline yet. Set the premise from the outline panel.
+              </TypographyMuted>
+            )}
+            <PacingGuide />
           </div>
-          <DragOverlay>{activeBeat ? <BoardBeatCard beat={activeBeat} /> : null}</DragOverlay>
-        </DndContext>
-      </div>
-    </ScrollArea>
+
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDragCancel={() => setActiveId(null)}
+          >
+            <div className="flex items-start gap-4">
+              {ACTS.map((kind) => (
+                <BoardActColumn key={kind} actKind={kind} />
+              ))}
+            </div>
+            <DragOverlay>{activeBeat ? <BoardBeatCard beat={activeBeat} /> : null}</DragOverlay>
+          </DndContext>
+        </div>
+      </ScrollArea>
+      <aside className="w-72 shrink-0 border-l border-border bg-card">
+        <BeatDetailRail />
+      </aside>
+    </div>
   );
 }

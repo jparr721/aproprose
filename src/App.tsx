@@ -37,6 +37,7 @@ import { PdfPane } from "@/components/app/pdf-pane";
 import { RightPanelContent, RightPanelRail } from "@/components/app/right-panel";
 import { Welcome } from "@/components/app/welcome";
 import { UpdateChecker } from "@/components/app/update-checker";
+import { WhatsNewDialog } from "@/components/app/whats-new-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
@@ -182,6 +183,7 @@ function App() {
       <UnsavedGuard />
       <MigrationGuard />
       <UpdateChecker />
+      <WhatsNewDialog />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

@@ -13,6 +13,7 @@ export const SETTINGS_TABS = {
   BACKUP: "backup",
   KEYBOARD: "keyboard",
   STATS: "stats",
+  ABOUT: "about",
 } as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[keyof typeof SETTINGS_TABS];

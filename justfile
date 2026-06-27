@@ -59,8 +59,20 @@ version VERSION:
     ( cd src-tauri && cargo test )
     echo "==> clippy"
     ( cd src-tauri && cargo clippy --all-targets -- -D warnings )
-    # Bump all version files (set-version.ts rejects a non-increasing version).
+    # Revert every file this recipe mutates if anything below fails or is interrupted, so an
+    # aborted release never leaves a dirty tree (a git checkout of unchanged files is a no-op).
+    revert() {
+        git checkout -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock changelog.json 2>/dev/null || true
+    }
+    trap revert ERR INT
+    # Bump all version files first - set-version.ts rejects a non-increasing version, so this
+    # cheap, deterministic check fails before the expensive AI changelog step writes anything.
+    echo "==> version"
     bun run scripts/set-version.ts "$ver"
+    # Generate the user-facing changelog entry (claude -p), reviewed in $EDITOR. Aborts the
+    # release if claude is missing/errors, $EDITOR is unset, or the entry is invalid.
+    echo "==> changelog"
+    bun run scripts/generate-changelog.ts "$ver" "$(date +%F)"
     # Confirm before the irreversible push that triggers the release.
     echo
     echo "Release v$ver to origin/main:"
@@ -69,10 +81,11 @@ version VERSION:
     read -r -p "Proceed? [y/N] " reply || true
     if [ "$reply" != "y" ] && [ "$reply" != "Y" ]; then
         echo "aborted - reverting version bump"
-        git checkout -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+        revert
         exit 1
     fi
-    git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+    trap - ERR INT
+    git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock changelog.json
     git commit -m "release $ver"
     git tag "v$ver"
     git push origin main "v$ver"

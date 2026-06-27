@@ -1,0 +1,18 @@
+[
+  {
+    "version": "0.3.0",
+    "date": "2026-06-25",
+    "summary": "The first tracked release of aproprose.",
+    "highlights": [
+      "Managed novel projects: create a new novel, then add, rename, reorder, and delete chapters from the sidebar.",
+      "Rich-text editing with bold and italic from the selection toolbar or Cmd/Ctrl+B and Cmd/Ctrl+I, plus centered scene-break headings.",
+      "Split and carve blocks directly from a text selection.",
+      "AI panel with brainstorm chat, click-to-generate drafting, and per-block edit suggestions you can review and accept or reject.",
+      "Pick your OpenAI model in Settings; the assistant stays gated until a key and model are set.",
+      "Git and GitHub backup and sync with a full-screen diff review.",
+      "Command palette (Cmd/Ctrl+K) and registry-driven keyboard shortcuts with on-screen hints.",
+      "Build-error viewer that surfaces LaTeX compile failures with a one-click View action.",
+      "Custom frameless window with a platform-adaptive titlebar, plus light, sepia, and dark themes."
+    ]
+  }
+]

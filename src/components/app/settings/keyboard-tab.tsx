@@ -9,12 +9,12 @@ export function KeyboardTab() {
       <div className="flex flex-col gap-2">
         {Object.values(KEYBINDINGS).map((kb) => (
           <div key={kb.id} className="flex items-center justify-between gap-3">
-            <TypographyForeground className="font-sans text-sm">{kb.label}</TypographyForeground>
+            <TypographyForeground className="text-sm">{kb.label}</TypographyForeground>
             <KeybindingHint keybinding={kb} />
           </div>
         ))}
       </div>
-      <TypographyMuted className="mt-1 font-sans text-xs">
+      <TypographyMuted className="mt-1 text-xs">
         Highlight text in a block to convert or isolate the selection.
       </TypographyMuted>
     </Field>

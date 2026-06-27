@@ -76,7 +76,7 @@ function AddLoreDialog() {
           <IconPlus />
         </SidebarGroupAction>
       </DialogTrigger>
-      <DialogContent className="font-sans sm:max-w-sm">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Add lore note</DialogTitle>
           <DialogDescription>A worldbuilding entry to track.</DialogDescription>
@@ -113,7 +113,7 @@ export function AppSidebar() {
   if (!project) return null;
 
   return (
-    <Sidebar collapsible="offcanvas" className="font-sans">
+    <Sidebar collapsible="offcanvas">
       {/* On macOS the native traffic lights are pinned to the window's top-left
           (x16/y16). When the sidebar is open that corner is the header, so we
           reserve a top-bar-height band (pt-11 = h-11) to drop the project name
@@ -132,7 +132,7 @@ export function AppSidebar() {
                   <IconChevronDown className="size-3 shrink-0 text-faint" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-60 font-sans">
+              <DropdownMenuContent align="start" className="w-60">
                 <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
                   <IconFolderOpen /> Open project
                 </DropdownMenuItem>

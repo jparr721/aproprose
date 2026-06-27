@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
-import { IconCheck, IconEye, IconEyeOff, IconTrash } from "@tabler/icons-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconEye,
+  IconEyeOff,
+  IconRefresh,
+  IconTrash,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -29,10 +36,17 @@ import {
 } from "@/components/ui/typography";
 import { Field } from "@/components/app/settings/field";
 import { useSettingsStore } from "@/stores/settings-store";
-import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
+import {
+  hasOpenAiKey,
+  setOpenAiKey,
+  cliProviderStatus,
+  type CliKind,
+  type CliProviderStatus,
+} from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
 import { listTextModels } from "@/lib/ai/models";
 import { describeAiError } from "@/lib/ai/errors";
+import type { AiProvider } from "@/lib/types";
 
 function OpenAiKeyField({
   configured,
@@ -112,7 +126,7 @@ function OpenAiKeyField({
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-success">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-success">
             <IconCheck className="size-3.5" /> A key is configured.
           </TypographyForeground>
           <AlertDialog>
@@ -125,7 +139,7 @@ function OpenAiKeyField({
                 <IconTrash className="size-3.5" /> Remove
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="font-sans">
+            <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -143,7 +157,7 @@ function OpenAiKeyField({
           </AlertDialog>
         </div>
       ) : (
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           Stored locally in your app config dir - never written into the app bundle or your
           manuscript.
         </TypographyMuted>
@@ -189,7 +203,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
   if (!keyConfigured) {
     return (
       <Field label="AI model">
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="text-xs">
           Add a key above to choose a model.
         </TypographyMuted>
       </Field>
@@ -215,25 +229,135 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         </SelectContent>
       </Select>
       {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans text-xs">
+        <TypographyMutedSpan className="flex items-center gap-1.5 text-xs">
           <Spinner /> Loading models
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="font-sans text-xs text-destructive">
+        <TypographyForeground className="text-xs text-destructive">
           {error}
         </TypographyForeground>
       ) : null}
-      {!loading && !error && !aiModel ? (
-        <TypographyMuted className="font-sans text-xs">
-          AI features are off until you pick a model.
+      {!loading && !error ? (
+        <TypographyMuted className="text-xs">
+          {aiModel ? `Using ${aiModel}.` : "AI features are off until you pick a model."}
         </TypographyMuted>
       ) : null}
     </Field>
   );
 }
 
+/**
+ * Active-provider picker. OpenAI uses an API key; codex/claude use the local CLI
+ * subscription. Switching resets the cached AI provider so the next call rebuilds.
+ */
+function ProviderField() {
+  const aiProvider = useSettingsStore((s) => s.aiProvider);
+  const setAiProvider = useSettingsStore((s) => s.setAiProvider);
+  return (
+    <Field label="AI provider">
+      <Select
+        value={aiProvider}
+        onValueChange={(v) => {
+          setAiProvider(v as AiProvider);
+          resetAiProvider();
+        }}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="openai">OpenAI (API key)</SelectItem>
+          <SelectItem value="codex">Codex CLI (subscription)</SelectItem>
+          <SelectItem value="claude">Claude Code (subscription)</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * Status panel for a CLI subscription provider. Detects install + login on open
+ * and via Recheck; the user authenticates in their terminal, never here.
+ */
+function CliStatusField({ kind }: { kind: CliKind }) {
+  const [status, setStatus] = useState<CliProviderStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const label = kind === "codex" ? "Codex CLI" : "Claude Code";
+
+  const check = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    cliProviderStatus(kind)
+      .then((s) => {
+        setStatus(s);
+      })
+      .catch((e) => {
+        // A rejected status command is a real backend failure, not a verdict
+        // that the CLI is missing - surface the cause instead of faking "not
+        // installed".
+        setError(describeAiError(e));
+        setStatus(null);
+      })
+      .finally(() => setLoading(false));
+  }, [kind]);
+
+  useEffect(check, [check]);
+
+  const ready = status?.installed && status.authenticated;
+
+  return (
+    <Field label={`${label} (subscription)`}>
+      {loading ? (
+        <TypographyMutedSpan className="flex items-center gap-1.5 text-xs">
+          <Spinner /> Checking
+        </TypographyMutedSpan>
+      ) : error ? (
+        <div className="flex flex-col gap-2">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-destructive">
+            <IconAlertTriangle className="size-3.5" /> Could not check the {kind} CLI
+          </TypographyForeground>
+          <TypographyMuted className="text-xs">{error}</TypographyMuted>
+          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
+            <IconRefresh className="size-3.5" /> Recheck
+          </Button>
+        </div>
+      ) : ready ? (
+        <div className="flex flex-col gap-1">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-success">
+            <IconCheck className="size-3.5" /> Connected through the {kind} CLI
+          </TypographyForeground>
+          <TypographyMuted className="text-xs">
+            {status?.model
+              ? `Using ${status.model}, your ${kind} default model.`
+              : `Using your ${kind} default model.`}
+          </TypographyMuted>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <TypographyForeground className="flex items-center gap-1.5 text-xs text-warning">
+            <IconAlertTriangle className="size-3.5" />
+            {status && !status.installed
+              ? `${kind} CLI not found on PATH`
+              : `${kind} is installed, but not signed in`}
+          </TypographyForeground>
+          <TypographyMuted className="text-xs">
+            {status && !status.installed
+              ? `Install it, then sign in with ${kind} login and recheck. Uses your subscription - no API key needed.`
+              : `Run ${kind} login in your terminal, then recheck. Uses your subscription - no API key needed.`}
+          </TypographyMuted>
+          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
+            <IconRefresh className="size-3.5" /> Recheck
+          </Button>
+        </div>
+      )}
+    </Field>
+  );
+}
+
 export function AiTab() {
+  const aiProvider = useSettingsStore((s) => s.aiProvider);
   const [keyConfigured, setKeyConfigured] = useState(false);
   useEffect(() => {
     void hasOpenAiKey()
@@ -246,8 +370,15 @@ export function AiTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <OpenAiKeyField configured={keyConfigured} onConfiguredChange={setKeyConfigured} />
-      <AiModelField keyConfigured={keyConfigured} />
+      <ProviderField />
+      {aiProvider === "openai" ? (
+        <>
+          <OpenAiKeyField configured={keyConfigured} onConfiguredChange={setKeyConfigured} />
+          <AiModelField keyConfigured={keyConfigured} />
+        </>
+      ) : (
+        <CliStatusField kind={aiProvider} />
+      )}
     </div>
   );
 }

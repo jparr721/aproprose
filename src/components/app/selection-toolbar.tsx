@@ -123,7 +123,7 @@ export function SelectionToolbar() {
       className={cn(
         "fixed z-50 left-[var(--tb-x)] top-[var(--tb-y)] -translate-x-1/2",
         below ? "translate-y-0" : "-translate-y-full",
-        "flex items-center gap-0.5 rounded-lg border border-border bg-card p-1 font-sans shadow-md",
+        "flex items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-md",
       )}
     >
       <Button

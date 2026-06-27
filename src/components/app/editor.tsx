@@ -68,7 +68,7 @@ function AddBlockRow() {
   const add = (type: BlockType) => insertAfter(selectedId, { type });
 
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5 py-4 pl-7 font-sans">
+    <div className="mt-2 flex flex-wrap gap-1.5 py-4 pl-7">
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
         + Narration
       </Button>
@@ -242,7 +242,7 @@ export function Editor() {
 
   if (!chapter) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-muted-foreground">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
         <IconWriting className="size-8 text-faint" />
         <TypographyMuted>Select a chapter to begin.</TypographyMuted>
       </div>
@@ -251,7 +251,7 @@ export function Editor() {
 
   if (conflictedFiles.includes(chapter.file)) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center font-sans">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center">
         <IconGitMerge className="size-8 text-destructive" />
         <TypographyLarge>This chapter has a merge conflict</TypographyLarge>
         <TypographyMuted className="max-w-sm text-sm">
@@ -288,7 +288,7 @@ export function Editor() {
           <TypographyForeground className="font-heading text-2xl font-medium tracking-tight">
             {chapter.title}
           </TypographyForeground>
-          <TypographyMutedSpan className="ml-auto font-sans text-xs tabular-nums">
+          <TypographyMutedSpan className="ml-auto text-xs tabular-nums">
             {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
             {chapterDirty ? "unsaved" : "saved"}
           </TypographyMutedSpan>

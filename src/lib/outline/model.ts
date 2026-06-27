@@ -5,7 +5,15 @@
 // The store (project-store) wires these to persistence; the UI calls the store.
 
 import { uid } from "@/lib/id";
-import type { ActKind, Beat, BeatType, ChapterRef, Outline, OutlineAct } from "@/lib/types";
+import type {
+  ActKind,
+  Beat,
+  BeatType,
+  ChapterRef,
+  ContinuityFlag,
+  Outline,
+  OutlineAct,
+} from "@/lib/types";
 
 /** Three-act proportions: setup 25%, confrontation 50%, resolution 25%. */
 export const ACT_TARGETS: Record<ActKind, number> = {
@@ -205,6 +213,60 @@ export function editBeat(
   patch: Partial<Pick<Beat, "title" | "intention">>,
 ): Outline {
   return mapBeats(outline, (beat) => (beat.id === beatId ? { ...beat, ...patch } : beat));
+}
+
+export function setBeatType(outline: Outline, beatId: string, type: BeatType): Outline {
+  return mapBeats(outline, (beat) => (beat.id === beatId ? { ...beat, type } : beat));
+}
+
+export function addCharacterToBeat(
+  outline: Outline,
+  beatId: string,
+  characterId: string,
+): Outline {
+  return mapBeats(outline, (beat) =>
+    beat.id === beatId && !beat.characterIds.includes(characterId)
+      ? { ...beat, characterIds: [...beat.characterIds, characterId] }
+      : beat,
+  );
+}
+
+export function removeCharacterFromBeat(
+  outline: Outline,
+  beatId: string,
+  characterId: string,
+): Outline {
+  return mapBeats(outline, (beat) =>
+    beat.id === beatId
+      ? { ...beat, characterIds: beat.characterIds.filter((id) => id !== characterId) }
+      : beat,
+  );
+}
+
+export function addLoreToBeat(outline: Outline, beatId: string, loreId: string): Outline {
+  return mapBeats(outline, (beat) =>
+    beat.id === beatId && !beat.loreIds.includes(loreId)
+      ? { ...beat, loreIds: [...beat.loreIds, loreId] }
+      : beat,
+  );
+}
+
+export function removeLoreFromBeat(outline: Outline, beatId: string, loreId: string): Outline {
+  return mapBeats(outline, (beat) =>
+    beat.id === beatId
+      ? { ...beat, loreIds: beat.loreIds.filter((id) => id !== loreId) }
+      : beat,
+  );
+}
+
+export function setBeatContinuityFlags(
+  outline: Outline,
+  beatId: string,
+  flags: ContinuityFlag[],
+): Outline {
+  return mapBeats(outline, (beat) =>
+    beat.id === beatId ? { ...beat, continuityFlags: flags } : beat,
+  );
 }
 
 export function editPremise(outline: Outline, premise: string): Outline {

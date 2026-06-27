@@ -12,8 +12,14 @@ import {
   editPremise,
   actPacing,
   unplacedChapters,
+  setBeatType,
+  addCharacterToBeat,
+  removeCharacterFromBeat,
+  addLoreToBeat,
+  removeLoreFromBeat,
+  setBeatContinuityFlags,
 } from "@/lib/outline/model";
-import type { ChapterRef } from "@/lib/types";
+import type { ChapterRef, ContinuityFlag } from "@/lib/types";
 
 const ch = (id: string, wordCount: number): ChapterRef => ({
   id,
@@ -155,6 +161,52 @@ describe("unplacedChapters", () => {
     const linked = assignChapter(base, "a", beatId);
     const out = unplacedChapters(linked, [ch("a", 1), ch("b", 1)]);
     expect(out.map((c) => c.id)).toEqual(["b"]);
+  });
+});
+
+describe("setBeatType", () => {
+  it("sets the type immutably", () => {
+    const o = defaultOutline();
+    const id = o.acts[0].beats[0].id;
+    const next = setBeatType(o, id, "climax");
+    expect(next.acts[0].beats[0].type).toBe("climax");
+    expect(o.acts[0].beats[0].type).toBe("plot-point");
+  });
+});
+
+describe("addCharacterToBeat / removeCharacterFromBeat", () => {
+  it("adds without duplicating and removes cleanly", () => {
+    const o = defaultOutline();
+    const id = o.acts[0].beats[0].id;
+    const a = addCharacterToBeat(o, id, "ch1");
+    const b = addCharacterToBeat(a, id, "ch1"); // idempotent
+    expect(b.acts[0].beats[0].characterIds).toEqual(["ch1"]);
+    const c = removeCharacterFromBeat(b, id, "ch1");
+    expect(c.acts[0].beats[0].characterIds).toEqual([]);
+    expect(o.acts[0].beats[0].characterIds).toEqual([]); // input untouched
+  });
+});
+
+describe("addLoreToBeat / removeLoreFromBeat", () => {
+  it("adds without duplicating and removes cleanly", () => {
+    const o = defaultOutline();
+    const id = o.acts[1].beats[0].id;
+    const a = addLoreToBeat(o, id, "l1");
+    const b = addLoreToBeat(a, id, "l1"); // idempotent
+    expect(b.acts[1].beats[0].loreIds).toEqual(["l1"]);
+    const c = removeLoreFromBeat(b, id, "l1");
+    expect(c.acts[1].beats[0].loreIds).toEqual([]);
+  });
+});
+
+describe("setBeatContinuityFlags", () => {
+  it("replaces the flags array immutably", () => {
+    const o = defaultOutline();
+    const id = o.acts[0].beats[0].id;
+    const flags: ContinuityFlag[] = [{ sev: "warn", tag: "Timeline", text: "Off by a day." }];
+    const next = setBeatContinuityFlags(o, id, flags);
+    expect(next.acts[0].beats[0].continuityFlags).toEqual(flags);
+    expect(o.acts[0].beats[0].continuityFlags).toEqual([]);
   });
 });
 

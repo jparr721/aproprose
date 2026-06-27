@@ -55,6 +55,9 @@ export interface AiContext {
   characters?: { name: string; role?: string }[];
   /** Optional free-text steering from the author's ask box; honoured when present. */
   instruction?: string;
+  /** Pre-rendered STORY STRUCTURE block (premise + served beat + chapter arc),
+   *  or undefined when the scene has no outline context. */
+  structure?: string;
 }
 
 /** What the Edit tab hands `editBlocks`: the blocks it may revise + the request. */
@@ -65,6 +68,8 @@ export interface EditRequest {
   blocks: { id: string; type: BlockType; text: string }[];
   /** The author's instruction (required for an edit). */
   instruction: string;
+  /** Pre-rendered STORY STRUCTURE block, or undefined. */
+  structure?: string;
 }
 
 /**
@@ -93,6 +98,10 @@ function buildGrounding(ctx: AiContext): string {
     parts.push(`CURSOR: ${ctx.cursorSummary}`);
   }
 
+  if (ctx.structure) {
+    parts.push(`STORY STRUCTURE:\n${ctx.structure}`);
+  }
+
   // The scene itself goes before the request so the request is the last,
   // freshest, most salient directive in the model's window.
   parts.push(`SCENE PROSE:\n${ctx.blocksText}`);
@@ -113,6 +122,9 @@ function buildEditGrounding(req: EditRequest): string {
       .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
       .join("\n");
     parts.push(`KNOWN CAST:\n${roster}`);
+  }
+  if (req.structure) {
+    parts.push(`STORY STRUCTURE:\n${req.structure}`);
   }
   const blocks = req.blocks
     .map((b) => `[${b.id}] (${b.type}): ${b.text}`)

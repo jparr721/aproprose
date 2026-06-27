@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { defaultOutline, assignChapter } from "@/lib/outline/model";
 
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
@@ -50,5 +51,40 @@ describe("buildAiContext", () => {
       blocks: [mk({ id: "brk", type: "chapter", level: "break", text: "" })],
     });
     expect(buildAiContext().blocksText).toBe("* * *");
+  });
+});
+
+describe("buildAiContext structure", () => {
+  it("is undefined when the outline is untouched and the chapter is unlinked", () => {
+    useProjectStore.setState({
+      project: {
+        root: "/p", name: "P", mainFile: "main.tex", title: "P", author: "A",
+        metadata: { title: "P", subtitle: "", author: "A", publisher: "", isbn: "" },
+        chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
+      },
+      activeChapterId: "c1",
+      meta: { characters: [], lore: [], statuses: {}, outline: defaultOutline(), chapterBeats: {} },
+      blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
+      selectedId: "n1",
+    });
+    expect(buildAiContext().structure).toBeUndefined();
+  });
+
+  it("includes the served beat once the chapter is linked", () => {
+    const o = assignChapter(defaultOutline(), "c1", defaultOutline().acts[1].beats[1].id);
+    const beatId = o.acts[1].beats[1].id;
+    const linked = assignChapter(o, "c1", beatId);
+    useProjectStore.setState({
+      project: {
+        root: "/p", name: "P", mainFile: "main.tex", title: "P", author: "A",
+        metadata: { title: "P", subtitle: "", author: "A", publisher: "", isbn: "" },
+        chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
+      },
+      activeChapterId: "c1",
+      meta: { characters: [], lore: [], statuses: {}, outline: linked, chapterBeats: {} },
+      blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
+      selectedId: "n1",
+    });
+    expect(buildAiContext().structure).toContain("It serves the beat");
   });
 });

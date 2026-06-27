@@ -13,9 +13,11 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent } from "@/components/ui/card";
 import { BeatTypeBadge } from "@/components/app/outline/beat-type-badge";
+import { ColorDot } from "@/components/app/color-dot";
 import { TypographySmall, TypographyMutedSpan } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
+import { beatCharacters, worstSev, SEV_DOT } from "@/lib/outline/beat-signals";
 import { cn } from "@/lib/utils";
 import type { Beat } from "@/lib/types";
 
@@ -23,6 +25,7 @@ type DndVar = CSSProperties & Record<"--dnd-transform", string>;
 
 export function BoardBeatCard({ beat }: { beat: Beat }) {
   const chapters = useProjectStore((s) => s.project?.chapters ?? []);
+  const roster = useProjectStore((s) => s.meta.characters);
   const selectChapter = useProjectStore((s) => s.selectChapter);
   const selectBeat = useOutlineBoardStore((s) => s.selectBeat);
   const selected = useOutlineBoardStore((s) => s.selectedBeatId === beat.id);
@@ -33,6 +36,9 @@ export function BoardBeatCard({ beat }: { beat: Beat }) {
   const linked = beat.chapterIds
     .map((id) => chapters.find((c) => c.id === id))
     .filter((c) => c != null);
+
+  const cast = beatCharacters(beat.characterIds, roster);
+  const sev = worstSev(beat.continuityFlags);
 
   return (
     <Card
@@ -60,10 +66,22 @@ export function BoardBeatCard({ beat }: { beat: Beat }) {
           <IconGripVertical className="size-3.5" />
         </button>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <BeatTypeBadge type={beat.type} />
+          <div className="flex items-center gap-1.5">
+            <BeatTypeBadge type={beat.type} />
+            {sev ? (
+              <span className={cn("size-1.5 shrink-0 rounded-full", SEV_DOT[sev])} />
+            ) : null}
+          </div>
           <TypographySmall className="line-clamp-2 font-medium leading-snug">
             {beat.title}
           </TypographySmall>
+          {cast.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1">
+              {cast.map((c) => (
+                <ColorDot key={c.id} color={c.color} />
+              ))}
+            </div>
+          ) : null}
           {linked.length > 0 ? (
             <button
               type="button"

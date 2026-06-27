@@ -25,7 +25,12 @@ import { Block } from "@/components/app/block";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TypographyLarge, TypographyMuted } from "@/components/ui/typography";
+import {
+  TypographyForeground,
+  TypographyLarge,
+  TypographyMuted,
+  TypographyMutedSpan,
+} from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
@@ -37,7 +42,6 @@ import { isInAuxSurface } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/lib/use-dictation";
 import type { BlockType } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 // Editor history defers to native undo/redo while the AI panel or a dialog holds
 // focus, so those inputs keep their own history.
@@ -240,7 +244,7 @@ export function Editor() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-background font-sans text-muted-foreground">
         <IconWriting className="size-8 text-faint" />
-        <p className="text-sm">Select a chapter to begin.</p>
+        <TypographyMuted>Select a chapter to begin.</TypographyMuted>
       </div>
     );
   }
@@ -278,14 +282,16 @@ export function Editor() {
     >
       <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
         <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
-          <span className="font-serif text-lg italic text-muted-foreground">Chapter {chapter.label}</span>
-          <span className="font-heading text-2xl font-medium tracking-tight text-foreground">
+          <TypographyMutedSpan className="font-serif text-lg italic">
+            Chapter {chapter.label}
+          </TypographyMutedSpan>
+          <TypographyForeground className="font-heading text-2xl font-medium tracking-tight">
             {chapter.title}
-          </span>
-          <span className={cn("ml-auto font-sans text-[11.5px] tabular-nums text-faint")}>
+          </TypographyForeground>
+          <TypographyMutedSpan className="ml-auto font-sans text-xs tabular-nums">
             {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
             {chapterDirty ? "unsaved" : "saved"}
-          </span>
+          </TypographyMutedSpan>
         </header>
 
         <DndContext

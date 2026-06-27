@@ -61,6 +61,14 @@ export const KEYBINDINGS = {
     category: "view",
     label: "Toggle PDF",
   },
+  TOGGLE_OUTLINE: {
+    id: "toggle-outline",
+    key: "o",
+    modifiers: { ctrl: true, shift: true },
+    description: "Toggle the full-page Outline storyboard",
+    category: "view",
+    label: "Toggle Outline",
+  },
   TOGGLE_AI: {
     id: "toggle-ai",
     key: "a",

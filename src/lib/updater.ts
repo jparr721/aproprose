@@ -7,6 +7,7 @@ export type UpdateMode = "auto" | "manual";
 export interface AvailableUpdate {
   readonly currentVersion: string;
   readonly version: string;
+  readonly body: string;
 }
 
 export interface UpdateFlowDeps {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { runUpdateFlow, type UpdateFlowDeps, type AvailableUpdate } from "@/lib/updater";
 
-const UPDATE: AvailableUpdate = { currentVersion: "0.3.0", version: "0.4.0" };
+const UPDATE: AvailableUpdate = { currentVersion: "0.3.0", version: "0.4.0", body: "" };
 
 function makeDeps(overrides: Partial<UpdateFlowDeps>): UpdateFlowDeps {
   return {

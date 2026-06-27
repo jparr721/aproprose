@@ -5,7 +5,7 @@
 // The store (project-store) wires these to persistence; the UI calls the store.
 
 import { uid } from "@/lib/id";
-import type { ActKind, Beat, ChapterRef, Outline, OutlineAct } from "@/lib/types";
+import type { ActKind, Beat, BeatType, ChapterRef, Outline, OutlineAct } from "@/lib/types";
 
 /** Three-act proportions: setup 25%, confrontation 50%, resolution 25%. */
 export const ACT_TARGETS: Record<ActKind, number> = {
@@ -26,22 +26,25 @@ const ACT_TITLES: Record<ActKind, string> = {
   resolution: "Resolution",
 };
 
-const SEED: Record<ActKind, { title: string; intention: string }[]> = {
+const SEED: Record<ActKind, { title: string; intention: string; type: BeatType }[]> = {
   setup: [
     {
       title: "Opening Image",
       intention:
         "Establish the ordinary world and the protagonist's normal before anything breaks.",
+      type: "plot-point",
     },
     {
       title: "Inciting Incident",
       intention:
         "The disruption that shatters the normal and pulls the protagonist into the story (often around 10-15%).",
+      type: "inciting",
     },
     {
       title: "Plot Point 1",
       intention:
         "The protagonist commits to the central problem and the door closes behind them; Act II begins (~25%).",
+      type: "plot-point",
     },
   ],
   confrontation: [
@@ -49,26 +52,31 @@ const SEED: Record<ActKind, { title: string; intention: string }[]> = {
       title: "Rising Action",
       intention:
         "Escalating complications as the protagonist struggles with the problem; each turn costs something.",
+      type: "action",
     },
     {
       title: "Midpoint",
       intention:
         "A major revelation or reversal that raises the stakes and changes the protagonist's approach (~50%).",
+      type: "midpoint",
     },
     {
       title: "Plot Point 2",
       intention:
         "The lowest point or biggest turn that launches the finale - the hinge into Act III (~75%).",
+      type: "plot-point",
     },
   ],
   resolution: [
     {
       title: "Climax",
       intention: "The protagonist faces the central problem head-on, on its terms.",
+      type: "climax",
     },
     {
       title: "Resolution",
       intention: "The aftermath - what has changed, and what the ending leaves behind.",
+      type: "resolution",
     },
   ],
 };
@@ -85,6 +93,10 @@ function seedAct(kind: ActKind): OutlineAct {
       title: b.title,
       intention: b.intention,
       chapterIds: [],
+      type: b.type,
+      characterIds: [],
+      loreIds: [],
+      continuityFlags: [],
     })),
   };
 }
@@ -141,7 +153,16 @@ export function addBeat(
   actKind: ActKind,
   afterBeatId: string | null,
 ): { outline: Outline; beatId: string } {
-  const beat: Beat = { id: uid("b"), title: "New beat", intention: "", chapterIds: [] };
+  const beat: Beat = {
+    id: uid("b"),
+    title: "New beat",
+    intention: "",
+    chapterIds: [],
+    type: "action",
+    characterIds: [],
+    loreIds: [],
+    continuityFlags: [],
+  };
   const acts = outline.acts.map((act) => {
     if (act.kind !== actKind) return act;
     const idx = afterBeatId ? act.beats.findIndex((b) => b.id === afterBeatId) : -1;

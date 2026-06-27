@@ -126,6 +126,16 @@ export interface LoreEntry {
 // most one beat. This is planning metadata the .tex files don't carry; it rides
 // ProjectMeta like the cast and lore index.
 
+/** Structural role of a beat - drives the type badge and the Sculpt prompt. */
+export type BeatType =
+  | "plot-point"
+  | "inciting"
+  | "pinch"
+  | "action"
+  | "midpoint"
+  | "climax"
+  | "resolution";
+
 /** A single beat on the story spine. */
 export interface Beat {
   id: string;
@@ -137,6 +147,14 @@ export interface Beat {
   /** Ids of chapters that realize this beat (0..N). A chapter id appears in at
    *  most one beat's list across the whole outline. */
   chapterIds: string[];
+  /** Structural role; backfilled from the seeded title on migration. */
+  type: BeatType;
+  /** Cast present on this beat - ids into {@link ProjectMeta.characters}. */
+  characterIds: string[];
+  /** Lore touched by this beat - ids into {@link ProjectMeta.lore}. */
+  loreIds: string[];
+  /** Persisted continuity findings; [] by default. Worst sev drives the health dot. */
+  continuityFlags: ContinuityFlag[];
 }
 
 /** The three fixed acts, identified by kind so seed/target logic survives a

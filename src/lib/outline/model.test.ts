@@ -157,3 +157,35 @@ describe("unplacedChapters", () => {
     expect(out.map((c) => c.id)).toEqual(["b"]);
   });
 });
+
+describe("Beat type fields (1.1 + 1.3)", () => {
+  it("seeds every beat with the new typed fields", () => {
+    const o = defaultOutline();
+    const b = o.acts[0].beats[0];
+    expect(b.type).toBeDefined();
+    expect(b.characterIds).toEqual([]);
+    expect(b.loreIds).toEqual([]);
+    expect(b.continuityFlags).toEqual([]);
+  });
+
+  it("seeds beats with a structural type matching their title", () => {
+    const o = defaultOutline();
+    expect(o.acts[0].beats.map((b) => b.type)).toEqual([
+      "plot-point",
+      "inciting",
+      "plot-point",
+    ]);
+    expect(o.acts[1].beats[1].type).toBe("midpoint");
+    expect(o.acts[2].beats[0].type).toBe("climax");
+  });
+
+  it("addBeat creates a neutral 'action' beat with empty link arrays", () => {
+    const o = defaultOutline();
+    const { outline, beatId } = addBeat(o, "setup", null);
+    const b = outline.acts[0].beats.find((x) => x.id === beatId)!;
+    expect(b.type).toBe("action");
+    expect(b.characterIds).toEqual([]);
+    expect(b.loreIds).toEqual([]);
+    expect(b.continuityFlags).toEqual([]);
+  });
+});

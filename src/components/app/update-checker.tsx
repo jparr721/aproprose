@@ -47,7 +47,6 @@ function buildDeps(): UpdateFlowDeps {
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"
-                size="sm"
                 onClick={() =>
                   useChangelogStore.getState().open({
                     version: update.version,
@@ -57,7 +56,7 @@ function buildDeps(): UpdateFlowDeps {
               >
                 See changes
               </Button>
-              <Button size="sm" onClick={() => resolve(true)}>
+              <Button onClick={() => resolve(true)}>
                 Update
               </Button>
             </div>

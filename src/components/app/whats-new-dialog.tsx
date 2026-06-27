@@ -14,7 +14,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TypographyH3, TypographyMuted, TypographyP } from "@/components/ui/typography";
+import {
+  TypographyEyebrow,
+  TypographyH3,
+  TypographyMuted,
+  TypographyP,
+} from "@/components/ui/typography";
 import { CHANGELOG, type ChangelogEntry } from "@/lib/changelog";
 import { useChangelogStore, type IncomingVersion } from "@/stores/changelog-store";
 
@@ -33,12 +38,10 @@ function EntryView({
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
         <TypographyH3>{version}</TypographyH3>
-        {date ? (
-          <TypographyMuted className="font-sans text-xs tabular-nums">{date}</TypographyMuted>
-        ) : null}
+        {date ? <TypographyMuted>{date}</TypographyMuted> : null}
       </div>
       {summary ? <TypographyP className="mt-0">{summary}</TypographyP> : null}
-      <ul className="ml-5 list-disc font-serif text-sm leading-relaxed marker:text-muted-foreground">
+      <ul className="ml-5 list-disc marker:text-muted-foreground">
         {highlights.map((h, i) => (
           <li key={i}>{h}</li>
         ))}
@@ -52,9 +55,7 @@ function IncomingSection({ incoming }: { incoming: IncomingVersion }) {
   const isEmpty = summary === "" && highlights.length === 0;
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-3">
-      <TypographyMuted className="font-sans text-xs uppercase tracking-wide">
-        Coming in this update
-      </TypographyMuted>
+      <TypographyEyebrow>Coming in this update</TypographyEyebrow>
       {isEmpty ? (
         <TypographyMuted>No release notes for v{incoming.version}.</TypographyMuted>
       ) : (
@@ -86,9 +87,9 @@ export function WhatsNewDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[80vh] font-sans sm:max-w-2xl">
+      <DialogContent className="max-h-[80vh] sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="font-heading">What's New</DialogTitle>
+          <DialogTitle>What's New</DialogTitle>
           <DialogDescription>Recent changes to aproprose.</DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] pr-3">

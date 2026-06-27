@@ -9,7 +9,7 @@ export function AboutTab() {
       <Button
         variant="outline"
         size="sm"
-        className="w-full justify-start font-sans"
+        className="w-full justify-start"
         onClick={() => {
           useSettingsDialogStore.getState().setOpen(false);
           useChangelogStore.getState().open(null);

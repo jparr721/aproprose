@@ -25,7 +25,8 @@ type SegStyle = React.CSSProperties & Record<"--seg-w", string>;
 
 export function PacingGuide() {
   const outline = useProjectStore((s) => s.meta.outline);
-  const chapters = useProjectStore((s) => s.project?.chapters ?? []);
+  const project = useProjectStore((s) => s.project);
+  const chapters = project?.chapters ?? [];
   const pacing = actPacing(outline, chapters);
 
   const anyLinked = ACTS.some((k) => pacing[k].words > 0);

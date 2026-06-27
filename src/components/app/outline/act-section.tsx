@@ -8,13 +8,14 @@ import { ACT_ROMAN, actPacing } from "@/lib/outline/model";
 import type { ActKind } from "@/lib/types";
 
 export function ActSection({ actKind }: { actKind: ActKind }) {
-  const act = useProjectStore((s) => s.meta.outline.acts.find((a) => a.kind === actKind))!;
+  const outline = useProjectStore((s) => s.meta.outline);
+  const project = useProjectStore((s) => s.project);
   const setActTitle = useProjectStore((s) => s.setActTitle);
   const setActSummary = useProjectStore((s) => s.setActSummary);
   const addBeat = useProjectStore((s) => s.addBeat);
-  const pacing = useProjectStore((s) =>
-    actPacing(s.meta.outline, s.project?.chapters ?? []),
-  )[actKind];
+
+  const act = outline.acts.find((a) => a.kind === actKind)!;
+  const pacing = actPacing(outline, project?.chapters ?? [])[actKind];
 
   const lastBeatId = act.beats.length ? act.beats[act.beats.length - 1].id : null;
 

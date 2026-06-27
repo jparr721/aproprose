@@ -72,9 +72,9 @@ describe("assignChapter (one-beat-per-chapter invariant)", () => {
 
 describe("unassignChapter", () => {
   it("removes the chapter from wherever it is linked", () => {
-    const o = assignChapter(defaultOutline(), "c1", defaultOutline().acts[0].beats[0].id);
-    const beatId = o.acts[0].beats[0].id;
-    const linked = assignChapter(o, "c1", beatId);
+    const base = defaultOutline();
+    const beatId = base.acts[0].beats[0].id;
+    const linked = assignChapter(base, "c1", beatId);
     const next = unassignChapter(linked, "c1");
     expect(beatForChapter(next, "c1")).toBeNull();
   });
@@ -150,9 +150,9 @@ describe("actPacing", () => {
 
 describe("unplacedChapters", () => {
   it("lists chapters not linked to any beat", () => {
-    const o = assignChapter(defaultOutline(), "a", defaultOutline().acts[0].beats[0].id);
-    const beatId = o.acts[0].beats[0].id;
-    const linked = assignChapter(o, "a", beatId);
+    const base = defaultOutline();
+    const beatId = base.acts[0].beats[0].id;
+    const linked = assignChapter(base, "a", beatId);
     const out = unplacedChapters(linked, [ch("a", 1), ch("b", 1)]);
     expect(out.map((c) => c.id)).toEqual(["b"]);
   });

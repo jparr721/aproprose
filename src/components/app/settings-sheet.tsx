@@ -4,11 +4,13 @@
 // the design was a design-tool artifact; here it's a proper shadcn Sheet opened
 // from the top bar's gear. Layout presets are applied through the view store.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  IconAlertTriangle,
   IconCheck,
   IconEye,
   IconEyeOff,
+  IconRefresh,
   IconSettings,
   IconTrash,
 } from "@tabler/icons-react";
@@ -53,11 +55,18 @@ import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSyncStore } from "@/stores/sync-store";
-import { hasOpenAiKey, setOpenAiKey, gitToolingStatus } from "@/lib/tauri";
+import {
+  hasOpenAiKey,
+  setOpenAiKey,
+  gitToolingStatus,
+  cliProviderStatus,
+  type CliKind,
+  type CliProviderStatus,
+} from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
 import { listTextModels } from "@/lib/ai/models";
 import { describeAiError } from "@/lib/ai/errors";
-import type { BlockStyle, LayoutMode, Theme, ToolingStatus } from "@/lib/types";
+import type { AiProvider, BlockStyle, LayoutMode, Theme, ToolingStatus } from "@/lib/types";
 
 function Field({
   label,
@@ -367,6 +376,98 @@ function BackupSyncField() {
   );
 }
 
+/**
+ * Active-provider picker. OpenAI uses an API key; codex/claude use the local CLI
+ * subscription. Switching resets the cached AI provider so the next call rebuilds.
+ */
+function ProviderField() {
+  const aiProvider = useSettingsStore((s) => s.aiProvider);
+  const setAiProvider = useSettingsStore((s) => s.setAiProvider);
+  return (
+    <Field label="AI provider">
+      <Select
+        value={aiProvider}
+        onValueChange={(v) => {
+          setAiProvider(v as AiProvider);
+          resetAiProvider();
+        }}
+      >
+        <SelectTrigger className="w-full font-sans">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="font-sans">
+          <SelectItem value="openai">OpenAI (API key)</SelectItem>
+          <SelectItem value="codex">Codex CLI (subscription)</SelectItem>
+          <SelectItem value="claude">Claude Code (subscription)</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * Status panel for a CLI subscription provider. Detects install + login on open
+ * and via Recheck; the user authenticates in their terminal, never here.
+ */
+function CliStatusField({ kind }: { kind: CliKind }) {
+  const [status, setStatus] = useState<CliProviderStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const label = kind === "codex" ? "Codex CLI" : "Claude Code";
+
+  const check = useCallback(() => {
+    setLoading(true);
+    cliProviderStatus(kind)
+      .then(setStatus)
+      .catch(() =>
+        setStatus({ installed: false, authenticated: false, model: null, version: null }),
+      )
+      .finally(() => setLoading(false));
+  }, [kind]);
+
+  useEffect(check, [check]);
+
+  const ready = status?.installed && status.authenticated;
+
+  return (
+    <Field label={`${label} (subscription)`}>
+      {loading ? (
+        <span className="flex items-center gap-1.5 font-sans text-xs text-muted-foreground">
+          <Spinner /> Checking
+        </span>
+      ) : ready ? (
+        <div className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 font-sans text-xs text-success">
+            <IconCheck className="size-3.5" /> Connected through the {kind} CLI
+          </span>
+          <TypographyMuted className="font-sans text-xs">
+            {status?.model
+              ? `Model: ${status.model} (your ${kind} default).`
+              : `Uses your ${kind} default model.`}{" "}
+            Auth is handled by {kind} login - nothing to enter here.
+          </TypographyMuted>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-1.5 font-sans text-xs text-warning">
+            <IconAlertTriangle className="size-3.5" />
+            {status && !status.installed
+              ? `${kind} CLI not found on PATH`
+              : `${kind} is installed, but not signed in`}
+          </span>
+          <TypographyMuted className="font-sans text-xs">
+            {status && !status.installed
+              ? `Install it, then sign in with ${kind} login and recheck. Uses your subscription - no API key needed.`
+              : `Run ${kind} login in your terminal, then recheck. Uses your subscription - no API key needed.`}
+          </TypographyMuted>
+          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
+            <IconRefresh className="size-3.5" /> Recheck
+          </Button>
+        </div>
+      )}
+    </Field>
+  );
+}
+
 export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   // Open state is lifted to the view store so the command palette can open the
   // sheet too; the sidebar gear, Cmd/Ctrl+,, and the palette all drive one flag.
@@ -384,6 +485,7 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
   const setBlockStyle = useSettingsStore((s) => s.setBlockStyle);
   const setProseSize = useSettingsStore((s) => s.setProseSize);
   const applyLayoutPreset = useViewStore((s) => s.applyLayoutPreset);
+  const aiProvider = useSettingsStore((s) => s.aiProvider);
 
   const [keyConfigured, setKeyConfigured] = useState(false);
   useEffect(() => {
@@ -404,7 +506,7 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
       <SheetContent className="font-sans">
         <SheetHeader>
           <SheetTitle className="font-heading">Tweaks</SheetTitle>
-          <SheetDescription>Appearance, layout, and your OpenAI key.</SheetDescription>
+          <SheetDescription>Appearance, layout, and your AI provider.</SheetDescription>
         </SheetHeader>
 
         <div className="flex flex-col gap-6 px-4 pb-6">
@@ -486,12 +588,19 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
 
           <Separator />
 
-          <OpenAiKeyField
-            configured={keyConfigured}
-            onConfiguredChange={setKeyConfigured}
-          />
+          <ProviderField />
 
-          <AiModelField keyConfigured={keyConfigured} />
+          {aiProvider === "openai" ? (
+            <>
+              <OpenAiKeyField
+                configured={keyConfigured}
+                onConfiguredChange={setKeyConfigured}
+              />
+              <AiModelField keyConfigured={keyConfigured} />
+            </>
+          ) : (
+            <CliStatusField kind={aiProvider} />
+          )}
 
           <Separator />
 

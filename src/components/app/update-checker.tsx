@@ -14,6 +14,9 @@ import {
   type UpdateFlowDeps,
   type UpdateMode,
 } from "@/lib/updater";
+import { Button } from "@/components/ui/button";
+import { parseUpdateNotes } from "@/lib/changelog";
+import { useChangelogStore } from "@/stores/changelog-store";
 
 const UPDATE_TOAST_ID = "app-update";
 
@@ -27,7 +30,11 @@ function buildDeps(): UpdateFlowDeps {
     check: async () => {
       handle = await check();
       if (handle === null) return null;
-      return { currentVersion: handle.currentVersion, version: handle.version };
+      return {
+        currentVersion: handle.currentVersion,
+        version: handle.version,
+        body: handle.body ?? "",
+      };
     },
     promptToInstall: (update: AvailableUpdate) =>
       new Promise<boolean>((resolve) => {
@@ -36,10 +43,24 @@ function buildDeps(): UpdateFlowDeps {
           description: `v${update.currentVersion} -> v${update.version}`,
           duration: Infinity,
           closeButton: true,
-          action: {
-            label: "Update",
-            onClick: () => resolve(true),
-          },
+          action: (
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  useChangelogStore.getState().open({
+                    version: update.version,
+                    notes: parseUpdateNotes(update.body),
+                  })
+                }
+              >
+                See changes
+              </Button>
+              <Button onClick={() => resolve(true)}>
+                Update
+              </Button>
+            </div>
+          ),
           onDismiss: () => resolve(false),
         });
       }),
@@ -49,8 +70,11 @@ function buildDeps(): UpdateFlowDeps {
       await handle.downloadAndInstall();
       await relaunch();
     },
+    notifyChecking: () => {
+      toast.loading("Checking for updates", { id: UPDATE_TOAST_ID });
+    },
     notifyUpToDate: () => {
-      toast.success("You are on the latest version");
+      toast.success("You are on the latest version", { id: UPDATE_TOAST_ID });
     },
     notifyError: (error: unknown) => {
       toast.error("Update failed", {

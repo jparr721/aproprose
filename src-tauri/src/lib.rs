@@ -364,16 +364,21 @@ pub fn run() {
                 let menu = Menu::default(app.handle())?;
                 let check = MenuItemBuilder::with_id("check-for-updates", "Check for Updates")
                     .build(app)?;
+                let whats_new =
+                    MenuItemBuilder::with_id("show-whats-new", "What's New").build(app)?;
 
                 let items = menu.items()?;
                 if let Some(app_submenu) = items.first().and_then(|kind| kind.as_submenu()) {
                     app_submenu.insert(&check, 1)?;
+                    app_submenu.insert(&whats_new, 2)?;
                 }
 
                 app.set_menu(menu)?;
                 app.on_menu_event(move |app_handle, event| {
                     if event.id() == check.id() {
                         let _ = app_handle.emit("check-for-updates", ());
+                    } else if event.id() == whats_new.id() {
+                        let _ = app_handle.emit("show-whats-new", ());
                     }
                 });
             }

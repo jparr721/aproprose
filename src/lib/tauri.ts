@@ -148,6 +148,24 @@ export function cliProviderStatus(kind: CliKind): Promise<CliProviderStatus> {
   return invoke<CliProviderStatus>("cli_provider_status", { kind });
 }
 
+export interface CliGenerateArgs {
+  kind: CliKind;
+  /** System instructions; codex prepends them, claude uses --system-prompt. */
+  system: string | null;
+  prompt: string;
+  /** JSON Schema the output must conform to, or null for free text. */
+  schema: unknown | null;
+}
+
+export interface CliGenerateResult {
+  text: string;
+  model: string | null;
+}
+
+export function cliGenerate(args: CliGenerateArgs): Promise<CliGenerateResult> {
+  return invoke<CliGenerateResult>("cli_generate", { args });
+}
+
 // ── App data (recents, per-project metadata) ───────────────────────────────────
 // Generic key/value JSON blobs stored under the app config dir. The frontend
 // owns the schema; Rust only does the file IO so nothing lands in the user repo.

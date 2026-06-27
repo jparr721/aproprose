@@ -71,7 +71,7 @@ function UnsavedGuard() {
   const cancel = useViewStore((s) => s.cancelPending);
   return (
     <AlertDialog open={pending != null} onOpenChange={(o) => !o && cancel()}>
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -97,7 +97,7 @@ function MigrationGuard() {
       open={needsMigration != null}
       onOpenChange={(o) => !o && cancel()}
     >
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Convert to managed structure?</AlertDialogTitle>
           <AlertDialogDescription>

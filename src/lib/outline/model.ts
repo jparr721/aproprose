@@ -13,6 +13,7 @@ import type {
   ContinuityFlag,
   Outline,
   OutlineAct,
+  SculptProposal,
 } from "@/lib/types";
 
 /** Three-act proportions: setup 25%, confrontation 50%, resolution 25%. */
@@ -362,4 +363,55 @@ export function unplacedChapters(outline: Outline, chapters: ChapterRef[]): Chap
     outline.acts.flatMap((act) => act.beats.flatMap((b) => b.chapterIds)),
   );
   return chapters.filter((c) => !linked.has(c.id));
+}
+
+/**
+ * Fold a sculpt proposal's KEPT changes into the outline, in proposal order, by
+ * delegating to the same pure beat editors the manual UI uses. `kept` holds the
+ * indices (into `proposal.changes`) the author approved. A skipped change is a
+ * no-op. A change whose target beat no longer exists (e.g. removed by an earlier
+ * kept change) is skipped defensively rather than throwing. Pure: returns a new
+ * Outline, never mutates the input.
+ */
+export function applySculpt(
+  outline: Outline,
+  proposal: SculptProposal,
+  kept: number[],
+): Outline {
+  const keptSet = new Set(kept);
+  const beatExists = (o: Outline, beatId: string): boolean =>
+    o.acts.some((act) => act.beats.some((b) => b.id === beatId));
+
+  return proposal.changes.reduce((acc, change, index) => {
+    if (!keptSet.has(index)) return acc;
+    switch (change.kind) {
+      case "rewrite": {
+        if (change.beatId === null || !beatExists(acc, change.beatId)) return acc;
+        let next = acc;
+        if (change.type !== null) next = setBeatType(next, change.beatId, change.type);
+        const patch: Partial<Pick<Beat, "title" | "intention">> = {};
+        if (change.title !== null) patch.title = change.title;
+        if (change.intention !== null) patch.intention = change.intention;
+        return editBeat(next, change.beatId, patch);
+      }
+      case "add": {
+        const { outline: added, beatId } = addBeat(acc, proposal.actKind, null);
+        let next = added;
+        if (change.type !== null) next = setBeatType(next, beatId, change.type);
+        const patch: Partial<Pick<Beat, "title" | "intention">> = {};
+        if (change.title !== null) patch.title = change.title;
+        if (change.intention !== null) patch.intention = change.intention;
+        return editBeat(next, beatId, patch);
+      }
+      case "move": {
+        if (change.beatId === null || change.toIndex === null) return acc;
+        if (!beatExists(acc, change.beatId)) return acc;
+        return moveBeatTo(acc, change.beatId, proposal.actKind, change.toIndex);
+      }
+      case "remove": {
+        if (change.beatId === null || !beatExists(acc, change.beatId)) return acc;
+        return removeBeat(acc, change.beatId);
+      }
+    }
+  }, outline);
 }

@@ -20,8 +20,9 @@ import {
   addLoreToBeat,
   removeLoreFromBeat,
   setBeatContinuityFlags,
+  applySculpt,
 } from "@/lib/outline/model";
-import type { ChapterRef, ContinuityFlag } from "@/lib/types";
+import type { ChapterRef, ContinuityFlag, SculptProposal } from "@/lib/types";
 
 const ch = (id: string, wordCount: number): ChapterRef => ({
   id,
@@ -278,5 +279,108 @@ describe("Beat type fields (1.1 + 1.3)", () => {
     expect(b.characterIds).toEqual([]);
     expect(b.loreIds).toEqual([]);
     expect(b.continuityFlags).toEqual([]);
+  });
+});
+
+describe("applySculpt", () => {
+  it("applies only kept changes, in proposal order, via the model fns", () => {
+    const o = defaultOutline();
+    const setupBeats = o.acts[0].beats; // Opening Image, Inciting Incident, Plot Point 1
+    const rewriteId = setupBeats[0].id;
+    const moveId = setupBeats[2].id;
+    const removeId = setupBeats[1].id;
+
+    const proposal: SculptProposal = {
+      actKind: "setup",
+      summary: "Tighten the opening.",
+      changes: [
+        {
+          kind: "rewrite",
+          beatId: rewriteId,
+          title: "Cold Open",
+          intention: "Drop us mid-action.",
+          type: "inciting",
+          toIndex: null,
+          reason: "Hook faster.",
+        },
+        {
+          kind: "add",
+          beatId: null,
+          title: "Threshold",
+          intention: "Door closes behind them.",
+          type: "plot-point",
+          toIndex: null,
+          reason: "Needs a commit beat.",
+        },
+        {
+          kind: "move",
+          beatId: moveId,
+          title: null,
+          intention: null,
+          type: null,
+          toIndex: 0,
+          reason: "Pull the turn earlier.",
+        },
+        {
+          kind: "remove",
+          beatId: removeId,
+          title: null,
+          intention: null,
+          type: null,
+          toIndex: null,
+          reason: "Redundant.",
+        },
+      ],
+    };
+
+    // Keep rewrite (0) and add (1); skip move (2) and remove (3).
+    const next = applySculpt(o, proposal, [0, 1]);
+    const beats = next.acts[0].beats;
+
+    const rewritten = beats.find((b) => b.id === rewriteId);
+    expect(rewritten?.title).toBe("Cold Open");
+    expect(rewritten?.intention).toBe("Drop us mid-action.");
+    expect(rewritten?.type).toBe("inciting");
+
+    // add appended a NEW beat with the proposed fields and a fresh id
+    const added = beats.find((b) => b.title === "Threshold");
+    expect(added).toBeDefined();
+    expect(added?.type).toBe("plot-point");
+    expect(added?.intention).toBe("Door closes behind them.");
+
+    // skipped move/remove left these untouched
+    expect(beats.find((b) => b.id === moveId)).toBeDefined();
+    expect(beats.find((b) => b.id === removeId)).toBeDefined();
+  });
+
+  it("applies move and remove when kept", () => {
+    const o = defaultOutline();
+    const moveId = o.acts[0].beats[2].id;
+    const removeId = o.acts[0].beats[1].id;
+    const proposal: SculptProposal = {
+      actKind: "setup",
+      summary: "",
+      changes: [
+        { kind: "move", beatId: moveId, title: null, intention: null, type: null, toIndex: 0, reason: "" },
+        { kind: "remove", beatId: removeId, title: null, intention: null, type: null, toIndex: null, reason: "" },
+      ],
+    };
+    const next = applySculpt(o, proposal, [0, 1]);
+    expect(next.acts[0].beats[0].id).toBe(moveId);
+    expect(next.acts[0].beats.find((b) => b.id === removeId)).toBeUndefined();
+  });
+
+  it("with no kept indices returns an equivalent outline and never mutates input", () => {
+    const o = defaultOutline();
+    const proposal: SculptProposal = {
+      actKind: "setup",
+      summary: "",
+      changes: [
+        { kind: "remove", beatId: o.acts[0].beats[0].id, title: null, intention: null, type: null, toIndex: null, reason: "" },
+      ],
+    };
+    const next = applySculpt(o, proposal, []);
+    expect(next.acts[0].beats).toHaveLength(o.acts[0].beats.length);
+    expect(o.acts[0].beats).toHaveLength(3); // input untouched
   });
 });

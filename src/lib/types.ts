@@ -321,6 +321,26 @@ export interface ChatMessage {
   content: string;
 }
 
+// ── Outline Sculpt ────────────────────────────────────────────────────────────
+
+export type SculptChangeKind = "rewrite" | "add" | "move" | "remove";
+
+export interface SculptChange {
+  kind: SculptChangeKind;
+  beatId: string | null;
+  title: string | null;
+  intention: string | null;
+  type: BeatType | null;
+  toIndex: number | null;
+  reason: string;
+}
+
+export interface SculptProposal {
+  actKind: ActKind;
+  summary: string;
+  changes: SculptChange[];
+}
+
 /** A single proposed in-place revision of one block (see the AI "Edit" tab). */
 export interface BlockEdit {
   /** The id of an existing block to revise. */

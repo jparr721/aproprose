@@ -162,6 +162,8 @@ export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
 export type BlockStyle = "typo" | "cards";
 export type AiProvider = "openai" | "codex" | "claude";
+/** The subscription CLI providers - exactly the non-OpenAI members of AiProvider. */
+export type CliKind = Exclude<AiProvider, "openai">;
 
 export interface Settings {
   theme: Theme;

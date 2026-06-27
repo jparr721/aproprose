@@ -10,7 +10,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type { JSONSchema7 } from "@ai-sdk/provider";
 import type {
+  CliKind,
   CompileResult,
   NameCheck,
   NovelMetadata,
@@ -134,9 +136,10 @@ export function setOpenAiKey(key: string): Promise<void> {
 // Subscription auth lives in each CLI's own login; the webview cannot spawn
 // processes, so detection + generation run on the Rust side.
 
-export type CliKind = "codex" | "claude";
+export type { CliKind };
 
 export interface CliProviderStatus {
+  /** Whether the binary is on PATH; independent of `version`. */
   installed: boolean;
   authenticated: boolean;
   /** Resolved default model, best-effort; null when unknown. */
@@ -154,7 +157,7 @@ export interface CliGenerateArgs {
   system: string | null;
   prompt: string;
   /** JSON Schema the output must conform to, or null for free text. */
-  schema: unknown | null;
+  schema: JSONSchema7 | null;
 }
 
 export interface CliGenerateResult {

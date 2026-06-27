@@ -23,6 +23,15 @@ describe("flattenCliPrompt", () => {
     ]);
     expect(system).toBeNull();
   });
+
+  it("prefixes assistant turns and leaves user turns bare", () => {
+    const { text } = flattenCliPrompt([
+      { role: "user", content: [{ type: "text", text: "first" }] },
+      { role: "assistant", content: [{ type: "text", text: "reply" }] },
+      { role: "user", content: [{ type: "text", text: "second" }] },
+    ]);
+    expect(text).toBe("first\n\nAssistant: reply\n\nsecond");
+  });
 });
 
 describe("createCliModel.doGenerate", () => {
@@ -42,6 +51,7 @@ describe("createCliModel.doGenerate", () => {
     });
     expect(res.content).toEqual([{ type: "text", text: '{"ok":true}' }]);
     expect(res.finishReason.unified).toBe("stop");
+    expect(res.finishReason.raw).toBe("stop");
   });
 
   it("passes null schema for free-text", async () => {

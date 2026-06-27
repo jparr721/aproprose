@@ -140,7 +140,8 @@ pub struct CliGenerateResult {
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-/// Unique throwaway dir under the OS temp dir (mirrors git.rs's convention).
+/// Unique throwaway dir under the OS temp dir; `{pid}-{seq}` stays unique across
+/// concurrent cli_generate calls in this process.
 fn unique_temp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), n))

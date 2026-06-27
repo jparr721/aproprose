@@ -29,6 +29,7 @@ describe("getModel provider routing", () => {
     useSettingsStore.setState({ aiProvider: "claude" });
     const model = await getModel();
     expect(mockCreateCliModel).toHaveBeenCalledWith("claude");
+    expect((model as { provider: string }).provider).toBe("claude");
   });
 
   it("throws on openai without a selected model", async () => {

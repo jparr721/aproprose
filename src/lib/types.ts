@@ -120,6 +120,53 @@ export interface LoreEntry {
   title: string;
 }
 
+// -- Outline ------------------------------------------------------------------
+// A whole-novel story spine (premise + three fixed acts + beats) plus a per-
+// chapter beat. The spine's beats link DOWN to chapters; a chapter belongs to at
+// most one beat. This is planning metadata the .tex files don't carry; it rides
+// ProjectMeta like the cast and lore index.
+
+/** A single beat on the story spine. */
+export interface Beat {
+  id: string;
+  /** Display title, e.g. "Inciting Incident". */
+  title: string;
+  /** 1-3 sentences: what this beat must accomplish. Seeded with teaching copy;
+   *  "" once the writer clears it. */
+  intention: string;
+  /** Ids of chapters that realize this beat (0..N). A chapter id appears in at
+   *  most one beat's list across the whole outline. */
+  chapterIds: string[];
+}
+
+/** The three fixed acts, identified by kind so seed/target logic survives a
+ *  display-title rename. */
+export type ActKind = "setup" | "confrontation" | "resolution";
+
+export interface OutlineAct {
+  kind: ActKind;
+  /** Display title, e.g. "Setup". */
+  title: string;
+  /** Optional act-level intention. "" if blank. */
+  summary: string;
+  /** Ordered beats; add / edit / reorder / remove freely. */
+  beats: Beat[];
+}
+
+/** The whole-novel spine. Exactly three acts, fixed order I, II, III. */
+export interface Outline {
+  /** One-line logline. "" if blank. */
+  premise: string;
+  acts: [OutlineAct, OutlineAct, OutlineAct];
+}
+
+/** A chapter's own internal arc. All fields "" when unfilled. */
+export interface ChapterBeat {
+  goal: string;
+  conflict: string;
+  turn: string;
+}
+
 /** The shape returned by the Rust `open_project` command. */
 export interface ProjectInfo {
   /** Absolute path of the project directory. */

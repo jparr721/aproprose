@@ -31,9 +31,10 @@ function formatLongDate(key: string): string {
 }
 
 export function ContributionChart({ days }: { days: WritingStats["days"] }) {
+  const todayKey = localDateKey(new Date());
   const { cells, thresholds } = useMemo(() => {
-    const today = new Date();
-    const todayKey = localDateKey(today);
+    const [ty, tm, td] = todayKey.split("-").map(Number);
+    const today = new Date(ty, tm - 1, td);
     const end = addDays(today, 6 - today.getDay()); // Saturday of this week
     const start = addDays(end, -(WEEKS * DAYS_IN_WEEK - 1)); // Sunday, WEEKS back
     const list: Array<{ key: string; isFuture: boolean }> = [];
@@ -43,7 +44,7 @@ export function ContributionChart({ days }: { days: WritingStats["days"] }) {
     }
     const values = list.map((c) => days[c.key]?.added ?? 0).filter((v) => v > 0);
     return { cells: list, thresholds: computeThresholds(values) };
-  }, [days]);
+  }, [days, todayKey]);
 
   return (
     <div className="flex flex-col gap-2">

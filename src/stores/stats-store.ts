@@ -1,7 +1,8 @@
 // stats-store.ts -- the global writing-activity log (words added/removed/saves
 // per local day, plus a per-project word-count baseline used to compute deltas).
-// Persisted to the app config dir via the Tauri-backed adapter, validated with
-// Zod on rehydrate so a corrupt file degrades to empty instead of crashing.
+// Persisted to the app config dir via the Tauri-backed adapter. Zod validates on
+// rehydrate: a corrupt or unrecognized file is discarded and the current in-memory
+// state is kept, rather than crashing.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -48,7 +49,11 @@ export const useStatsStore = create<StatsState>()(
       partialize: ({ baselines, days }) => ({ baselines, days }),
       merge: (persisted, current) => {
         const parsed = WritingStatsSchema.safeParse(persisted);
-        if (!parsed.success) return current;
+        if (!parsed.success) {
+          if (import.meta.env.DEV)
+            console.warn("writing-stats: persisted data failed schema validation, keeping current state:", parsed.error);
+          return current;
+        }
         return { ...current, baselines: parsed.data.baselines, days: parsed.data.days };
       },
     },

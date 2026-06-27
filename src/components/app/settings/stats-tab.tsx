@@ -55,7 +55,7 @@ export function StatsTab() {
         <StatCell
           label="Current streak"
           value={`${streak} day${streak === 1 ? "" : "s"}`}
-          caption={longest > 0 ? `Best: ${longest}` : undefined}
+          caption={longest > 0 ? `Best: ${longest.toLocaleString()}` : undefined}
         />
       </div>
       <div className="flex flex-col gap-2">

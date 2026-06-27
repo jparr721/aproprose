@@ -236,7 +236,10 @@ export function AiTab() {
   useEffect(() => {
     void hasOpenAiKey()
       .then(setKeyConfigured)
-      .catch(() => setKeyConfigured(false));
+      .catch((e) => {
+        console.error("hasOpenAiKey failed:", e);
+        setKeyConfigured(false);
+      });
   }, []);
 
   return (

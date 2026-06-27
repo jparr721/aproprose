@@ -844,6 +844,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               }
             : s.project,
         }));
+        // Stats capture is best-effort: a recordSave failure must never abort the save.
         try {
           const updated = get().project;
           if (updated) {
@@ -851,7 +852,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             useStatsStore.getState().recordSave(updated.root, total);
           }
         } catch (e) {
-          if (import.meta.env.DEV) console.warn("recordSave failed:", e);
+          console.warn("stats recordSave failed:", e);
         }
       } catch (e) {
         set({ saving: false, error: String(e) });

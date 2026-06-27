@@ -25,4 +25,11 @@ describe("settings-dialog-store", () => {
     expect(s.open).toBe(true);
     expect(s.tab).toBe(SETTINGS_TABS.STATS);
   });
+
+  it("setTab changes the tab without opening or closing", () => {
+    useSettingsDialogStore.setState({ open: true, tab: SETTINGS_TABS.APPEARANCE });
+    useSettingsDialogStore.getState().setTab(SETTINGS_TABS.KEYBOARD);
+    expect(useSettingsDialogStore.getState().open).toBe(true);
+    expect(useSettingsDialogStore.getState().tab).toBe(SETTINGS_TABS.KEYBOARD);
+  });
 });

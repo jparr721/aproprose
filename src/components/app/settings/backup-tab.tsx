@@ -47,7 +47,12 @@ export function BackupTab() {
   const [tooling, setTooling] = useState<ToolingStatus | null>(null);
 
   useEffect(() => {
-    void gitToolingStatus().then(setTooling).catch(() => setTooling(null));
+    void gitToolingStatus()
+      .then(setTooling)
+      .catch((e) => {
+        console.error("gitToolingStatus failed:", e);
+        setTooling(null);
+      });
   }, []);
 
   return (

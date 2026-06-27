@@ -2,6 +2,12 @@
 
 import type { DayActivity, WritingStats } from "./schema";
 
+/** Heatmap intensity bucket: 0 = no activity, 1-4 = increasing shading. */
+export type CellLevel = 0 | 1 | 2 | 3 | 4;
+
+/** Sorted-ascending [q25, q50, q75, max] cutoffs over a day's non-zero word counts. */
+export type HeatmapThresholds = readonly [number, number, number, number];
+
 /** Local-timezone YYYY-MM-DD so "today" matches the user's calendar. */
 export function localDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -66,8 +72,9 @@ export function longestStreak(days: WritingStats["days"]): number {
   return longest;
 }
 
-/** Percentile buckets over the non-zero "added" values, for heatmap shading. */
-export function computeThresholds(values: number[]): [number, number, number, number] {
+/** Quartile-style thresholds over the non-zero "added" values for heatmap shading.
+ *  Returns [q25, q50, q75, max]; for small or uniform inputs the four may be equal. */
+export function computeThresholds(values: number[]): HeatmapThresholds {
   const nonZero = values.filter((v) => v > 0).sort((a, b) => a - b);
   if (nonZero.length === 0) return [1, 2, 3, 4];
   const p25 = nonZero[Math.floor(nonZero.length * 0.25)] ?? 1;
@@ -77,7 +84,7 @@ export function computeThresholds(values: number[]): [number, number, number, nu
   return [p25, p50, p75, max];
 }
 
-function getLevel(value: number, thresholds: [number, number, number, number]): number {
+function getLevel(value: number, thresholds: HeatmapThresholds): CellLevel {
   if (value <= 0) return 0;
   if (value <= thresholds[0]) return 1;
   if (value <= thresholds[1]) return 2;
@@ -89,8 +96,8 @@ function getLevel(value: number, thresholds: [number, number, number, number]): 
  *  delete-only day - we reward showing up and writing, not just net growth. */
 export function cellLevel(
   day: DayActivity | undefined,
-  thresholds: [number, number, number, number],
-): number {
+  thresholds: HeatmapThresholds,
+): CellLevel {
   if (!day || day.saves === 0) return 0;
-  return Math.max(1, getLevel(day.added, thresholds));
+  return Math.max(1, getLevel(day.added, thresholds)) as CellLevel;
 }

@@ -63,6 +63,10 @@ describe("currentStreak", () => {
     const days = { "2026-05-31": day(1, 0, 1), "2026-06-01": day(1, 0, 1) };
     expect(currentStreak(days, "2026-06-01")).toBe(2);
   });
+  it("counts across a year boundary", () => {
+    const days = { "2025-12-31": day(1, 0, 1), "2026-01-01": day(1, 0, 1) };
+    expect(currentStreak(days, "2026-01-01")).toBe(2);
+  });
 });
 
 describe("longestStreak", () => {
@@ -78,6 +82,9 @@ describe("longestStreak", () => {
   });
   it("is 0 for an empty log", () => {
     expect(longestStreak({})).toBe(0);
+  });
+  it("is 1 for a single active day", () => {
+    expect(longestStreak({ "2026-06-15": day(1, 0, 1) })).toBe(1);
   });
 });
 
@@ -99,6 +106,9 @@ describe("cellLevel", () => {
 describe("computeThresholds", () => {
   it("returns fallback [1, 2, 3, 4] for empty input", () => {
     expect(computeThresholds([])).toEqual([1, 2, 3, 4]);
+  });
+  it("computes thresholds for a 2-element input without index underrun", () => {
+    expect(computeThresholds([100, 200])).toEqual([100, 200, 200, 200]);
   });
   it("filters out zeros and negatives, returning uniform thresholds for single value", () => {
     expect(computeThresholds([0, 0, 10])).toEqual([10, 10, 10, 10]);

@@ -16,7 +16,7 @@ import { useKeybinding } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import {
   SETTINGS_TABS,
-  type SettingsTab,
+  isSettingsTab,
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
 
@@ -42,7 +42,9 @@ export function SettingsDialog() {
           className="min-h-0 flex-1 gap-4"
           orientation="vertical"
           value={tab}
-          onValueChange={(v) => setTab(v as SettingsTab)}
+          onValueChange={(v) => {
+            if (isSettingsTab(v)) setTab(v);
+          }}
         >
           <TabsList className="w-40 shrink-0" variant="line">
             <TabsTrigger value={SETTINGS_TABS.APPEARANCE}>Appearance</TabsTrigger>

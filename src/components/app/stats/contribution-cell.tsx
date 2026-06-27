@@ -1,5 +1,6 @@
 import type { ComponentPropsWithRef } from "react";
 import { cn } from "@/lib/utils";
+import type { CellLevel } from "@/lib/stats/stats";
 
 // Five levels ramp foreground opacity over the bg-card chart surface so the grid
 // stays legible in every theme (a muted empty level can collapse into the card).
@@ -15,7 +16,7 @@ export function ContributionCell({
   level,
   className,
   ...rest
-}: ComponentPropsWithRef<"div"> & { level: number }) {
+}: ComponentPropsWithRef<"div"> & { level: CellLevel }) {
   return (
     <div
       {...rest}

@@ -17,6 +17,10 @@ export const SETTINGS_TABS = {
 
 export type SettingsTab = (typeof SETTINGS_TABS)[keyof typeof SETTINGS_TABS];
 
+export function isSettingsTab(value: string): value is SettingsTab {
+  return (Object.values(SETTINGS_TABS) as string[]).includes(value);
+}
+
 interface SettingsDialogState {
   open: boolean;
   tab: SettingsTab;

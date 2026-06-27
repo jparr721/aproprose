@@ -19,6 +19,11 @@ describe("view-store aiTab", () => {
     useViewStore.getState().setAiTab("edit");
     expect(useViewStore.getState().aiTab).toBe("edit");
   });
+
+  it("can switch to the outline surface", () => {
+    useViewStore.getState().setAiTab("outline");
+    expect(useViewStore.getState().aiTab).toBe("outline");
+  });
 });
 
 describe("view-store aiCollapsed", () => {

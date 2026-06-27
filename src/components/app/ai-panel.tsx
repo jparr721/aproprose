@@ -16,6 +16,7 @@ import {
   IconArrowRight,
   IconCheck,
   IconCopy,
+  IconListTree,
   IconMessages,
   IconNotes,
   IconPencil,
@@ -49,6 +50,7 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { ColorAvatar } from "@/components/app/color-dot";
+import { OutlineSurface } from "@/components/app/outline/outline-surface";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -895,6 +897,7 @@ type TabMeta = { label: string; Icon: typeof IconSparkles };
 // Keyed by AiTab: adding a member to the union without a rail entry is a type error,
 // so the icon rail can never silently omit a function.
 const TAB_META: Record<AiTab, TabMeta> = {
+  outline: { label: "Outline", Icon: IconListTree },
   suggest: { label: "Suggest", Icon: IconSparkles },
   edit: { label: "Edit", Icon: IconPencil },
   critique: { label: "Critique", Icon: IconNotes },
@@ -913,6 +916,8 @@ const TABS = (Object.entries(TAB_META) as [AiTab, TabMeta][]).map(
  *  so results survive switching tabs and panel toggles. */
 function ActivePanel({ tab }: { tab: AiTab }) {
   switch (tab) {
+    case "outline":
+      return <OutlineSurface />;
     case "suggest":
       return <SuggestTab />;
     case "edit":
@@ -966,14 +971,18 @@ export function AiPanel() {
         <div className="flex w-80 min-w-0 flex-col border-l border-border bg-card">
           <CursorAnchor />
           <div className="min-h-0 flex-1">
-            {hydrated && !aiModel ? <NoModelNotice /> : <ActivePanel tab={tab} />}
+            {tab === "outline" || !(hydrated && !aiModel) ? (
+              <ActivePanel tab={tab} />
+            ) : (
+              <NoModelNotice />
+            )}
           </div>
         </div>
       )}
       <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-card py-2">
         {TABS.map(({ id, label, Icon }) => {
           const active = id === tab && !collapsed;
-          return (
+          const button = (
             <Tooltip key={id}>
               <TooltipTrigger asChild>
                 <Button
@@ -992,6 +1001,13 @@ export function AiPanel() {
               <TooltipContent side="left">{label}</TooltipContent>
             </Tooltip>
           );
+          // Divide the Outline surface from the AI tools.
+          return id === "suggest"
+            ? [
+                <div key="sep" className="my-1 h-px w-5 bg-border" />,
+                button,
+              ]
+            : button;
         })}
       </nav>
     </aside>

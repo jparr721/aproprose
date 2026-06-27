@@ -18,6 +18,7 @@ import { tauriStateStorage } from "@/lib/storage";
 import { useProjectStore } from "@/stores/project-store";
 
 export type AiTab =
+  | "outline"
   | "suggest"
   | "edit"
   | "critique"

@@ -9,10 +9,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { InlineEdit } from "@/components/app/outline/inline-edit";
+import { BeatTypeBadge } from "@/components/app/outline/beat-type-badge";
+import { BEAT_TYPES, BEAT_TYPE_META } from "@/lib/outline/beat-types";
 import { beatForChapter, unplacedChapters } from "@/lib/outline/model";
 import { cn } from "@/lib/utils";
-import type { Beat } from "@/lib/types";
+import type { Beat, BeatType } from "@/lib/types";
 
 export function BeatCard({ beat }: { beat: Beat }) {
   const project = useProjectStore((s) => s.project);
@@ -21,6 +30,7 @@ export function BeatCard({ beat }: { beat: Beat }) {
   const editBeat = useProjectStore((s) => s.editBeat);
   const removeBeat = useProjectStore((s) => s.removeBeat);
   const moveBeat = useProjectStore((s) => s.moveBeat);
+  const setBeatType = useProjectStore((s) => s.setBeatType);
   const assignChapterToBeat = useProjectStore((s) => s.assignChapterToBeat);
   const unassignChapterFromBeat = useProjectStore((s) => s.unassignChapterFromBeat);
   const selectChapter = useProjectStore((s) => s.selectChapter);
@@ -38,6 +48,7 @@ export function BeatCard({ beat }: { beat: Beat }) {
       )}
     >
       <div className="mb-1 flex items-center gap-1.5">
+        <BeatTypeBadge type={beat.type} />
         <InlineEdit
           value={beat.title}
           onCommit={(title) => editBeat(beat.id, { title })}
@@ -45,8 +56,23 @@ export function BeatCard({ beat }: { beat: Beat }) {
           multiline={false}
           className="text-xs font-semibold text-foreground"
         />
+        <Select
+          value={beat.type}
+          onValueChange={(v) => setBeatType(beat.id, v as BeatType)}
+        >
+          <SelectTrigger size="sm" className="ml-auto" aria-label="Beat type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {BEAT_TYPES.map((t) => (
+              <SelectItem key={t} value={t}>
+                {BEAT_TYPE_META[t].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <DropdownMenu>
-          <DropdownMenuTrigger className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground">
+          <DropdownMenuTrigger className="rounded p-0.5 text-muted-foreground hover:text-foreground">
             <IconDots className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

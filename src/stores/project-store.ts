@@ -10,14 +10,18 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import type {
   ActKind,
+  Beat,
+  BeatType,
   Block,
   BlockType,
   ChapterRef,
   ChapterStatus,
   Character,
   CompileError,
+  ContinuityFlag,
   LoreEntry,
   NovelMetadata,
+  Outline,
   ProjectInfo,
   ProjectMeta,
   RecentProject,
@@ -52,6 +56,8 @@ import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import {
   addBeat as addBeatModel,
+  addCharacterToBeat as addCharacterToBeatModel,
+  addLoreToBeat as addLoreToBeatModel,
   assignChapter,
   defaultOutline,
   editActSummary,
@@ -59,9 +65,15 @@ import {
   editBeat as editBeatModel,
   editPremise,
   moveBeat as moveBeatModel,
+  moveBeatTo as moveBeatToModel,
   removeBeat as removeBeatModel,
+  removeCharacterFromBeat as removeCharacterFromBeatModel,
+  removeLoreFromBeat as removeLoreFromBeatModel,
+  setBeatContinuityFlags as setBeatContinuityFlagsModel,
+  setBeatType as setBeatTypeModel,
   unassignChapter,
 } from "@/lib/outline/model";
+import { beatTypeFromTitle } from "@/lib/outline/beat-types";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -86,12 +98,32 @@ const EMPTY_META: ProjectMeta = {
 
 /** Backfill any fields an older meta.json predates, so an open never crashes on a
  *  meta blob written before outlines existed. */
-function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
+function backfillBeat(beat: Beat): Beat {
+  return {
+    ...beat,
+    type: beat.type ?? beatTypeFromTitle(beat.title),
+    characterIds: beat.characterIds ?? [],
+    loreIds: beat.loreIds ?? [],
+    continuityFlags: beat.continuityFlags ?? [],
+  };
+}
+
+function normalizeOutline(outline: Outline): Outline {
+  return {
+    ...outline,
+    acts: outline.acts.map((act) => ({
+      ...act,
+      beats: act.beats.map(backfillBeat),
+    })) as Outline["acts"],
+  };
+}
+
+export function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
   return {
     characters: m?.characters ?? [],
     lore: m?.lore ?? [],
     statuses: m?.statuses ?? {},
-    outline: m?.outline ?? defaultOutline(),
+    outline: normalizeOutline(m?.outline ?? defaultOutline()),
     chapterBeats: m?.chapterBeats ?? {},
   };
 }
@@ -248,6 +280,13 @@ interface ProjectState {
   setActTitle: (act: ActKind, title: string) => void;
   assignChapterToBeat: (chapterId: string, beatId: string) => void;
   unassignChapterFromBeat: (chapterId: string) => void;
+  setBeatType: (beatId: string, type: BeatType) => void;
+  addCharacterToBeat: (beatId: string, characterId: string) => void;
+  removeCharacterFromBeat: (beatId: string, characterId: string) => void;
+  addLoreToBeat: (beatId: string, loreId: string) => void;
+  removeLoreFromBeat: (beatId: string, loreId: string) => void;
+  setBeatContinuityFlags: (beatId: string, flags: ContinuityFlag[]) => void;
+  moveBeatTo: (beatId: string, toActKind: ActKind, toIndex: number) => void;
   setChapterBeat: (chapterId: string, patch: { goal?: string; conflict?: string; turn?: string }) => void;
 }
 
@@ -1144,6 +1183,70 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     unassignChapterFromBeat: (chapterId) =>
       set((s) => {
         const meta = { ...s.meta, outline: unassignChapter(s.meta.outline, chapterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setBeatType: (beatId, type) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: setBeatTypeModel(s.meta.outline, beatId, type) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addCharacterToBeat: (beatId, characterId) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          outline: addCharacterToBeatModel(s.meta.outline, beatId, characterId),
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeCharacterFromBeat: (beatId, characterId) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          outline: removeCharacterFromBeatModel(s.meta.outline, beatId, characterId),
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addLoreToBeat: (beatId, loreId) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: addLoreToBeatModel(s.meta.outline, beatId, loreId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeLoreFromBeat: (beatId, loreId) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          outline: removeLoreFromBeatModel(s.meta.outline, beatId, loreId),
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setBeatContinuityFlags: (beatId, flags) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          outline: setBeatContinuityFlagsModel(s.meta.outline, beatId, flags),
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    moveBeatTo: (beatId, toActKind, toIndex) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          outline: moveBeatToModel(s.meta.outline, beatId, toActKind, toIndex),
+        };
         persistMeta(meta);
         return { meta };
       }),

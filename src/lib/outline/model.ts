@@ -293,7 +293,7 @@ export function setBeatContinuityFlags(
   flags: ContinuityFlag[],
 ): Outline {
   return mapBeats(outline, (beat) =>
-    beat.id === beatId ? { ...beat, continuityFlags: flags } : beat,
+    beat.id === beatId ? { ...beat, continuityFlags: [...flags] } : beat,
   );
 }
 

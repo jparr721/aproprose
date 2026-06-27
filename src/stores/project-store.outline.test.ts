@@ -18,8 +18,9 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import { useProjectStore } from "@/stores/project-store";
+import { useProjectStore, normalizeMeta } from "@/stores/project-store";
 import { defaultOutline, beatForChapter } from "@/lib/outline/model";
+import { beatTypeFromTitle } from "@/lib/outline/beat-types";
 import { deleteChapterCmd } from "@/lib/tauri";
 import type { ChapterRef, ProjectInfo } from "@/lib/types";
 
@@ -88,6 +89,57 @@ describe("project-store outline actions", () => {
     const beats = useProjectStore.getState().meta.outline.acts[0].beats;
     expect(beats[1].id).toBe(id);
   });
+
+  it("setBeatType updates a beat's type", () => {
+    const id = useProjectStore.getState().meta.outline.acts[0].beats[0].id;
+    useProjectStore.getState().setBeatType(id, "climax");
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].type,
+    ).toBe("climax");
+  });
+
+  it("addCharacterToBeat is idempotent and removeCharacterFromBeat clears it", () => {
+    const id = useProjectStore.getState().meta.outline.acts[0].beats[0].id;
+    useProjectStore.getState().addCharacterToBeat(id, "ch1");
+    useProjectStore.getState().addCharacterToBeat(id, "ch1");
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].characterIds,
+    ).toEqual(["ch1"]);
+    useProjectStore.getState().removeCharacterFromBeat(id, "ch1");
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].characterIds,
+    ).toEqual([]);
+  });
+
+  it("addLoreToBeat / removeLoreFromBeat round-trips", () => {
+    const id = useProjectStore.getState().meta.outline.acts[0].beats[0].id;
+    useProjectStore.getState().addLoreToBeat(id, "l1");
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].loreIds,
+    ).toEqual(["l1"]);
+    useProjectStore.getState().removeLoreFromBeat(id, "l1");
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].loreIds,
+    ).toEqual([]);
+  });
+
+  it("setBeatContinuityFlags replaces the flags", () => {
+    const id = useProjectStore.getState().meta.outline.acts[0].beats[0].id;
+    useProjectStore.getState().setBeatContinuityFlags(id, [
+      { sev: "flag", tag: "Cast", text: "Two characters in two places." },
+    ]);
+    expect(
+      useProjectStore.getState().meta.outline.acts[0].beats[0].continuityFlags,
+    ).toHaveLength(1);
+  });
+
+  it("moveBeatTo moves a beat across acts", () => {
+    const id = useProjectStore.getState().meta.outline.acts[0].beats[0].id;
+    useProjectStore.getState().moveBeatTo(id, "resolution", 0);
+    const outline = useProjectStore.getState().meta.outline;
+    expect(outline.acts[0].beats.find((b) => b.id === id)).toBeUndefined();
+    expect(outline.acts[2].beats[0].id).toBe(id);
+  });
 });
 
 describe("deleteChapter cleanup", () => {
@@ -103,5 +155,54 @@ describe("deleteChapter cleanup", () => {
     const meta = useProjectStore.getState().meta;
     expect(beatForChapter(meta.outline, "c2")).toBeNull();
     expect(meta.chapterBeats.c2).toBeUndefined();
+  });
+});
+
+describe("normalizeMeta backfill", () => {
+  it("backfills the 4 new fields on every beat of a legacy meta", () => {
+    // A legacy meta: every beat lacks type/characterIds/loreIds/continuityFlags.
+    const legacy = defaultOutline();
+    const stripped = {
+      ...legacy,
+      acts: legacy.acts.map((a) => ({
+        ...a,
+        beats: a.beats.map((b) => ({
+          id: b.id,
+          title: b.title,
+          intention: b.intention,
+          chapterIds: b.chapterIds,
+        })),
+      })),
+    };
+    const normalized = normalizeMeta({
+      characters: [],
+      lore: [],
+      statuses: {},
+      outline: stripped as typeof legacy,
+      chapterBeats: {},
+    });
+    for (const act of normalized.outline.acts) {
+      for (const beat of act.beats) {
+        expect(beat.type).toBe(beatTypeFromTitle(beat.title));
+        expect(beat.characterIds).toEqual([]);
+        expect(beat.loreIds).toEqual([]);
+        expect(beat.continuityFlags).toEqual([]);
+      }
+    }
+  });
+
+  it("preserves existing beat fields and does not drop data", () => {
+    const meta = normalizeMeta({
+      characters: [{ id: "c1", name: "Ada", color: "oklch(0 0 0)", role: "" }],
+      lore: [],
+      statuses: { ch1: "draft" },
+      outline: defaultOutline(),
+      chapterBeats: { ch1: { goal: "g", conflict: "c", turn: "t" } },
+    });
+    expect(meta.characters).toHaveLength(1);
+    expect(meta.statuses.ch1).toBe("draft");
+    expect(meta.chapterBeats.ch1.goal).toBe("g");
+    const first = meta.outline.acts[0].beats[0];
+    expect(first.type).toBe("plot-point");
   });
 });

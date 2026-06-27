@@ -56,22 +56,22 @@ export function SettingsDialog() {
             <TabsTrigger value={SETTINGS_TABS.ABOUT}>About</TabsTrigger>
           </TabsList>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.APPEARANCE}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><AppearanceTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><AppearanceTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.AI}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><AiTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><AiTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.BACKUP}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><BackupTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><BackupTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.KEYBOARD}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><KeyboardTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><KeyboardTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.STATS}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><StatsTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><StatsTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.ABOUT}>
-            <ScrollArea className="h-full pr-4"><div className="p-1"><AboutTab /></div></ScrollArea>
+            <ScrollArea className="h-full"><div className="p-1"><AboutTab /></div></ScrollArea>
           </TabsContent>
         </Tabs>
       </DialogContent>

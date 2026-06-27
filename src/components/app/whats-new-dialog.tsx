@@ -87,12 +87,12 @@ export function WhatsNewDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[80vh] sm:max-w-2xl">
+      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>What's New</DialogTitle>
           <DialogDescription>Recent changes to aproprose.</DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh] pr-3">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-6">
             {incoming ? <IncomingSection incoming={incoming} /> : null}
             {CHANGELOG.map((e: ChangelogEntry) => (

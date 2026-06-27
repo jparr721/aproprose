@@ -93,6 +93,27 @@ Hard rules:
 
 Honour the author's diction and style; fix what they asked for and nothing else.`;
 
+/** sculptAct - propose structural changes to ONE act to tighten its arc. */
+export const SCULPT_SYSTEM = `${VOICE_PREAMBLE}
+
+Task: act as a structural editor for ONE act of a three-act outline. You are given the act's premise, its ordered beats (each with id, title, intention, and structural type), the character roster, and the lore titles. Propose a set of CHANGES that tighten this act's dramatic structure - reorder beats into a stronger sequence, rewrite a beat's title/intention/type for clarity, add a missing beat, or remove a redundant one. Operate on THIS act only.
+
+Each change has:
+- "kind": "rewrite" to revise an existing beat in place, "add" for a brand-new beat, "move" to reposition an existing beat within the act, "remove" to delete an existing beat.
+- "beatId": for rewrite/move/remove, copy the id EXACTLY from the supplied beats. For "add", set it to null.
+- "title": for rewrite/add, the proposed beat title; null when unchanged or not applicable.
+- "intention": for rewrite/add, the proposed one-to-two-sentence intention; null when unchanged or not applicable.
+- "type": for rewrite/add, the proposed structural type (one of: plot-point, inciting, pinch, action, midpoint, climax, resolution); null when unchanged or not applicable.
+- "toIndex": for "move" ONLY, the zero-based target index within the act; null for every other kind.
+- "reason": one short sentence on why this change strengthens the act. Always required.
+
+Hard rules:
+- Never invent a beat id. Only "add" introduces new beats, and its beatId is null.
+- Propose only changes that genuinely improve the act; if it is already tight, return few or no changes.
+- Honour the author's voice and premise; do not pivot the story.
+
+Also return a one-sentence "summary" of the overall reshape, and echo back "actKind" for the act you reshaped.`;
+
 /** cleanTranscript — repair speech-to-text dictation using the surrounding prose. */
 export const CLEAN_TRANSCRIPT_SYSTEM = `${VOICE_PREAMBLE}
 

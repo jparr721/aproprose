@@ -18,12 +18,16 @@ import { generateText, Output, streamText } from "ai";
 import { z } from "zod";
 
 import type {
+  ActKind,
+  BeatType,
   BlockEdit,
   BlockType,
   CastResult,
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
+  SculptChange,
+  SculptProposal,
   SuggestResult,
 } from "@/lib/types";
 import { getModel } from "@/lib/ai/model";
@@ -34,6 +38,7 @@ import {
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
   EDIT_SYSTEM,
+  SCULPT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
 
@@ -358,6 +363,133 @@ export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
     prompt: buildEditGrounding(req),
   });
   return sanitizeEdits(output.edits, req.blocks);
+}
+
+// ── Sculpt (act-level AI write path) ──────────────────────────────────────────
+// sculptAct proposes structural changes to ONE act. Unlike editBlocks (which
+// only rewrites in place), it may also add/move/remove beats. The proposal is
+// reviewed behind a gate in the board before any of it is applied.
+
+/** What the board hands `sculptAct`: one act's structure + the project roster. */
+export interface SculptContext {
+  actKind: ActKind;
+  premise: string;
+  /** The act's beats in order, by id, for the model to reference and reorder. */
+  beats: { id: string; title: string; intention: string; type: BeatType }[];
+  /** Character roster (names only) so renames/adds can reference the cast. */
+  characters: { name: string }[];
+  /** Lore titles touched by this story, for grounding. */
+  lore: { title: string }[];
+}
+
+// OpenAI strict structured output requires every property in `required`; fields
+// that may be absent are `.nullable()` (never `.optional()`) and every field is
+// `.describe()`d. `kind`/`type` are enums so the model can't drift the contract.
+const sculptChangeSchema = z.object({
+  kind: z
+    .enum(["rewrite", "add", "move", "remove"])
+    .describe("rewrite revises a beat in place, add inserts a new beat, move repositions, remove deletes"),
+  beatId: z
+    .string()
+    .nullable()
+    .describe("for rewrite/move/remove: an id copied exactly from the supplied beats; null for add"),
+  title: z
+    .string()
+    .nullable()
+    .describe("proposed beat title for rewrite/add; null otherwise"),
+  intention: z
+    .string()
+    .nullable()
+    .describe("proposed one-to-two sentence intention for rewrite/add; null otherwise"),
+  type: z
+    .enum(["plot-point", "inciting", "pinch", "action", "midpoint", "climax", "resolution"])
+    .nullable()
+    .describe("proposed structural type for rewrite/add; null otherwise"),
+  toIndex: z
+    .number()
+    .int()
+    .nullable()
+    .describe("for move ONLY: zero-based target index within the act; null otherwise"),
+  reason: z.string().describe("one short sentence on why this change strengthens the act"),
+});
+
+const sculptProposalSchema = z.object({
+  actKind: z
+    .enum(["setup", "confrontation", "resolution"])
+    .describe("the act being reshaped, echoed back from context"),
+  summary: z.string().describe("one sentence describing the overall reshape"),
+  changes: z
+    .array(sculptChangeSchema)
+    .describe("the structural changes to apply; few or none if the act is already tight"),
+});
+
+/** Render the sculpt grounding: premise, the act's ordered beats, cast, lore. */
+function buildSculptGrounding(ctx: SculptContext): string {
+  const parts: string[] = [];
+  parts.push(`ACT: ${ctx.actKind}`);
+  if (ctx.premise.trim()) parts.push(`PREMISE: ${ctx.premise.trim()}`);
+  if (ctx.characters.length > 0) {
+    parts.push(`KNOWN CAST:\n${ctx.characters.map((c) => `- ${c.name}`).join("\n")}`);
+  }
+  if (ctx.lore.length > 0) {
+    parts.push(`LORE:\n${ctx.lore.map((l) => `- ${l.title}`).join("\n")}`);
+  }
+  const beats = ctx.beats
+    .map((b, i) => `[${i}] (${b.id}) <${b.type}> ${b.title}: ${b.intention}`)
+    .join("\n");
+  parts.push(`BEATS IN THIS ACT (in order; reorder/rewrite/add/remove these):\n${beats}`);
+  return parts.join("\n\n");
+}
+
+/**
+ * Drop changes the board can't safely apply: rewrite/move/remove whose beatId is
+ * not one of `beatIds`, a `move` with no `toIndex`, and a `rewrite` that proposes
+ * no title, intention, or type (a no-op). Pure: returns a new proposal.
+ */
+export function sanitizeSculpt(
+  proposal: SculptProposal,
+  beatIds: string[],
+): SculptProposal {
+  const known = new Set(beatIds);
+  const changes = proposal.changes.filter((c: SculptChange) => {
+    switch (c.kind) {
+      case "add":
+        return true;
+      case "rewrite":
+        return (
+          c.beatId !== null &&
+          known.has(c.beatId) &&
+          (c.title !== null || c.intention !== null || c.type !== null)
+        );
+      case "move":
+        return c.beatId !== null && known.has(c.beatId) && c.toIndex !== null;
+      case "remove":
+        return c.beatId !== null && known.has(c.beatId);
+    }
+  });
+  return { ...proposal, changes };
+}
+
+/**
+ * Propose structural changes to ONE act. Returns a validated, sanitized proposal
+ * (unknown-id and no-op changes dropped) the board reviews behind its gate. With
+ * no beats and an empty premise there is nothing to reshape, so we skip the call.
+ */
+export async function sculptAct(ctx: SculptContext): Promise<SculptProposal> {
+  if (ctx.beats.length === 0) {
+    return { actKind: ctx.actKind, summary: "", changes: [] };
+  }
+  const model = await getModel();
+  const { output } = await generateText({
+    model,
+    output: Output.object({ schema: sculptProposalSchema }),
+    system: SCULPT_SYSTEM,
+    prompt: buildSculptGrounding(ctx),
+  });
+  return sanitizeSculpt(
+    { actKind: output.actKind, summary: output.summary, changes: output.changes },
+    ctx.beats.map((b) => b.id),
+  );
 }
 
 // ── Streaming + freeform operations ─────────────────────────────────────────

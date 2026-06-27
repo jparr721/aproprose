@@ -342,10 +342,13 @@ function BlockImpl({
   dictation: { supported: boolean; listening: boolean; toggle: () => void };
 }) {
   const selected = useProjectStore((s) => s.selectedId === block.id);
+  const inMultiSelection = useProjectStore((s) => s.selectedIds.includes(block.id));
+  const multiActive = useProjectStore((s) => s.selectedIds.length > 0);
   const storeEditing = useProjectStore((s) => s.editing);
   const editCaret = useProjectStore((s) => s.editCaret);
   const characters = useProjectStore((s) => s.meta.characters);
   const select = useProjectStore((s) => s.select);
+  const toggleSelection = useProjectStore((s) => s.toggleSelection);
   const beginEdit = useProjectStore((s) => s.beginEdit);
   const moveBlock = useProjectStore((s) => s.moveBlock);
   const deleteBlock = useProjectStore((s) => s.deleteBlock);
@@ -374,6 +377,10 @@ function BlockImpl({
   const editing = selected && storeEditing;
   // The one-shot caret hint only applies to the block currently in edit mode.
   const caret = editing && editCaret ? editCaret : undefined;
+  // The active block plus every Cmd/Ctrl-clicked member of the multi-selection
+  // get the selected highlight; only the active block (`selected`) shows the
+  // action row and can enter edit mode.
+  const highlighted = selected || inMultiSelection;
   const isProse = block.type === "narration" || block.type === "dialogue";
   const cardChrome = blockStyle === "cards" && isProse;
 
@@ -425,14 +432,20 @@ function BlockImpl({
         <div
           ref={setNodeRef}
           data-block-id={block.id}
-          // First left press highlights the block (nav mode, prose stays). A
-          // second press on the already-selected block enters edit mode, the
-          // mouseup landing the caret at the click point (beginEdit passes no
-          // caret hint). Right press must NOT select, or swapping prose for
-          // textareas drops the highlight the user is trying to copy.
+          // Cmd/Ctrl + left press toggles the block in the multi-selection (never
+          // edits). A plain left press: while a multi-selection is active it
+          // collapses to just this block; otherwise the first press highlights
+          // (nav mode, prose stays) and a second press on the already-selected
+          // block enters edit mode, the mouseup landing the caret at the click
+          // point (beginEdit passes no caret hint). Right press must NOT select,
+          // or swapping prose for textareas drops the highlight being copied.
           onMouseDown={(e) => {
             if (e.button !== 0) return;
-            if (!selected) select(block.id);
+            if (e.metaKey || e.ctrlKey) {
+              toggleSelection(block.id);
+              return;
+            }
+            if (multiActive || !selected) select(block.id);
             else if (!storeEditing) beginEdit();
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
@@ -441,11 +454,11 @@ function BlockImpl({
           style={{ "--dnd-transform": CSS.Transform.toString(transform) } as CSSProperties}
           className={cn(
             "group relative flex gap-1.5 rounded-lg border border-transparent py-1.5 pl-1.5 pr-2 transition-colors [transform:var(--dnd-transform,none)]",
-            selected
+            highlighted
               ? "border-select-edge bg-card"
               : "hover:bg-muted/50",
             cardChrome && "border-border bg-card px-3 py-3",
-            cardChrome && selected && "border-select-edge",
+            cardChrome && highlighted && "border-select-edge",
             isDragging && "z-10 opacity-90 shadow-lg",
           )}
         >

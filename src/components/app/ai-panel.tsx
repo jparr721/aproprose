@@ -590,13 +590,15 @@ function ScopeToggle({
   scope,
   onChange,
   disabled,
+  blockLabel,
 }: {
   scope: "block" | "chapter";
   onChange: (s: "block" | "chapter") => void;
   disabled?: boolean;
+  blockLabel: string;
 }) {
   const opts: { id: "block" | "chapter"; label: string }[] = [
-    { id: "block", label: "This block" },
+    { id: "block", label: blockLabel },
     { id: "chapter", label: "Whole chapter" },
   ];
   return (
@@ -619,6 +621,7 @@ function ScopeToggle({
 
 function EditTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
+  const selectedIds = useProjectStore((s) => s.selectedIds);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
@@ -626,8 +629,13 @@ function EditTab() {
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
+  // Identity of the block scope: the multi-selection set when active, else the
+  // single selected block. Sorted so the key tracks set membership, not click
+  // order, matching buildEditRequest's order-independent target list.
+  const blockKey =
+    selectedIds.length > 0 ? [...selectedIds].sort().join(",") : selectedId ?? "";
   const cacheKey = `edit:${activeChapterId ?? ""}:${scope}:${
-    scope === "block" ? selectedId ?? "" : ""
+    scope === "block" ? blockKey : ""
   }`;
   const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
     (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
@@ -644,6 +652,12 @@ function EditTab() {
 
   // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the call.
   const targetCount = buildEditRequest(scope, "").blocks.length;
+  // The block-scope button names the editable targets it will act on: "This
+  // block" for one, "These N blocks" for a multi-selection. Reuse targetCount
+  // under block scope rather than recomputing the same request.
+  const blockTargetCount =
+    scope === "block" ? targetCount : buildEditRequest("block", "").blocks.length;
+  const blockLabel = blockTargetCount > 1 ? `These ${blockTargetCount} blocks` : "This block";
 
   // Remove one edit from the cached set, reading the LATEST cached value (not the
   // render-time `edits` closure) so two rapid accept/reject clicks in the same
@@ -739,7 +753,7 @@ function EditTab() {
           if (targetCount === 0) return; // nothing eligible in scope; skip the model call
           run(t);
         }}
-        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} />}
+        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} blockLabel={blockLabel} />}
       />
     </div>
   );

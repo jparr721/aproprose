@@ -82,6 +82,7 @@ const LOADING_RESET = {
   activeChapterId: null,
   blocks: [],
   selectedId: null,
+  selectedIds: [],
   editing: false,
   editCaret: null,
   chapterDirty: false,
@@ -112,6 +113,13 @@ interface ProjectState {
   blocks: Block[];
   /** The highlighted block, or null. "Selected" means highlighted, not editing. */
   selectedId: string | null;
+  /**
+   * The multi-block selection set (Cmd/Ctrl-click), in selection order. Empty in
+   * the normal single-selection case; populated only when the user has explicitly
+   * multi-selected. When non-empty, `selectedId` is the active member (the most
+   * recently toggled block). Plain selection, deselection, and nav clear it.
+   */
+  selectedIds: string[];
   /**
    * Whether the selected block's textarea has the caret (edit mode). Selection
    * and editing are distinct states: a block can be selected (nav mode) without
@@ -149,6 +157,9 @@ interface ProjectState {
 
   // block selection / editing (the nav vs edit modal model)
   select: (id: string | null) => void;
+  /** Cmd/Ctrl-click: add or remove `id` from the multi-selection set, seeding it
+   *  from the current single selection. Never enters edit mode. */
+  toggleSelection: (id: string) => void;
   /** Enter edit mode on the selected block (no-op if nothing is selected). */
   beginEdit: (caret?: "start") => void;
   /** Leave edit mode but keep the block highlighted (nav mode). */
@@ -295,6 +306,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     activeChapterId: null,
     blocks: [],
     selectedId: null,
+    selectedIds: [],
     editing: false,
     editCaret: null,
     chapterDirty: false,
@@ -361,6 +373,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         activeChapterId: null,
         blocks: [],
         selectedId: null,
+        selectedIds: [],
         editing: false,
         editCaret: null,
         chapterDirty: false,
@@ -385,6 +398,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks,
           // Highlight the last block in nav mode — no caret/autofocus on load.
           selectedId: blocks.length ? blocks[blocks.length - 1].id : null,
+          selectedIds: [],
           editing: false,
           editCaret: null,
           chapterDirty: false,
@@ -480,7 +494,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
-          else set({ activeChapterId: null, blocks: [], selectedId: null, editing: false, editCaret: null });
+          else set({ activeChapterId: null, blocks: [], selectedId: null, selectedIds: [], editing: false, editCaret: null });
         }
       } catch (e) {
         toast.error("Couldn't delete the chapter", { description: String(e) });
@@ -519,20 +533,44 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     cancelMigration: () => set({ needsMigration: null }),
 
     // Selecting always lands in nav mode — highlighted, not editing. Click-to-edit
-    // and `i` promote to edit mode explicitly via beginEdit.
-    select: (id) => set({ selectedId: id, editing: false, editCaret: null }),
+    // and `i` promote to edit mode explicitly via beginEdit. A plain select also
+    // collapses any active multi-selection back to this single block.
+    select: (id) => set({ selectedId: id, selectedIds: [], editing: false, editCaret: null }),
+
+    // Cmd/Ctrl-click toggles a block in/out of the multi-selection. The set is
+    // seeded from the current single selection so the first toggle folds the
+    // already-highlighted block in (Finder-style). The active block follows the
+    // toggle: the clicked block when adding; the last surviving member when the
+    // active block itself is removed (or null once the set empties).
+    toggleSelection: (id) =>
+      set((s) => {
+        const base = s.selectedIds.length > 0
+          ? s.selectedIds
+          : s.selectedId
+            ? [s.selectedId]
+            : [];
+        const has = base.includes(id);
+        const selectedIds = has ? base.filter((x) => x !== id) : [...base, id];
+        const selectedId = has
+          ? id === s.selectedId
+            ? selectedIds[selectedIds.length - 1] ?? null
+            : s.selectedId
+          : id;
+        return { selectedIds, selectedId, editing: false, editCaret: null };
+      }),
 
     beginEdit: (caret) =>
       set((s) => {
         if (!s.selectedId) return {};
         const block = s.blocks.find((b) => b.id === s.selectedId);
         if (!block) return {};
-        return { editing: true, editCaret: caret ?? null };
+        // Editing is single-block: entering edit mode dismisses any multi-selection.
+        return { editing: true, editCaret: caret ?? null, selectedIds: [] };
       }),
 
     stopEdit: () => set({ editing: false, editCaret: null }),
 
-    deselect: () => set({ selectedId: null, editing: false, editCaret: null }),
+    deselect: () => set({ selectedId: null, selectedIds: [], editing: false, editCaret: null }),
 
     moveSelection: (dir) =>
       set((s) => {
@@ -541,7 +579,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (idx < 0) return {};
         const to = idx + dir;
         if (to < 0 || to >= s.blocks.length) return {}; // clamp at the ends, no wrap
-        return { selectedId: s.blocks[to].id, editing: false, editCaret: null };
+        // Arrow-key nav is a single-block move; collapse any multi-selection.
+        return { selectedId: s.blocks[to].id, selectedIds: [], editing: false, editCaret: null };
       }),
 
     // Text edits coalesce: a run of typing in the same block is ONE undo step.
@@ -652,6 +691,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: id,
           // A freshly inserted block is ready to type into, caret at the start.
+          // Entering edit mode dismisses any multi-selection (single-block edit).
+          selectedIds: [],
           editing: true,
           editCaret: "start",
           chapterDirty: true,
@@ -675,6 +716,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           // Splitting happens mid-edit; stay in edit mode on the focused piece.
+          // Editing is single-block, so dismiss any multi-selection.
+          selectedIds: [],
           editing: true,
           editCaret: null,
           chapterDirty: true,
@@ -697,6 +740,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           blocks: next,
           selectedId: plan.focusId,
           // Carving happens mid-edit; stay in edit mode on the carved piece.
+          // Editing is single-block, so dismiss any multi-selection.
+          selectedIds: [],
           editing: true,
           editCaret: null,
           chapterDirty: true,
@@ -710,13 +755,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => {
         const idx = s.blocks.findIndex((b) => b.id === id);
         const blocks = s.blocks.filter((b) => b.id !== id);
+        // Keep the multi-selection in lockstep with the block list: drop the
+        // deleted id so the set never references a block that no longer exists.
+        const selectedIds = s.selectedIds.filter((x) => x !== id);
         const selectedId =
           s.selectedId === id
-            ? (blocks[Math.max(0, idx - 1)]?.id ?? null)
+            ? // Deleting the active block: keep the active pointer on a surviving
+              // member of the set if one remains, else the document neighbour.
+              (selectedIds[selectedIds.length - 1] ?? blocks[Math.max(0, idx - 1)]?.id ?? null)
             : s.selectedId;
         return {
           blocks,
           selectedId,
+          selectedIds,
           // After a delete the neighbour is highlighted in nav mode, not editing.
           editing: false,
           editCaret: null,
@@ -784,7 +835,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           chapterDirty: true,
           lastTextEditId: null,
           // Undo restores the captured selection (above) but always lands in nav
-          // mode — highlighted, not editing.
+          // mode - highlighted, not editing - and single-block, so collapse any
+          // multi-selection (history snapshots only the single selectedId).
+          selectedIds: [],
           editing: false,
           editCaret: null,
         };
@@ -802,7 +855,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           chapterDirty: true,
           lastTextEditId: null,
           // Redo restores the captured selection (above) but always lands in nav
-          // mode — highlighted, not editing.
+          // mode - highlighted, not editing - and single-block, so collapse any
+          // multi-selection (history snapshots only the single selectedId).
+          selectedIds: [],
           editing: false,
           editCaret: null,
         };
@@ -820,22 +875,37 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // Re-parse what we wrote so spans reset and the chapter is clean again.
         const reparsed = parseChapter(source);
         const wordCount = countWords(reparsed);
-        set((s) => ({
-          blocks: reparsed,
-          chapterDirty: false,
-          saving: false,
-          past: [],
-          future: [],
-          lastTextEditId: null,
-          project: s.project
-            ? {
-                ...s.project,
-                chapters: s.project.chapters.map((c) =>
-                  c.id === activeChapterId ? { ...c, wordCount } : c,
-                ),
-              }
-            : s.project,
-        }));
+        set((s) => {
+          // parseChapter re-mints every block id, so map the selection onto the
+          // reparsed blocks by position to keep the user's place (and not strand
+          // the Edit scope on dead ids). Out-of-range maps drop out.
+          const remap = (id: string): string | null => {
+            const i = s.blocks.findIndex((b) => b.id === id);
+            return i >= 0 && i < reparsed.length ? reparsed[i].id : null;
+          };
+          const selectedId = s.selectedId ? remap(s.selectedId) : null;
+          const selectedIds = s.selectedIds
+            .map(remap)
+            .filter((id): id is string => id !== null);
+          return {
+            blocks: reparsed,
+            selectedId,
+            selectedIds,
+            chapterDirty: false,
+            saving: false,
+            past: [],
+            future: [],
+            lastTextEditId: null,
+            project: s.project
+              ? {
+                  ...s.project,
+                  chapters: s.project.chapters.map((c) =>
+                    c.id === activeChapterId ? { ...c, wordCount } : c,
+                  ),
+                }
+              : s.project,
+          };
+        });
       } catch (e) {
         set({ saving: false, error: String(e) });
       }

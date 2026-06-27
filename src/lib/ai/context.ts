@@ -73,22 +73,25 @@ function isEditable(b: Block): boolean {
 }
 
 /**
- * Build the request for `editBlocks`. `"block"` scope targets the selected block
- * (empty when none is selected or it is ineligible); `"chapter"` targets every
- * eligible block. Chapter title + cast are included so revisions keep voice.
+ * Build the request for `editBlocks`. `"block"` scope targets the multi-selection
+ * set when one is active, otherwise the single selected block (empty when nothing
+ * is selected); non-prose members are dropped. `"chapter"` targets every eligible
+ * block. Chapter title + cast are included so revisions keep voice.
  */
 export function buildEditRequest(
   scope: "block" | "chapter",
   instruction: string,
 ): EditRequest {
-  const { project, activeChapterId, blocks, meta, selectedId } =
+  const { project, activeChapterId, blocks, meta, selectedId, selectedIds } =
     useProjectStore.getState();
   const chapter = project?.chapters.find((c) => c.id === activeChapterId);
 
   let targets: Block[];
   if (scope === "block") {
-    const sel = selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
-    targets = sel && isEditable(sel) ? [sel] : [];
+    const ids = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    const idSet = new Set(ids);
+    // Filter `blocks` (not `ids`) so targets stay in document order.
+    targets = blocks.filter((b) => idSet.has(b.id) && isEditable(b));
   } else {
     targets = blocks.filter(isEditable);
   }

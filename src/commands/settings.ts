@@ -28,7 +28,7 @@ export const settingsCommands: Command[] = [
   {
     id: "settings.open",
     group: "Settings",
-    title: "Open settings...",
+    title: "Open settings",
     icon: IconSettings,
     keywords: ["preferences", "tweaks"],
     run: () => useSettingsDialogStore.getState().setOpen(true),

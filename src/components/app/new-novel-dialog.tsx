@@ -82,7 +82,7 @@ export function NewNovelDialog({ trigger }: { trigger: React.ReactNode }) {
               onClick={chooseLocation}
             >
               <IconFolder />
-              <span className="truncate">{location ?? "Choose a folder…"}</span>
+              <span className="truncate">{location ?? "Choose a folder"}</span>
             </Button>
           </div>
         </div>

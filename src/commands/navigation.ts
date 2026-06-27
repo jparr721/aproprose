@@ -16,7 +16,7 @@ export const navigationCommands: Command[] = [
   {
     id: "nav.go-to-chapter",
     group: "Navigation",
-    title: "Go to chapter...",
+    title: "Go to chapter",
     icon: IconBook,
     page: "chapters",
     enabled: () => {
@@ -27,7 +27,7 @@ export const navigationCommands: Command[] = [
   {
     id: "nav.switch-project",
     group: "Navigation",
-    title: "Switch project...",
+    title: "Switch project",
     icon: IconFolders,
     page: "projects",
     enabled: () => useProjectStore.getState().recents.length > 0,
@@ -35,7 +35,7 @@ export const navigationCommands: Command[] = [
   {
     id: "nav.open-project",
     group: "Navigation",
-    title: "Open project...",
+    title: "Open project",
     icon: IconFolderOpen,
     run: () => guard(() => void useProjectStore.getState().openProjectDialog()),
   },

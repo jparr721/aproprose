@@ -23,7 +23,7 @@ For each suggestion:
 - "text" is the continuation prose itself, written in the manuscript's voice and ready to drop into the page. Keep it tight — a sentence or a short beat, not a full scene. Use plain prose (straight quotes, real em dashes); do NOT emit LaTeX.
 - "rationale" is one crisp sentence on why this direction works dramatically — tied to what is actually on the page.
 
-Also return a few short "followups": terse "after this, you could…" nudges (a handful of words each) the author might pursue next.
+Also return a few short "followups": terse "after this, you could" nudges (a handful of words each) the author might pursue next.
 
 If the author included an explicit request ("AUTHOR'S REQUEST"), treat it as the primary brief and shape all three continuations to honour it. Otherwise, use your judgment.`;
 

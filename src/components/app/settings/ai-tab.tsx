@@ -93,14 +93,16 @@ function OpenAiKeyField({
             spellCheck={false}
             className="pr-7 font-mono"
           />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => setShow((s) => !s)}
             title={show ? "Hide key" : "Show key"}
-            className="absolute inset-y-0 right-1.5 grid place-items-center text-muted-foreground transition-colors hover:text-foreground"
+            className="absolute inset-y-0 right-0 text-muted-foreground"
           >
-            {show ? <IconEyeOff className="size-3.5" /> : <IconEye className="size-3.5" />}
-          </button>
+            {show ? <IconEyeOff /> : <IconEye />}
+          </Button>
         </div>
         <Button size="sm" onClick={() => void save()} disabled={!draft.trim() || saving}>
           {saving ? <Spinner /> : null}

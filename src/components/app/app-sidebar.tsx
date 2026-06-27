@@ -134,7 +134,7 @@ export function AppSidebar() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-60 font-sans">
                 <DropdownMenuItem onSelect={() => guard(() => void openDialog())}>
-                  <IconFolderOpen /> Open project…
+                  <IconFolderOpen /> Open project
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={compiling}
@@ -143,7 +143,7 @@ export function AppSidebar() {
                   <IconDeviceFloppy /> Save &amp; build PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
-                  <IconAdjustments /> Project settings…
+                  <IconAdjustments /> Project settings
                 </DropdownMenuItem>
                 {recents.length > 0 ? (
                   <>

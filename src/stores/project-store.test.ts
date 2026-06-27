@@ -22,8 +22,8 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
 }));
 
-import { useProjectStore } from "@/stores/project-store";
-import { compileProject, openProject, readPdf } from "@/lib/tauri";
+import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
+import { compileProject, openProject, readPdf, readTextFile } from "@/lib/tauri";
 import type { Block, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
@@ -39,6 +39,7 @@ beforeEach(() => {
   useProjectStore.setState({
     blocks: [],
     selectedId: null,
+    selectedIds: [],
     editing: false,
     editCaret: null,
     chapterDirty: false,
@@ -519,5 +520,273 @@ describe("compileNow exception path", () => {
     expect(compile.status).toBe("error");
     expect(compile.log).toContain("latexmk not found");
     expect(compile.durationMs).toBe(0);
+  });
+});
+
+describe("toggleSelection (multi-block selection)", () => {
+  const a = mkBlock({ id: "a" });
+  const b = mkBlock({ id: "b" });
+  const c = mkBlock({ id: "c" });
+
+  beforeEach(() => {
+    useProjectStore.setState({ blocks: [a, b, c], selectedId: null, selectedIds: [] });
+  });
+
+  it("seeds the set from nothing: first toggle selects just that block and makes it active", () => {
+    useProjectStore.getState().toggleSelection("b");
+    const { selectedIds, selectedId, editing } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["b"]);
+    expect(selectedId).toBe("b");
+    expect(editing).toBe(false);
+  });
+
+  it("folds the current single selection into the set (Finder-style add)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: [] });
+    useProjectStore.getState().toggleSelection("b");
+    const { selectedIds, selectedId } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["a", "b"]);
+    expect(selectedId).toBe("b");
+  });
+
+  it("adds further blocks to an existing set", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().toggleSelection("c");
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "b", "c"]);
+    expect(useProjectStore.getState().selectedId).toBe("c");
+  });
+
+  it("toggling a block already in the set removes it", () => {
+    useProjectStore.setState({ selectedId: "c", selectedIds: ["a", "b", "c"] });
+    useProjectStore.getState().toggleSelection("b");
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("removing the active block reassigns active to the last surviving member", () => {
+    useProjectStore.setState({ selectedId: "c", selectedIds: ["a", "b", "c"] });
+    useProjectStore.getState().toggleSelection("c");
+    const { selectedIds, selectedId } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["a", "b"]);
+    expect(selectedId).toBe("b");
+  });
+
+  it("removing a non-active block keeps the active block", () => {
+    useProjectStore.setState({ selectedId: "c", selectedIds: ["a", "b", "c"] });
+    useProjectStore.getState().toggleSelection("a");
+    expect(useProjectStore.getState().selectedIds).toEqual(["b", "c"]);
+    expect(useProjectStore.getState().selectedId).toBe("c");
+  });
+
+  it("toggling off the only selected block deselects entirely", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a"] });
+    useProjectStore.getState().toggleSelection("a");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
+  it("a plain select clears the multi-selection", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().select("c");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().selectedId).toBe("c");
+  });
+
+  it("deselect clears the multi-selection", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().deselect();
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
+  it("moveSelection clears the multi-selection (single-block nav)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().moveSelection(1);
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().selectedId).toBe("b");
+  });
+
+  it("beginEdit dismisses the multi-selection (editing is single-block)", () => {
+    useProjectStore.setState({ selectedId: "b", selectedIds: ["a", "b"] });
+    useProjectStore.getState().beginEdit();
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().editing).toBe(true);
+  });
+});
+
+describe("multi-selection stays live across structural edits (selectedIds invariant)", () => {
+  const a = mkBlock({ id: "a", text: "aa" });
+  const b = mkBlock({ id: "b", text: "bb" });
+  const c = mkBlock({ id: "c", text: "cc" });
+
+  beforeEach(() => {
+    useProjectStore.setState({ blocks: [a, b, c], selectedId: "c", selectedIds: ["a", "b", "c"] });
+  });
+
+  it("deleteBlock prunes the removed block from the set (keeps the rest)", () => {
+    useProjectStore.getState().deleteBlock("b");
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("deleting every set member empties the set so the single selection takes over", () => {
+    useProjectStore.setState({ selectedId: "b", selectedIds: ["a", "b"] });
+    useProjectStore.getState().deleteBlock("a");
+    expect(useProjectStore.getState().selectedIds).toEqual(["b"]);
+    useProjectStore.getState().deleteBlock("b"); // removes the active member too
+    const { selectedIds, selectedId } = useProjectStore.getState();
+    expect(selectedIds).toEqual([]);
+    expect(selectedId).toBe("c"); // a live neighbor, not a stale id
+  });
+
+  it("deleting the active member keeps the active pointer inside the surviving set", () => {
+    // 'a' and 'c' selected, 'c' active; 'b' is not in the set.
+    useProjectStore.setState({ selectedId: "c", selectedIds: ["a", "c"] });
+    useProjectStore.getState().deleteBlock("c");
+    const { selectedId, selectedIds } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["a"]);
+    expect(selectedId).toBe("a"); // a surviving member, not the document neighbor "b"
+  });
+
+  it("insertAfter clears the multi-selection (it enters edit mode on a new block)", () => {
+    useProjectStore.getState().insertAfter("a", { type: "narration" });
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().editing).toBe(true);
+  });
+
+  it("splitBlock clears the multi-selection", () => {
+    useProjectStore.getState().splitBlock("a", 1);
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+
+  it("convertSelection clears the multi-selection", () => {
+    useProjectStore.getState().convertSelection("a", 0, 2, "dialogue");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+
+  it("undo collapses the multi-selection to single-block nav", () => {
+    // Seed history with a structural edit, then restore a clean multi-selection.
+    useProjectStore.getState().deleteBlock("c");
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+
+  it("redo collapses the multi-selection to single-block nav", () => {
+    useProjectStore.getState().deleteBlock("c");
+    useProjectStore.getState().undo();
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().redo();
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+
+  // In-place edits and reorders keep every block id, so the set stays valid and
+  // must survive - the AI block-edit happy path (multi-select then apply) and a
+  // reorder within the selection both keep the user's chosen blocks selected.
+  it("applyBlockEdits preserves the multi-selection (the AI block-edit happy path)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().applyBlockEdits([
+      { id: "a", text: "A2" },
+      { id: "c", text: "C2" },
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("moveBlock preserves a live multi-selection (ids unchanged)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().moveBlock("a", 1);
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("reorderBlock preserves a live multi-selection (ids unchanged)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().reorderBlock("a", "c");
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+});
+
+describe("saveChapter reconciles selection across the id-reminting reparse", () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      project: {
+        root: "/tmp/book",
+        name: "Book",
+        mainFile: "main.tex",
+        title: null,
+        author: null,
+        chapters: [{ id: "ch1", title: "One", file: "ch1.tex", label: "1", wordCount: 0 }],
+      } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      blocks: [
+        mkBlock({ id: "x0", type: "narration", text: "Alpha", dirty: true }),
+        mkBlock({ id: "x1", type: "narration", text: "Beta", dirty: true }),
+        mkBlock({ id: "x2", type: "narration", text: "Gamma", dirty: true }),
+      ],
+      selectedId: "x1",
+      selectedIds: ["x0", "x2"],
+      chapterDirty: true,
+    });
+  });
+
+  it("remaps selectedId and selectedIds onto the reparsed blocks by position", async () => {
+    await useProjectStore.getState().saveChapter();
+    const { blocks, selectedId, selectedIds } = useProjectStore.getState();
+    const byId = new Map(blocks.map((b) => [b.id, b]));
+    // parseChapter re-mints every id, so the pre-save ids must be gone.
+    expect(blocks.some((b) => ["x0", "x1", "x2"].includes(b.id))).toBe(false);
+    // The selection now resolves to live blocks at the same positions/content.
+    expect(byId.get(selectedId!)?.text).toBe("Beta");
+    expect(selectedIds.map((id) => byId.get(id)?.text)).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("clears the selection when the reparse changes the block count (positional remap unreliable)", async () => {
+    // A narration containing a blank line reparses into two blocks, so the
+    // positional remap can no longer be trusted to map ids to the same blocks.
+    useProjectStore.setState({
+      blocks: [mkBlock({ id: "x0", type: "narration", text: "Line one\n\nLine two", dirty: true })],
+      selectedId: "x0",
+      selectedIds: ["x0"],
+      chapterDirty: true,
+    });
+    await useProjectStore.getState().saveChapter();
+    const { blocks, selectedId, selectedIds } = useProjectStore.getState();
+    expect(blocks.length).toBe(2); // count diverged
+    expect(selectedId).toBeNull();
+    expect(selectedIds).toEqual([]);
+  });
+});
+
+describe("selectChapter resets the multi-selection across chapters", () => {
+  it("clears a stale multi-selection carried from the previous chapter", async () => {
+    vi.mocked(readTextFile).mockResolvedValueOnce("A fresh narration paragraph.");
+    useProjectStore.setState({
+      project: {
+        root: "/tmp/book",
+        name: "Book",
+        mainFile: "main.tex",
+        title: null,
+        author: null,
+        chapters: [
+          { id: "ch1", title: "One", file: "a.tex", label: "1", wordCount: 0 },
+          { id: "ch2", title: "Two", file: "b.tex", label: "2", wordCount: 0 },
+        ],
+      } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      selectedId: "stale-active",
+      selectedIds: ["stale-1", "stale-2"],
+    });
+    await useProjectStore.getState().selectChapter("ch2");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+});
+
+describe("selectionTargetIds (the block-scope precedence rule)", () => {
+  it("prefers the multi-selection set when one is active", () => {
+    expect(selectionTargetIds(["a", "b"], "a")).toEqual(["a", "b"]);
+  });
+
+  it("falls back to the single selection when the set is empty", () => {
+    expect(selectionTargetIds([], "a")).toEqual(["a"]);
+  });
+
+  it("is empty when nothing is selected", () => {
+    expect(selectionTargetIds([], null)).toEqual([]);
   });
 });

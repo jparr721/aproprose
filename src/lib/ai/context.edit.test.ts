@@ -64,6 +64,25 @@ describe("buildEditRequest", () => {
     expect(buildEditRequest("block", "x").blocks).toEqual([]);
   });
 
+  it("block scope targets the multi-selection set when present, in document order", () => {
+    useProjectStore.setState({ selectedId: "c1", selectedIds: ["c1", "n1", "d1"] });
+    expect(buildEditRequest("block", "x").blocks.map((b) => b.id)).toEqual([
+      "n1",
+      "d1",
+      "c1",
+    ]);
+  });
+
+  it("block scope drops non-editable members of the multi-selection", () => {
+    useProjectStore.setState({ selectedId: "lore1", selectedIds: ["n1", "lore1", "tex1"] });
+    expect(buildEditRequest("block", "x").blocks.map((b) => b.id)).toEqual(["n1"]);
+  });
+
+  it("block scope falls back to the single selection when the set is empty", () => {
+    useProjectStore.setState({ selectedId: "d1", selectedIds: [] });
+    expect(buildEditRequest("block", "x").blocks.map((b) => b.id)).toEqual(["d1"]);
+  });
+
   it("forwards the active chapter title and cast to the request", () => {
     useProjectStore.setState({
       project: { chapters: [{ id: "ch1", title: "The Gate" }] } as unknown as ProjectInfo,

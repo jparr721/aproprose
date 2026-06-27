@@ -1,4 +1,4 @@
-// settings-store.ts — appearance + layout preferences.
+// settings-store.ts - user preferences: appearance, layout, and AI provider/model.
 //
 // One store, one concern (per CLAUDE.md). Persisted to the app config dir via the
 // Tauri-backed storage adapter. The ThemeController subscribes to apply the theme

@@ -1,18 +1,21 @@
-// model.ts - builds the OpenAI provider and resolves the user-selected model.
+// model.ts - resolves the active language model, dispatching on the selected
+// AI provider (`settings-store.aiProvider`). Both families are returned behind
+// the Vercel AI SDK's LanguageModel interface so callers see one shape.
 //
-// ALL AI operations go through the Vercel AI SDK (`ai` + `@ai-sdk/openai`).
-// Two deliberate choices reconcile the SDK with the Tauri secrets rule:
-//
-//   1. The API key is read on the RUST side (`get_ai_config`) from the value the
-//      user saved in Settings, and handed over at runtime - never inlined into
-//      frontend source or the bundle.
-//   2. HTTP egress is routed through Tauri's http plugin `fetch`, not the
-//      webview's global fetch, to bypass webview CORS (OpenAI sends no CORS
-//      headers) uniformly across WebKitGTK / WKWebView / WebView2.
-//
-// The model is NOT hardcoded: it is whatever the user selected in Settings
-// (`settings-store.aiModel`). Until they pick one, `getModel()` throws so AI
-// features cannot run.
+//   - OpenAI (`aiProvider === "openai"`): the Vercel AI SDK (`ai` +
+//     `@ai-sdk/openai`). Two deliberate choices reconcile it with the Tauri
+//     secrets rule: (1) the API key is read on the RUST side (`get_ai_config`)
+//     from the value the user saved in Settings and handed over at runtime,
+//     never inlined into frontend source or the bundle; (2) HTTP egress is
+//     routed through Tauri's http plugin `fetch`, not the webview's global
+//     fetch, to bypass webview CORS (OpenAI sends no CORS headers) uniformly
+//     across WebKitGTK / WKWebView / WebView2. The model is NOT hardcoded; until
+//     the user picks one, `getModel()` throws so AI features cannot run.
+//   - Codex / Claude (`aiProvider === "codex" | "claude"`): the local-CLI
+//     LanguageModelV3 adapter in `cli-provider.ts`. No HTTP - generation runs
+//     through the Rust `cli_generate` command driving the CLI's own
+//     subscription, and no model needs to be selected, so the OpenAI throw does
+//     not apply to this path.
 
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";

@@ -313,6 +313,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     lastTextEditId: null,
 
     init: async () => {
+      await useStatsStore.persist.rehydrate();
       const recents = (await readAppData<RecentProject[]>(RECENTS_KEY)) ?? [];
       set({ recents });
       // Re-open the last project so a refresh / relaunch lands back in the editor.

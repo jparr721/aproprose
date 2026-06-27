@@ -44,6 +44,7 @@ export const useStatsStore = create<StatsState>()(
       name: "writing-stats",
       version: 1,
       storage: createJSONStorage(() => tauriStateStorage),
+      skipHydration: true,
       partialize: ({ baselines, days }) => ({ baselines, days }),
       merge: (persisted, current) => {
         const parsed = WritingStatsSchema.safeParse(persisted);

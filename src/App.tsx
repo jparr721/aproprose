@@ -33,6 +33,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { Editor } from "@/components/app/editor";
+import { OutlinePane } from "@/components/app/outline/outline-pane";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { RightPanelContent, RightPanelRail } from "@/components/app/right-panel";
 import { Welcome } from "@/components/app/welcome";
@@ -41,17 +42,20 @@ import { WhatsNewDialog } from "@/components/app/whats-new-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
+import { cn } from "@/lib/utils";
 import { useRef } from "react";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
+  const outlineOpen = useViewStore((s) => s.outlineOpen);
   const collapsed = useViewStore((s) => s.aiCollapsed);
   const rightPanelWidth = useViewStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useViewStore((s) => s.setRightPanelWidth);
 
-  const showPdf = pdfOpen && !focus;
+  const showOutline = outlineOpen && !focus;
+  const showPdf = pdfOpen && !focus && !showOutline;
   const showAi = aiOpen && !focus;
   const showContent = showAi && !collapsed;
 
@@ -64,9 +68,14 @@ function Workspace() {
   // collapsing/expanding the right panel never remounts (and resets) the editor.
   const main = (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1">
+      <div className={cn("min-w-0 flex-1", showOutline && "hidden")}>
         <Editor />
       </div>
+      {showOutline ? (
+        <div className="min-w-0 flex-1">
+          <OutlinePane />
+        </div>
+      ) : null}
       {showPdf ? (
         <div className="min-w-[340px] flex-1">
           <PdfPane />

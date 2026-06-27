@@ -28,6 +28,8 @@ tauri-plugin-http = "2.5.9"
 base64 = "0.22.1"
 tokio = { version = "1.52.3", features = ["process", "time", "rt-multi-thread"] }
 tauri-plugin-os = "2.3.2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tempfile = "3"

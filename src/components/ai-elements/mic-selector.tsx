@@ -360,7 +360,7 @@ export const MicSelectorValue = ({
   if (!currentDevice) {
     return (
       <span className={cn("flex-1 text-left", className)} {...props}>
-        Select microphone...
+        Select microphone
       </span>
     );
   }

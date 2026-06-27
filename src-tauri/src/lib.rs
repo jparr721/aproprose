@@ -350,6 +350,34 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            // macOS only: add a "Check for Updates" item to the native
+            // application menu. It emits `check-for-updates`, which the webview's
+            // UpdateChecker handles. Other platforms keep their default chrome
+            // (the window is frameless, so no in-window menubar).
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItemBuilder};
+                use tauri::Emitter;
+
+                let menu = Menu::default(app.handle())?;
+                let check = MenuItemBuilder::with_id("check-for-updates", "Check for Updates")
+                    .build(app)?;
+
+                let items = menu.items()?;
+                if let Some(app_submenu) = items.first().and_then(|kind| kind.as_submenu()) {
+                    app_submenu.insert(&check, 1)?;
+                }
+
+                app.set_menu(menu)?;
+                app.on_menu_event(move |app_handle, event| {
+                    if event.id() == check.id() {
+                        let _ = app_handle.emit("check-for-updates", ());
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_project,
             create_project,

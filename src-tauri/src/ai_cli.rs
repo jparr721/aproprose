@@ -192,11 +192,12 @@ fn parse_claude_output(stdout: &str, want_schema: bool) -> Result<CliGenerateRes
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
         .map_err(|e| format!("claude returned non-JSON output: {e}"))?;
     if v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) {
-        let msg = v
-            .get("result")
-            .and_then(|r| r.as_str())
-            .unwrap_or("claude reported an error");
-        return Err(msg.to_string());
+        let msg = match v.get("result") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => "claude reported an error (no result field in envelope)".to_string(),
+        };
+        return Err(msg);
     }
     let model = v
         .get("model")
@@ -225,9 +226,9 @@ fn run_cli(
     home: &Path,
     work: &Path,
 ) -> Result<CliGenerateResult, String> {
-    let work_str = work.to_str().ok_or("temp dir path is not valid UTF-8")?;
     match kind {
         CliKind::Codex => {
+            let work_str = work.to_str().ok_or("temp dir path is not valid UTF-8")?;
             let out_file = work.join("out.txt");
             let out_str = out_file.to_str().ok_or("temp path not UTF-8")?;
             let schema_file = match schema {
@@ -378,6 +379,8 @@ mod tests {
             .windows(2)
             .any(|w| w[0] == "-o" && w[1] == "/tmp/w/out.txt"));
         assert!(!a.iter().any(|s| s == "--output-schema"));
+        assert!(a.iter().any(|s| s == "--skip-git-repo-check"));
+        assert!(a.iter().any(|s| s == "--ephemeral"));
     }
 
     #[test]
@@ -437,5 +440,11 @@ mod tests {
     fn parse_claude_error_is_surfaced() {
         let e = parse_claude_output(r#"{"is_error":true,"result":"boom"}"#, false).unwrap_err();
         assert!(e.contains("boom"));
+    }
+
+    #[test]
+    fn parse_claude_missing_structured_output_errors() {
+        let e = parse_claude_output(r#"{"is_error":false,"model":"claude-x"}"#, true).unwrap_err();
+        assert!(e.contains("structured_output"));
     }
 }

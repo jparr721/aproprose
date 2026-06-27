@@ -1,10 +1,15 @@
-// inline-edit.tsx -- a text field that looks like text and commits on blur.
+// inline-edit.tsx -- an outline field backed by shadcn Input/Textarea.
 //
-// Holds a local draft so typing is smooth; commits to the store only when focus
-// leaves and the value actually changed. Used for every editable outline field
-// (premise, act summary/title, beat title/intention, chapter goal/conflict/turn).
+// Holds a local draft so typing is smooth and the store write lands once, on
+// blur, only when the value actually changed. This matters: every outline setter
+// persists to disk eagerly (project-store persistMeta -> writeProjectMeta with no
+// debounce), so a plain controlled input would write to disk on every keystroke.
+// Used for every editable outline field (premise, act summary/title, beat
+// title/intention, chapter goal/conflict/turn).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export function InlineEdit({
@@ -21,7 +26,6 @@ export function InlineEdit({
   className?: string;
 }) {
   const [draft, setDraft] = useState(value);
-  const ref = useRef<HTMLTextAreaElement>(null);
 
   // Re-sync when the upstream value changes (e.g. switching chapters).
   useEffect(() => setDraft(value), [value]);
@@ -31,26 +35,32 @@ export function InlineEdit({
     if (next !== value.trim()) onCommit(next);
   };
 
+  if (multiline) {
+    return (
+      <Textarea
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        className={cn("min-h-0", className)}
+      />
+    );
+  }
+
   return (
-    <textarea
-      ref={ref}
+    <Input
       value={draft}
       placeholder={placeholder}
-      rows={1}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        // Enter commits + blurs for single-line fields; Shift+Enter always newlines.
-        if (e.key === "Enter" && !e.shiftKey && !multiline) {
+        // Enter commits + blurs single-line fields.
+        if (e.key === "Enter") {
           e.preventDefault();
-          ref.current?.blur();
+          e.currentTarget.blur();
         }
       }}
-      className={cn(
-        "w-full resize-none bg-transparent outline-none placeholder:text-faint field-sizing-content",
-        "focus:rounded-md focus:bg-muted/40 focus:px-1.5 focus:py-1 focus:-mx-1.5 focus:-my-1",
-        className,
-      )}
+      className={className}
     />
   );
 }

@@ -202,11 +202,11 @@ export function TopBar() {
             <Button
               variant="outline"
               size="sm"
-              aria-pressed={aiOpen && !focus}
+              aria-pressed={aiOpen && !focus && aiTab !== "outline"}
               onClick={toggleAi}
               className={cn(
                 "font-sans",
-                aiOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
+                aiOpen && !focus && aiTab !== "outline" && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >
               <IconSparkles /> AI

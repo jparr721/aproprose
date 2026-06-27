@@ -50,12 +50,12 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ColorDot } from "@/components/app/color-dot";
-import { SettingsSheet } from "@/components/app/settings-sheet";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { ChapterList } from "@/components/app/chapter-list";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -245,14 +245,12 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SettingsSheet
-              trigger={
-                <SidebarMenuButton>
-                  <IconSettings />
-                  <span>Settings</span>
-                </SidebarMenuButton>
-              }
-            />
+            <SidebarMenuButton
+              onClick={() => useSettingsDialogStore.getState().setOpen(true)}
+            >
+              <IconSettings />
+              <span>Settings</span>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

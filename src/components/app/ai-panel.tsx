@@ -52,6 +52,7 @@ import { ColorAvatar } from "@/components/app/color-dot";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-store";
 import { TypographyMuted } from "@/components/ui/typography";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
@@ -926,13 +927,16 @@ function ActivePanel({ tab }: { tab: AiTab }) {
 
 /** Shown in place of any tab body when no AI model is selected in Settings. */
 function NoModelNotice() {
-  const setSettingsOpen = useViewStore((s) => s.setSettingsOpen);
   return (
     <div className="flex h-full flex-col items-start justify-center gap-3 p-6">
       <TypographyMuted className="font-sans text-sm">
         Pick an AI model in Settings to turn on the assistant.
       </TypographyMuted>
-      <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => useSettingsDialogStore.getState().openWithTab(SETTINGS_TABS.AI)}
+      >
         Open Settings
       </Button>
     </div>

@@ -50,6 +50,7 @@ import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { useKeybinding } from "@/hooks/use-keybinding";
 import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
+import { useChangelogStore } from "@/stores/changelog-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSyncStore } from "@/stores/sync-store";
@@ -511,6 +512,22 @@ export function SettingsSheet({ trigger }: { trigger?: React.ReactNode }) {
             <TypographyMuted className="mt-1 font-sans text-xs">
               Highlight text in a block to convert or isolate the selection.
             </TypographyMuted>
+          </Field>
+
+          <Separator />
+
+          <Field label="About">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start font-sans"
+              onClick={() => {
+                setOpen(false);
+                useChangelogStore.getState().open(null);
+              }}
+            >
+              What's New
+            </Button>
           </Field>
         </div>
       </SheetContent>

@@ -161,6 +161,7 @@ export interface RecentProject {
 export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
 export type BlockStyle = "typo" | "cards";
+export type AiProvider = "openai" | "codex" | "claude";
 
 export interface Settings {
   theme: Theme;
@@ -172,6 +173,8 @@ export interface Settings {
   pdfZoom: number;
   /** OpenAI model id chosen in Settings. Null until the user picks one - no default. */
   aiModel: string | null;
+  /** Active AI provider. OpenAI uses an API key; codex/claude use the local CLI subscription. */
+  aiProvider: AiProvider;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -181,6 +184,7 @@ export const DEFAULT_SETTINGS: Settings = {
   proseSize: 17.5,
   pdfZoom: 1.1,
   aiModel: null,
+  aiProvider: "openai",
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

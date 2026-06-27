@@ -51,7 +51,10 @@ fn home_dir() -> Result<PathBuf, String> {
 
 /// Run `<cli> --version`; `None` when the binary is missing or errors.
 fn cli_version(kind: CliKind) -> Option<String> {
-    let out = Command::new(binary_name(kind)).arg("--version").output().ok()?;
+    let out = Command::new(binary_name(kind))
+        .arg("--version")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -80,7 +83,14 @@ fn parse_codex_model(toml: &str) -> Option<String> {
         if let Some(rest) = line.strip_prefix("model") {
             // Guard against `model_provider = ...` etc: next must be `=` after ws.
             if let Some(rest) = rest.trim_start().strip_prefix('=') {
-                let v = rest.trim().trim_matches('"').trim().to_string();
+                let v = rest.trim();
+                let v = v
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .or_else(|| v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                    .unwrap_or(v)
+                    .trim()
+                    .to_string();
                 if !v.is_empty() {
                     return Some(v);
                 }
@@ -130,6 +140,10 @@ mod tests {
     fn codex_model_parses_and_ignores_model_provider() {
         assert_eq!(
             parse_codex_model("model = \"gpt-5-codex\"\n").as_deref(),
+            Some("gpt-5-codex")
+        );
+        assert_eq!(
+            parse_codex_model("model = 'gpt-5-codex'\n").as_deref(),
             Some("gpt-5-codex")
         );
         assert_eq!(parse_codex_model("model_provider = \"openai\"\n"), None);

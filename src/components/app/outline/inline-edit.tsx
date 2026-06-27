@@ -18,7 +18,7 @@ export function InlineEdit({
   onCommit: (next: string) => void;
   placeholder: string;
   multiline: boolean;
-  className: string;
+  className?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const ref = useRef<HTMLTextAreaElement>(null);

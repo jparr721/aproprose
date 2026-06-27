@@ -62,7 +62,7 @@ function FileRow({
       <button
         type="button"
         onClick={() => void toggle()}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-sans text-xs text-foreground transition-colors hover:bg-muted/50"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs text-foreground transition-colors hover:bg-muted/50"
       >
         <IconChevronRight
           className={cn(
@@ -125,7 +125,7 @@ export function BackupReviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[88vh] w-[92vw] max-w-[1100px] flex-col gap-0 p-0 font-sans sm:max-w-[1100px]">
+      <DialogContent className="flex h-[88vh] w-[92vw] max-w-[1100px] flex-col gap-0 p-0 sm:max-w-[1100px]">
         <DialogHeader className="border-b border-border px-5 py-4">
           <DialogTitle>Review changes</DialogTitle>
           <DialogDescription>

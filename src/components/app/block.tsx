@@ -94,13 +94,13 @@ function TypeChip({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="xs" className="gap-1 font-sans text-muted-foreground">
+          <Button variant="ghost" size="xs" className="gap-1 text-muted-foreground">
             {speaker ? <ColorDot color={speaker.color} /> : null}
             {speaker ? speaker.name : TYPE_LABELS[block.type]}
             <IconChevronDown className="size-2.5 opacity-50" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 font-sans">
+        <DropdownMenuContent align="end" className="w-56">
           {block.type === "dialogue" ? (
             <>
               <DropdownMenuLabel className="text-faint">Speaker</DropdownMenuLabel>
@@ -180,10 +180,10 @@ function BlockBody({
           autoFocus
           caret={caret}
           placeholder="Scene heading"
-          className="text-center font-heading text-2xl font-medium tracking-wide text-foreground"
+          className="text-center font-serif text-2xl font-medium tracking-wide text-foreground"
         />
       ) : (
-        <h2 className="my-2 text-center font-heading text-2xl font-medium tracking-wide text-foreground">
+        <h2 className="my-2 text-center font-serif text-2xl font-medium tracking-wide text-foreground">
           {block.text || <span className="text-faint">Scene heading</span>}
         </h2>
       );
@@ -192,7 +192,7 @@ function BlockBody({
       return (
         <div className="flex flex-col gap-1">
           {speaker ? (
-            <div className="flex items-center gap-1.5 font-sans text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               <ColorDot color={speaker.color} />
               {speaker.name}
             </div>
@@ -245,7 +245,7 @@ function BlockBody({
           )}
         >
           <div className="mb-1.5 flex items-baseline gap-2">
-            <span className="font-sans text-[9.5px] font-semibold uppercase tracking-[0.1em] opacity-70">
+            <span className="text-[9.5px] font-semibold uppercase tracking-[0.1em] opacity-70">
               {isLore ? "Lore · won't render" : "Scratchpad · won't render"}
             </span>
             {isLore && (block.title || editing) ? (
@@ -254,10 +254,10 @@ function BlockBody({
                   value={block.title ?? ""}
                   onChange={(e) => updateBlock(block.id, { title: e.currentTarget.value })}
                   placeholder="Title"
-                  className="border-0 bg-transparent p-0 font-sans text-xs font-semibold outline-none placeholder:opacity-50"
+                  className="border-0 bg-transparent p-0 text-xs font-semibold outline-none placeholder:opacity-50"
                 />
               ) : (
-                <span className="font-sans text-xs font-semibold">{block.title}</span>
+                <span className="text-xs font-semibold">{block.title}</span>
               )
             ) : null}
           </div>
@@ -268,11 +268,11 @@ function BlockBody({
               autoFocus
               caret={caret}
               placeholder={isLore ? "Worldbuilding note" : "Brainstorm, reminders"}
-              className="font-sans text-[13px] leading-[1.55]"
+              className="text-[13px] leading-[1.55]"
               proseBody
             />
           ) : (
-            <p className="font-sans text-[13px] leading-[1.55]">{renderInline(block.text)}</p>
+            <p className="text-[13px] leading-[1.55]">{renderInline(block.text)}</p>
           )}
         </div>
       );
@@ -526,7 +526,7 @@ function BlockImpl({
                   <IconDotsVertical />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 font-sans">
+              <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem onSelect={() => moveBlock(block.id, -1)}>
                   <IconArrowUp /> Move up
                 </DropdownMenuItem>
@@ -546,7 +546,7 @@ function BlockImpl({
           </div>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-52 font-sans">
+      <ContextMenuContent className="w-52">
         <ContextMenuItem disabled={!selText.trim()} onSelect={() => void onCopySelection()}>
           <IconCopy /> Copy
         </ContextMenuItem>

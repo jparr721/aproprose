@@ -31,7 +31,7 @@ export function BuildErrorsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[80vh] w-[92vw] max-w-[860px] flex-col gap-0 p-0 font-sans sm:max-w-[860px]">
+      <DialogContent className="flex h-[80vh] w-[92vw] max-w-[860px] flex-col gap-0 p-0 sm:max-w-[860px]">
         <DialogHeader className="border-b border-border px-5 py-4">
           <DialogTitle>{failed ? "Build failed" : "Build log"}</DialogTitle>
           <DialogDescription>

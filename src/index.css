@@ -211,7 +211,7 @@
   --color-sheet: var(--sheet);
   --color-sheet-ink: var(--sheet-ink);
 
-  /* fonts — serif-forward per project convention; sans only for dense chrome */
+  /* fonts - serif is reserved for headings and manuscript prose; sans is the default for everything else */
   --font-serif: "Noto Serif Variable", "Source Serif Pro", Georgia, serif;
   --font-heading: "Lora Variable", "Newsreader", Georgia, serif;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -233,9 +233,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  /* serif-forward base (CLAUDE.md). Chrome opts into font-sans via utilities. */
+  /* sans base. Headings and manuscript prose opt into serif explicitly via the
+     typography components and the editor prose styles. */
   html {
-    @apply font-serif;
+    @apply font-sans;
   }
 }
 

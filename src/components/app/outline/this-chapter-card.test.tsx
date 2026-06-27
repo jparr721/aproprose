@@ -1,11 +1,9 @@
 // @vitest-environment happy-dom
 //
-// Render-boundary guard: a zustand selector that returns a freshly-built object
-// or array on every call violates useSyncExternalStore's Object.is snapshot
-// contract and sends React into an infinite render loop ("The result of
-// getSnapshot should be cached"). Pure unit tests cannot catch it -- only
-// actually mounting the component does. This test mounts the act spine and
-// fails (throws "Maximum update depth exceeded") if any selector is unstable.
+// Render-boundary + structure guard for the redesigned This-chapter card: it now
+// builds from style-guide primitives (Card + Select) instead of hand-rolled divs.
+// Mounting it proves the selectors are snapshot-stable (no infinite render loop)
+// and that the beat picker renders as a real Select (role="combobox").
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -28,7 +26,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import { ActSection } from "@/components/app/outline/act-section";
+import { ThisChapterCard } from "@/components/app/outline/this-chapter-card";
 import { useProjectStore } from "@/stores/project-store";
 import { defaultOutline } from "@/lib/outline/model";
 import type { ChapterRef, ProjectInfo } from "@/lib/types";
@@ -67,22 +65,23 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("ActSection", () => {
-  it("mounts without an infinite render loop", () => {
-    render(<ActSection actKind="setup" />);
-    expect(screen.getByText("Add beat")).toBeTruthy();
+describe("ThisChapterCard", () => {
+  it("mounts without an infinite render loop and shows the three fields", () => {
+    render(<ThisChapterCard />);
+    expect(screen.getByText("This chapter")).toBeTruthy();
+    expect(screen.getByText("Goal")).toBeTruthy();
+    expect(screen.getByText("Conflict")).toBeTruthy();
+    expect(screen.getByText("Turn")).toBeTruthy();
   });
 
-  it("mounts when no project is loaded (chapters absent)", () => {
-    useProjectStore.setState({ project: null });
-    render(<ActSection actKind="confrontation" />);
-    expect(screen.getByText("Add beat")).toBeTruthy();
+  it("renders the beat assignment as a Select combobox", () => {
+    render(<ThisChapterCard />);
+    expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
-  it("renders the editable act title with no Roman numeral badge", () => {
-    render(<ActSection actKind="setup" />);
-    expect(screen.getByDisplayValue("Setup")).toBeTruthy();
-    // The old design rendered a standalone "I" act badge; it is gone now.
-    expect(screen.queryByText("I")).toBeNull();
+  it("renders nothing when no chapter is active", () => {
+    useProjectStore.setState({ activeChapterId: null });
+    const { container } = render(<ThisChapterCard />);
+    expect(container.firstChild).toBeNull();
   });
 });

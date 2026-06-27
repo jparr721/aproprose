@@ -5,9 +5,8 @@
 import { useState, useEffect } from "react";
 import {
   IconFileTypePdf,
-  IconListTree,
+  IconLayoutSidebarRight,
   IconPlayerPlayFilled,
-  IconSparkles,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -64,7 +63,7 @@ function BuildBadge() {
   );
 
   const base =
-    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-sans text-[11px] text-muted-foreground";
+    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground";
 
   if (status === "error") {
     return (
@@ -109,8 +108,6 @@ export function TopBar() {
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
   const togglePdf = useViewStore((s) => s.togglePdf);
-  const openOutline = useViewStore((s) => s.openAiTab);
-  const aiTab = useViewStore((s) => s.aiTab);
   const buildErrorsOpen = useViewStore((s) => s.buildErrorsOpen);
   const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
 
@@ -126,7 +123,7 @@ export function TopBar() {
     <header
       data-tauri-drag-region
       className={cn(
-        "flex h-11 items-center gap-3 border-b border-border bg-background px-3 font-sans",
+        "flex h-11 items-center gap-3 border-b border-border bg-background px-3",
         IS_MAC && sidebarState === "collapsed" && "pl-20",
       )}
     >
@@ -161,7 +158,6 @@ export function TopBar() {
           size="sm"
           onClick={() => void compileNow()}
           disabled={compiling}
-          className="font-sans"
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile
@@ -179,38 +175,26 @@ export function TopBar() {
               aria-pressed={pdfOpen && !focus}
               onClick={togglePdf}
               className={cn(
-                "font-sans",
                 pdfOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >
               <IconFileTypePdf /> PDF
               <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} />
             </Button>
+            {/* Right-panel toggle, mirroring the left SidebarTrigger (⌘⇧A). */}
             <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={aiOpen && !focus && aiTab === "outline"}
-              onClick={() => openOutline("outline")}
-              className={cn(
-                "font-sans",
-                aiOpen && !focus && aiTab === "outline" &&
-                  "border-accent-ink/30 bg-accent text-accent-foreground",
-              )}
-            >
-              <IconListTree /> Outline
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={aiOpen && !focus && aiTab !== "outline"}
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Toggle assistant panel"
+              aria-pressed={aiOpen && !focus}
               onClick={toggleAi}
               className={cn(
-                "font-sans",
-                aiOpen && !focus && aiTab !== "outline" && "border-accent-ink/30 bg-accent text-accent-foreground",
+                "text-muted-foreground",
+                aiOpen && !focus && "bg-accent text-foreground",
               )}
             >
-              <IconSparkles /> AI
-              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_AI} />
+              <IconLayoutSidebarRight />
+              <span className="sr-only">Toggle assistant panel</span>
             </Button>
           </>
         ) : null}

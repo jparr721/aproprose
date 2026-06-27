@@ -104,7 +104,7 @@ function OpenAiKeyField({
             {show ? <IconEyeOff /> : <IconEye />}
           </Button>
         </div>
-        <Button size="sm" onClick={() => void save()} disabled={!draft.trim() || saving}>
+        <Button onClick={() => void save()} disabled={!draft.trim() || saving}>
           {saving ? <Spinner /> : null}
           Save
         </Button>
@@ -112,8 +112,8 @@ function OpenAiKeyField({
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <TypographyForeground className="flex items-center gap-1.5 font-sans text-xs text-success">
-            <IconCheck className="size-3.5" /> A key is configured.
+          <TypographyForeground className="flex items-center gap-2 font-sans  text-success">
+            <IconCheck className="size-4" /> A key is configured.
           </TypographyForeground>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -122,7 +122,7 @@ function OpenAiKeyField({
                 size="sm"
                 className="text-destructive hover:text-destructive"
               >
-                <IconTrash className="size-3.5" /> Remove
+                <IconTrash className="size-4" /> Remove
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="font-sans">
@@ -143,7 +143,7 @@ function OpenAiKeyField({
           </AlertDialog>
         </div>
       ) : (
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="font-sans ">
           Stored locally in your app config dir - never written into the app bundle or your
           manuscript.
         </TypographyMuted>
@@ -189,7 +189,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
   if (!keyConfigured) {
     return (
       <Field label="AI model">
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="font-sans ">
           Add a key above to choose a model.
         </TypographyMuted>
       </Field>
@@ -215,17 +215,17 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         </SelectContent>
       </Select>
       {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans text-xs">
+        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans ">
           <Spinner /> Loading models
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="font-sans text-xs text-destructive">
+        <TypographyForeground className="font-sans  text-destructive">
           {error}
         </TypographyForeground>
       ) : null}
       {!loading && !error && !aiModel ? (
-        <TypographyMuted className="font-sans text-xs">
+        <TypographyMuted className="font-sans ">
           AI features are off until you pick a model.
         </TypographyMuted>
       ) : null}

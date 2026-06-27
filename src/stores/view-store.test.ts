@@ -58,6 +58,9 @@ describe("view-store buildErrorsOpen", () => {
       ? opts.partialize(useViewStore.getState())
       : {};
     expect(persisted).not.toHaveProperty("buildErrorsOpen");
-    expect(persisted).toEqual({ aiTab: useViewStore.getState().aiTab });
+    expect(persisted).toEqual({
+      aiTab: useViewStore.getState().aiTab,
+      rightPanelWidth: useViewStore.getState().rightPanelWidth,
+    });
   });
 });

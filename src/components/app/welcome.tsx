@@ -29,7 +29,7 @@ export function Welcome() {
   const loading = useProjectStore((s) => s.status === "loading");
 
   return (
-    <div className="flex h-full flex-col bg-background font-sans">
+    <div className="flex h-full flex-col bg-background">
       {/* The window is frameless and there's no top bar until a project opens, so
           provide a drag region + window controls here. macOS keeps its native
           traffic lights (WindowControls renders nothing there); the inset leaves
@@ -66,7 +66,7 @@ export function Welcome() {
                   >
                     <IconBook2 className="size-4 shrink-0 text-faint group-hover:text-accent-ink" />
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate font-heading text-sm text-foreground">
+                      <span className="truncate font-serif text-sm text-foreground">
                         {r.name}
                       </span>
                       <span className="truncate text-xs text-faint">{r.root}</span>
@@ -94,7 +94,7 @@ export function Welcome() {
           <div className="flex w-full flex-col gap-2">
             <NewNovelDialog
               trigger={
-                <Button size="lg" className="w-full font-sans" disabled={loading}>
+                <Button size="lg" className="w-full" disabled={loading}>
                   <IconBookUpload />
                   New novel
                 </Button>
@@ -103,7 +103,7 @@ export function Welcome() {
             <Button
               size="lg"
               variant="outline"
-              className="w-full font-sans"
+              className="w-full"
               onClick={open}
               disabled={loading}
             >

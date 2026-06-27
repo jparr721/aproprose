@@ -33,23 +33,17 @@ export function BeatCard({ beat }: { beat: Beat }) {
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-background p-2.5",
-        active && "border-select-edge bg-select-edge/5",
+        "rounded-md border border-border bg-background p-2.5",
+        active && "ring-1 ring-select-edge",
       )}
     >
       <div className="mb-1 flex items-center gap-1.5">
-        <span
-          className={cn(
-            "size-1.5 rounded-full",
-            active ? "bg-select-edge" : "bg-accent-ink",
-          )}
-        />
         <InlineEdit
           value={beat.title}
           onCommit={(title) => editBeat(beat.id, { title })}
           placeholder="Beat name"
           multiline={false}
-          className="font-sans text-xs font-semibold text-foreground"
+          className="text-xs font-semibold text-foreground"
         />
         <DropdownMenu>
           <DropdownMenuTrigger className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground">
@@ -73,7 +67,7 @@ export function BeatCard({ beat }: { beat: Beat }) {
         onCommit={(intention) => editBeat(beat.id, { intention })}
         placeholder="What must this beat accomplish?"
         multiline
-        className="mb-1.5 font-serif text-[11.5px] leading-snug text-muted-foreground"
+        className="mb-1.5 text-xs leading-snug text-muted-foreground"
       />
       <div className="flex flex-wrap gap-1">
         {beat.chapterIds.map((id) => {
@@ -84,10 +78,10 @@ export function BeatCard({ beat }: { beat: Beat }) {
             <span
               key={id}
               className={cn(
-                "group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-sans text-[10.5px]",
+                "group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
                 here
                   ? "border-accent-ink/30 bg-accent font-medium text-accent-foreground"
-                  : "border-border bg-muted text-foreground/80",
+                  : "border-border bg-muted text-muted-foreground",
               )}
             >
               <button className="hover:underline" onClick={() => void selectChapter(id)}>
@@ -105,7 +99,7 @@ export function BeatCard({ beat }: { beat: Beat }) {
           );
         })}
         <DropdownMenu>
-          <DropdownMenuTrigger className="rounded-full border border-dashed border-border px-2 py-0.5 font-sans text-[10.5px] text-faint hover:text-muted-foreground">
+          <DropdownMenuTrigger className="rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-faint hover:text-muted-foreground">
             + link chapter
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-72 overflow-auto">

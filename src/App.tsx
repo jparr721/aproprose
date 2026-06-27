@@ -27,41 +27,82 @@ import { TopBar } from "@/components/app/top-bar";
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { CommandPalette } from "@/components/app/command-palette";
 import { SettingsDialog } from "@/components/app/settings-dialog";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
-import { AiPanel } from "@/components/app/ai-panel";
+import { RightPanelContent, RightPanelRail } from "@/components/app/right-panel";
 import { Welcome } from "@/components/app/welcome";
 import { UpdateChecker } from "@/components/app/update-checker";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
+import { useRef } from "react";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
+  const collapsed = useViewStore((s) => s.aiCollapsed);
+  const rightPanelWidth = useViewStore((s) => s.rightPanelWidth);
+  const setRightPanelWidth = useViewStore((s) => s.setRightPanelWidth);
 
   const showPdf = pdfOpen && !focus;
   const showAi = aiOpen && !focus;
+  const showContent = showAi && !collapsed;
 
-  return (
-    <div className="flex min-h-0 flex-1">
-      {/* Editor and PDF share the central space; the AI panel is a fixed rail. */}
+  // Track the live px width during a drag in a ref (no re-render); persist it to
+  // the store only on pointer release (the group's onLayoutChanged) so we don't
+  // write to the Tauri-backed store on every frame of the drag.
+  const liveWidth = useRef(rightPanelWidth);
+
+  // The editor + PDF stay mounted in the `main` panel across every AI toggle, so
+  // collapsing/expanding the right panel never remounts (and resets) the editor.
+  const main = (
+    <div className="flex h-full min-w-0">
       <div className="min-w-0 flex-1">
         <Editor />
       </div>
-
       {showPdf ? (
         <div className="min-w-[340px] flex-1">
           <PdfPane />
         </div>
       ) : null}
+    </div>
+  );
 
-      {showAi ? (
-        <div className="shrink-0">
-          <AiPanel />
-        </div>
-      ) : null}
+  return (
+    <div className="flex min-h-0 flex-1">
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="min-w-0 flex-1"
+        onLayoutChanged={() => setRightPanelWidth(Math.round(liveWidth.current))}
+      >
+        <ResizablePanel id="main" minSize={360}>
+          {main}
+        </ResizablePanel>
+        {showContent ? (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel
+              id="right"
+              defaultSize={rightPanelWidth}
+              minSize={320}
+              maxSize={640}
+              groupResizeBehavior="preserve-pixel-size"
+              onResize={(size) => {
+                liveWidth.current = size.inPixels;
+              }}
+            >
+              <RightPanelContent />
+            </ResizablePanel>
+          </>
+        ) : null}
+      </ResizablePanelGroup>
+      {showAi ? <RightPanelRail /> : null}
     </div>
   );
 }

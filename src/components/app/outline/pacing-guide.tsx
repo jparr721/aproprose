@@ -8,8 +8,8 @@
 // a CSS custom property per CLAUDE.md: style={{ "--seg-w": `${n}%` }} + w-[var(--seg-w)].
 
 import { useProjectStore } from "@/stores/project-store";
-import { TypographyEyebrow } from "@/components/ui/typography";
-import { actPacing, ACT_ROMAN, ACT_TARGETS } from "@/lib/outline/model";
+import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
+import { actPacing, ACT_TARGETS } from "@/lib/outline/model";
 import { cn } from "@/lib/utils";
 import type { ActKind } from "@/lib/types";
 
@@ -32,6 +32,8 @@ export function PacingGuide() {
   const anyLinked = ACTS.some((k) => pacing[k].words > 0);
   if (!anyLinked) return null;
 
+  const titleOf = (k: ActKind) => outline.acts.find((a) => a.kind === k)!.title;
+
   // Largest positive deviation from target, for the note.
   const worst = ACTS.map((k) => ({ k, over: pacing[k].actualShare - ACT_TARGETS[k] })).sort(
     (a, b) => b.over - a.over,
@@ -42,11 +44,9 @@ export function PacingGuide() {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <TypographyEyebrow className="text-muted-foreground">Pacing</TypographyEyebrow>
+        <TypographyEyebrow>Pacing</TypographyEyebrow>
         {overruns ? (
-          <span className="font-sans text-[11px] font-medium text-warning">
-            Act {ACT_ROMAN[worst.k]} running long
-          </span>
+          <span className="text-xs font-medium text-warning">{titleOf(worst.k)} running long</span>
         ) : null}
       </div>
       <div className="relative flex h-7 overflow-hidden rounded-lg border border-border bg-muted">
@@ -54,22 +54,22 @@ export function PacingGuide() {
           <div
             key={k}
             className={cn(
-              "flex items-center justify-center font-mono text-[10px] text-foreground/70 w-[var(--seg-w)]",
+              "flex items-center justify-center overflow-hidden px-1 text-xs text-foreground/70 w-[var(--seg-w)]",
               SEG_TINT[k],
             )}
             style={{ "--seg-w": `${pacing[k].actualShare * 100}%` } as SegStyle}
           >
-            {pacing[k].actualShare > 0.06 ? ACT_ROMAN[k] : ""}
+            <span className="truncate">{pacing[k].actualShare > 0.12 ? titleOf(k) : ""}</span>
           </div>
         ))}
         <span className="pointer-events-none absolute inset-y-0 left-1/4 border-l border-dashed border-muted-foreground/70" />
         <span className="pointer-events-none absolute inset-y-0 left-3/4 border-l border-dashed border-muted-foreground/70" />
       </div>
-      <p className="font-sans text-[11px] leading-snug text-muted-foreground">
-        Act {ACT_ROMAN[worst.k]} holds {pct(pacing[worst.k].actualShare)} of your linked words
-        (target {pct(ACT_TARGETS[worst.k])}). Dashed lines are the three-act targets; bars are
-        where your words sit.
-      </p>
+      <TypographyMuted className="text-xs leading-snug">
+        {titleOf(worst.k)} holds {pct(pacing[worst.k].actualShare)} of your linked words (target{" "}
+        {pct(ACT_TARGETS[worst.k])}). Dashed lines are the three-act targets; bars are where your
+        words sit.
+      </TypographyMuted>
     </div>
   );
 }

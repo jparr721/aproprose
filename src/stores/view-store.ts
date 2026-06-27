@@ -7,9 +7,10 @@
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// Only `aiTab` is persisted (to the app config dir, via the Tauri-backed storage
-// adapter) so the panel reopens on the tab the author last used; the rest of the
-// state is ephemeral and the `pending` callback is not serializable.
+// `aiTab` and the right-panel width are persisted (to the app config dir, via the
+// Tauri-backed storage adapter) so the panel reopens on the tab the author last
+// used at the width they set; the rest of the state is ephemeral and the
+// `pending` callback is not serializable.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -42,6 +43,8 @@ interface ViewState {
   suggestFocusTick: number;
   /** True when the panel is collapsed to just the icon rail (ephemeral). */
   aiCollapsed: boolean;
+  /** Persisted px width of the right panel's resizable content column. */
+  rightPanelWidth: number;
 
   toggleAi: () => void;
   togglePdf: () => void;
@@ -49,6 +52,7 @@ interface ViewState {
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
   setAiCollapsed: (v: boolean) => void;
+  setRightPanelWidth: (px: number) => void;
   /** Open + expand the AI panel and switch to `tab` in one step (command palette). */
   openAiTab: (tab: AiTab) => void;
   /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
@@ -73,6 +77,7 @@ export const useViewStore = create<ViewState>()(
       aiTab: "suggest",
       suggestFocusTick: 0,
       aiCollapsed: false,
+      rightPanelWidth: 360,
 
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
@@ -86,6 +91,7 @@ export const useViewStore = create<ViewState>()(
 
       setAiTab: (tab) => set({ aiTab: tab }),
       setAiCollapsed: (v) => set({ aiCollapsed: v }),
+      setRightPanelWidth: (rightPanelWidth) => set({ rightPanelWidth }),
       openAiTab: (tab) =>
         set({ aiOpen: true, focus: false, aiTab: tab, aiCollapsed: false }),
       triggerSuggest: () =>
@@ -111,9 +117,9 @@ export const useViewStore = create<ViewState>()(
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // Only the selected tab persists; visibility toggles, the settings sheet,
+      // The selected tab and the right-panel width persist; visibility toggles
       // and the collapse flag are ephemeral and `pending` is not serializable.
-      partialize: ({ aiTab }) => ({ aiTab }),
+      partialize: ({ aiTab, rightPanelWidth }) => ({ aiTab, rightPanelWidth }),
     },
   ),
 );

@@ -51,7 +51,7 @@ export function buildAiContext(uptoId?: string): AiContext {
       ? last.text.trim().split(/\s+/).slice(-12).join(" ")
       : "";
     cursorSummary = tail
-      ? `Cursor sits just after a ${last.type} block ending: "…${tail}".`
+      ? `Cursor sits just after a ${last.type} block ending: "${tail}".`
       : `Cursor sits just after a ${last.type} block.`;
   }
 

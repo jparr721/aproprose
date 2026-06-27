@@ -267,7 +267,7 @@ function BlockBody({
               onChange={(v) => updateBlockText(block.id, v)}
               autoFocus
               caret={caret}
-              placeholder={isLore ? "Worldbuilding note…" : "Brainstorm, reminders…"}
+              placeholder={isLore ? "Worldbuilding note" : "Brainstorm, reminders"}
               className="font-sans text-[13px] leading-[1.55]"
               proseBody
             />
@@ -301,7 +301,7 @@ function BlockBody({
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
           caret={caret}
-          placeholder="Write…"
+          placeholder="Write"
           className={PROSE}
           proseBody
         />

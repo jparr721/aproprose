@@ -46,6 +46,7 @@ import {
 import { uid } from "@/lib/id";
 import { pathHash } from "@/lib/path-hash";
 import { useSyncStore } from "@/stores/sync-store";
+import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 
@@ -280,6 +281,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     persistRecents(recents);
     void writeAppData(LAST_PROJECT_KEY, root);
     set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
+    useStatsStore
+      .getState()
+      .noteBaseline(
+        project.root,
+        project.chapters.reduce((sum, c) => sum + c.wordCount, 0),
+      );
     void useSyncStore.getState().init(root);
 
     const first = project.chapters[0];
@@ -322,6 +329,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     lastTextEditId: null,
 
     init: async () => {
+      await useStatsStore.persist.rehydrate();
       const recents = (await readAppData<RecentProject[]>(RECENTS_KEY)) ?? [];
       set({ recents });
       // Re-open the last project so a refresh / relaunch lands back in the editor.
@@ -921,6 +929,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               : s.project,
           };
         });
+        // Stats capture is best-effort: a recordSave failure must never abort the save.
+        try {
+          const updated = get().project;
+          if (updated) {
+            const total = updated.chapters.reduce((sum, c) => sum + c.wordCount, 0);
+            useStatsStore.getState().recordSave(updated.root, total);
+          }
+        } catch (e) {
+          console.warn("stats recordSave failed:", e);
+        }
       } catch (e) {
         set({ saving: false, error: String(e) });
       }

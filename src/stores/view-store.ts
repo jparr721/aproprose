@@ -1,11 +1,11 @@
 // view-store.ts -- view state shared across the chrome.
 //
-// Panel visibility (AI / PDF / focus), the settings sheet, and the AI panel's
-// active tab / collapse are read+written by the top bar, the editor layout, the
-// settings sheet, and the command palette, so per CLAUDE.md it's a store rather
-// than a context. It also owns the "discard unsaved edits?" guard: any state-
-// wiping action (open project, switch chapter, close) routes through
-// requestGuarded, which defers to a confirm dialog when the chapter is dirty.
+// Panel visibility (AI / PDF / focus) and the AI panel's active tab / collapse
+// are read+written by the top bar, the editor layout, and the command palette,
+// so per CLAUDE.md it's a store rather than a context. It also owns the
+// "discard unsaved edits?" guard: any state-wiping action (open project, switch
+// chapter, close) routes through requestGuarded, which defers to a confirm
+// dialog when the chapter is dirty.
 //
 // Only `aiTab` is persisted (to the app config dir, via the Tauri-backed storage
 // adapter) so the panel reopens on the tab the author last used; the rest of the
@@ -29,9 +29,6 @@ interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
   focus: boolean;
-  /** Whether the settings sheet is open. Lifted here so the command palette can
-   *  open it; the sidebar's gear button drives the same flag. */
-  settingsOpen: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
   buildErrorsOpen: boolean;
@@ -47,7 +44,6 @@ interface ViewState {
 
   toggleAi: () => void;
   togglePdf: () => void;
-  setSettingsOpen: (open: boolean) => void;
   setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
@@ -69,7 +65,6 @@ export const useViewStore = create<ViewState>()(
       aiOpen: true,
       pdfOpen: false,
       focus: false,
-      settingsOpen: false,
       buildErrorsOpen: false,
 
       pending: null,
@@ -80,7 +75,6 @@ export const useViewStore = create<ViewState>()(
 
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
-      setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {

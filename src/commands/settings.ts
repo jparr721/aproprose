@@ -11,7 +11,7 @@ import {
   IconTextIncrease,
 } from "@tabler/icons-react";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useViewStore } from "@/stores/view-store";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import type { Command } from "./types";
 
 const PROSE_MIN = 14;
@@ -28,10 +28,10 @@ export const settingsCommands: Command[] = [
   {
     id: "settings.open",
     group: "Settings",
-    title: "Open settings...",
+    title: "Open settings",
     icon: IconSettings,
     keywords: ["preferences", "tweaks"],
-    run: () => useViewStore.getState().setSettingsOpen(true),
+    run: () => useSettingsDialogStore.getState().setOpen(true),
   },
   {
     id: "settings.theme-light",

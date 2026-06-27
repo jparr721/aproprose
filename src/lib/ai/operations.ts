@@ -151,7 +151,7 @@ const suggestResultSchema = z.object({
     .describe("three distinct continuations, mixing dialogue and narration"),
   followups: z
     .array(z.string())
-    .describe("a few short 'after this, you could…' nudges"),
+    .describe("a few short 'after this, you could' nudges"),
 });
 
 const critiqueNoteSchema = z.object({

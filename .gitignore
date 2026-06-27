@@ -36,4 +36,5 @@ dist-ssr
 
 # Internal AI planning / spec scaffolding — kept local, not published
 docs/superpowers/
+.superpowers/
 

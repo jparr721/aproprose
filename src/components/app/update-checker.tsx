@@ -3,7 +3,7 @@
 // user-facing output goes through the global sonner Toaster. The decision logic
 // lives in `@/lib/updater`; this file only supplies the real side effects.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen } from "@tauri-apps/api/event";
@@ -12,6 +12,7 @@ import {
   runUpdateFlow,
   type AvailableUpdate,
   type UpdateFlowDeps,
+  type UpdateMode,
 } from "@/lib/updater";
 
 const UPDATE_TOAST_ID = "app-update";
@@ -54,22 +55,36 @@ function buildDeps(): UpdateFlowDeps {
     notifyError: (error: unknown) => {
       toast.error("Update failed", {
         id: UPDATE_TOAST_ID,
-        description: String(error),
+        description: error instanceof Error ? error.message : String(error),
       });
     },
   };
 }
 
 export function UpdateChecker(): null {
+  // Guard against overlapping flows: an open auto-check prompt and a
+  // menu-triggered manual check would otherwise share the same toast id.
+  const inFlight = useRef(false);
+
   useEffect(() => {
     // Skip in dev (`just dev` browser has no Tauri IPC; `just run` cannot apply
     // updates anyway). Production bundles run the full flow.
     if (import.meta.env.DEV) return;
 
-    void runUpdateFlow("auto", buildDeps());
+    const run = async (mode: UpdateMode) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      try {
+        await runUpdateFlow(mode, buildDeps());
+      } finally {
+        inFlight.current = false;
+      }
+    };
+
+    void run("auto");
 
     const unlisten = listen("check-for-updates", () => {
-      void runUpdateFlow("manual", buildDeps());
+      void run("manual");
     });
     return () => {
       void unlisten.then((fn) => fn());

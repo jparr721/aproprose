@@ -376,6 +376,8 @@ pub fn run() {
                     }
                 });
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = app;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

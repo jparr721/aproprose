@@ -49,7 +49,7 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { ColorAvatar } from "@/components/app/color-dot";
-import { useProjectStore } from "@/stores/project-store";
+import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { TypographyMuted } from "@/components/ui/typography";
@@ -629,11 +629,10 @@ function EditTab() {
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
-  // Identity of the block scope: the multi-selection set when active, else the
-  // single selected block. Sorted so the key tracks set membership, not click
-  // order, matching buildEditRequest's order-independent target list.
-  const blockKey =
-    selectedIds.length > 0 ? [...selectedIds].sort().join(",") : selectedId ?? "";
+  // Identity of the block scope: the same targets buildEditRequest resolves,
+  // sorted so the key tracks set membership, not click order, matching its
+  // order-independent target list.
+  const blockKey = [...selectionTargetIds(selectedIds, selectedId)].sort().join(",");
   const cacheKey = `edit:${activeChapterId ?? ""}:${scope}:${
     scope === "block" ? blockKey : ""
   }`;

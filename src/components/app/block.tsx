@@ -49,6 +49,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { buildAiContext } from "@/lib/ai/context";
+import { blockClickAction } from "@/lib/blocks/click";
 import { cleanTranscript } from "@/lib/ai/operations";
 import { describeAiError } from "@/lib/ai/errors";
 import type { Block as BlockT, BlockType, Character } from "@/lib/types";
@@ -439,14 +440,18 @@ function BlockImpl({
           // block enters edit mode, the mouseup landing the caret at the click
           // point (beginEdit passes no caret hint). Right press must NOT select,
           // or swapping prose for textareas drops the highlight being copied.
+          // The routing table is `blockClickAction` (unit-tested in isolation).
           onMouseDown={(e) => {
-            if (e.button !== 0) return;
-            if (e.metaKey || e.ctrlKey) {
-              toggleSelection(block.id);
-              return;
-            }
-            if (multiActive || !selected) select(block.id);
-            else if (!storeEditing) beginEdit();
+            const action = blockClickAction({
+              button: e.button,
+              modifier: e.metaKey || e.ctrlKey,
+              selected,
+              multiActive,
+              editing: storeEditing,
+            });
+            if (action === "toggle") toggleSelection(block.id);
+            else if (action === "select") select(block.id);
+            else if (action === "edit") beginEdit();
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
           // dnd-kit drives the live drag offset; surface it as a CSS var (per the

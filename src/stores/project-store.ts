@@ -117,7 +117,9 @@ interface ProjectState {
    * The multi-block selection set (Cmd/Ctrl-click), in selection order. Empty in
    * the normal single-selection case; populated only when the user has explicitly
    * multi-selected. When non-empty, `selectedId` is the active member (the most
-   * recently toggled block). Plain selection, deselection, and nav clear it.
+   * recently toggled block). Plain selection, deselection, nav, entering edit
+   * mode, and undo/redo all clear it; structural edits keep it in lockstep with
+   * the live block list (prune on delete, remap on save).
    */
   selectedIds: string[];
   /**
@@ -157,8 +159,8 @@ interface ProjectState {
 
   // block selection / editing (the nav vs edit modal model)
   select: (id: string | null) => void;
-  /** Cmd/Ctrl-click: add or remove `id` from the multi-selection set, seeding it
-   *  from the current single selection. Never enters edit mode. */
+  /** Cmd/Ctrl-click: add or remove a *live* block `id` from the multi-selection
+   *  set, seeding it from the current single selection. Never enters edit mode. */
   toggleSelection: (id: string) => void;
   /** Enter edit mode on the selected block (no-op if nothing is selected). */
   beginEdit: (caret?: "start") => void;
@@ -878,10 +880,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set((s) => {
           // parseChapter re-mints every block id, so map the selection onto the
           // reparsed blocks by position to keep the user's place (and not strand
-          // the Edit scope on dead ids). Out-of-range maps drop out.
+          // the Edit scope on dead ids). Positional remap is only sound when the
+          // reparse preserved the block count; if a dirty block re-segments (e.g.
+          // a blank line splits a narration in two) the indices no longer denote
+          // the same blocks, so clear the selection rather than land it on a wrong
+          // or dead block.
+          const sameCount = reparsed.length === s.blocks.length;
+          if (import.meta.env.DEV && !sameCount) {
+            console.warn(
+              `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional remap unreliable)`,
+            );
+          }
           const remap = (id: string): string | null => {
+            if (!sameCount) return null;
             const i = s.blocks.findIndex((b) => b.id === id);
-            return i >= 0 && i < reparsed.length ? reparsed[i].id : null;
+            return i >= 0 ? reparsed[i].id : null;
           };
           const selectedId = s.selectedId ? remap(s.selectedId) : null;
           const selectedIds = s.selectedIds
@@ -996,6 +1009,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }),
   };
 });
+
+/**
+ * The blocks a `"block"`-scoped operation acts on: the multi-selection set when
+ * one is active, otherwise the single selected block (empty when nothing is
+ * selected). The single definition of the selection-precedence rule, shared by
+ * `buildEditRequest` and the Edit-tab cache key so they cannot drift.
+ */
+export function selectionTargetIds(
+  selectedIds: string[],
+  selectedId: string | null,
+): string[] {
+  return selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+}
 
 /** Derive a chapter's display status (explicit override, else inferred). */
 export function chapterStatus(

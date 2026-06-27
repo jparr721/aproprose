@@ -7,7 +7,7 @@
 
 import type { AiContext, EditRequest } from "@/lib/ai/operations";
 import type { Block } from "@/lib/types";
-import { useProjectStore } from "@/stores/project-store";
+import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 
 export function buildAiContext(uptoId?: string): AiContext {
   const { project, activeChapterId, blocks, meta, selectedId } =
@@ -75,8 +75,9 @@ function isEditable(b: Block): boolean {
 /**
  * Build the request for `editBlocks`. `"block"` scope targets the multi-selection
  * set when one is active, otherwise the single selected block (empty when nothing
- * is selected); non-prose members are dropped. `"chapter"` targets every eligible
- * block. Chapter title + cast are included so revisions keep voice.
+ * is selected); non-editable members are dropped (see `isEditable`). `"chapter"`
+ * targets every eligible block. Chapter title + cast are included so revisions
+ * keep voice.
  */
 export function buildEditRequest(
   scope: "block" | "chapter",
@@ -88,9 +89,8 @@ export function buildEditRequest(
 
   let targets: Block[];
   if (scope === "block") {
-    const ids = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
-    const idSet = new Set(ids);
-    // Filter `blocks` (not `ids`) so targets stay in document order.
+    const idSet = new Set(selectionTargetIds(selectedIds, selectedId));
+    // Filter `blocks` (not the id set) so targets stay in document order.
     targets = blocks.filter((b) => idSet.has(b.id) && isEditable(b));
   } else {
     targets = blocks.filter(isEditable);

@@ -20,8 +20,8 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
 }));
 
-import { useProjectStore } from "@/stores/project-store";
-import { compileProject } from "@/lib/tauri";
+import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
+import { compileProject, readTextFile } from "@/lib/tauri";
 import type { Block, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
@@ -615,6 +615,30 @@ describe("multi-selection stays live across structural edits (selectedIds invari
     useProjectStore.getState().redo();
     expect(useProjectStore.getState().selectedIds).toEqual([]);
   });
+
+  // In-place edits and reorders keep every block id, so the set stays valid and
+  // must survive - the AI block-edit happy path (multi-select then apply) and a
+  // reorder within the selection both keep the user's chosen blocks selected.
+  it("applyBlockEdits preserves the multi-selection (the AI block-edit happy path)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().applyBlockEdits([
+      { id: "a", text: "A2" },
+      { id: "c", text: "C2" },
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("moveBlock preserves a live multi-selection (ids unchanged)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().moveBlock("a", 1);
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
+
+  it("reorderBlock preserves a live multi-selection (ids unchanged)", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
+    useProjectStore.getState().reorderBlock("a", "c");
+    expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
+  });
 });
 
 describe("saveChapter reconciles selection across the id-reminting reparse", () => {
@@ -649,5 +673,59 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     // The selection now resolves to live blocks at the same positions/content.
     expect(byId.get(selectedId!)?.text).toBe("Beta");
     expect(selectedIds.map((id) => byId.get(id)?.text)).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("clears the selection when the reparse changes the block count (positional remap unreliable)", async () => {
+    // A narration containing a blank line reparses into two blocks, so the
+    // positional remap can no longer be trusted to map ids to the same blocks.
+    useProjectStore.setState({
+      blocks: [mkBlock({ id: "x0", type: "narration", text: "Line one\n\nLine two", dirty: true })],
+      selectedId: "x0",
+      selectedIds: ["x0"],
+      chapterDirty: true,
+    });
+    await useProjectStore.getState().saveChapter();
+    const { blocks, selectedId, selectedIds } = useProjectStore.getState();
+    expect(blocks.length).toBe(2); // count diverged
+    expect(selectedId).toBeNull();
+    expect(selectedIds).toEqual([]);
+  });
+});
+
+describe("selectChapter resets the multi-selection across chapters", () => {
+  it("clears a stale multi-selection carried from the previous chapter", async () => {
+    vi.mocked(readTextFile).mockResolvedValueOnce("A fresh narration paragraph.");
+    useProjectStore.setState({
+      project: {
+        root: "/tmp/book",
+        name: "Book",
+        mainFile: "main.tex",
+        title: null,
+        author: null,
+        chapters: [
+          { id: "ch1", title: "One", file: "a.tex", label: "1", wordCount: 0 },
+          { id: "ch2", title: "Two", file: "b.tex", label: "2", wordCount: 0 },
+        ],
+      } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      selectedId: "stale-active",
+      selectedIds: ["stale-1", "stale-2"],
+    });
+    await useProjectStore.getState().selectChapter("ch2");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+  });
+});
+
+describe("selectionTargetIds (the block-scope precedence rule)", () => {
+  it("prefers the multi-selection set when one is active", () => {
+    expect(selectionTargetIds(["a", "b"], "a")).toEqual(["a", "b"]);
+  });
+
+  it("falls back to the single selection when the set is empty", () => {
+    expect(selectionTargetIds([], "a")).toEqual(["a"]);
+  });
+
+  it("is empty when nothing is selected", () => {
+    expect(selectionTargetIds([], null)).toEqual([]);
   });
 });

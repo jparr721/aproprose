@@ -215,7 +215,6 @@ export type BlockStyle = "typo" | "cards";
 
 export interface Settings {
   theme: Theme;
-  layout: LayoutMode;
   blockStyle: BlockStyle;
   /** Editor prose font-size in px. */
   proseSize: number;
@@ -227,7 +226,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
-  layout: "two",
   blockStyle: "typo",
   proseSize: 17.5,
   pdfZoom: 1.1,

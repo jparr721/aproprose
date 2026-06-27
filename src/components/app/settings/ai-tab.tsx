@@ -13,7 +13,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
@@ -77,8 +82,8 @@ function OpenAiKeyField({
   return (
     <Field label="OpenAI key">
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Input
+        <InputGroup className="flex-1">
+          <InputGroupInput
             type={show ? "text" : "password"}
             value={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
@@ -91,19 +96,18 @@ function OpenAiKeyField({
             placeholder={configured ? "Replace stored key" : "sk-"}
             autoComplete="off"
             spellCheck={false}
-            className="pr-7 font-mono"
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setShow((s) => !s)}
-            title={show ? "Hide key" : "Show key"}
-            className="absolute inset-y-0 right-0 text-muted-foreground"
-          >
-            {show ? <IconEyeOff /> : <IconEye />}
-          </Button>
-        </div>
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              size="icon-xs"
+              aria-label={show ? "Hide key" : "Show key"}
+              title={show ? "Hide key" : "Show key"}
+              onClick={() => setShow((s) => !s)}
+            >
+              {show ? <IconEyeOff /> : <IconEye />}
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
         <Button onClick={() => void save()} disabled={!draft.trim() || saving}>
           {saving ? <Spinner /> : null}
           Save
@@ -112,7 +116,7 @@ function OpenAiKeyField({
 
       {configured ? (
         <div className="flex items-center justify-between">
-          <TypographyForeground className="flex items-center gap-2 font-sans  text-success">
+          <TypographyForeground className="flex items-center gap-2 text-success">
             <IconCheck className="size-4" /> A key is configured.
           </TypographyForeground>
           <AlertDialog>
@@ -125,7 +129,7 @@ function OpenAiKeyField({
                 <IconTrash className="size-4" /> Remove
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="font-sans">
+            <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -143,7 +147,7 @@ function OpenAiKeyField({
           </AlertDialog>
         </div>
       ) : (
-        <TypographyMuted className="font-sans ">
+        <TypographyMuted>
           Stored locally in your app config dir - never written into the app bundle or your
           manuscript.
         </TypographyMuted>
@@ -189,9 +193,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
   if (!keyConfigured) {
     return (
       <Field label="AI model">
-        <TypographyMuted className="font-sans ">
-          Add a key above to choose a model.
-        </TypographyMuted>
+        <TypographyMuted>Add a key above to choose a model.</TypographyMuted>
       </Field>
     );
   }
@@ -203,10 +205,10 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         onValueChange={(v) => setAiModel(v)}
         disabled={loading || options.length === 0}
       >
-        <SelectTrigger className="w-full font-mono">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
         </SelectTrigger>
-        <SelectContent className="font-mono">
+        <SelectContent>
           {options.map((id) => (
             <SelectItem key={id} value={id}>
               {id}
@@ -215,19 +217,15 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         </SelectContent>
       </Select>
       {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 font-sans ">
+        <TypographyMutedSpan className="flex items-center gap-1.5">
           <Spinner /> Loading models
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="font-sans  text-destructive">
-          {error}
-        </TypographyForeground>
+        <TypographyForeground className="text-destructive">{error}</TypographyForeground>
       ) : null}
       {!loading && !error && !aiModel ? (
-        <TypographyMuted className="font-sans ">
-          AI features are off until you pick a model.
-        </TypographyMuted>
+        <TypographyMuted>AI features are off until you pick a model.</TypographyMuted>
       ) : null}
     </Field>
   );

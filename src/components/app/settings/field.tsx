@@ -15,7 +15,7 @@ export function Field({
       <div className="flex items-baseline justify-between">
         <TypographyEyebrow>{label}</TypographyEyebrow>
         {hint ? (
-          <TypographyMutedSpan className="font-sans text-xs tabular-nums">{hint}</TypographyMutedSpan>
+          <TypographyMutedSpan className="text-xs tabular-nums">{hint}</TypographyMutedSpan>
         ) : null}
       </div>
       {children}

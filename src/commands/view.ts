@@ -11,13 +11,11 @@ import {
   IconSparkles,
   IconViewfinder,
 } from "@tabler/icons-react";
-import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 import type { LayoutMode } from "@/lib/types";
 import type { Command } from "./types";
 
 const applyLayout = (preset: LayoutMode) => {
-  useSettingsStore.getState().setLayout(preset);
   useViewStore.getState().applyLayoutPreset(preset);
 };
 

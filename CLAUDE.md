@@ -99,7 +99,9 @@ Ellipses remain correct for **non-loading** affordances: a menu item that opens 
 - Prefer stock shadcn/ui primitives composed with Tailwind over bespoke components. Add new ones with `bunx shadcn@latest add <component>` (config in `components.json`: style `radix-mira`, base color `olive`, icons `tabler`).
 - **No inline `style={{...}}`.** Style with Tailwind utility classes; reach for theme tokens (`bg-background`, `text-muted-foreground`, etc.) rather than literal colors. Dynamic one-off values that genuinely can't be a class go through a CSS variable, not an inline style object.
 - Merge conditional classes with `cn` from `@/lib/utils` - never string-concatenate `className`.
-- Reuse before you write: if a primitive almost fits, extend it via `className`/variants (`class-variance-authority`) rather than forking a near-duplicate.
+- Reuse before you write: if a primitive almost fits, extend it via `className`/variants (`class-variance-authority`) rather than forking a near-duplicate. Deviating from the core component library makes everything harder to customize - reach for the library primitive first, every time.
+- **A mutually-exclusive choice is a `ButtonGroup`** (`button-group.tsx`) of plain `Button`s: the selected one is `variant="default"`, the rest `variant="outline"`. Use the components out of the box - no `w-full`/`flex-1` stretching or other custom styling - and never hand-roll radio buttons.
+- **An input with a trailing/leading affordance** (eye toggle, unit, clear, inline action) is an `InputGroup` + `InputGroupInput` + `InputGroupAddon`/`InputGroupButton` - never an absolutely-positioned button over a padded `Input` (`pr-7` + `absolute inset-y-0 right-0`).
 - Icons come from `@tabler/icons-react`.
 - Use `AlertDialog` for user confirmations - never `window.confirm()`. Apply `variant="destructive"` to the action for destructive ops.
 

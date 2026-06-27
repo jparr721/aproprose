@@ -54,18 +54,29 @@ jobs:
     outputs:
       release_id: ${{ steps.create-release.outputs.result }}
     steps:
+      - uses: actions/checkout@v4
       - name: Create the draft release
         id: create-release
         uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
+            const fs = require('fs');
             const tag = context.ref.replace('refs/tags/', '');
+            const version = tag.replace(/^v/, '');
+            const changelog = JSON.parse(fs.readFileSync('changelog.json', 'utf8'));
+            const entry = changelog.find((e) => e.version === version);
+            if (!entry) {
+              core.setFailed(`changelog.json has no entry for ${version}`);
+              throw new Error(`no changelog entry for ${version}`);
+            }
+            const body = [entry.summary, '', ...entry.highlights.map((h) => `- ${h}`)].join('\n');
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
               name: `aproprose ${tag}`,
+              body,
               draft: true,
               prerelease: false,
             });

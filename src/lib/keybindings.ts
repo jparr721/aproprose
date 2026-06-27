@@ -73,7 +73,7 @@ export const KEYBINDINGS = {
     id: "toggle-settings",
     key: ",",
     modifiers: { ctrl: true },
-    description: "Toggle the settings sheet",
+    description: "Toggle the settings dialog",
     category: "view",
     label: "Toggle settings",
   },

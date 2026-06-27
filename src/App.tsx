@@ -26,6 +26,7 @@ import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { CommandPalette } from "@/components/app/command-palette";
+import { SettingsDialog } from "@/components/app/settings-dialog";
 import { Editor } from "@/components/app/editor";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AiPanel } from "@/components/app/ai-panel";
@@ -71,7 +72,7 @@ function UnsavedGuard() {
   const cancel = useViewStore((s) => s.cancelPending);
   return (
     <AlertDialog open={pending != null} onOpenChange={(o) => !o && cancel()}>
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -97,7 +98,7 @@ function MigrationGuard() {
       open={needsMigration != null}
       onOpenChange={(o) => !o && cancel()}
     >
-      <AlertDialogContent className="font-sans">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Convert to managed structure?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -132,6 +133,7 @@ function App() {
             <Workspace />
           </SidebarInset>
           <CommandPalette />
+          <SettingsDialog />
         </SidebarProvider>
       ) : (
         <Welcome />

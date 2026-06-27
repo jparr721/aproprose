@@ -79,7 +79,7 @@ function AddChapterDialog() {
       </DialogTrigger>
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Add chapter</DialogTitle>
+          <DialogTitle>Add chapter</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="add-chapter-title">Title</Label>
@@ -122,7 +122,7 @@ function RenameChapterDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="font-sans sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Rename chapter</DialogTitle>
+          <DialogTitle>Rename chapter</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="rename-chapter-title">Title</Label>

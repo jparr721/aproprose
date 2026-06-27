@@ -23,28 +23,38 @@ export function flattenCliPrompt(prompt: LanguageModelV3CallOptions["prompt"]): 
   system: string | null;
   text: string;
 } {
+  const joinText = (parts: readonly LanguageModelV3TextPart[]): string =>
+    parts.map((p) => p.text).join("");
   const systemParts: string[] = [];
-  const turns: string[] = [];
+  const turns: { role: "user" | "assistant"; text: string }[] = [];
   for (const msg of prompt) {
     if (msg.role === "system") {
       systemParts.push(msg.content);
     } else if (msg.role === "user") {
-      const text = msg.content
-        .filter((p): p is LanguageModelV3TextPart => p.type === "text")
-        .map((p) => p.text)
-        .join("");
-      if (text) turns.push(text);
+      const text = joinText(
+        msg.content.filter((p): p is LanguageModelV3TextPart => p.type === "text"),
+      );
+      if (text) turns.push({ role: "user", text });
     } else if (msg.role === "assistant") {
-      const text = msg.content
-        .filter((p): p is LanguageModelV3TextPart => p.type === "text")
-        .map((p) => p.text)
-        .join("");
-      if (text) turns.push(`Assistant: ${text}`);
+      const text = joinText(
+        msg.content.filter((p): p is LanguageModelV3TextPart => p.type === "text"),
+      );
+      if (text) turns.push({ role: "assistant", text });
     }
   }
+  // A single user turn (the structured-op shape) stays bare. Multi-turn
+  // exchanges label both sides so the model can tell the new turn from the
+  // prior context - labelling only one side blurs that boundary.
+  const multiTurn = turns.length > 1;
+  const text = turns
+    .map((t) => {
+      if (t.role === "assistant") return `Assistant: ${t.text}`;
+      return multiTurn ? `User: ${t.text}` : t.text;
+    })
+    .join("\n\n");
   return {
     system: systemParts.length ? systemParts.join("\n\n") : null,
-    text: turns.join("\n\n"),
+    text,
   };
 }
 

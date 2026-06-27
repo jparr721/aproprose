@@ -18,7 +18,7 @@ export function buildPrompt(commitSubjects: string[], diff: string): string {
     "You are writing a changelog entry for aproprose, a desktop writing app, for its users (writers, not developers).",
     "Summarize ONLY user-facing changes from the commits and diff below. Ignore refactors, chores, tests, CI, dependency bumps, and internal tooling.",
     "Respond with ONLY a JSON object, no prose and no code fences, in exactly this shape:",
-    '{"summary": "one short sentence headline", "highlights": ["user-facing change", "..."]}',
+    '{"summary": "one short sentence headline", "highlights": ["user-facing change", "another user-facing change"]}',
     "Use plain ASCII punctuation only: no em dashes, no smart quotes, no ellipses.",
     "If nothing is user-facing, give a brief summary and a one-item highlights array describing the maintenance nature.",
     "",
@@ -129,7 +129,12 @@ function reviewInEditor(draft: DraftEntry): DraftEntry {
   try {
     writeFileSync(file, JSON.stringify(draft, null, 2) + "\n");
     execFileSync(editor, [file], { stdio: "inherit" });
-    return parseEntry(readFileSync(file, "utf8"));
+    const edited = readFileSync(file, "utf8");
+    try {
+      return parseEntry(edited);
+    } catch (e) {
+      throw new Error(`The edited changelog entry is not valid: ${String(e)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

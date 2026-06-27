@@ -10,6 +10,7 @@ describe("generate-changelog", () => {
   it("buildPrompt includes commits, diff, and the JSON shape", () => {
     const p = buildPrompt(["feat: add X", "chore: bump dep"], "diff --git a b");
     expect(p).toContain("feat: add X");
+    expect(p).toContain("- feat: add X");
     expect(p).toContain("diff --git a b");
     expect(p).toContain('"summary"');
     expect(p).toContain('"highlights"');

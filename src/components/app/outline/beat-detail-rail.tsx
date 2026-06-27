@@ -191,7 +191,7 @@ export function BeatDetailRail() {
                   <TypographySmall className="font-semibold text-foreground">
                     {flag.tag}
                   </TypographySmall>
-                  <TypographyMuted className="leading-[1.5]">{flag.text}</TypographyMuted>
+                  <TypographyMuted className="leading-normal">{flag.text}</TypographyMuted>
                 </div>
               </div>
             ))}

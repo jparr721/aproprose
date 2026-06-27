@@ -1,25 +1,19 @@
 // beat-types.ts -- presentation table + title->type migration for beat structure.
-//
-// `tintVar` is a CSS variable TOKEN NAME (declared in src/index.css), never a
-// literal color: components read it through a per-instance CSS variable so the
-// badge tint retunes with the theme, not the call site.
 
 import type { BeatType } from "@/lib/types";
 
 export interface BeatTypeMeta {
   label: string;
-  /** CSS-var token name for the badge tint, e.g. "--beat-inciting-tint". */
-  tintVar: string;
 }
 
 export const BEAT_TYPE_META: Record<BeatType, BeatTypeMeta> = {
-  "plot-point": { label: "Plot Point", tintVar: "--beat-plot-point-tint" },
-  inciting: { label: "Inciting", tintVar: "--beat-inciting-tint" },
-  pinch: { label: "Pinch", tintVar: "--beat-pinch-tint" },
-  action: { label: "Action", tintVar: "--beat-action-tint" },
-  midpoint: { label: "Midpoint", tintVar: "--beat-midpoint-tint" },
-  climax: { label: "Climax", tintVar: "--beat-climax-tint" },
-  resolution: { label: "Resolution", tintVar: "--beat-resolution-tint" },
+  "plot-point": { label: "Plot Point" },
+  inciting: { label: "Inciting" },
+  pinch: { label: "Pinch" },
+  action: { label: "Action" },
+  midpoint: { label: "Midpoint" },
+  climax: { label: "Climax" },
+  resolution: { label: "Resolution" },
 };
 
 /** Ordered list for the type Select and any "all types" iteration. */

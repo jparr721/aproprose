@@ -22,11 +22,10 @@ describe("BEAT_TYPES / BEAT_TYPE_META", () => {
     expect(new Set(BEAT_TYPES).size).toBe(BEAT_TYPES.length);
   });
 
-  it("has a label and a CSS-var tintVar for every type", () => {
+  it("has a label for every type", () => {
     for (const t of ALL) {
       const meta = BEAT_TYPE_META[t];
       expect(meta.label.length).toBeGreaterThan(0);
-      expect(meta.tintVar.startsWith("--beat-")).toBe(true);
     }
     expect(BEAT_TYPE_META["plot-point"].label).toBe("Plot Point");
   });

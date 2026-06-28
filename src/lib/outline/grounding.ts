@@ -1,48 +1,47 @@
 // grounding.ts -- render the STORY STRUCTURE block injected into AI grounding.
 //
-// Pure: takes the outline + chapter beats + the active chapter, returns the inner
-// text (operations.ts adds the "STORY STRUCTURE:" header) or null when the active
-// scene has no structural context and there is no premise. The null case is the
-// no-op guarantee: writers who do not outline see zero change in AI behavior,
-// even though beats ship with seeded intention copy.
+// Pure: takes the global logline + the active chapter's planning entry, returns
+// the inner text (operations.ts adds the "STORY STRUCTURE:" header) or null when
+// there is nothing to ground on. The null case is the no-op guarantee: writers
+// who do not outline see zero change in AI behavior. With seeded defaults gone,
+// an untouched chapter contributes nothing.
 
-import { ACT_ROMAN, beatForChapter } from "@/lib/outline/model";
-import type { ChapterBeat, ChapterRef, Outline } from "@/lib/types";
+import { ACT_ROMAN, ACT_TITLES } from "@/lib/outline/model";
+import type { ChapterOutline, Outline } from "@/lib/types";
 
 export function renderStoryStructure(args: {
   outline: Outline;
-  chapterBeats: Record<string, ChapterBeat>;
+  chapters: Record<string, ChapterOutline>;
   activeChapterId: string | null;
-  chapters: ChapterRef[];
 }): string | null {
-  const { outline, chapterBeats, activeChapterId } = args;
+  const { outline, chapters, activeChapterId } = args;
   const premise = outline.premise.trim();
-  const linked = activeChapterId ? beatForChapter(outline, activeChapterId) : null;
-  const cb = activeChapterId ? chapterBeats[activeChapterId] : undefined;
-  const arc = cb
+  const ch = activeChapterId ? chapters[activeChapterId] : undefined;
+
+  const arc = ch
     ? [
-        cb.goal.trim() ? `Goal: ${cb.goal.trim()}` : "",
-        cb.conflict.trim() ? `Conflict: ${cb.conflict.trim()}` : "",
-        cb.turn.trim() ? `Turn: ${cb.turn.trim()}` : "",
+        ch.goal.trim() ? `Goal: ${ch.goal.trim()}` : "",
+        ch.conflict.trim() ? `Conflict: ${ch.conflict.trim()}` : "",
+        ch.turn.trim() ? `Turn: ${ch.turn.trim()}` : "",
       ].filter(Boolean)
     : [];
+  const chapterPremise = ch?.premise.trim() ?? "";
+  const cards = (ch?.cards ?? []).filter((c) => c.title.trim() || c.intention.trim());
 
-  if (!linked && arc.length === 0 && !premise) return null;
+  if (!premise && !ch?.act && arc.length === 0 && !chapterPremise && cards.length === 0) {
+    return null;
+  }
 
   const lines: string[] = [];
   if (premise) lines.push(`Premise: ${premise}`);
-
-  if (linked) {
-    const { act, beat } = linked;
-    const head = `This scene is in Act ${ACT_ROMAN[act.kind]} - ${act.title}`;
-    lines.push(act.summary.trim() ? `${head}: ${act.summary.trim()}` : `${head}.`);
-    const intention = beat.intention.trim();
-    lines.push(intention ? `It serves the beat "${beat.title}": ${intention}` : `It serves the beat "${beat.title}".`);
-  } else {
-    lines.push("This scene is not yet placed on the outline.");
-  }
-
+  if (ch?.act) lines.push(`This scene is in Act ${ACT_ROMAN[ch.act]} - ${ACT_TITLES[ch.act]}.`);
+  if (chapterPremise) lines.push(`This chapter: ${chapterPremise}`);
   if (arc.length > 0) lines.push(`This chapter's arc - ${arc.join(" ")}`);
-
+  if (cards.length > 0) {
+    const beats = cards
+      .map((c) => (c.intention.trim() ? `${c.title.trim()} - ${c.intention.trim()}` : c.title.trim()))
+      .join("; ");
+    lines.push(`Planned beats: ${beats}`);
+  }
   return lines.join("\n");
 }

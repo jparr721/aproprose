@@ -1,4 +1,4 @@
-import { IconChevronRight, IconLayoutKanban, IconPlus } from "@tabler/icons-react";
+import { IconLayoutKanban, IconPlus } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +6,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { CharacterChip } from "@/components/app/outline/character-chip";
 import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-point-badge";
@@ -42,13 +50,21 @@ export function ChapterSubview() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-xs text-muted-foreground">
-        <button type="button" onClick={closeChapter} className="flex items-center gap-1.5 hover:text-foreground">
-          <IconLayoutKanban className="size-3.5" /> Storyboard
-        </button>
-        <IconChevronRight className="size-3 text-faint" />
-        <span className="text-foreground">{chapterRef.title}</span>
-      </div>
+      <Breadcrumb className="border-b border-border px-4 py-3">
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <button type="button" onClick={closeChapter}>
+                <IconLayoutKanban className="size-4" /> Storyboard
+              </button>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{chapterRef.title}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-6 py-6">

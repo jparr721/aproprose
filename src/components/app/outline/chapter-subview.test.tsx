@@ -18,7 +18,7 @@ beforeEach(() => {
     },
     meta: {
       characters: [], lore: [], statuses: {}, outline: { premise: "" },
-      chapters: { ch1: { act: "setup", plotPoint: "inciting", premise: "", goal: "", conflict: "", turn: "", cards: [] } },
+      chapters: { ch1: { act: "setup", plotPoint: "inciting", premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] } },
     },
   } as never);
 });

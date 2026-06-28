@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { TypographyEyebrow, TypographyMuted, TypographyP, TypographySmall } from "@/components/ui/typography";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { CharacterChip } from "@/components/app/outline/character-chip";
+import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -23,8 +24,9 @@ export function OutlineSurface() {
   const characters = useProjectStore((s) => s.meta.characters);
   const toggleOutline = useViewStore((s) => s.toggleOutline);
 
+  const chapterCast = ch ? beatCharacters(ch.characterIds, characters) : [];
   const hasOutline = ch
-    ? SPINE.some((f) => ch[f.key].trim()) || ch.cards.length > 0
+    ? SPINE.some((f) => ch[f.key].trim()) || ch.cards.length > 0 || chapterCast.length > 0
     : false;
 
   return (
@@ -53,6 +55,14 @@ export function OutlineSurface() {
           </Empty>
         ) : (
           <>
+            {chapterCast.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                <TypographyEyebrow>Characters</TypographyEyebrow>
+                <div className="flex flex-wrap gap-1">
+                  {chapterCast.map((c) => <CharacterChip key={c.id} name={c.name} color={c.color} />)}
+                </div>
+              </div>
+            ) : null}
             {SPINE.filter((f) => ch[f.key].trim()).map((f) => (
               <div key={f.key} className="flex flex-col gap-0.5">
                 <TypographyEyebrow>{f.label}</TypographyEyebrow>

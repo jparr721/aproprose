@@ -1,4 +1,4 @@
-import { IconLayoutKanban, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,8 +14,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
-import { CharacterChip } from "@/components/app/outline/character-chip";
+import { TypographyEyebrow } from "@/components/ui/typography";
+import { CharacterAssign } from "@/components/app/outline/character-assign";
 import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-point-badge";
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
@@ -36,14 +36,16 @@ export function ChapterSubview() {
   const closeChapter = useOutlineBoardStore((s) => s.closeChapter);
   const chapterRef = useProjectStore((s) => s.project?.chapters.find((c) => c.id === chapterId));
   const ch = useProjectStore((s) => (chapterId ? getChapterOutline(s.meta.chapters, chapterId) : null));
-  const characters = useProjectStore((s) => s.meta.characters);
   const renameChapter = useProjectStore((s) => s.renameChapter);
   const setChapterField = useProjectStore((s) => s.setChapterField);
   const setChapterAct = useProjectStore((s) => s.setChapterAct);
   const setChapterPlotPoint = useProjectStore((s) => s.setChapterPlotPoint);
+  const addCharacterToChapter = useProjectStore((s) => s.addCharacterToChapter);
+  const removeCharacterFromChapter = useProjectStore((s) => s.removeCharacterFromChapter);
   const addCard = useProjectStore((s) => s.addCard);
   const editCard = useProjectStore((s) => s.editCard);
   const removeCard = useProjectStore((s) => s.removeCard);
+  const addCharacterToCard = useProjectStore((s) => s.addCharacterToCard);
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
 
   if (!chapterId || !ch || !chapterRef) return null;
@@ -108,6 +110,15 @@ export function ChapterSubview() {
             <span className="ml-auto text-xs text-faint">{chapterRef.wordCount.toLocaleString()} words</span>
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <TypographyEyebrow>Characters</TypographyEyebrow>
+            <CharacterAssign
+              assignedIds={ch.characterIds}
+              onAdd={(id) => addCharacterToChapter(chapterId, id)}
+              onRemove={(id) => removeCharacterFromChapter(chapterId, id)}
+            />
+          </div>
+
           <div className="flex flex-col gap-4">
             {SPINE.map((f) => (
               <label key={f.key} className="flex flex-col gap-1.5">
@@ -128,48 +139,37 @@ export function ChapterSubview() {
           </div>
 
           <div className="flex flex-col gap-2.5">
-            {ch.cards.map((card) => {
-              const cast = card.characterIds
-                .map((id) => characters.find((c) => c.id === id))
-                .filter((c): c is NonNullable<typeof c> => Boolean(c));
-              return (
-                <Card key={card.id}>
-                  <CardHeader>
-                    <TypographyEyebrow>Element Focus</TypographyEyebrow>
-                    <Input
-                      value={card.title}
-                      onChange={(e) => editCard(chapterId, card.id, { title: e.target.value })}
-                      placeholder="Card title"
+            {ch.cards.map((card) => (
+              <Card key={card.id}>
+                <CardHeader>
+                  <TypographyEyebrow>Element Focus</TypographyEyebrow>
+                  <Input
+                    value={card.title}
+                    onChange={(e) => editCard(chapterId, card.id, { title: e.target.value })}
+                    placeholder="Card title"
+                  />
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2 p-3">
+                  <TypographyEyebrow>Element Goal</TypographyEyebrow>
+                  <Textarea
+                    value={card.intention}
+                    onChange={(e) => editCard(chapterId, card.id, { intention: e.target.value })}
+                    placeholder="What does this beat accomplish?"
+                    rows={2}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CharacterAssign
+                      assignedIds={card.characterIds}
+                      onAdd={(id) => addCharacterToCard(chapterId, card.id, id)}
+                      onRemove={(id) => removeCharacterFromCard(chapterId, card.id, id)}
                     />
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2 p-3">
-                    <TypographyEyebrow>Element Goal</TypographyEyebrow>
-                    <Textarea
-                      value={card.intention}
-                      onChange={(e) => editCard(chapterId, card.id, { intention: e.target.value })}
-                      placeholder="What does this beat accomplish?"
-                      rows={2}
-                    />
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {cast.map((c) => (
-                        <CharacterChip
-                          key={c.id}
-                          name={c.name}
-                          color={c.color}
-                          onRemove={() => removeCharacterFromCard(chapterId, card.id, c.id)}
-                        />
-                      ))}
-                      <Button
-                        variant="destructive"
-                        onClick={() => removeCard(chapterId, card.id)}
-                      >
-                        <IconTrash /> Remove card
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                    <Button variant="destructive" onClick={() => removeCard(chapterId, card.id)}>
+                      <IconTrash /> Remove card
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
             <Button
               variant="outline"
               className="justify-start border-dashed text-muted-foreground"

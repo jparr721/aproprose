@@ -165,6 +165,9 @@ export interface ChapterOutline {
   goal: string;
   conflict: string;
   turn: string;
+  /** Planned cast for the chapter - ids into {@link ProjectMeta.characters}. Independent
+   *  of card-level casts; drives the expected-cast continuity grounding. */
+  characterIds: string[];
   /** Ordered plot elements. */
   cards: Card[];
 }

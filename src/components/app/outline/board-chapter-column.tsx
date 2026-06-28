@@ -3,8 +3,10 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { IconChevronRight, IconPlus, IconWand } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { BoardCard } from "@/components/app/outline/board-card";
+import { CharacterChip } from "@/components/app/outline/character-chip";
 import { PlotPointBadge } from "@/components/app/outline/plot-point-badge";
 import { cardColumnId } from "@/lib/outline/board-dnd";
+import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { buildSculptContext } from "@/lib/ai/sculpt-context";
 import { sculptChapter } from "@/lib/ai/operations";
@@ -16,12 +18,14 @@ import type { ChapterRef } from "@/lib/types";
 export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: number }) {
   const { chapterRef, index } = props;
   const ch = useProjectStore((s) => getChapterOutline(s.meta.chapters, chapterRef.id));
+  const characters = useProjectStore((s) => s.meta.characters);
   const addCard = useProjectStore((s) => s.addCard);
   const openChapter = useOutlineBoardStore((s) => s.openChapter);
   const startSculpt = useOutlineBoardStore((s) => s.startSculpt);
   const setProposal = useOutlineBoardStore((s) => s.setProposal);
   const setSculptError = useOutlineBoardStore((s) => s.setSculptError);
   const { setNodeRef } = useDroppable({ id: cardColumnId(chapterRef.id) });
+  const cast = beatCharacters(ch.characterIds, characters);
 
   const runSculpt = () => {
     startSculpt(chapterRef.id);
@@ -48,6 +52,13 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
             <IconWand className="size-3.5" /> Sculpt
           </Button>
         </div>
+        {cast.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {cast.map((c) => (
+              <CharacterChip key={c.id} name={c.name} color={c.color} />
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div ref={setNodeRef} className="flex min-h-12 flex-col gap-2">

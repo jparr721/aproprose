@@ -46,6 +46,7 @@ const _EMPTY_OUTLINE: ChapterOutline = {
   goal: "",
   conflict: "",
   turn: "",
+  characterIds: [],
   cards: [],
 };
 
@@ -176,6 +177,18 @@ export function setCardContinuityFlags(
   c: Chapters, chapterId: string, cardId: string, flags: ContinuityFlag[],
 ): Chapters {
   return patchCard(c, chapterId, cardId, (card) => ({ ...card, continuityFlags: [...flags] }));
+}
+
+export function addCharacterToChapter(chapters: Chapters, chapterId: string, characterId: string): Chapters {
+  return updateChapter(chapters, chapterId, (ch) =>
+    ch.characterIds.includes(characterId) ? ch : { ...ch, characterIds: [...ch.characterIds, characterId] },
+  );
+}
+
+export function removeCharacterFromChapter(chapters: Chapters, chapterId: string, characterId: string): Chapters {
+  return updateChapter(chapters, chapterId, (ch) => ({
+    ...ch, characterIds: ch.characterIds.filter((id) => id !== characterId),
+  }));
 }
 
 export function setChapterAct(chapters: Chapters, chapterId: string, act: ActKind | null): Chapters {

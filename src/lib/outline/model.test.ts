@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   actPacing,
   addCard,
+  addCharacterToChapter,
   applySculpt,
   editCard,
   emptyChapterOutline,
   moveCardToChapter,
   moveCardWithin,
   removeCard,
+  removeCharacterFromChapter,
   setChapterAct,
 } from "@/lib/outline/model";
 import type { ChapterOutline, ChapterRef, SculptProposal } from "@/lib/types";
@@ -94,5 +96,25 @@ describe("applySculpt over cards", () => {
 describe("setChapterAct", () => {
   it("sets the act, lazily creating the entry", () => {
     expect(setChapterAct({}, "ch1", "resolution").ch1.act).toBe("resolution");
+  });
+});
+
+describe("chapter cast", () => {
+  it("adds a character to a (possibly missing) chapter, deduping", () => {
+    const once = addCharacterToChapter({}, "ch1", "c1");
+    expect(once.ch1.characterIds).toEqual(["c1"]);
+    const twice = addCharacterToChapter(once, "ch1", "c1");
+    expect(twice.ch1.characterIds).toEqual(["c1"]);
+  });
+
+  it("removes a character without touching others", () => {
+    const seeded = addCharacterToChapter(addCharacterToChapter({}, "ch1", "c1"), "ch1", "c2");
+    expect(removeCharacterFromChapter(seeded, "ch1", "c1").ch1.characterIds).toEqual(["c2"]);
+  });
+
+  it("does not mutate the input map", () => {
+    const seeded = addCharacterToChapter({}, "ch1", "c1");
+    addCharacterToChapter(seeded, "ch1", "c2");
+    expect(seeded.ch1.characterIds).toEqual(["c1"]);
   });
 });

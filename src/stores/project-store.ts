@@ -57,6 +57,7 @@ import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
+  addCharacterToChapter as addCharacterToChapterModel,
   addLoreToCard as addLoreToCardModel,
   applySculpt as applySculptModel,
   editCard as editCardModel,
@@ -66,6 +67,7 @@ import {
   moveCardWithin as moveCardWithinModel,
   removeCard as removeCardModel,
   removeCharacterFromCard as removeCharacterFromCardModel,
+  removeCharacterFromChapter as removeCharacterFromChapterModel,
   removeLoreFromCard as removeLoreFromCardModel,
   setCardContinuityFlags as setCardContinuityFlagsModel,
   setChapterAct as setChapterActModel,
@@ -104,12 +106,15 @@ export function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
   if (!m) return EMPTY_META;
   const raw = m as unknown as Record<string, unknown>;
   if (isNewShapeMeta(raw)) {
+    const chapters = (m as ProjectMeta).chapters ?? {};
     return {
       characters: m.characters ?? [],
       lore: m.lore ?? [],
       statuses: m.statuses ?? {},
       outline: { premise: m.outline?.premise ?? "" },
-      chapters: (m as ProjectMeta).chapters ?? {},
+      chapters: Object.fromEntries(
+        Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
+      ),
     };
   }
   return migrateLegacyMeta(raw);
@@ -271,6 +276,8 @@ interface ProjectState {
   removeLoreFromCard: (chapterId: string, cardId: string, loreId: string) => void;
   setCardContinuityFlags: (chapterId: string, cardId: string, flags: ContinuityFlag[]) => void;
   // chapter fields
+  addCharacterToChapter: (chapterId: string, characterId: string) => void;
+  removeCharacterFromChapter: (chapterId: string, characterId: string) => void;
   setChapterAct: (chapterId: string, act: ActKind | null) => void;
   setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
   setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
@@ -1186,6 +1193,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     setCardContinuityFlags: (chapterId, cardId, flags) =>
       set((s) => {
         const meta = { ...s.meta, chapters: setCardContinuityFlagsModel(s.meta.chapters, chapterId, cardId, flags) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addCharacterToChapter: (chapterId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: addCharacterToChapterModel(s.meta.chapters, chapterId, characterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeCharacterFromChapter: (chapterId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: removeCharacterFromChapterModel(s.meta.chapters, chapterId, characterId) };
         persistMeta(meta);
         return { meta };
       }),

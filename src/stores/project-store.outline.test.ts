@@ -24,6 +24,10 @@ describe("normalizeMeta", () => {
     const m = normalizeMeta({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.act).toBe("setup");
   });
+  it("backfills characterIds on chapters that predate the field", () => {
+    const m = normalizeMeta({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    expect(m.chapters.ch1.characterIds).toEqual([]);
+  });
 });
 
 describe("card + chapter actions", () => {
@@ -42,5 +46,12 @@ describe("card + chapter actions", () => {
     useProjectStore.getState().setChapterField("ch1", { goal: "win" });
     const ch = useProjectStore.getState().meta.chapters.ch1;
     expect(ch).toMatchObject({ act: "confrontation", goal: "win" });
+  });
+  it("assigns and unassigns a chapter cast", () => {
+    useProjectStore.getState().addCharacterToChapter("ch1", "c1");
+    useProjectStore.getState().addCharacterToChapter("ch1", "c2");
+    expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c1", "c2"]);
+    useProjectStore.getState().removeCharacterFromChapter("ch1", "c1");
+    expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c2"]);
   });
 });

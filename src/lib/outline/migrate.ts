@@ -54,7 +54,7 @@ export function migrateLegacyMeta(raw: Record<string, unknown>): ProjectMeta {
   // arrays: emptyChapterOutline() returns a shared stable reference, and the
   // mutations below (ch.cards.push, ch.goal = ...) must not leak into it.
   const ensure = (id: string): ChapterOutline =>
-    (chapters[id] ??= { ...emptyChapterOutline(), cards: [] });
+    (chapters[id] ??= { ...emptyChapterOutline(), characterIds: [], cards: [] });
 
   for (const [id, cb] of Object.entries(legacyBeats)) {
     const ch = ensure(id);

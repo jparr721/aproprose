@@ -7,14 +7,15 @@
 // an untouched chapter contributes nothing.
 
 import { ACT_ROMAN, ACT_TITLES } from "@/lib/outline/model";
-import type { ChapterOutline, Outline } from "@/lib/types";
+import type { Character, ChapterOutline, Outline } from "@/lib/types";
 
 export function renderStoryStructure(args: {
   outline: Outline;
   chapters: Record<string, ChapterOutline>;
+  characters: Character[];
   activeChapterId: string | null;
 }): string | null {
-  const { outline, chapters, activeChapterId } = args;
+  const { outline, chapters, characters, activeChapterId } = args;
   const premise = outline.premise.trim();
   const ch = activeChapterId ? chapters[activeChapterId] : undefined;
 
@@ -27,8 +28,14 @@ export function renderStoryStructure(args: {
     : [];
   const chapterPremise = ch?.premise.trim() ?? "";
   const cards = (ch?.cards ?? []).filter((c) => c.title.trim() || c.intention.trim());
+  const cast = ch
+    ? ch.characterIds
+        .map((id) => characters.find((c) => c.id === id))
+        .filter((c): c is Character => Boolean(c))
+        .map((c) => c.name)
+    : [];
 
-  if (!premise && !ch?.act && arc.length === 0 && !chapterPremise && cards.length === 0) {
+  if (!premise && !ch?.act && arc.length === 0 && !chapterPremise && cards.length === 0 && cast.length === 0) {
     return null;
   }
 
@@ -37,6 +44,7 @@ export function renderStoryStructure(args: {
   if (ch?.act) lines.push(`This scene is in Act ${ACT_ROMAN[ch.act]} - ${ACT_TITLES[ch.act]}.`);
   if (chapterPremise) lines.push(`This chapter: ${chapterPremise}`);
   if (arc.length > 0) lines.push(`This chapter's arc - ${arc.join(" ")}`);
+  if (cast.length > 0) lines.push(`Expected cast in this chapter: ${cast.join(", ")}.`);
   if (cards.length > 0) {
     const beats = cards
       .map((c) => (c.intention.trim() ? `${c.title.trim()} - ${c.intention.trim()}` : c.title.trim()))

@@ -92,6 +92,7 @@ describe("buildAiContext structure", () => {
             goal: "Introduce the protagonist",
             conflict: "",
             turn: "",
+            characterIds: [],
             cards: [],
           },
         },

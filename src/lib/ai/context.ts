@@ -59,6 +59,7 @@ export function buildAiContext(uptoId?: string): AiContext {
   const structure = renderStoryStructure({
     outline: meta.outline,
     chapters: meta.chapters,
+    characters: meta.characters,
     activeChapterId,
   });
 
@@ -107,6 +108,7 @@ export function buildEditRequest(
   const structure = renderStoryStructure({
     outline: meta.outline,
     chapters: meta.chapters,
+    characters: meta.characters,
     activeChapterId,
   });
 

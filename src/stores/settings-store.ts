@@ -24,6 +24,7 @@ interface SettingsState extends Settings {
   setPdfZoom: (pdfZoom: number) => void;
   setAiModel: (aiModel: string | null) => void;
   setAiProvider: (aiProvider: AiProvider) => void;
+  setLoreTags: (loreTags: string[]) => void;
   reset: () => void;
 }
 
@@ -38,18 +39,20 @@ export const useSettingsStore = create<SettingsState>()(
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
       setAiModel: (aiModel) => set({ aiModel }),
       setAiProvider: (aiProvider) => set({ aiProvider }),
+      setLoreTags: (loreTags) => set({ loreTags }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, blockStyle, proseSize, pdfZoom, aiModel, aiProvider }) => ({
+      partialize: ({ theme, blockStyle, proseSize, pdfZoom, aiModel, aiProvider, loreTags }) => ({
         theme,
         blockStyle,
         proseSize,
         pdfZoom,
         aiModel,
         aiProvider,
+        loreTags,
       }),
       onRehydrateStorage: () => (state) => {
         // Mark hydrated once the async read resolves (or fails).

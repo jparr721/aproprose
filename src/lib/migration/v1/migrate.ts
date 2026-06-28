@@ -1,4 +1,5 @@
-// migrate.ts -- one-shot fold of legacy (act/beat) meta into the chapter model.
+// migration/v1/migrate.ts -- one-shot fold of legacy (act/beat) meta into the
+// chapter model.
 //
 // Pure. Reads an untyped meta blob (any historical shape) and returns a valid,
 // new-shape ProjectMeta. Lossy by design: structural beats that linked to no
@@ -83,10 +84,30 @@ export function migrateLegacyMeta(raw: Record<string, unknown>): ProjectMeta {
   }
 
   return {
+    version: 1,
     characters: (raw.characters as Character[]) ?? [],
     lore: (raw.lore as LoreEntry[]) ?? [],
     statuses: (raw.statuses as ProjectMeta["statuses"]) ?? {},
     outline: { premise: legacyOutline.premise ?? "" },
     chapters,
   };
+}
+
+/** Migrate a blob to v1, handling both new-shape pass-through and legacy fold. */
+export function migrateV1(meta: ProjectMeta): ProjectMeta {
+  const raw = meta as unknown as Record<string, unknown>;
+  if (isNewShapeMeta(raw)) {
+    const chapters = meta.chapters ?? {};
+    return {
+      version: 1,
+      characters: meta.characters ?? [],
+      lore: meta.lore ?? [],
+      statuses: meta.statuses ?? {},
+      outline: { premise: meta.outline?.premise ?? "" },
+      chapters: Object.fromEntries(
+        Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
+      ),
+    };
+  }
+  return migrateLegacyMeta(raw);
 }

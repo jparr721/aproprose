@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { CharacterAssign } from "@/components/app/outline/character-assign";
+import { LoreAssign } from "@/components/app/outline/lore-assign";
 import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-point-badge";
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
@@ -47,7 +48,8 @@ export function ChapterSubview() {
   const removeCard = useProjectStore((s) => s.removeCard);
   const addCharacterToCard = useProjectStore((s) => s.addCharacterToCard);
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
-
+  const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
+  const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
   if (!chapterId || !ch || !chapterRef) return null;
 
   return (
@@ -158,11 +160,18 @@ export function ChapterSubview() {
                     rows={2}
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <CharacterAssign
-                      assignedIds={card.characterIds}
-                      onAdd={(id) => addCharacterToCard(chapterId, card.id, id)}
-                      onRemove={(id) => removeCharacterFromCard(chapterId, card.id, id)}
-                    />
+                    <div className="flex flex-col gap-1.5">
+                      <CharacterAssign
+                        assignedIds={card.characterIds}
+                        onAdd={(id) => addCharacterToCard(chapterId, card.id, id)}
+                        onRemove={(id) => removeCharacterFromCard(chapterId, card.id, id)}
+                      />
+                      <LoreAssign
+                        assignedIds={card.loreIds}
+                        onAdd={(id) => addLoreToCard(chapterId, card.id, id)}
+                        onRemove={(id) => removeLoreFromCard(chapterId, card.id, id)}
+                      />
+                    </div>
                     <Button variant="destructive" onClick={() => removeCard(chapterId, card.id)}>
                       <IconTrash /> Remove card
                     </Button>

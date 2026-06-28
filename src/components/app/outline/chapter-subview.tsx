@@ -53,10 +53,10 @@ export function ChapterSubview() {
       <Breadcrumb className="border-b border-border px-4 py-3">
         <BreadcrumbList>
           <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Button onClick={closeChapter} variant="ghost">
-                <IconLayoutKanban className="size-4" /> Storyboard
-              </Button>
+            <BreadcrumbLink asChild onClick={closeChapter}>
+              <BreadcrumbItem>
+                Storyboard
+              </BreadcrumbItem>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />

@@ -1,5 +1,6 @@
 // commands/settings.ts - open settings, theme, block style, prose size.
 
+import { clamp } from "es-toolkit";
 import {
   IconCards,
   IconLetterCase,
@@ -17,7 +18,6 @@ import type { Command } from "./types";
 const PROSE_MIN = 14;
 const PROSE_MAX = 22;
 const PROSE_STEP = 1;
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 const stepProse = (dir: 1 | -1) => {
   const s = useSettingsStore.getState();

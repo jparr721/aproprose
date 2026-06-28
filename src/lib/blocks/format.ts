@@ -2,6 +2,7 @@
 // selection. Pure: returns the new text plus the selection to restore. Toggling
 // off recognises markers both inside the selection and immediately outside it.
 
+import { clamp } from "es-toolkit";
 import { type InlineMarker } from "@/lib/latex/markup";
 
 export type { InlineMarker };
@@ -19,8 +20,8 @@ export function toggleInlineWrap(sel: TextSelection, marker: InlineMarker): Text
   const { text } = sel;
   // Clamp to valid bounds so the returned selection is always in range, whatever
   // a stale caller passes; `start <= end <= text.length`.
-  const start = Math.max(0, Math.min(sel.start, text.length));
-  const end = Math.max(start, Math.min(sel.end, text.length));
+  const start = clamp(sel.start, 0, text.length);
+  const end = clamp(sel.end, start, text.length);
 
   // Empty selection: drop an empty pair, caret between the markers.
   if (start === end) {

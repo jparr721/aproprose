@@ -10,6 +10,7 @@
 // `compile_project`/`read_pdf` commands.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { clamp } from "es-toolkit";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
@@ -55,7 +56,7 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 function clampZoom(z: number): number {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  return clamp(Math.round(z * 100) / 100, ZOOM_MIN, ZOOM_MAX);
 }
 
 // One page in the scroll column. The wrapper is sized synchronously from the
@@ -177,7 +178,7 @@ export function PdfPane() {
   const scrollToPage = (n: number) => {
     if (!scrollEl) return;
     const max = doc?.numPages ?? 1;
-    const clamped = Math.min(max, Math.max(1, n));
+    const clamped = clamp(n, 1, max);
     const el = scrollEl.querySelector<HTMLElement>(`[data-page="${clamped}"]`);
     if (!el) return;
     const top =
@@ -249,7 +250,7 @@ export function PdfPane() {
         const first = await d.getPage(1);
         if (cancelled) return;
         const viewport = first.getViewport({ scale: 1 });
-        const target = Math.min(d.numPages, Math.max(1, restoreTo));
+        const target = clamp(restoreTo, 1, d.numPages);
         restorePageRef.current = target;
         setBaseSize({ width: viewport.width, height: viewport.height });
         setDoc(d);

@@ -4,6 +4,7 @@
 // (autoSync, interval) persist in the app config dir keyed by a path hash.
 
 import { create } from "zustand";
+import { clamp, isEqual } from "es-toolkit";
 import type { ChangedFile, RepoStatus, SyncPrefs, SyncStatus } from "@/lib/types";
 import { gitRepoStatus, syncProject, readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
@@ -51,11 +52,11 @@ export const useSyncStore = create<SyncState>((set, get) => {
   // (the poll tick, init, or the review dialog) — one mechanism, all entry points.
   let statusReadInFlight = false;
 
-  // The serialized RepoStatus we last wrote. A poll whose status serializes
-  // identically is a no-op, so we skip the write entirely — keeping every array
-  // ref stable so the 5s tick doesn't re-render subscribers. Reset on teardown
-  // (and thus on project switch, since init() tears down first).
-  let lastStatusDigest: string | null = null;
+  // The RepoStatus we last wrote. A poll whose status is deeply equal is a no-op,
+  // so we skip the write entirely — keeping every array ref stable so the 5s tick
+  // doesn't re-render subscribers. Reset on teardown (and thus on project switch,
+  // since init() tears down first).
+  let lastStatus: RepoStatus | null = null;
 
   const armTimer = () => {
     const { timer, autoSync, intervalMinutes } = get();
@@ -130,7 +131,7 @@ export const useSyncStore = create<SyncState>((set, get) => {
       if (timer) clearInterval(timer);
       if (statusTimer) clearInterval(statusTimer);
       statusReadInFlight = false;
-      lastStatusDigest = null;
+      lastStatus = null;
       set({
         root: null, prefsKnown: true, status: "disabled", isRepo: false, remoteUrl: null,
         lastSyncedAt: null, lastError: null, changedFiles: [], conflictedFiles: [],
@@ -158,11 +159,10 @@ export const useSyncStore = create<SyncState>((set, get) => {
         }
         if (stale()) return;
         // Everything set() writes is a function of `s` (or of prev.status, which is
-        // unchanged on a poll), so a byte-identical snapshot means a byte-identical
-        // write. Bail before set() so all refs stay stable and the tick is invisible.
-        const digest = JSON.stringify(s);
-        if (digest === lastStatusDigest) return;
-        lastStatusDigest = digest;
+        // unchanged on a poll), so a deeply-equal snapshot means an identical write.
+        // Bail before set() so all refs stay stable and the tick is invisible.
+        if (lastStatus && isEqual(lastStatus, s)) return;
+        lastStatus = s;
         set((prev) => ({
           isRepo: s.isRepo,
           remoteUrl: s.remoteUrl,
@@ -226,7 +226,7 @@ export const useSyncStore = create<SyncState>((set, get) => {
     },
 
     setIntervalMinutes: (n) => {
-      set({ intervalMinutes: Math.min(60, Math.max(1, Math.round(n))), prefsKnown: true });
+      set({ intervalMinutes: clamp(Math.round(n), 1, 60), prefsKnown: true });
       persistPrefs();
       armTimer();
     },

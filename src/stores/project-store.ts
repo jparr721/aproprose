@@ -7,6 +7,7 @@
 // byte-for-byte.
 
 import { create } from "zustand";
+import { sumBy } from "es-toolkit";
 import { toast } from "sonner";
 import type {
   Block,
@@ -285,7 +286,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       .getState()
       .noteBaseline(
         project.root,
-        project.chapters.reduce((sum, c) => sum + c.wordCount, 0),
+        sumBy(project.chapters, (c) => c.wordCount),
       );
     void useSyncStore.getState().init(root);
 
@@ -933,7 +934,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         try {
           const updated = get().project;
           if (updated) {
-            const total = updated.chapters.reduce((sum, c) => sum + c.wordCount, 0);
+            const total = sumBy(updated.chapters, (c) => c.wordCount);
             useStatsStore.getState().recordSave(updated.root, total);
           }
         } catch (e) {

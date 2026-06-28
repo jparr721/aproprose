@@ -1,17 +1,14 @@
-// outline-pane.tsx -- full-page storyboard surface (mirrors pdf-pane.tsx).
-//
-// A frameless aside: a thin header (title + close, which routes through the same
-// toggleOutline the sidebar button uses) over the OutlineBoard. The board owns its
-// own scrolling; the pane is just the chrome around it.
-
 import { IconLayoutKanban, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { TypographySmall } from "@/components/ui/typography";
 import { OutlineBoard } from "@/components/app/outline/outline-board";
+import { ChapterSubview } from "@/components/app/outline/chapter-subview";
+import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useViewStore } from "@/stores/view-store";
 
 export function OutlinePane() {
   const closeOutline = useViewStore((s) => s.toggleOutline);
+  const openChapterId = useOutlineBoardStore((s) => s.openChapterId);
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-background">
@@ -24,9 +21,7 @@ export function OutlinePane() {
           <IconX />
         </Button>
       </div>
-      <div className="min-h-0 flex-1">
-        <OutlineBoard />
-      </div>
+      <div className="min-h-0 flex-1">{openChapterId ? <ChapterSubview /> : <OutlineBoard />}</div>
     </aside>
   );
 }

@@ -17,7 +17,7 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconWand,
-  IconCheck,
+  IconSquareRoundedPlus,
   IconCopy,
   IconClipboardText,
   IconUserPlus,
@@ -356,6 +356,8 @@ function BlockImpl({
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const blockStyle = useSettingsStore((s) => s.blockStyle);
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
+  const blocks = useProjectStore((s) => s.blocks);
+  const insertAfter = useProjectStore((s) => s.insertAfter);
   const {
     attributes,
     listeners,
@@ -423,6 +425,16 @@ function BlockImpl({
 
   const onCopyBlock = async () => {
     if (!(await copyText(blockText))) toast.error("Couldn't copy to the clipboard");
+  };
+
+  const insertAbove = () => {
+    const idx = blocks.findIndex((b) => b.id === block.id);
+    const prevId = idx > 0 ? blocks[idx - 1].id : null;
+    insertAfter(prevId);
+  };
+
+  const insertBelow = () => {
+    insertAfter(block.id);
   };
 
   return (
@@ -534,6 +546,13 @@ function BlockImpl({
                   <IconArrowDown /> Move down
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => insertAbove()}>
+                  <IconSquareRoundedPlus /> Insert block above
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => insertBelow()}>
+                  <IconSquareRoundedPlus /> Insert block below
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>
                   <IconWand /> Clean up with AI
                 </DropdownMenuItem>
@@ -559,6 +578,13 @@ function BlockImpl({
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => moveBlock(block.id, 1)}>
           <IconArrowDown /> Move down
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => insertAbove()}>
+          <IconSquareRoundedPlus /> Insert block above
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => insertBelow()}>
+          <IconSquareRoundedPlus /> Insert block below
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>

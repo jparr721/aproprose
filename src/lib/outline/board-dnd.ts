@@ -1,70 +1,61 @@
-// board-dnd.ts -- decode a dnd-kit drop on the outline board into a move.
+// board-dnd.ts -- decode a dnd-kit drop on the chapter board into a card move.
 //
-// The board is a multi-container sortable: three columns, each a SortableContext
-// over its act's beats. closestCorners hands onDragEnd an `over.id` that is EITHER
-// a beat id (the pointer is over a card) OR a column id (the pointer is over an
-// empty column or the slack below the last card). This pure helper is the single
-// place that branch lives, so onDragEnd just forwards the result to moveBeatTo and
-// the rule stays unit-tested in isolation.
+// The board is a multi-container sortable: one column per chapter, each a
+// SortableContext over its cards. closestCorners hands onDragEnd an over.id that
+// is EITHER a card id (pointer over a card) OR a column id (pointer over an empty
+// column / slack below the last card). This pure helper is the single place that
+// branch lives, so onDragEnd just forwards the result to moveCardToChapter.
 
-import type { ActKind, Outline } from "@/lib/types";
+import type { ChapterOutline } from "@/lib/types";
 
-const ACT_ORDER: ActKind[] = ["setup", "confrontation", "resolution"];
+const COLUMN_PREFIX = "col:";
 
-/** Droppable id each column registers, distinct from any beat id. */
-export const COLUMN_IDS: Record<ActKind, string> = {
-  setup: "col:setup",
-  confrontation: "col:confrontation",
-  resolution: "col:resolution",
-};
-
-function actByColumnId(overId: string): ActKind | null {
-  return ACT_ORDER.find((k) => COLUMN_IDS[k] === overId) ?? null;
+/** Droppable id each chapter column registers, distinct from any card id. */
+export function cardColumnId(chapterId: string): string {
+  return `${COLUMN_PREFIX}${chapterId}`;
 }
 
-function locateBeat(
-  outline: Outline,
-  beatId: string,
-): { actKind: ActKind; index: number } | null {
-  for (const act of outline.acts) {
-    const index = act.beats.findIndex((b) => b.id === beatId);
-    if (index >= 0) return { actKind: act.kind, index };
+function chapterIdFromColumnId(overId: string): string | null {
+  return overId.startsWith(COLUMN_PREFIX) ? overId.slice(COLUMN_PREFIX.length) : null;
+}
+
+function locateCard(
+  chapters: Record<string, ChapterOutline>,
+  cardId: string,
+): { chapterId: string; index: number } | null {
+  for (const [chapterId, ch] of Object.entries(chapters)) {
+    const index = ch.cards.findIndex((c) => c.id === cardId);
+    if (index >= 0) return { chapterId, index };
   }
   return null;
 }
 
 /**
- * Resolve a beat drop into `{ toActKind, toIndex }` for moveBeatTo, or null when
- * the drop is a no-op (onto itself) or onto an unrecognized target.
- *
- * - over a column id  -> append to that act (index = its current beat count).
- * - over a beat id    -> that beat's act, at that beat's index (so the dragged
- *   card lands where the hovered card sits; moveBeatTo clamps).
- *
- * Index semantics match moveBeatTo: toIndex is the insertion slot AFTER the
- * dragged beat is removed from its source. For a beat target, passing the
- * over-beat's pre-removal index works in all cases:
- *   - cross-act: removal is in a different act, indices unaffected.
- *   - same-act moving up (active.index > over.index): over is before active,
- *     unaffected by removal.
- *   - same-act moving down (active.index < over.index): after removal, over
- *     shifts to over.index - 1; moveBeatTo receives over.index which clamps to
- *     the new length and splices active after over - the intended behavior.
+ * Resolve a card drop into the full move, or null when it is a no-op (onto
+ * itself) or onto an unrecognized target. Index semantics mirror moveCardToChapter:
+ * - over a column id -> append (index = that chapter's card count).
+ * - over a card id   -> that card's chapter, at that card's current index.
  */
-export function resolveBeatDrop(
-  outline: Outline,
+export function resolveCardDrop(
+  chapters: Record<string, ChapterOutline>,
   activeId: string,
   overId: string,
-): { toActKind: ActKind; toIndex: number } | null {
+): { fromChapterId: string; toChapterId: string; cardId: string; toIndex: number } | null {
   if (activeId === overId) return null;
+  const src = locateCard(chapters, activeId);
+  if (!src) return null;
 
-  const column = actByColumnId(overId);
+  const column = chapterIdFromColumnId(overId);
   if (column) {
-    const act = outline.acts.find((a) => a.kind === column)!;
-    return { toActKind: column, toIndex: act.beats.length };
+    return {
+      fromChapterId: src.chapterId,
+      toChapterId: column,
+      cardId: activeId,
+      toIndex: chapters[column]?.cards.length ?? 0,
+    };
   }
 
-  const target = locateBeat(outline, overId);
-  if (!target) return null;
-  return { toActKind: target.actKind, toIndex: target.index };
+  const tgt = locateCard(chapters, overId);
+  if (!tgt) return null;
+  return { fromChapterId: src.chapterId, toChapterId: tgt.chapterId, cardId: activeId, toIndex: tgt.index };
 }

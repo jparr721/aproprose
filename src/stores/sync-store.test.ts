@@ -58,13 +58,15 @@ describe("local status polling", () => {
   });
 
   it("keeps array references stable across a no-op poll (no spurious re-render)", async () => {
-    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    vi.mocked(gitRepoStatus).mockResolvedValue(DIRTY);
     await useSyncStore.getState().init("/repo");
-    const before = useSyncStore.getState().conflictedFiles;
+    const beforeChanged = useSyncStore.getState().changedFiles;
+    const beforeConflicted = useSyncStore.getState().conflictedFiles;
 
     await vi.advanceTimersByTimeAsync(STATUS_POLL_MS);
 
-    expect(useSyncStore.getState().conflictedFiles).toBe(before);
+    expect(useSyncStore.getState().changedFiles).toBe(beforeChanged);
+    expect(useSyncStore.getState().conflictedFiles).toBe(beforeConflicted);
   });
 
   it("skips the poll while a sync is in flight (no double-read)", async () => {

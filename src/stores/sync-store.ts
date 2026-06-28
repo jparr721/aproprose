@@ -17,13 +17,6 @@ const prefsKey = (root: string) => `sync-${pathHash(root)}`;
 // continuously while a project is open, independent of auto-sync.
 export const STATUS_POLL_MS = 5_000;
 
-const sameChangedFiles = (a: ChangedFile[], b: ChangedFile[]): boolean =>
-  a.length === b.length &&
-  a.every((f, i) => f.path === b[i].path && f.status === b[i].status && f.conflicted === b[i].conflicted);
-
-const sameStrings = (a: string[], b: string[]): boolean =>
-  a.length === b.length && a.every((s, i) => s === b[i]);
-
 interface SyncState {
   root: string | null;
   /** False after init() when this git repo has no stored prefs — drives the first-run setup dialog. */
@@ -57,6 +50,12 @@ export const useSyncStore = create<SyncState>((set, get) => {
   // Guards the read-only status operation against overlap from any caller
   // (the poll tick, init, or the review dialog) — one mechanism, all entry points.
   let statusReadInFlight = false;
+
+  // The serialized RepoStatus we last wrote. A poll whose status serializes
+  // identically is a no-op, so we skip the write entirely — keeping every array
+  // ref stable so the 5s tick doesn't re-render subscribers. Reset on teardown
+  // (and thus on project switch, since init() tears down first).
+  let lastStatusDigest: string | null = null;
 
   const armTimer = () => {
     const { timer, autoSync, intervalMinutes } = get();
@@ -131,6 +130,7 @@ export const useSyncStore = create<SyncState>((set, get) => {
       if (timer) clearInterval(timer);
       if (statusTimer) clearInterval(statusTimer);
       statusReadInFlight = false;
+      lastStatusDigest = null;
       set({
         root: null, prefsKnown: true, status: "disabled", isRepo: false, remoteUrl: null,
         lastSyncedAt: null, lastError: null, changedFiles: [], conflictedFiles: [],
@@ -157,17 +157,17 @@ export const useSyncStore = create<SyncState>((set, get) => {
           return;
         }
         if (stale()) return;
+        // Everything set() writes is a function of `s` (or of prev.status, which is
+        // unchanged on a poll), so a byte-identical snapshot means a byte-identical
+        // write. Bail before set() so all refs stay stable and the tick is invisible.
+        const digest = JSON.stringify(s);
+        if (digest === lastStatusDigest) return;
+        lastStatusDigest = digest;
         set((prev) => ({
           isRepo: s.isRepo,
           remoteUrl: s.remoteUrl,
-          // Keep prior array refs when nothing changed so the interval poll doesn't
-          // churn references and needlessly re-render the editor every tick.
-          changedFiles: sameChangedFiles(prev.changedFiles, s.changedFiles)
-            ? prev.changedFiles
-            : s.changedFiles,
-          conflictedFiles: sameStrings(prev.conflictedFiles, s.conflictedFiles)
-            ? prev.conflictedFiles
-            : s.conflictedFiles,
+          changedFiles: s.changedFiles,
+          conflictedFiles: s.conflictedFiles,
           // Don't repaint a terminal failure the sync just set.
           status:
             prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"

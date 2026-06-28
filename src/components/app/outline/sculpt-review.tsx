@@ -133,7 +133,7 @@ export function SculptReview() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-3 p-4">
           {proposal.changes.length === 0 ? (
-            <TypographyMuted>This act is already tight - no changes proposed.</TypographyMuted>
+            <TypographyMuted>This chapter is already tight - no changes proposed.</TypographyMuted>
           ) : (
             proposal.changes.map((change, i) => (
               <ChangeCard

@@ -1,22 +1,23 @@
 // outline-board-store.ts -- ephemeral board UI state.
 //
-// Holds the selected beat and the in-flight AI sculpt proposal + per-change
-// review decisions. None of this persists: a sculpt proposal is a transient,
-// reviewable gate, and the selection resets when the board unmounts.
-// The durable outline lives in project-store/meta.json; this store only
-// tracks what the author is currently looking at.
+// Holds which chapter subview is open and the in-flight AI sculpt proposal +
+// per-change review decisions. None of this persists: a sculpt proposal is a
+// transient, reviewable gate, and the open-chapter resets when the board
+// unmounts. The durable outline lives in project-store/meta.json.
 
 import { create } from "zustand";
-import type { ActKind, SculptProposal } from "@/lib/types";
+import type { SculptProposal } from "@/lib/types";
 
 interface OutlineBoardState {
-  selectedBeatId: string | null;
+  /** The chapter whose subview is open, or null for the board overview. */
+  openChapterId: string | null;
   proposal: SculptProposal | null;
   decisions: Record<number, "keep" | "skip">;
-  sculptingAct: ActKind | null;
+  sculptingChapterId: string | null;
   sculptError: string | null;
-  selectBeat: (id: string | null) => void;
-  startSculpt: (act: ActKind) => void;
+  openChapter: (id: string) => void;
+  closeChapter: () => void;
+  startSculpt: (chapterId: string) => void;
   setProposal: (p: SculptProposal | null) => void;
   setSculptError: (e: string | null) => void;
   setDecision: (index: number, d: "keep" | "skip") => void;
@@ -25,19 +26,18 @@ interface OutlineBoardState {
 }
 
 export const useOutlineBoardStore = create<OutlineBoardState>()((set) => ({
-  selectedBeatId: null,
+  openChapterId: null,
   proposal: null,
   decisions: {},
-  sculptingAct: null,
+  sculptingChapterId: null,
   sculptError: null,
-  selectBeat: (selectedBeatId) => set({ selectedBeatId }),
-  startSculpt: (act) => set({ sculptingAct: act, proposal: null, sculptError: null, decisions: {} }),
-  // A fresh proposal resets review decisions so prior keep/skip choices never
-  // bleed across runs (default-treated-as-keep happens at apply time).
+  openChapter: (openChapterId) => set({ openChapterId }),
+  closeChapter: () => set({ openChapterId: null }),
+  startSculpt: (chapterId) =>
+    set({ sculptingChapterId: chapterId, proposal: null, sculptError: null, decisions: {} }),
   setProposal: (p) => set({ proposal: p, decisions: {} }),
   setSculptError: (e) => set({ sculptError: e }),
-  setDecision: (index, d) =>
-    set((s) => ({ decisions: { ...s.decisions, [index]: d } })),
-  rejectAll: () => set({ proposal: null, decisions: {}, sculptingAct: null }),
+  setDecision: (index, d) => set((s) => ({ decisions: { ...s.decisions, [index]: d } })),
+  rejectAll: () => set({ proposal: null, decisions: {}, sculptingChapterId: null }),
   clearProposal: () => set({ proposal: null, decisions: {} }),
 }));

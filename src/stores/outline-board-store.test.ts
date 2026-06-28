@@ -2,41 +2,48 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import type { SculptProposal } from "@/lib/types";
 
-beforeEach(() => {
-  useOutlineBoardStore.setState({ selectedBeatId: null });
-});
-
-describe("outline-board-store", () => {
-  it("selectBeat sets and clears the selected beat", () => {
-    useOutlineBoardStore.getState().selectBeat("b1");
-    expect(useOutlineBoardStore.getState().selectedBeatId).toBe("b1");
-    useOutlineBoardStore.getState().selectBeat(null);
-    expect(useOutlineBoardStore.getState().selectedBeatId).toBeNull();
-  });
-});
-
 const proposal: SculptProposal = {
-  actKind: "setup",
+  chapterId: "ch1",
   summary: "s",
   changes: [
-    { kind: "add", beatId: null, title: "T", intention: "i", type: "action", toIndex: null, reason: "r" },
+    { kind: "add", cardId: null, title: "T", intention: "i", toIndex: null, reason: "r" },
   ],
 };
 
-describe("outline-board-store sculpt fields", () => {
-  beforeEach(() => {
-    useOutlineBoardStore.getState().rejectAll();
-    useOutlineBoardStore.getState().setSculptError(null);
+beforeEach(() => {
+  useOutlineBoardStore.setState({
+    openChapterId: null,
+    sculptingChapterId: null,
+    proposal: null,
+    decisions: {},
+    sculptError: null,
+  });
+});
+
+describe("outline-board-store chapter nav", () => {
+  it("openChapter sets openChapterId", () => {
+    useOutlineBoardStore.getState().openChapter("ch1");
+    expect(useOutlineBoardStore.getState().openChapterId).toBe("ch1");
   });
 
-  it("startSculpt sets the act and clears any prior proposal/error", () => {
+  it("closeChapter clears openChapterId to null", () => {
+    useOutlineBoardStore.getState().openChapter("ch1");
+    useOutlineBoardStore.getState().closeChapter();
+    expect(useOutlineBoardStore.getState().openChapterId).toBeNull();
+  });
+});
+
+describe("outline-board-store sculpt fields", () => {
+  it("startSculpt sets sculptingChapterId and resets proposal/error/decisions", () => {
     useOutlineBoardStore.getState().setProposal(proposal);
     useOutlineBoardStore.getState().setSculptError("boom");
-    useOutlineBoardStore.getState().startSculpt("confrontation");
+    useOutlineBoardStore.getState().setDecision(0, "keep");
+    useOutlineBoardStore.getState().startSculpt("ch2");
     const s = useOutlineBoardStore.getState();
-    expect(s.sculptingAct).toBe("confrontation");
+    expect(s.sculptingChapterId).toBe("ch2");
     expect(s.proposal).toBeNull();
     expect(s.sculptError).toBeNull();
+    expect(s.decisions).toEqual({});
   });
 
   it("setProposal stores the proposal and resets decisions", () => {
@@ -53,23 +60,25 @@ describe("outline-board-store sculpt fields", () => {
     expect(useOutlineBoardStore.getState().decisions[0]).toBe("skip");
   });
 
-  it("rejectAll clears proposal, decisions, and sculptingAct", () => {
-    useOutlineBoardStore.getState().startSculpt("setup");
+  it("rejectAll clears proposal, decisions, and sculptingChapterId", () => {
+    useOutlineBoardStore.getState().startSculpt("ch1");
     useOutlineBoardStore.getState().setProposal(proposal);
     useOutlineBoardStore.getState().setDecision(0, "skip");
     useOutlineBoardStore.getState().rejectAll();
     const s = useOutlineBoardStore.getState();
     expect(s.proposal).toBeNull();
     expect(s.decisions).toEqual({});
-    expect(s.sculptingAct).toBeNull();
+    expect(s.sculptingChapterId).toBeNull();
   });
 
-  it("clearProposal clears the proposal and decisions but not sculptingAct semantics", () => {
+  it("clearProposal clears proposal and decisions but leaves sculptingChapterId", () => {
+    useOutlineBoardStore.getState().startSculpt("ch1");
     useOutlineBoardStore.getState().setProposal(proposal);
     useOutlineBoardStore.getState().setDecision(0, "keep");
     useOutlineBoardStore.getState().clearProposal();
     const s = useOutlineBoardStore.getState();
     expect(s.proposal).toBeNull();
     expect(s.decisions).toEqual({});
+    expect(s.sculptingChapterId).toBe("ch1");
   });
 });

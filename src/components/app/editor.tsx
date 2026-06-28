@@ -52,7 +52,7 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
 
 // After a nav-key move, bring the newly-selected block into view. The block node
 // already exists (selection only restyles it), so a synchronous query is fine.
-function scrollSelectedIntoView() {
+export function scrollSelectedIntoView() {
   const id = useProjectStore.getState().selectedId;
   if (!id) return;
   document

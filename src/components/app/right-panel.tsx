@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  IconArrowDown,
   IconArrowRight,
   IconCheck,
   IconCopy,
@@ -51,6 +52,7 @@ import {
 } from "@/components/ai-elements/message";
 import { ColorAvatar } from "@/components/app/color-dot";
 import { OutlineSurface } from "@/components/app/outline/outline-surface";
+import { scrollSelectedIntoView } from "@/components/app/editor";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -233,6 +235,21 @@ function CursorAnchor() {
           {text || "Place your cursor in the manuscript."}
         </TypographyMuted>
       </div>
+      {block && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Scroll to block in editor"
+              onClick={() => scrollSelectedIntoView()}
+            >
+              <IconArrowDown className="size-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Go to block</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -260,6 +277,7 @@ function SuggestTab() {
         ? characters.find((c) => c.name.toLowerCase() === s.speaker?.toLowerCase())?.id
         : undefined;
     insertAfter(selectedId, { type: s.type, text: s.text, speaker: speakerId });
+    requestAnimationFrame(() => scrollSelectedIntoView());
   };
 
   const v =

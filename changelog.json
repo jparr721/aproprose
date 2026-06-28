@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.5.0",
+    "date": "2026-06-28",
+    "summary": "Quickly copy the location of your compiled PDF straight from the preview pane.",
+    "highlights": [
+      "A new copy button next to preview.pdf in the PDF preview pane copies the full file path of the compiled PDF to your clipboard, with a checkmark confirming the copy",
+      "Hovering the button shows the exact PDF path, so you can grab the file's location without leaving the app"
+    ]
+  },
+  {
     "version": "0.4.1",
     "date": "2026-06-28",
     "summary": "Launching the installed app now finds your installed tools so PDF export and other features work",

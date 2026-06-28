@@ -95,7 +95,11 @@ export function SculptReview() {
   const setDecision = useOutlineBoardStore((s) => s.setDecision);
   const rejectAll = useOutlineBoardStore((s) => s.rejectAll);
   const clearProposal = useOutlineBoardStore((s) => s.clearProposal);
+  const sculptingChapterId = useOutlineBoardStore((s) => s.sculptingChapterId);
   const applySculpt = useProjectStore((s) => s.applySculpt);
+  const chapterTitle = useProjectStore(
+    (s) => s.project?.chapters.find((c) => c.id === sculptingChapterId)?.title ?? "",
+  );
 
   if (!proposal) return null;
 
@@ -106,7 +110,7 @@ export function SculptReview() {
     .filter((i) => decisionFor(i) === "keep");
 
   const handleAccept = () => {
-    applySculpt(proposal, keptIndices);
+    applySculpt(proposal.chapterId, proposal, keptIndices);
     clearProposal();
   };
 
@@ -114,7 +118,7 @@ export function SculptReview() {
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex flex-col gap-0.5">
-          <TypographyEyebrow>Sculpt {proposal.actKind}</TypographyEyebrow>
+          <TypographyEyebrow>Reshape {chapterTitle}</TypographyEyebrow>
           <TypographyMuted className="text-sm">{proposal.summary}</TypographyMuted>
         </div>
         <div className="flex items-center gap-1.5">

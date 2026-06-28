@@ -1,11 +1,11 @@
-import { IconLayoutKanban, IconPlus } from "@tabler/icons-react";
+import { IconLayoutKanban, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -54,9 +54,9 @@ export function ChapterSubview() {
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <button type="button" onClick={closeChapter}>
+              <Button onClick={closeChapter} variant="ghost">
                 <IconLayoutKanban className="size-4" /> Storyboard
-              </button>
+              </Button>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
@@ -67,11 +67,11 @@ export function ChapterSubview() {
       </Breadcrumb>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-6 py-6">
+        <div className="mx-auto flex flex-col gap-4 p-4">
+          <TypographyEyebrow>Chapter Title</TypographyEyebrow>
           <Input
             value={chapterRef.title}
             onChange={(e) => void renameChapter(chapterRef.id, e.target.value)}
-            className="h-auto border-none p-0 text-2xl font-semibold shadow-none focus-visible:ring-0"
           />
 
           <div className="flex flex-wrap items-end gap-4">
@@ -125,7 +125,6 @@ export function ChapterSubview() {
 
           <div className="flex items-baseline gap-2 border-t border-border pt-4">
             <TypographyEyebrow>Plot elements</TypographyEyebrow>
-            <TypographyMuted className="text-xs">the pieces of this chapter</TypographyMuted>
           </div>
 
           <div className="flex flex-col gap-2.5">
@@ -135,19 +134,21 @@ export function ChapterSubview() {
                 .filter((c): c is NonNullable<typeof c> => Boolean(c));
               return (
                 <Card key={card.id}>
-                  <CardContent className="flex flex-col gap-2 p-3">
+                  <CardHeader>
+                    <TypographyEyebrow>Element Focus</TypographyEyebrow>
                     <Input
                       value={card.title}
                       onChange={(e) => editCard(chapterId, card.id, { title: e.target.value })}
                       placeholder="Card title"
-                      className="h-auto border-none p-0 font-semibold shadow-none focus-visible:ring-0"
                     />
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 p-3">
+                    <TypographyEyebrow>Element Goal</TypographyEyebrow>
                     <Textarea
                       value={card.intention}
                       onChange={(e) => editCard(chapterId, card.id, { intention: e.target.value })}
                       placeholder="What does this beat accomplish?"
                       rows={2}
-                      className="resize-y border-none p-0 text-sm shadow-none focus-visible:ring-0"
                     />
                     <div className="flex flex-wrap items-center gap-1.5">
                       {cast.map((c) => (
@@ -159,12 +160,10 @@ export function ChapterSubview() {
                         />
                       ))}
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs text-muted-foreground"
+                        variant="destructive"
                         onClick={() => removeCard(chapterId, card.id)}
                       >
-                        Remove card
+                        <IconTrash /> Remove card
                       </Button>
                     </div>
                   </CardContent>

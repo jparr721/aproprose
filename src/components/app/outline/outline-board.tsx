@@ -79,18 +79,18 @@ export function OutlineBoard() {
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
       <SculptReview />
+      <div className="flex flex-col gap-1.5 px-4 pt-5 pb-3">
+        <TypographyEyebrow>Logline</TypographyEyebrow>
+        <Textarea
+          value={premise}
+          onChange={(e) => setPremise(e.target.value)}
+          placeholder="One or two sentences: who wants what, and what stands in the way."
+          rows={2}
+          className="resize-y"
+        />
+      </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex min-w-max flex-col gap-4 px-4 py-5">
-          <div className="flex max-w-[640px] flex-col gap-1.5">
-            <TypographyEyebrow>Logline</TypographyEyebrow>
-            <Textarea
-              value={premise}
-              onChange={(e) => setPremise(e.target.value)}
-              placeholder="One or two sentences: who wants what, and what stands in the way."
-              rows={2}
-              className="resize-y"
-            />
-          </div>
+        <div className="flex min-w-max flex-col px-4 pb-5">
           <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
             <div className="flex items-start gap-4">
               {runs.map((run, i) => (

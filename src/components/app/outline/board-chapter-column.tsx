@@ -31,7 +31,7 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
   };
 
   return (
-    <div className="flex w-60 shrink-0 flex-col gap-2">
+    <div className="flex w-72 shrink-0 flex-col gap-2">
       <div className="flex flex-col gap-1.5 px-0.5">
         <button
           type="button"

@@ -19,6 +19,7 @@ import {
   IconWand,
   IconSquareRoundedPlus,
   IconCopy,
+  IconCheck,
   IconClipboardText,
   IconUserPlus,
 } from "@tabler/icons-react";
@@ -109,7 +110,7 @@ function TypeChip({
                   <ColorDot color={c.color} />
                   <span className="flex-1">{c.name}</span>
                   <span className="text-xs text-faint">{c.role}</span>
-                  {block.speaker === c.id ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
+                  {block.speaker === c.id ? <IconCheck className="size-4 text-accent-ink" /> : null}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuItem onSelect={() => setAddOpen(true)}>
@@ -124,7 +125,7 @@ function TypeChip({
             <DropdownMenuItem key={t} onSelect={() => changeType(block.id, t)}>
               <span className={cn("size-2 rounded-[2px]", TYPE_SWATCH[t])} />
               <span className="flex-1">{TYPE_LABELS[t]}</span>
-              {block.type === t ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
+              {block.type === t ? <IconCheck className="size-4 text-accent-ink" /> : null}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

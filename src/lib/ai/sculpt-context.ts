@@ -1,24 +1,25 @@
-// sculpt-context.ts - build the SculptContext for one act from project state.
+// sculpt-context.ts - build the SculptContext for one chapter from project state.
 //
-// Reads the current outline, the act's ordered beats, and the project roster
+// Reads the chapter's planning entry, its title from the project, and the roster
 // (characters + lore) straight from project-store. Pure read; no writes.
 
 import type { SculptContext } from "@/lib/ai/operations";
-import type { ActKind } from "@/lib/types";
+import { getChapterOutline } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
 
-export function buildSculptContext(actKind: ActKind): SculptContext {
-  const { meta } = useProjectStore.getState();
-  const act = meta.outline.acts.find((a) => a.kind === actKind);
+export function buildSculptContext(chapterId: string): SculptContext {
+  const { meta, project } = useProjectStore.getState();
+  const ch = getChapterOutline(meta.chapters, chapterId);
+  const title = project?.chapters.find((c) => c.id === chapterId)?.title ?? "";
   return {
-    actKind,
-    premise: meta.outline.premise,
-    beats: (act?.beats ?? []).map((b) => ({
-      id: b.id,
-      title: b.title,
-      intention: b.intention,
-      type: b.type,
-    })),
+    chapterId,
+    chapterTitle: title,
+    storyPremise: meta.outline.premise,
+    premise: ch.premise,
+    goal: ch.goal,
+    conflict: ch.conflict,
+    turn: ch.turn,
+    cards: ch.cards.map((c) => ({ id: c.id, title: c.title, intention: c.intention })),
     characters: meta.characters.map((c) => ({ name: c.name })),
     lore: meta.lore.map((l) => ({ title: l.title })),
   };

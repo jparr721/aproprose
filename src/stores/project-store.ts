@@ -10,7 +10,6 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import type {
   ActKind,
-  Beat,
   BeatType,
   Block,
   BlockType,
@@ -56,26 +55,23 @@ import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import {
-  addBeat as addBeatModel,
-  addCharacterToBeat as addCharacterToBeatModel,
-  addLoreToBeat as addLoreToBeatModel,
+  addCard as addCardModel,
+  addCharacterToCard as addCharacterToCardModel,
+  addLoreToCard as addLoreToCardModel,
   applySculpt as applySculptModel,
-  assignChapter,
-  defaultOutline,
-  editActSummary,
-  editActTitle,
-  editBeat as editBeatModel,
+  editCard as editCardModel,
+  editChapterField,
   editPremise,
-  moveBeat as moveBeatModel,
-  moveBeatTo as moveBeatToModel,
-  removeBeat as removeBeatModel,
-  removeCharacterFromBeat as removeCharacterFromBeatModel,
-  removeLoreFromBeat as removeLoreFromBeatModel,
-  setBeatContinuityFlags as setBeatContinuityFlagsModel,
-  setBeatType as setBeatTypeModel,
-  unassignChapter,
+  moveCardToChapter as moveCardToChapterModel,
+  moveCardWithin as moveCardWithinModel,
+  removeCard as removeCardModel,
+  removeCharacterFromCard as removeCharacterFromCardModel,
+  removeLoreFromCard as removeLoreFromCardModel,
+  setCardContinuityFlags as setCardContinuityFlagsModel,
+  setChapterAct as setChapterActModel,
+  setChapterPlotPoint as setChapterPlotPointModel,
 } from "@/lib/outline/model";
-import { beatTypeFromTitle } from "@/lib/outline/beat-types";
+import { isNewShapeMeta, migrateLegacyMeta } from "@/lib/outline/migrate";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -90,44 +86,33 @@ interface CompileState {
   at: number | null;
 }
 
+export function defaultOutline(): Outline {
+  return { premise: "" };
+}
+
 const EMPTY_META: ProjectMeta = {
   characters: [],
   lore: [],
   statuses: {},
   outline: defaultOutline(),
-  chapterBeats: {},
+  chapters: {},
 };
 
-/** Backfill any fields an older meta.json predates, so an open never crashes on a
- *  meta blob written before outlines existed. */
-function backfillBeat(beat: Beat): Beat {
-  return {
-    ...beat,
-    type: beat.type ?? beatTypeFromTitle(beat.title),
-    characterIds: beat.characterIds ?? [],
-    loreIds: beat.loreIds ?? [],
-    continuityFlags: beat.continuityFlags ?? [],
-  };
-}
-
-function normalizeOutline(outline: Outline): Outline {
-  return {
-    ...outline,
-    acts: outline.acts.map((act) => ({
-      ...act,
-      beats: act.beats.map(backfillBeat),
-    })) as Outline["acts"],
-  };
-}
-
+/** Coerce any historical meta blob into the chapter-centric shape. New-shape
+ *  blobs pass through (with field backfill); legacy blobs are migrated once. */
 export function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
-  return {
-    characters: m?.characters ?? [],
-    lore: m?.lore ?? [],
-    statuses: m?.statuses ?? {},
-    outline: normalizeOutline(m?.outline ?? defaultOutline()),
-    chapterBeats: m?.chapterBeats ?? {},
-  };
+  if (!m) return EMPTY_META;
+  const raw = m as unknown as Record<string, unknown>;
+  if (isNewShapeMeta(raw)) {
+    return {
+      characters: m.characters ?? [],
+      lore: m.lore ?? [],
+      statuses: m.statuses ?? {},
+      outline: { premise: m.outline?.premise ?? "" },
+      chapters: (m as ProjectMeta).chapters ?? {},
+    };
+  }
+  return migrateLegacyMeta(raw);
 }
 
 const EMPTY_COMPILE: CompileState = {
@@ -272,25 +257,24 @@ interface ProjectState {
   addLore: (title: string) => void;
   setChapterStatus: (id: string, status: ChapterStatus) => void;
 
-  // outline
+  // outline (global)
   setPremise: (premise: string) => void;
-  addBeat: (act: ActKind, afterBeatId: string | null) => string;
-  removeBeat: (beatId: string) => void;
-  moveBeat: (beatId: string, dir: -1 | 1) => void;
-  editBeat: (beatId: string, patch: { title?: string; intention?: string }) => void;
-  setActSummary: (act: ActKind, summary: string) => void;
-  setActTitle: (act: ActKind, title: string) => void;
-  assignChapterToBeat: (chapterId: string, beatId: string) => void;
-  unassignChapterFromBeat: (chapterId: string) => void;
-  setBeatType: (beatId: string, type: BeatType) => void;
-  addCharacterToBeat: (beatId: string, characterId: string) => void;
-  removeCharacterFromBeat: (beatId: string, characterId: string) => void;
-  addLoreToBeat: (beatId: string, loreId: string) => void;
-  removeLoreFromBeat: (beatId: string, loreId: string) => void;
-  setBeatContinuityFlags: (beatId: string, flags: ContinuityFlag[]) => void;
-  moveBeatTo: (beatId: string, toActKind: ActKind, toIndex: number) => void;
-  setChapterBeat: (chapterId: string, patch: { goal?: string; conflict?: string; turn?: string }) => void;
-  applySculpt: (proposal: SculptProposal, kept: number[]) => void;
+  // cards
+  addCard: (chapterId: string) => string;
+  removeCard: (chapterId: string, cardId: string) => void;
+  editCard: (chapterId: string, cardId: string, patch: { title?: string; intention?: string }) => void;
+  moveCardWithin: (chapterId: string, cardId: string, toIndex: number) => void;
+  moveCardToChapter: (fromChapterId: string, toChapterId: string, cardId: string, toIndex: number) => void;
+  addCharacterToCard: (chapterId: string, cardId: string, characterId: string) => void;
+  removeCharacterFromCard: (chapterId: string, cardId: string, characterId: string) => void;
+  addLoreToCard: (chapterId: string, cardId: string, loreId: string) => void;
+  removeLoreFromCard: (chapterId: string, cardId: string, loreId: string) => void;
+  setCardContinuityFlags: (chapterId: string, cardId: string, flags: ContinuityFlag[]) => void;
+  // chapter fields
+  setChapterAct: (chapterId: string, act: ActKind | null) => void;
+  setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
+  setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
+  applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
 }
 
 const HISTORY_CAP = 100;
@@ -591,9 +575,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set((s) => {
           const meta = {
             ...s.meta,
-            outline: unassignChapter(s.meta.outline, id),
-            chapterBeats: Object.fromEntries(
-              Object.entries(s.meta.chapterBeats).filter(([k]) => k !== id),
+            chapters: Object.fromEntries(
+              Object.entries(s.meta.chapters).filter(([k]) => k !== id),
             ),
           };
           persistMeta(meta);
@@ -1131,143 +1114,106 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
-    addBeat: (act, afterBeatId) => {
-      const { outline, beatId } = addBeatModel(get().meta.outline, act, afterBeatId);
+    addCard: (chapterId) => {
+      const { chapters, cardId } = addCardModel(get().meta.chapters, chapterId);
       set((s) => {
-        const meta = { ...s.meta, outline };
+        const meta = { ...s.meta, chapters };
         persistMeta(meta);
         return { meta };
       });
-      return beatId;
+      return cardId;
     },
 
-    removeBeat: (beatId) =>
+    removeCard: (chapterId, cardId) =>
       set((s) => {
-        const meta = { ...s.meta, outline: removeBeatModel(s.meta.outline, beatId) };
+        const meta = { ...s.meta, chapters: removeCardModel(s.meta.chapters, chapterId, cardId) };
         persistMeta(meta);
         return { meta };
       }),
 
-    moveBeat: (beatId, dir) =>
+    editCard: (chapterId, cardId, patch) =>
       set((s) => {
-        const meta = { ...s.meta, outline: moveBeatModel(s.meta.outline, beatId, dir) };
+        const meta = { ...s.meta, chapters: editCardModel(s.meta.chapters, chapterId, cardId, patch) };
         persistMeta(meta);
         return { meta };
       }),
 
-    editBeat: (beatId, patch) =>
+    moveCardWithin: (chapterId, cardId, toIndex) =>
       set((s) => {
-        const meta = { ...s.meta, outline: editBeatModel(s.meta.outline, beatId, patch) };
+        const meta = { ...s.meta, chapters: moveCardWithinModel(s.meta.chapters, chapterId, cardId, toIndex) };
         persistMeta(meta);
         return { meta };
       }),
 
-    setActSummary: (act, summary) =>
-      set((s) => {
-        const meta = { ...s.meta, outline: editActSummary(s.meta.outline, act, summary) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
-    setActTitle: (act, title) =>
-      set((s) => {
-        const meta = { ...s.meta, outline: editActTitle(s.meta.outline, act, title) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
-    assignChapterToBeat: (chapterId, beatId) =>
-      set((s) => {
-        const meta = { ...s.meta, outline: assignChapter(s.meta.outline, chapterId, beatId) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
-    unassignChapterFromBeat: (chapterId) =>
-      set((s) => {
-        const meta = { ...s.meta, outline: unassignChapter(s.meta.outline, chapterId) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
-    setBeatType: (beatId, type) =>
-      set((s) => {
-        const meta = { ...s.meta, outline: setBeatTypeModel(s.meta.outline, beatId, type) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
-    addCharacterToBeat: (beatId, characterId) =>
+    moveCardToChapter: (fromChapterId, toChapterId, cardId, toIndex) =>
       set((s) => {
         const meta = {
           ...s.meta,
-          outline: addCharacterToBeatModel(s.meta.outline, beatId, characterId),
+          chapters: moveCardToChapterModel(s.meta.chapters, fromChapterId, toChapterId, cardId, toIndex),
         };
         persistMeta(meta);
         return { meta };
       }),
 
-    removeCharacterFromBeat: (beatId, characterId) =>
+    addCharacterToCard: (chapterId, cardId, characterId) =>
       set((s) => {
-        const meta = {
-          ...s.meta,
-          outline: removeCharacterFromBeatModel(s.meta.outline, beatId, characterId),
-        };
+        const meta = { ...s.meta, chapters: addCharacterToCardModel(s.meta.chapters, chapterId, cardId, characterId) };
         persistMeta(meta);
         return { meta };
       }),
 
-    addLoreToBeat: (beatId, loreId) =>
+    removeCharacterFromCard: (chapterId, cardId, characterId) =>
       set((s) => {
-        const meta = { ...s.meta, outline: addLoreToBeatModel(s.meta.outline, beatId, loreId) };
+        const meta = { ...s.meta, chapters: removeCharacterFromCardModel(s.meta.chapters, chapterId, cardId, characterId) };
         persistMeta(meta);
         return { meta };
       }),
 
-    removeLoreFromBeat: (beatId, loreId) =>
+    addLoreToCard: (chapterId, cardId, loreId) =>
       set((s) => {
-        const meta = {
-          ...s.meta,
-          outline: removeLoreFromBeatModel(s.meta.outline, beatId, loreId),
-        };
+        const meta = { ...s.meta, chapters: addLoreToCardModel(s.meta.chapters, chapterId, cardId, loreId) };
         persistMeta(meta);
         return { meta };
       }),
 
-    setBeatContinuityFlags: (beatId, flags) =>
+    removeLoreFromCard: (chapterId, cardId, loreId) =>
       set((s) => {
-        const meta = {
-          ...s.meta,
-          outline: setBeatContinuityFlagsModel(s.meta.outline, beatId, flags),
-        };
+        const meta = { ...s.meta, chapters: removeLoreFromCardModel(s.meta.chapters, chapterId, cardId, loreId) };
         persistMeta(meta);
         return { meta };
       }),
 
-    moveBeatTo: (beatId, toActKind, toIndex) =>
+    setCardContinuityFlags: (chapterId, cardId, flags) =>
       set((s) => {
-        const meta = {
-          ...s.meta,
-          outline: moveBeatToModel(s.meta.outline, beatId, toActKind, toIndex),
-        };
+        const meta = { ...s.meta, chapters: setCardContinuityFlagsModel(s.meta.chapters, chapterId, cardId, flags) };
         persistMeta(meta);
         return { meta };
       }),
 
-    setChapterBeat: (chapterId, patch) =>
+    setChapterAct: (chapterId, act) =>
       set((s) => {
-        const prev = s.meta.chapterBeats[chapterId] ?? { goal: "", conflict: "", turn: "" };
-        const meta = {
-          ...s.meta,
-          chapterBeats: { ...s.meta.chapterBeats, [chapterId]: { ...prev, ...patch } },
-        };
+        const meta = { ...s.meta, chapters: setChapterActModel(s.meta.chapters, chapterId, act) };
         persistMeta(meta);
         return { meta };
       }),
 
-    applySculpt: (proposal, kept) =>
+    setChapterPlotPoint: (chapterId, plotPoint) =>
       set((s) => {
-        const meta = { ...s.meta, outline: applySculptModel(s.meta.outline, proposal, kept) };
+        const meta = { ...s.meta, chapters: setChapterPlotPointModel(s.meta.chapters, chapterId, plotPoint) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setChapterField: (chapterId, patch) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: editChapterField(s.meta.chapters, chapterId, patch) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    applySculpt: (chapterId, proposal, kept) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: applySculptModel(s.meta.chapters, chapterId, proposal, kept) };
         persistMeta(meta);
         return { meta };
       }),

@@ -369,6 +369,9 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Persist + restore the main window's size/position across launches so it
+        // reopens exactly where it was last closed.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             // macOS only: add a "Check for Updates" item to the native
             // application menu. It emits `check-for-updates`, which the webview's

@@ -10,6 +10,7 @@ pub mod ai_cli;
 pub mod compile;
 pub mod git;
 pub mod novel;
+pub mod path_env;
 pub mod project;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -343,6 +344,11 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A GUI launch (Finder/Dock/.dmg) inherits launchd's minimal PATH, hiding
+    // user-installed tools (latexmk, the Codex/Claude CLIs, git/gh). Recover the
+    // real PATH before any command can spawn a child.
+    path_env::repair_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

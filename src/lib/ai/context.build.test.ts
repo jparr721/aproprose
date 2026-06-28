@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { defaultOutline, assignChapter } from "@/lib/outline/model";
 
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
@@ -63,17 +62,18 @@ describe("buildAiContext structure", () => {
         chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
       },
       activeChapterId: "c1",
-      meta: { characters: [], lore: [], statuses: {}, outline: defaultOutline(), chapterBeats: {} },
+      meta: {
+        characters: [], lore: [], statuses: {},
+        outline: { premise: "" },
+        chapters: {},
+      },
       blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
       selectedId: "n1",
     });
     expect(buildAiContext().structure).toBeUndefined();
   });
 
-  it("includes the served beat once the chapter is linked", () => {
-    const o = assignChapter(defaultOutline(), "c1", defaultOutline().acts[1].beats[1].id);
-    const beatId = o.acts[1].beats[1].id;
-    const linked = assignChapter(o, "c1", beatId);
+  it("includes act info once the chapter has an act assigned", () => {
     useProjectStore.setState({
       project: {
         root: "/p", name: "P", mainFile: "main.tex", title: "P", author: "A",
@@ -81,10 +81,26 @@ describe("buildAiContext structure", () => {
         chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
       },
       activeChapterId: "c1",
-      meta: { characters: [], lore: [], statuses: {}, outline: linked, chapterBeats: {} },
+      meta: {
+        characters: [], lore: [], statuses: {},
+        outline: { premise: "" },
+        chapters: {
+          c1: {
+            act: "setup",
+            plotPoint: null,
+            premise: "",
+            goal: "Introduce the protagonist",
+            conflict: "",
+            turn: "",
+            cards: [],
+          },
+        },
+      },
       blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
       selectedId: "n1",
     });
-    expect(buildAiContext().structure).toContain("It serves the beat");
+    const structure = buildAiContext().structure;
+    expect(structure).toContain("Act I");
+    expect(structure).toContain("Goal: Introduce the protagonist");
   });
 });

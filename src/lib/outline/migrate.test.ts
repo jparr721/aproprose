@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isNewShapeMeta, migrateLegacyMeta } from "@/lib/outline/migrate";
+import { emptyChapterOutline } from "@/lib/outline/model";
 
 const legacy = {
   characters: [{ id: "c1", name: "Mara", color: "oklch(0 0 0)", role: "POV" }],
@@ -41,6 +42,12 @@ describe("migrateLegacyMeta", () => {
     const m = migrateLegacyMeta({});
     expect(m.chapters).toEqual({});
     expect(m.outline.premise).toBe("");
+  });
+  it("owns its chapter objects - repeated calls do not accumulate, and the shared empty outline stays empty", () => {
+    migrateLegacyMeta(legacy);
+    const second = migrateLegacyMeta(legacy);
+    expect(second.chapters.ch1.cards).toHaveLength(1);
+    expect(emptyChapterOutline().cards).toHaveLength(0);
   });
 });
 

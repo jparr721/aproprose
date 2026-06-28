@@ -50,7 +50,11 @@ export function migrateLegacyMeta(raw: Record<string, unknown>): ProjectMeta {
   const legacyOutline = (raw.outline ?? {}) as LegacyOutline;
   const legacyBeats = (raw.chapterBeats ?? {}) as Record<string, LegacyChapterBeat>;
   const chapters: Record<string, ChapterOutline> = {};
-  const ensure = (id: string): ChapterOutline => (chapters[id] ??= emptyChapterOutline());
+  // Clone the empty template into a fresh, locally-owned object with its own
+  // arrays: emptyChapterOutline() returns a shared stable reference, and the
+  // mutations below (ch.cards.push, ch.goal = ...) must not leak into it.
+  const ensure = (id: string): ChapterOutline =>
+    (chapters[id] ??= { ...emptyChapterOutline(), cards: [] });
 
   for (const [id, cb] of Object.entries(legacyBeats)) {
     const ch = ensure(id);

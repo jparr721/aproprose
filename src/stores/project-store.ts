@@ -939,6 +939,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         } catch (e) {
           console.warn("stats recordSave failed:", e);
         }
+        // The working tree changed on disk; refresh the backup indicator now
+        // instead of waiting for the next status poll tick.
+        void useSyncStore.getState().refreshStatus();
       } catch (e) {
         set({ saving: false, error: String(e) });
       }

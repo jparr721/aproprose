@@ -23,6 +23,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
+import { useSyncStore } from "@/stores/sync-store";
 import { compileProject, openProject, readPdf, readTextFile } from "@/lib/tauri";
 import type { Block, ProjectInfo } from "@/lib/types";
 
@@ -750,6 +751,32 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     expect(blocks.length).toBe(2); // count diverged
     expect(selectedId).toBeNull();
     expect(selectedIds).toEqual([]);
+  });
+});
+
+describe("saveChapter refreshes the backup indicator", () => {
+  it("triggers a git status refresh after the disk write (no wait for the poll)", async () => {
+    const refreshSpy = vi
+      .spyOn(useSyncStore.getState(), "refreshStatus")
+      .mockResolvedValue(undefined);
+    useProjectStore.setState({
+      project: {
+        root: "/tmp/book",
+        name: "Book",
+        mainFile: "main.tex",
+        title: null,
+        author: null,
+        chapters: [{ id: "ch1", title: "One", file: "ch1.tex", label: "1", wordCount: 0 }],
+      } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      blocks: [mkBlock({ id: "x0", type: "narration", text: "Alpha", dirty: true })],
+      chapterDirty: true,
+    });
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    refreshSpy.mockRestore();
   });
 });
 

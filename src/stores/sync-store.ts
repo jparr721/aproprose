@@ -12,6 +12,18 @@ import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from
 const DEFAULT_PREFS: SyncPrefs = { autoSync: false, intervalMinutes: 10 };
 const prefsKey = (root: string) => `sync-${pathHash(root)}`;
 
+// How often to re-read local git status so the chrome reflects on-disk edits
+// without a manual check. Local `git status` is offline and cheap, so this runs
+// continuously while a project is open, independent of auto-sync.
+export const STATUS_POLL_MS = 5_000;
+
+const sameChangedFiles = (a: ChangedFile[], b: ChangedFile[]): boolean =>
+  a.length === b.length &&
+  a.every((f, i) => f.path === b[i].path && f.status === b[i].status && f.conflicted === b[i].conflicted);
+
+const sameStrings = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((s, i) => s === b[i]);
+
 interface SyncState {
   root: string | null;
   /** False after init() when this git repo has no stored prefs — drives the first-run setup dialog. */
@@ -27,6 +39,10 @@ interface SyncState {
   conflictedFiles: string[];
   inFlight: boolean;
   timer: ReturnType<typeof setInterval> | null;
+  statusTimer: ReturnType<typeof setInterval> | null;
+  /** Bumped whenever a sync begins. A status read whose epoch changed mid-read
+   *  is stale (a sync set an authoritative status meanwhile) and must not write. */
+  syncEpoch: number;
 
   init: (root: string) => Promise<void>;
   teardown: () => void;
@@ -38,6 +54,10 @@ interface SyncState {
 
 
 export const useSyncStore = create<SyncState>((set, get) => {
+  // Guards the read-only status operation against overlap from any caller
+  // (the poll tick, init, or the review dialog) — one mechanism, all entry points.
+  let statusReadInFlight = false;
+
   const armTimer = () => {
     const { timer, autoSync, intervalMinutes } = get();
     if (timer) clearInterval(timer);
@@ -48,6 +68,21 @@ export const useSyncStore = create<SyncState>((set, get) => {
     const ms = Math.max(1, intervalMinutes) * 60_000;
     const handle = setInterval(() => void get().syncNow(), ms);
     set({ timer: handle });
+  };
+
+  // Read-only local-status poll, independent of auto-sync, so the indicator
+  // tracks on-disk edits live instead of going stale until a manual check.
+  // refreshStatus self-guards against overlap, so the tick only screens out the
+  // sync case (a running sync refreshes the file lists itself).
+  const armStatusTimer = () => {
+    const { statusTimer } = get();
+    if (statusTimer) clearInterval(statusTimer);
+    const handle = setInterval(() => {
+      const { root, inFlight } = get();
+      if (!root || inFlight) return;
+      void get().refreshStatus();
+    }, STATUS_POLL_MS);
+    set({ statusTimer: handle });
   };
 
   const persistPrefs = () => {
@@ -69,6 +104,8 @@ export const useSyncStore = create<SyncState>((set, get) => {
     conflictedFiles: [],
     inFlight: false,
     timer: null,
+    statusTimer: null,
+    syncEpoch: 0,
 
     init: async (root) => {
       get().teardown();
@@ -86,47 +123,66 @@ export const useSyncStore = create<SyncState>((set, get) => {
         void get().syncNow();
       }
       armTimer();
+      armStatusTimer();
     },
 
     teardown: () => {
-      const { timer } = get();
+      const { timer, statusTimer } = get();
       if (timer) clearInterval(timer);
+      if (statusTimer) clearInterval(statusTimer);
+      statusReadInFlight = false;
       set({
         root: null, prefsKnown: true, status: "disabled", isRepo: false, remoteUrl: null,
         lastSyncedAt: null, lastError: null, changedFiles: [], conflictedFiles: [],
-        inFlight: false, timer: null,
+        inFlight: false, timer: null, statusTimer: null,
       });
     },
 
     refreshStatus: async () => {
       const { root } = get();
-      if (!root) return;
-      let s: RepoStatus;
+      if (!root || statusReadInFlight) return;
+      statusReadInFlight = true;
+      const epoch = get().syncEpoch;
+      // This snapshot is only safe to write if nothing authoritative changed during
+      // the read: a sync that ran/started (epoch moved or inFlight) owns the status
+      // and the file lists, and a project switch (root moved) makes our read stale.
+      const stale = () => get().root !== root || get().syncEpoch !== epoch || get().inFlight;
       try {
-        s = await gitRepoStatus(root);
-      } catch (e) {
-        set({ status: "error", lastError: String(e) });
-        return;
-      }
-      set((prev) => ({
-        isRepo: s.isRepo,
-        remoteUrl: s.remoteUrl,
-        changedFiles: s.changedFiles,
-        conflictedFiles: s.conflictedFiles,
-        // Don't repaint a terminal failure the sync just set.
-        status:
-          prev.inFlight
-            ? "syncing"
-            : prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"
+        let s: RepoStatus;
+        try {
+          s = await gitRepoStatus(root);
+        } catch (e) {
+          if (stale()) return;
+          set({ status: "error", lastError: String(e) });
+          return;
+        }
+        if (stale()) return;
+        set((prev) => ({
+          isRepo: s.isRepo,
+          remoteUrl: s.remoteUrl,
+          // Keep prior array refs when nothing changed so the interval poll doesn't
+          // churn references and needlessly re-render the editor every tick.
+          changedFiles: sameChangedFiles(prev.changedFiles, s.changedFiles)
+            ? prev.changedFiles
+            : s.changedFiles,
+          conflictedFiles: sameStrings(prev.conflictedFiles, s.conflictedFiles)
+            ? prev.conflictedFiles
+            : s.conflictedFiles,
+          // Don't repaint a terminal failure the sync just set.
+          status:
+            prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"
               ? prev.status
               : deriveIdleStatus(s),
-      }));
+        }));
+      } finally {
+        statusReadInFlight = false;
+      }
     },
 
     syncNow: async () => {
       const { root, inFlight } = get();
       if (!root || inFlight) return;
-      set({ inFlight: true, status: "syncing", lastError: null });
+      set((p) => ({ inFlight: true, status: "syncing", lastError: null, syncEpoch: p.syncEpoch + 1 }));
       try {
         const outcome = await syncProject(root, backupMessage(new Date()));
         const status = outcomeToStatus(outcome);

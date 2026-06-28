@@ -39,8 +39,18 @@ export const ACT_ORDER: ActKind[] = ["setup", "confrontation", "resolution"];
 
 type Chapters = Record<string, ChapterOutline>;
 
+const _EMPTY_OUTLINE: ChapterOutline = {
+  act: null,
+  plotPoint: null,
+  premise: "",
+  goal: "",
+  conflict: "",
+  turn: "",
+  cards: [],
+};
+
 export function emptyChapterOutline(): ChapterOutline {
-  return { act: null, plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] };
+  return _EMPTY_OUTLINE;
 }
 
 /** The entry for a chapter, or a fresh empty one (never mutates the map). */

@@ -976,7 +976,7 @@ export function RightPanelContent() {
 
   return (
     <aside data-right-panel className="flex h-full min-h-0 w-full flex-col bg-card">
-      <CursorAnchor />
+      {tab !== "outline" && <CursorAnchor />}
       <div className="min-h-0 flex-1">
         {tab === "outline" || !(hydrated && !aiModel) ? (
           <ActivePanel tab={tab} />

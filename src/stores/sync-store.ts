@@ -4,6 +4,7 @@
 // (autoSync, interval) persist in the app config dir keyed by a path hash.
 
 import { create } from "zustand";
+import { clamp, isEqual } from "es-toolkit";
 import type { ChangedFile, RepoStatus, SyncPrefs, SyncStatus } from "@/lib/types";
 import { gitRepoStatus, syncProject, readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
@@ -11,6 +12,11 @@ import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from
 
 const DEFAULT_PREFS: SyncPrefs = { autoSync: false, intervalMinutes: 10 };
 const prefsKey = (root: string) => `sync-${pathHash(root)}`;
+
+// How often to re-read local git status so the chrome reflects on-disk edits
+// without a manual check. Local `git status` is offline and cheap, so this runs
+// continuously while a project is open, independent of auto-sync.
+export const STATUS_POLL_MS = 5_000;
 
 interface SyncState {
   root: string | null;
@@ -27,6 +33,10 @@ interface SyncState {
   conflictedFiles: string[];
   inFlight: boolean;
   timer: ReturnType<typeof setInterval> | null;
+  statusTimer: ReturnType<typeof setInterval> | null;
+  /** Bumped whenever a sync begins. A status read whose epoch changed mid-read
+   *  is stale (a sync set an authoritative status meanwhile) and must not write. */
+  syncEpoch: number;
 
   init: (root: string) => Promise<void>;
   teardown: () => void;
@@ -38,6 +48,16 @@ interface SyncState {
 
 
 export const useSyncStore = create<SyncState>((set, get) => {
+  // Guards the read-only status operation against overlap from any caller
+  // (the poll tick, init, or the review dialog) — one mechanism, all entry points.
+  let statusReadInFlight = false;
+
+  // The RepoStatus we last wrote. A poll whose status is deeply equal is a no-op,
+  // so we skip the write entirely — keeping every array ref stable so the 5s tick
+  // doesn't re-render subscribers. Reset on teardown (and thus on project switch,
+  // since init() tears down first).
+  let lastStatus: RepoStatus | null = null;
+
   const armTimer = () => {
     const { timer, autoSync, intervalMinutes } = get();
     if (timer) clearInterval(timer);
@@ -48,6 +68,21 @@ export const useSyncStore = create<SyncState>((set, get) => {
     const ms = Math.max(1, intervalMinutes) * 60_000;
     const handle = setInterval(() => void get().syncNow(), ms);
     set({ timer: handle });
+  };
+
+  // Read-only local-status poll, independent of auto-sync, so the indicator
+  // tracks on-disk edits live instead of going stale until a manual check.
+  // refreshStatus self-guards against overlap, so the tick only screens out the
+  // sync case (a running sync refreshes the file lists itself).
+  const armStatusTimer = () => {
+    const { statusTimer } = get();
+    if (statusTimer) clearInterval(statusTimer);
+    const handle = setInterval(() => {
+      const { root, inFlight } = get();
+      if (!root || inFlight) return;
+      void get().refreshStatus();
+    }, STATUS_POLL_MS);
+    set({ statusTimer: handle });
   };
 
   const persistPrefs = () => {
@@ -69,6 +104,8 @@ export const useSyncStore = create<SyncState>((set, get) => {
     conflictedFiles: [],
     inFlight: false,
     timer: null,
+    statusTimer: null,
+    syncEpoch: 0,
 
     init: async (root) => {
       get().teardown();
@@ -86,47 +123,66 @@ export const useSyncStore = create<SyncState>((set, get) => {
         void get().syncNow();
       }
       armTimer();
+      armStatusTimer();
     },
 
     teardown: () => {
-      const { timer } = get();
+      const { timer, statusTimer } = get();
       if (timer) clearInterval(timer);
+      if (statusTimer) clearInterval(statusTimer);
+      statusReadInFlight = false;
+      lastStatus = null;
       set({
         root: null, prefsKnown: true, status: "disabled", isRepo: false, remoteUrl: null,
         lastSyncedAt: null, lastError: null, changedFiles: [], conflictedFiles: [],
-        inFlight: false, timer: null,
+        inFlight: false, timer: null, statusTimer: null,
       });
     },
 
     refreshStatus: async () => {
       const { root } = get();
-      if (!root) return;
-      let s: RepoStatus;
+      if (!root || statusReadInFlight) return;
+      statusReadInFlight = true;
+      const epoch = get().syncEpoch;
+      // This snapshot is only safe to write if nothing authoritative changed during
+      // the read: a sync that ran/started (epoch moved or inFlight) owns the status
+      // and the file lists, and a project switch (root moved) makes our read stale.
+      const stale = () => get().root !== root || get().syncEpoch !== epoch || get().inFlight;
       try {
-        s = await gitRepoStatus(root);
-      } catch (e) {
-        set({ status: "error", lastError: String(e) });
-        return;
-      }
-      set((prev) => ({
-        isRepo: s.isRepo,
-        remoteUrl: s.remoteUrl,
-        changedFiles: s.changedFiles,
-        conflictedFiles: s.conflictedFiles,
-        // Don't repaint a terminal failure the sync just set.
-        status:
-          prev.inFlight
-            ? "syncing"
-            : prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"
+        let s: RepoStatus;
+        try {
+          s = await gitRepoStatus(root);
+        } catch (e) {
+          if (stale()) return;
+          set({ status: "error", lastError: String(e) });
+          return;
+        }
+        if (stale()) return;
+        // Everything set() writes is a function of `s` (or of prev.status, which is
+        // unchanged on a poll), so a deeply-equal snapshot means an identical write.
+        // Bail before set() so all refs stay stable and the tick is invisible.
+        if (lastStatus && isEqual(lastStatus, s)) return;
+        lastStatus = s;
+        set((prev) => ({
+          isRepo: s.isRepo,
+          remoteUrl: s.remoteUrl,
+          changedFiles: s.changedFiles,
+          conflictedFiles: s.conflictedFiles,
+          // Don't repaint a terminal failure the sync just set.
+          status:
+            prev.status === "error" || prev.status === "offline" || prev.status === "needsSetup"
               ? prev.status
               : deriveIdleStatus(s),
-      }));
+        }));
+      } finally {
+        statusReadInFlight = false;
+      }
     },
 
     syncNow: async () => {
       const { root, inFlight } = get();
       if (!root || inFlight) return;
-      set({ inFlight: true, status: "syncing", lastError: null });
+      set((p) => ({ inFlight: true, status: "syncing", lastError: null, syncEpoch: p.syncEpoch + 1 }));
       try {
         const outcome = await syncProject(root, backupMessage(new Date()));
         const status = outcomeToStatus(outcome);
@@ -170,7 +226,7 @@ export const useSyncStore = create<SyncState>((set, get) => {
     },
 
     setIntervalMinutes: (n) => {
-      set({ intervalMinutes: Math.min(60, Math.max(1, Math.round(n))), prefsKnown: true });
+      set({ intervalMinutes: clamp(Math.round(n), 1, 60), prefsKnown: true });
       persistPrefs();
       armTimer();
     },

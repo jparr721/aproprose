@@ -3,6 +3,7 @@
 // routed through Tauri's http plugin, exactly like the provider in ./model.ts,
 // so this dodges webview CORS and never inlines the key into the bundle.
 
+import { uniq } from "es-toolkit";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getAiConfig } from "@/lib/tauri";
 
@@ -37,7 +38,7 @@ export function filterTextModels(ids: string[]): string[] {
     const isNonText = NON_TEXT_MARKERS.some((m) => lower.includes(m));
     return isTextFamily && !isNonText;
   });
-  return Array.from(new Set(kept)).sort();
+  return uniq(kept).sort();
 }
 
 interface ModelsResponse {

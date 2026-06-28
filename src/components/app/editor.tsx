@@ -40,7 +40,7 @@ import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { isInAuxSurface } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
-import { useDictation } from "@/lib/use-dictation";
+import { useDictation } from "@/hooks/use-dictation";
 import type { BlockType } from "@/lib/types";
 
 // Editor history defers to native undo/redo while the AI panel or a dialog holds

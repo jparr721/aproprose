@@ -11,7 +11,7 @@
 // full app restarts. Every function's composer is pinned to the bottom
 // (ai-elements/prompt-input).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IconArrowDown,
   IconArrowRight,
@@ -26,6 +26,7 @@ import {
   IconTimeline,
   IconUsers,
 } from "@tabler/icons-react";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,8 +58,14 @@ import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-store";
-import { TypographyMuted } from "@/components/ui/typography";
+import {
+  TypographyEyebrow,
+  TypographyMuted,
+  TypographyMutedSpan,
+  TypographyP,
+} from "@/components/ui/typography";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAi } from "@/hooks/use-ai";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { buildAiContext, buildEditRequest } from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
@@ -97,7 +104,7 @@ function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
       <span className="text-destructive">Couldn't reach the model.</span>
-      <span className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words text-faint">
+      <span className="block max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words text-muted-foreground">
         {error}
       </span>
       <Button variant="outline" size="sm" onClick={onRetry}>
@@ -131,45 +138,6 @@ function PanelHint({ children }: { children: React.ReactNode }) {
       {children}
     </TypographyMuted>
   );
-}
-
-/**
- * Cache-backed, manual async result. Idle-first: a request fires only on an
- * explicit run(instruction?) (a tab's composer submit / Try again). Results live
- * in the shared ai-cache-store keyed by `cacheKey`, so they survive remounts and
- * (via ai-persistence) app restarts; a new key (different scene / cursor) reads
- * as idle. `op` is read through a ref so each run uses the latest closure while
- * `run` stays memoised on `cacheKey` -- moving the cursor mid-flight can never
- * land a stale result against the new anchor; the in-flight run just populates
- * the old key. The instruction that produced a result is stored on the entry so
- * a remounted tab can caption it.
- */
-function useAi<T>(op: (instruction?: string) => Promise<T>, cacheKey: string) {
-  const entry = useAiCacheStore((s) => s.entries[cacheKey]);
-  const patch = useAiCacheStore((s) => s.patch);
-  const opRef = useRef(op);
-  opRef.current = op;
-
-  const run = useCallback(
-    (instruction?: string) => {
-      patch(cacheKey, { loading: true, error: null, instruction });
-      opRef
-        .current(instruction)
-        .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
-        .catch((e) => patch(cacheKey, { loading: false, error: describeAiError(e) }));
-    },
-    [cacheKey, patch],
-  );
-
-  return {
-    // The cache stores `data` as `unknown`; this cast is sound because only this
-    // hook writes `cacheKey`, and it only writes the `T` its own `op` produced.
-    data: (entry?.data ?? null) as T | null,
-    loading: entry?.loading ?? false,
-    error: entry?.error ?? null,
-    instruction: entry?.instruction,
-    run,
-  };
 }
 
 /** Bottom-pinned composer shared by every function (ai-elements/prompt-input,
@@ -225,12 +193,12 @@ function CursorAnchor() {
 
   return (
     <div className="flex items-center gap-2 border-b border-border bg-ai-tint/40 px-3 py-1.5">
-      <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-ai-ink">
+      <TypographyEyebrow className="shrink-0 text-ai-ink">
         {block ? `Continuing after ${block.type}` : "Cursor"}
-      </span>
+      </TypographyEyebrow>
       <div className="min-w-0 flex-1">
         <TypographyMuted
-          className={cn("line-clamp-1 text-xs", text ? "font-serif" : "text-faint")}
+          className={cn("line-clamp-1 text-xs", !text && "text-muted-foreground")}
         >
           {text || "Place your cursor in the manuscript."}
         </TypographyMuted>
@@ -304,43 +272,34 @@ function SuggestTab() {
             <>
               <div className="flex flex-col gap-2.5 rounded-xl border border-ai-edge bg-ai-tint p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                  <TypographyEyebrow className="text-ai-ink">
                     {v.type === "dialogue"
                       ? v.speaker
                         ? `Dialogue: ${v.speaker}`
                         : "Dialogue"
                       : "Narration"}
-                  </span>
-                  <div className="flex gap-0.5">
+                  </TypographyEyebrow>
+                  <ButtonGroup>
                     {data.suggestions.map((_, i) => (
-                      <button
+                      <Button
                         key={i}
+                        size="sm"
+                        variant={i === variant ? "default" : "outline"}
                         onClick={() => setVariant(i)}
-                        className={cn(
-                          "size-[18px] rounded text-xs tabular-nums text-ai-ink transition-opacity",
-                          i === variant
-                            ? "bg-card opacity-100 shadow-[0_0_0_0.5px_var(--ai-edge)]"
-                            : "opacity-55 hover:opacity-100",
-                        )}
                       >
                         {i + 1}
-                      </button>
+                      </Button>
                     ))}
-                  </div>
+                  </ButtonGroup>
                 </div>
-                <p
-                  className={cn(
-                    "font-serif text-sm leading-[1.55] text-foreground",
-                    v.type === "narration" && "text-muted-foreground",
-                  )}
-                >
+                <TypographyP className={cn("mt-0 text-sm", v.type === "narration" && "text-muted-foreground")}>
                   {v.type === "dialogue" ? `"${v.text}"` : v.text}
-                </p>
+                </TypographyP>
                 <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                  <span className="text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                  <TypographyEyebrow className="text-ai-ink/70">
                     Why
-                  </span>
-                  <p className="text-xs leading-[1.5] text-muted-foreground">{v.rationale}</p>
+                  </TypographyEyebrow>
+                  <TypographyMuted className="text-xs">{v.rationale}</TypographyMuted>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Button size="sm" onClick={() => insert(v)}>
@@ -356,15 +315,15 @@ function SuggestTab() {
                 <>
                   <Separator />
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-[0.08em] text-faint">
+                    <TypographyEyebrow>
                       After this, you could:
-                    </span>
+                    </TypographyEyebrow>
                     {data.followups.map((f, i) => (
                       <div
                         key={i}
                         className="flex items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground"
                       >
-                        <IconArrowRight className="size-3 shrink-0 text-faint" />
+                        <IconArrowRight className="size-3 shrink-0 text-muted-foreground" />
                         {f}
                       </div>
                     ))}
@@ -421,19 +380,19 @@ function CritiqueTab() {
             data.map((n, i) => (
               <div key={i} className="rounded-lg border border-border bg-background p-3">
                 <div className="mb-1 flex items-baseline gap-2">
-                  <span
+                  <TypographyEyebrow
                     className={cn(
-                      "rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-[0.08em]",
+                      "rounded px-1.5 py-0.5",
                       NOTE_TONE[n.kind],
                     )}
                   >
                     {NOTE_WORD[n.kind]}
-                  </span>
-                  <span className="text-xs uppercase tracking-[0.06em] text-muted-foreground">
+                  </TypographyEyebrow>
+                  <TypographyEyebrow>
                     {n.tag}
-                  </span>
+                  </TypographyEyebrow>
                 </div>
-                <p className="text-sm leading-[1.55] text-muted-foreground">{n.text}</p>
+                <TypographyMuted>{n.text}</TypographyMuted>
               </div>
             ))
           )}
@@ -487,11 +446,11 @@ function ContinuityTab() {
                 <div>
                   <div className="mb-0.5 flex items-baseline gap-2">
                     <span className="text-xs font-semibold text-foreground">{f.tag}</span>
-                    <span className="text-xs uppercase tracking-[0.08em] text-faint">
+                    <TypographyEyebrow>
                       {SEV_WORD[f.sev]}
-                    </span>
+                    </TypographyEyebrow>
                   </div>
-                  <p className="text-xs leading-[1.5] text-muted-foreground">{f.text}</p>
+                  <TypographyMuted className="text-xs">{f.text}</TypographyMuted>
                 </div>
               </div>
             ))
@@ -524,16 +483,16 @@ function CastRow({ m }: { m: CastMember }) {
       {m.color ? (
         <ColorAvatar color={m.color} initials={initials(m.name)} />
       ) : (
-        <span className="grid size-8 place-items-center rounded-lg border border-dashed border-border font-serif text-xs text-muted-foreground">
+        <TypographyMutedSpan className="grid size-8 place-items-center rounded-lg border border-dashed border-border text-xs">
           {initials(m.name)}
-        </span>
+        </TypographyMutedSpan>
       )}
       <div>
         <div className="flex items-baseline gap-2 text-sm font-medium text-foreground">
           <span className="truncate">{m.name}</span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-xs uppercase tracking-[0.06em] text-muted-foreground">
+          <TypographyEyebrow className="rounded bg-muted px-1.5 py-0.5">
             {m.state}
-          </span>
+          </TypographyEyebrow>
         </div>
         <div className="text-xs leading-[1.45] text-muted-foreground">{m.detail}</div>
       </div>
@@ -596,18 +555,18 @@ function CastTab() {
 const DIFF_TONE: Record<DiffSegment["type"], string> = {
   same: "text-foreground",
   add: "rounded-sm bg-success/15 text-success",
-  del: "text-faint line-through",
+  del: "text-muted-foreground line-through",
 };
 
 function DiffText({ segments }: { segments: DiffSegment[] }) {
   return (
-    <p className="font-serif text-sm leading-relaxed">
+    <TypographyP className="mt-0 text-sm">
       {segments.map((s, i) => (
         <span key={i} className={cn(DIFF_TONE[s.type])}>
           {s.text}
         </span>
       ))}
-    </p>
+    </TypographyP>
   );
 }
 
@@ -627,7 +586,7 @@ function ScopeToggle({
     { id: "chapter", label: "Whole chapter" },
   ];
   return (
-    <div className="flex gap-1">
+    <ButtonGroup>
       {opts.map((o) => (
         <Button
           key={o.id}
@@ -635,12 +594,11 @@ function ScopeToggle({
           variant={scope === o.id ? "default" : "outline"}
           disabled={disabled}
           onClick={() => onChange(o.id)}
-          className="h-7 flex-1 text-xs"
         >
           {o.label}
         </Button>
       ))}
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -721,9 +679,9 @@ function EditTab() {
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-[0.08em] text-faint">
+                <TypographyEyebrow>
                   {live.length} proposed {live.length === 1 ? "edit" : "edits"}
-                </span>
+                </TypographyEyebrow>
                 <div className="flex gap-1.5">
                   <Button size="sm" onClick={acceptAll}>
                     Accept all
@@ -738,17 +696,17 @@ function EditTab() {
                   key={edit.blockId}
                   className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3"
                 >
-                  <span className="text-xs font-semibold uppercase tracking-[0.06em] text-ai-ink">
+                  <TypographyEyebrow className="text-ai-ink">
                     {block.type}
-                  </span>
+                  </TypographyEyebrow>
                   <DiffText segments={diffWords(block.text, edit.newText)} />
                   <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                    <span className="text-xs uppercase tracking-[0.08em] text-ai-ink opacity-70">
+                    <TypographyEyebrow className="text-ai-ink/70">
                       Why
-                    </span>
-                    <p className="text-xs leading-snug text-muted-foreground">
+                    </TypographyEyebrow>
+                    <TypographyMuted className="text-xs">
                       {edit.reason}
-                    </p>
+                    </TypographyMuted>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <Button size="sm" onClick={() => accept(edit)}>

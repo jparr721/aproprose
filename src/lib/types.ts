@@ -121,12 +121,12 @@ export interface LoreEntry {
 }
 
 // -- Outline ------------------------------------------------------------------
-// A whole-novel story spine (premise + three fixed acts + beats) plus a per-
-// chapter beat. The spine's beats link DOWN to chapters; a chapter belongs to at
-// most one beat. This is planning metadata the .tex files don't carry; it rides
-// ProjectMeta like the cast and lore index.
+// Chapter-centric story spine. Each real .tex chapter owns an entry keyed by its
+// id; the entry carries the chapter's act (a band on the board, not a column),
+// an optional structural marker, its premise/goal/conflict/turn, and ordered
+// free-form plot-element cards. The global logline lives on Outline.premise.
 
-/** Structural role of a beat - drives the type badge and the Sculpt prompt. */
+/** Optional structural marker a writer can pin to a chapter. */
 export type BeatType =
   | "plot-point"
   | "inciting"
@@ -136,53 +136,43 @@ export type BeatType =
   | "climax"
   | "resolution";
 
-/** A single beat on the story spine. */
-export interface Beat {
+/** The three movements. A per-chapter attribute now, not a column. */
+export type ActKind = "setup" | "confrontation" | "resolution";
+
+/** One free-form plot element inside a chapter. Belongs to exactly one chapter
+ *  by its position in {@link ChapterOutline.cards}. */
+export interface Card {
   id: string;
-  /** Display title, e.g. "Inciting Incident". */
+  /** Short label, e.g. "Mara reads the summons". */
   title: string;
-  /** 1-3 sentences: what this beat must accomplish. Seeded with teaching copy;
-   *  "" once the writer clears it. */
+  /** What this beat accomplishes; rendered as the card's "goal" line. "" if blank. */
   intention: string;
-  /** Ids of chapters that realize this beat (0..N). A chapter id appears in at
-   *  most one beat's list across the whole outline. */
-  chapterIds: string[];
-  /** Structural role; backfilled from the seeded title on migration. */
-  type: BeatType;
-  /** Cast present on this beat - ids into {@link ProjectMeta.characters}. */
+  /** Cast present - ids into {@link ProjectMeta.characters}. */
   characterIds: string[];
-  /** Lore touched by this beat - ids into {@link ProjectMeta.lore}. */
+  /** Lore touched - ids into {@link ProjectMeta.lore}. */
   loreIds: string[];
   /** Persisted continuity findings; [] by default. Worst sev drives the health dot. */
   continuityFlags: ContinuityFlag[];
 }
 
-/** The three fixed acts, identified by kind so seed/target logic survives a
- *  display-title rename. */
-export type ActKind = "setup" | "confrontation" | "resolution";
-
-export interface OutlineAct {
-  kind: ActKind;
-  /** Display title, e.g. "Setup". */
-  title: string;
-  /** Optional act-level intention. "" if blank. */
-  summary: string;
-  /** Ordered beats; add / edit / reorder / remove freely. */
-  beats: Beat[];
-}
-
-/** The whole-novel spine. Exactly three acts, fixed order I, II, III. */
-export interface Outline {
-  /** One-line logline. "" if blank. */
+/** A chapter's planning entry. All string fields "" when unfilled. */
+export interface ChapterOutline {
+  /** Which movement this chapter sits in; null until assigned. Drives bands + pacing. */
+  act: ActKind | null;
+  /** Optional structural marker (Inciting Incident, Midpoint); null if none. */
+  plotPoint: BeatType | null;
   premise: string;
-  acts: [OutlineAct, OutlineAct, OutlineAct];
-}
-
-/** A chapter's own internal arc. All fields "" when unfilled. */
-export interface ChapterBeat {
   goal: string;
   conflict: string;
   turn: string;
+  /** Ordered plot elements. */
+  cards: Card[];
+}
+
+/** The whole-novel spine: just the global logline now. */
+export interface Outline {
+  /** Global logline. "" if blank. */
+  premise: string;
 }
 
 /** The shape returned by the Rust `open_project` command. */
@@ -211,10 +201,10 @@ export interface ProjectMeta {
   lore: LoreEntry[];
   /** chapter id -> status override. */
   statuses: Record<string, ChapterStatus>;
-  /** The whole-novel three-act story spine. */
+  /** The global logline. */
   outline: Outline;
-  /** chapter id -> that chapter's own Goal/Conflict/Turn (sparse). */
-  chapterBeats: Record<string, ChapterBeat>;
+  /** chapter id -> that chapter's planning entry (sparse; lazily created). */
+  chapters: Record<string, ChapterOutline>;
 }
 
 /** A previously opened project, for the recents list / switcher. */
@@ -333,16 +323,18 @@ export type SculptChangeKind = "rewrite" | "add" | "move" | "remove";
 
 export interface SculptChange {
   kind: SculptChangeKind;
-  beatId: string | null;
+  /** Target card id for rewrite/move/remove; null for add. */
+  cardId: string | null;
   title: string | null;
   intention: string | null;
-  type: BeatType | null;
+  /** For move ONLY: zero-based target index within the chapter's cards. */
   toIndex: number | null;
   reason: string;
 }
 
 export interface SculptProposal {
-  actKind: ActKind;
+  /** The chapter being reshaped. */
+  chapterId: string;
   summary: string;
   changes: SculptChange[];
 }

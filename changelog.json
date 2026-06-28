@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.4.1",
+    "date": "2026-06-28",
+    "summary": "Launching the installed app now finds your installed tools so PDF export and other features work",
+    "highlights": [
+      "Fixed PDF/LaTeX compilation failing when the app was opened normally from Finder, the Dock, or the .dmg instead of a terminal",
+      "The app now reliably locates your installed tools (LaTeX, git, and the AI CLIs) on macOS and Linux no matter where they were installed"
+    ]
+  },
+  {
     "version": "0.4.0",
     "date": "2026-06-28",
     "summary": "A visual story outline storyboard, writing stats and streaks, automatic app updates, and multi-block AI editing",

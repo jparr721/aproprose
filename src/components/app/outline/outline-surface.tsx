@@ -21,6 +21,9 @@ export function OutlineSurface() {
   const premise = useProjectStore((s) => s.meta.outline.premise);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const ch = useProjectStore((s) => (activeChapterId ? getChapterOutline(s.meta.chapters, activeChapterId) : null));
+  const chapterRef = useProjectStore((s) =>
+    activeChapterId ? s.project?.chapters.find((c) => c.id === activeChapterId) ?? null : null,
+  );
   const characters = useProjectStore((s) => s.meta.characters);
   const toggleOutline = useViewStore((s) => s.toggleOutline);
 
@@ -71,7 +74,10 @@ export function OutlineSurface() {
             ))}
             {ch.cards.length > 0 ? (
               <div className="flex flex-col gap-2">
-                <TypographyEyebrow>Plot elements</TypographyEyebrow>
+                <TypographyEyebrow>
+                  Plot elements
+                  {chapterRef ? ` — ${chapterRef.title || chapterRef.label}` : ""}
+                </TypographyEyebrow>
                 {ch.cards.map((card) => {
                   const cast = card.characterIds
                     .map((id) => characters.find((c) => c.id === id))

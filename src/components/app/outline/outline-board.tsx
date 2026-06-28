@@ -77,20 +77,20 @@ export function OutlineBoard() {
   };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-background">
+    <div className="relative flex h-full min-h-0 flex-col">
       <SculptReview />
-      <div className="flex flex-col gap-1.5 px-4 pt-5 pb-3">
+      <div className="flex flex-col p-4 space-y-2">
         <TypographyEyebrow>Logline</TypographyEyebrow>
         <Textarea
           value={premise}
           onChange={(e) => setPremise(e.target.value)}
-          placeholder="One or two sentences: who wants what, and what stands in the way."
+          placeholder="What is this book about?"
           rows={2}
           className="resize-y"
         />
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex min-w-max flex-col px-4 pb-5">
+        <div className="flex min-w-max flex-col px-4">
           <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
             <div className="flex items-start gap-4">
               {runs.map((run, i) => (
@@ -104,7 +104,7 @@ export function OutlineBoard() {
               ))}
               <Button
                 variant="outline"
-                className="mt-9 h-24 w-36 shrink-0 border-dashed text-muted-foreground"
+                className="shrink-0 border-dashed text-muted-foreground"
                 onClick={() => void addChapter("New chapter")}
               >
                 <IconPlus className="size-4" /> Add chapter

@@ -3,6 +3,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
   TypographyForeground,
+  TypographyInlineCode,
   TypographyMuted,
   TypographyMutedSpan,
 } from "@/components/ui/typography";
@@ -27,13 +28,13 @@ function ToolingNotice({ tooling }: { tooling: ToolingStatus | null }) {
   if (!tooling.ghAuthed) {
     return (
       <TypographyMuted className={cls}>
-        Not signed in to GitHub - run <span className="font-mono">gh auth login</span>.
+        Not signed in to GitHub - run <TypographyInlineCode>gh auth login</TypographyInlineCode>.
       </TypographyMuted>
     );
   }
   return (
     <TypographyMuted className={cls}>
-      Signed in as <span className="font-mono">{tooling.login ?? "-"}</span>.
+      Signed in as {tooling.login ?? "-"}.
     </TypographyMuted>
   );
 }
@@ -66,7 +67,7 @@ export function BackupTab() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <TypographyMutedSpan className="text-sm">Every</TypographyMutedSpan>
-          <TypographyMutedSpan className="font-mono text-xs tabular-nums">{intervalMinutes} min</TypographyMutedSpan>
+          <TypographyMutedSpan className="text-xs tabular-nums">{intervalMinutes} min</TypographyMutedSpan>
         </div>
         <Slider
           min={1}

@@ -20,7 +20,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
@@ -91,8 +96,8 @@ function OpenAiKeyField({
   return (
     <Field label="OpenAI key">
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Input
+        <InputGroup className="flex-1">
+          <InputGroupInput
             type={show ? "text" : "password"}
             value={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
@@ -105,20 +110,19 @@ function OpenAiKeyField({
             placeholder={configured ? "Replace stored key" : "sk-"}
             autoComplete="off"
             spellCheck={false}
-            className="pr-7 font-mono"
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setShow((s) => !s)}
-            title={show ? "Hide key" : "Show key"}
-            className="absolute inset-y-0 right-0 text-muted-foreground"
-          >
-            {show ? <IconEyeOff /> : <IconEye />}
-          </Button>
-        </div>
-        <Button size="sm" onClick={() => void save()} disabled={!draft.trim() || saving}>
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              size="icon-xs"
+              aria-label={show ? "Hide key" : "Show key"}
+              title={show ? "Hide key" : "Show key"}
+              onClick={() => setShow((s) => !s)}
+            >
+              {show ? <IconEyeOff /> : <IconEye />}
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+        <Button onClick={() => void save()} disabled={!draft.trim() || saving}>
           {saving ? <Spinner /> : null}
           Save
         </Button>
@@ -217,10 +221,10 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         onValueChange={(v) => setAiModel(v)}
         disabled={loading || options.length === 0}
       >
-        <SelectTrigger className="w-full font-mono">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
         </SelectTrigger>
-        <SelectContent className="font-mono">
+        <SelectContent>
           {options.map((id) => (
             <SelectItem key={id} value={id}>
               {id}

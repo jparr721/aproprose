@@ -5,8 +5,8 @@
 import { useState, useEffect } from "react";
 import {
   IconFileTypePdf,
+  IconLayoutSidebarRight,
   IconPlayerPlayFilled,
-  IconSparkles,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -181,17 +181,20 @@ export function TopBar() {
               <IconFileTypePdf /> PDF
               <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} />
             </Button>
+            {/* Right-panel toggle, mirroring the left SidebarTrigger (⌘⇧A). */}
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Toggle assistant panel"
               aria-pressed={aiOpen && !focus}
               onClick={toggleAi}
               className={cn(
-                aiOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
+                "text-muted-foreground",
+                aiOpen && !focus && "bg-accent text-foreground",
               )}
             >
-              <IconSparkles /> AI
-              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_AI} />
+              <IconLayoutSidebarRight />
+              <span className="sr-only">Toggle assistant panel</span>
             </Button>
           </>
         ) : null}

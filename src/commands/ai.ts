@@ -1,6 +1,6 @@
 // commands/ai.ts - open the AI panel on a given tab, or focus the Suggest ask box.
 
-import { IconSparkles, IconMessageCircle } from "@tabler/icons-react";
+import { IconSparkles, IconMessageCircle, IconListTree } from "@tabler/icons-react";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 import type { Command } from "./types";
 
@@ -13,6 +13,14 @@ const AI_TABS: { tab: AiTab; title: string }[] = [
 ];
 
 export const aiCommands: Command[] = [
+  {
+    id: "view.outline",
+    group: "AI",
+    title: "Outline",
+    icon: IconListTree,
+    keywords: ["structure", "beats", "acts", "story spine"],
+    run: () => useViewStore.getState().openAiTab("outline"),
+  },
   {
     id: "ai.suggest",
     group: "AI",

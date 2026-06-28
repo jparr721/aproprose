@@ -8,6 +8,7 @@ import {
   IconChevronRight,
   IconDeviceFloppy,
   IconFolderOpen,
+  IconLayoutList,
   IconPlus,
   IconSettings,
   IconX,
@@ -56,6 +57,8 @@ import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog"
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
+import { useKeybinding } from "@/hooks/use-keybinding";
+import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -108,7 +111,13 @@ export function AppSidebar() {
   const compileNow = useProjectStore((s) => s.compileNow);
   const compiling = useProjectStore((s) => s.compile.status === "compiling");
   const guard = useViewStore((s) => s.requestGuarded);
+  const toggleOutline = useViewStore((s) => s.toggleOutline);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // The Outline toggle is guarded (a dirty chapter stages the unsaved-edits
+  // dialog first). Bind the chord co-located with the action, mirroring the
+  // top bar's TOGGLE_PDF. The button below calls the same guarded toggle.
+  useKeybinding(KEYBINDING_IDS.TOGGLE_OUTLINE, () => guard(toggleOutline));
 
   if (!project) return null;
 
@@ -126,7 +135,7 @@ export function AppSidebar() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton className="h-auto min-h-10 items-center gap-2 py-2 whitespace-normal">
-                  <span className="min-w-0 flex-1 break-words font-heading text-sm text-foreground">
+                  <span className="min-w-0 flex-1 break-words font-serif text-sm text-foreground">
                     {project.name}
                   </span>
                   <IconChevronDown className="size-3 shrink-0 text-faint" />
@@ -244,6 +253,12 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => guard(toggleOutline)}>
+              <IconLayoutList />
+              <span>Outline</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => useSettingsDialogStore.getState().setOpen(true)}

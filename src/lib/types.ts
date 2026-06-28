@@ -120,6 +120,64 @@ export interface LoreEntry {
   title: string;
 }
 
+// -- Outline ------------------------------------------------------------------
+// Chapter-centric story spine. Each real .tex chapter owns an entry keyed by its
+// id; the entry carries the chapter's act (a band on the board, not a column),
+// an optional structural marker, its premise/goal/conflict/turn, and ordered
+// free-form plot-element cards. The global logline lives on Outline.premise.
+
+/** Optional structural marker a writer can pin to a chapter. */
+export type BeatType =
+  | "plot-point"
+  | "inciting"
+  | "pinch"
+  | "action"
+  | "midpoint"
+  | "climax"
+  | "resolution";
+
+/** The three movements. A per-chapter attribute now, not a column. */
+export type ActKind = "setup" | "confrontation" | "resolution";
+
+/** One free-form plot element inside a chapter. Belongs to exactly one chapter
+ *  by its position in {@link ChapterOutline.cards}. */
+export interface Card {
+  id: string;
+  /** Short label, e.g. "Mara reads the summons". */
+  title: string;
+  /** What this beat accomplishes; rendered as the card's "goal" line. "" if blank. */
+  intention: string;
+  /** Cast present - ids into {@link ProjectMeta.characters}. */
+  characterIds: string[];
+  /** Lore touched - ids into {@link ProjectMeta.lore}. */
+  loreIds: string[];
+  /** Persisted continuity findings; [] by default. Worst sev drives the health dot. */
+  continuityFlags: ContinuityFlag[];
+}
+
+/** A chapter's planning entry. All string fields "" when unfilled. */
+export interface ChapterOutline {
+  /** Which movement this chapter sits in; null until assigned. Drives bands + pacing. */
+  act: ActKind | null;
+  /** Optional structural marker (Inciting Incident, Midpoint); null if none. */
+  plotPoint: BeatType | null;
+  premise: string;
+  goal: string;
+  conflict: string;
+  turn: string;
+  /** Planned cast for the chapter - ids into {@link ProjectMeta.characters}. Independent
+   *  of card-level casts; drives the expected-cast continuity grounding. */
+  characterIds: string[];
+  /** Ordered plot elements. */
+  cards: Card[];
+}
+
+/** The whole-novel spine: just the global logline now. */
+export interface Outline {
+  /** Global logline. "" if blank. */
+  premise: string;
+}
+
 /** The shape returned by the Rust `open_project` command. */
 export interface ProjectInfo {
   /** Absolute path of the project directory. */
@@ -146,6 +204,10 @@ export interface ProjectMeta {
   lore: LoreEntry[];
   /** chapter id -> status override. */
   statuses: Record<string, ChapterStatus>;
+  /** The global logline. */
+  outline: Outline;
+  /** chapter id -> that chapter's planning entry (sparse; lazily created). */
+  chapters: Record<string, ChapterOutline>;
 }
 
 /** A previously opened project, for the recents list / switcher. */
@@ -167,7 +229,6 @@ export type CliKind = Exclude<AiProvider, "openai">;
 
 export interface Settings {
   theme: Theme;
-  layout: LayoutMode;
   blockStyle: BlockStyle;
   /** Editor prose font-size in px. */
   proseSize: number;
@@ -181,7 +242,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
-  layout: "two",
   blockStyle: "typo",
   proseSize: 17.5,
   pdfZoom: 1.1,
@@ -258,6 +318,28 @@ export interface CastResult {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+// ── Outline Sculpt ────────────────────────────────────────────────────────────
+
+export type SculptChangeKind = "rewrite" | "add" | "move" | "remove";
+
+export interface SculptChange {
+  kind: SculptChangeKind;
+  /** Target card id for rewrite/move/remove; null for add. */
+  cardId: string | null;
+  title: string | null;
+  intention: string | null;
+  /** For move ONLY: zero-based target index within the chapter's cards. */
+  toIndex: number | null;
+  reason: string;
+}
+
+export interface SculptProposal {
+  /** The chapter being reshaped. */
+  chapterId: string;
+  summary: string;
+  changes: SculptChange[];
 }
 
 /** A single proposed in-place revision of one block (see the AI "Edit" tab). */

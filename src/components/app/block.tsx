@@ -17,8 +17,9 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconWand,
-  IconCheck,
+  IconSquareRoundedPlus,
   IconCopy,
+  IconCheck,
   IconClipboardText,
   IconUserPlus,
 } from "@tabler/icons-react";
@@ -109,7 +110,7 @@ function TypeChip({
                   <ColorDot color={c.color} />
                   <span className="flex-1">{c.name}</span>
                   <span className="text-xs text-faint">{c.role}</span>
-                  {block.speaker === c.id ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
+                  {block.speaker === c.id ? <IconCheck className="size-4 text-accent-ink" /> : null}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuItem onSelect={() => setAddOpen(true)}>
@@ -124,7 +125,7 @@ function TypeChip({
             <DropdownMenuItem key={t} onSelect={() => changeType(block.id, t)}>
               <span className={cn("size-2 rounded-[2px]", TYPE_SWATCH[t])} />
               <span className="flex-1">{TYPE_LABELS[t]}</span>
-              {block.type === t ? <IconCheck className="size-3.5 text-accent-ink" /> : null}
+              {block.type === t ? <IconCheck className="size-4 text-accent-ink" /> : null}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -180,10 +181,10 @@ function BlockBody({
           autoFocus
           caret={caret}
           placeholder="Scene heading"
-          className="text-center font-heading text-2xl font-medium tracking-wide text-foreground"
+          className="text-center font-serif text-2xl font-medium tracking-wide text-foreground"
         />
       ) : (
-        <h2 className="my-2 text-center font-heading text-2xl font-medium tracking-wide text-foreground">
+        <h2 className="my-2 text-center font-serif text-2xl font-medium tracking-wide text-foreground">
           {block.text || <span className="text-faint">Scene heading</span>}
         </h2>
       );
@@ -356,6 +357,8 @@ function BlockImpl({
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const blockStyle = useSettingsStore((s) => s.blockStyle);
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
+  const blocks = useProjectStore((s) => s.blocks);
+  const insertAfter = useProjectStore((s) => s.insertAfter);
   const {
     attributes,
     listeners,
@@ -423,6 +426,16 @@ function BlockImpl({
 
   const onCopyBlock = async () => {
     if (!(await copyText(blockText))) toast.error("Couldn't copy to the clipboard");
+  };
+
+  const insertAbove = () => {
+    const idx = blocks.findIndex((b) => b.id === block.id);
+    const prevId = idx > 0 ? blocks[idx - 1].id : null;
+    insertAfter(prevId);
+  };
+
+  const insertBelow = () => {
+    insertAfter(block.id);
   };
 
   return (
@@ -534,6 +547,13 @@ function BlockImpl({
                   <IconArrowDown /> Move down
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => insertAbove()}>
+                  <IconSquareRoundedPlus /> Insert block above
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => insertBelow()}>
+                  <IconSquareRoundedPlus /> Insert block below
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>
                   <IconWand /> Clean up with AI
                 </DropdownMenuItem>
@@ -559,6 +579,13 @@ function BlockImpl({
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => moveBlock(block.id, 1)}>
           <IconArrowDown /> Move down
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => insertAbove()}>
+          <IconSquareRoundedPlus /> Insert block above
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => insertBelow()}>
+          <IconSquareRoundedPlus /> Insert block below
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={cleaning || !block.text.trim()} onSelect={() => void onClean()}>

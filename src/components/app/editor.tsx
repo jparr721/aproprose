@@ -40,7 +40,7 @@ import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { isInAuxSurface } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
-import { useDictation } from "@/lib/use-dictation";
+import { useDictation } from "@/hooks/use-dictation";
 import type { BlockType } from "@/lib/types";
 
 // Editor history defers to native undo/redo while the AI panel or a dialog holds
@@ -52,7 +52,7 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
 
 // After a nav-key move, bring the newly-selected block into view. The block node
 // already exists (selection only restyles it), so a synchronous query is fine.
-function scrollSelectedIntoView() {
+export function scrollSelectedIntoView() {
   const id = useProjectStore.getState().selectedId;
   if (!id) return;
   document
@@ -285,7 +285,7 @@ export function Editor() {
           <TypographyMutedSpan className="font-serif text-lg italic">
             Chapter {chapter.label}
           </TypographyMutedSpan>
-          <TypographyForeground className="font-heading text-2xl font-medium tracking-tight">
+          <TypographyForeground className="font-serif text-2xl font-medium tracking-tight">
             {chapter.title}
           </TypographyForeground>
           <TypographyMutedSpan className="ml-auto text-xs tabular-nums">

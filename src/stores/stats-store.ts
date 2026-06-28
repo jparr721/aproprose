@@ -48,6 +48,9 @@ export const useStatsStore = create<StatsState>()(
       skipHydration: true,
       partialize: ({ baselines, days }) => ({ baselines, days }),
       merge: (persisted, current) => {
+        // No stored file yet (first run) - keep current state silently. Only data
+        // that exists but fails the schema is a genuine corruption worth warning on.
+        if (persisted == null) return current;
         const parsed = WritingStatsSchema.safeParse(persisted);
         if (!parsed.success) {
           if (import.meta.env.DEV)

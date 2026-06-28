@@ -52,3 +52,56 @@ describe("buildAiContext", () => {
     expect(buildAiContext().blocksText).toBe("* * *");
   });
 });
+
+describe("buildAiContext structure", () => {
+  it("is undefined when the outline is untouched and the chapter is unlinked", () => {
+    useProjectStore.setState({
+      project: {
+        root: "/p", name: "P", mainFile: "main.tex", title: "P", author: "A",
+        metadata: { title: "P", subtitle: "", author: "A", publisher: "", isbn: "" },
+        chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
+      },
+      activeChapterId: "c1",
+      meta: {
+        characters: [], lore: [], statuses: {},
+        outline: { premise: "" },
+        chapters: {},
+      },
+      blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
+      selectedId: "n1",
+    });
+    expect(buildAiContext().structure).toBeUndefined();
+  });
+
+  it("includes act info once the chapter has an act assigned", () => {
+    useProjectStore.setState({
+      project: {
+        root: "/p", name: "P", mainFile: "main.tex", title: "P", author: "A",
+        metadata: { title: "P", subtitle: "", author: "A", publisher: "", isbn: "" },
+        chapters: [{ id: "c1", label: "1", title: "One", file: "c1.tex", wordCount: 0 }],
+      },
+      activeChapterId: "c1",
+      meta: {
+        characters: [], lore: [], statuses: {},
+        outline: { premise: "" },
+        chapters: {
+          c1: {
+            act: "setup",
+            plotPoint: null,
+            premise: "",
+            goal: "Introduce the protagonist",
+            conflict: "",
+            turn: "",
+            characterIds: [],
+            cards: [],
+          },
+        },
+      },
+      blocks: [mk({ id: "n1", type: "narration", text: "Hi." })],
+      selectedId: "n1",
+    });
+    const structure = buildAiContext().structure;
+    expect(structure).toContain("Act I");
+    expect(structure).toContain("Goal: Introduce the protagonist");
+  });
+});

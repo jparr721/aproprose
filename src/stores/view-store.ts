@@ -7,9 +7,10 @@
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// Only `aiTab` is persisted (to the app config dir, via the Tauri-backed storage
-// adapter) so the panel reopens on the tab the author last used; the rest of the
-// state is ephemeral and the `pending` callback is not serializable.
+// `aiTab` and the right-panel width are persisted (to the app config dir, via the
+// Tauri-backed storage adapter) so the panel reopens on the tab the author last
+// used at the width they set; the rest of the state is ephemeral and the
+// `pending` callback is not serializable.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -18,6 +19,7 @@ import { tauriStateStorage } from "@/lib/storage";
 import { useProjectStore } from "@/stores/project-store";
 
 export type AiTab =
+  | "outline"
   | "suggest"
   | "edit"
   | "critique"
@@ -28,6 +30,8 @@ export type AiTab =
 interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
+  /** Whether the full-page Outline storyboard replaces the editor (ephemeral). */
+  outlineOpen: boolean;
   focus: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
@@ -41,13 +45,17 @@ interface ViewState {
   suggestFocusTick: number;
   /** True when the panel is collapsed to just the icon rail (ephemeral). */
   aiCollapsed: boolean;
+  /** Persisted px width of the right panel's resizable content column. */
+  rightPanelWidth: number;
 
   toggleAi: () => void;
   togglePdf: () => void;
+  toggleOutline: () => void;
   setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setAiTab: (tab: AiTab) => void;
   setAiCollapsed: (v: boolean) => void;
+  setRightPanelWidth: (px: number) => void;
   /** Open + expand the AI panel and switch to `tab` in one step (command palette). */
   openAiTab: (tab: AiTab) => void;
   /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
@@ -64,6 +72,7 @@ export const useViewStore = create<ViewState>()(
     (set, get) => ({
       aiOpen: true,
       pdfOpen: false,
+      outlineOpen: false,
       focus: false,
       buildErrorsOpen: false,
 
@@ -72,19 +81,26 @@ export const useViewStore = create<ViewState>()(
       aiTab: "suggest",
       suggestFocusTick: 0,
       aiCollapsed: false,
+      rightPanelWidth: 360,
 
-      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
+      // Clear aiCollapsed on every toggle so reopening always restores the panel
+      // content, never a bare icon rail (aiOpen + aiCollapsed must agree on "is
+      // content visible"). Matches openAiTab / triggerSuggest.
+      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false, aiCollapsed: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
+      toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen, focus: false })),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {
         if (preset === "focus") set({ focus: true });
-        else if (preset === "two") set({ focus: false, aiOpen: true, pdfOpen: false });
-        else set({ focus: false, aiOpen: true, pdfOpen: true });
+        else if (preset === "two")
+          set({ focus: false, aiOpen: true, pdfOpen: false, aiCollapsed: false });
+        else set({ focus: false, aiOpen: true, pdfOpen: true, aiCollapsed: false });
       },
 
       setAiTab: (tab) => set({ aiTab: tab }),
       setAiCollapsed: (v) => set({ aiCollapsed: v }),
+      setRightPanelWidth: (rightPanelWidth) => set({ rightPanelWidth }),
       openAiTab: (tab) =>
         set({ aiOpen: true, focus: false, aiTab: tab, aiCollapsed: false }),
       triggerSuggest: () =>
@@ -110,9 +126,9 @@ export const useViewStore = create<ViewState>()(
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // Only the selected tab persists; visibility toggles, the settings sheet,
+      // The selected tab and the right-panel width persist; visibility toggles
       // and the collapse flag are ephemeral and `pending` is not serializable.
-      partialize: ({ aiTab }) => ({ aiTab }),
+      partialize: ({ aiTab, rightPanelWidth }) => ({ aiTab, rightPanelWidth }),
     },
   ),
 );

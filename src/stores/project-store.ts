@@ -10,18 +10,23 @@ import { create } from "zustand";
 import { sumBy } from "es-toolkit";
 import { toast } from "sonner";
 import type {
+  ActKind,
+  BeatType,
   Block,
   BlockType,
   ChapterRef,
   ChapterStatus,
   Character,
   CompileError,
+  ContinuityFlag,
   LoreEntry,
   NovelMetadata,
+  Outline,
   ProjectInfo,
   ProjectMeta,
   RecentProject,
   SkeletonModel,
+  SculptProposal,
 } from "@/lib/types";
 import {
   countWords,
@@ -50,6 +55,26 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import {
+  addCard as addCardModel,
+  addCharacterToCard as addCharacterToCardModel,
+  addCharacterToChapter as addCharacterToChapterModel,
+  addLoreToCard as addLoreToCardModel,
+  applySculpt as applySculptModel,
+  editCard as editCardModel,
+  editChapterField,
+  editPremise,
+  moveCardToChapter as moveCardToChapterModel,
+  moveCardWithin as moveCardWithinModel,
+  removeCard as removeCardModel,
+  removeCharacterFromCard as removeCharacterFromCardModel,
+  removeCharacterFromChapter as removeCharacterFromChapterModel,
+  removeLoreFromCard as removeLoreFromCardModel,
+  setCardContinuityFlags as setCardContinuityFlagsModel,
+  setChapterAct as setChapterActModel,
+  setChapterPlotPoint as setChapterPlotPointModel,
+} from "@/lib/outline/model";
+import { isNewShapeMeta, migrateLegacyMeta } from "@/lib/outline/migrate";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -64,7 +89,37 @@ interface CompileState {
   at: number | null;
 }
 
-const EMPTY_META: ProjectMeta = { characters: [], lore: [], statuses: {} };
+export function defaultOutline(): Outline {
+  return { premise: "" };
+}
+
+const EMPTY_META: ProjectMeta = {
+  characters: [],
+  lore: [],
+  statuses: {},
+  outline: defaultOutline(),
+  chapters: {},
+};
+
+/** Coerce any historical meta blob into the chapter-centric shape. New-shape
+ *  blobs pass through (with field backfill); legacy blobs are migrated once. */
+export function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
+  if (!m) return EMPTY_META;
+  const raw = m as unknown as Record<string, unknown>;
+  if (isNewShapeMeta(raw)) {
+    const chapters = (m as ProjectMeta).chapters ?? {};
+    return {
+      characters: m.characters ?? [],
+      lore: m.lore ?? [],
+      statuses: m.statuses ?? {},
+      outline: { premise: m.outline?.premise ?? "" },
+      chapters: Object.fromEntries(
+        Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
+      ),
+    };
+  }
+  return migrateLegacyMeta(raw);
+}
 
 const EMPTY_COMPILE: CompileState = {
   status: "idle",
@@ -207,6 +262,27 @@ interface ProjectState {
   removeCharacter: (id: string) => void;
   addLore: (title: string) => void;
   setChapterStatus: (id: string, status: ChapterStatus) => void;
+
+  // outline (global)
+  setPremise: (premise: string) => void;
+  // cards
+  addCard: (chapterId: string) => string;
+  removeCard: (chapterId: string, cardId: string) => void;
+  editCard: (chapterId: string, cardId: string, patch: { title?: string; intention?: string }) => void;
+  moveCardWithin: (chapterId: string, cardId: string, toIndex: number) => void;
+  moveCardToChapter: (fromChapterId: string, toChapterId: string, cardId: string, toIndex: number) => void;
+  addCharacterToCard: (chapterId: string, cardId: string, characterId: string) => void;
+  removeCharacterFromCard: (chapterId: string, cardId: string, characterId: string) => void;
+  addLoreToCard: (chapterId: string, cardId: string, loreId: string) => void;
+  removeLoreFromCard: (chapterId: string, cardId: string, loreId: string) => void;
+  setCardContinuityFlags: (chapterId: string, cardId: string, flags: ContinuityFlag[]) => void;
+  // chapter fields
+  addCharacterToChapter: (chapterId: string, characterId: string) => void;
+  removeCharacterFromChapter: (chapterId: string, characterId: string) => void;
+  setChapterAct: (chapterId: string, act: ActKind | null) => void;
+  setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
+  setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
+  applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
 }
 
 const HISTORY_CAP = 100;
@@ -270,11 +346,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     }
     if (parsed) {
-      meta = parsed;
+      meta = normalizeMeta(parsed);
     } else {
       const legacy = await readAppData<ProjectMeta>(metaKey(root));
-      meta = legacy ?? EMPTY_META;
-      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(legacy));
+      meta = normalizeMeta(legacy);
+      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(meta));
     }
 
     const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
@@ -504,6 +580,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await deleteChapterCmd(project.root, model, file);
         set({ project: updated });
+        set((s) => {
+          const meta = {
+            ...s.meta,
+            chapters: Object.fromEntries(
+              Object.entries(s.meta.chapters).filter(([k]) => k !== id),
+            ),
+          };
+          persistMeta(meta);
+          return { meta };
+        });
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
@@ -1028,6 +1114,131 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ...s.meta,
           statuses: { ...s.meta.statuses, [id]: status },
         };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setPremise: (premise) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editPremise(s.meta.outline, premise) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addCard: (chapterId) => {
+      const { chapters, cardId } = addCardModel(get().meta.chapters, chapterId);
+      set((s) => {
+        const meta = { ...s.meta, chapters };
+        persistMeta(meta);
+        return { meta };
+      });
+      return cardId;
+    },
+
+    removeCard: (chapterId, cardId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: removeCardModel(s.meta.chapters, chapterId, cardId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    editCard: (chapterId, cardId, patch) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: editCardModel(s.meta.chapters, chapterId, cardId, patch) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    moveCardWithin: (chapterId, cardId, toIndex) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: moveCardWithinModel(s.meta.chapters, chapterId, cardId, toIndex) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    moveCardToChapter: (fromChapterId, toChapterId, cardId, toIndex) =>
+      set((s) => {
+        const meta = {
+          ...s.meta,
+          chapters: moveCardToChapterModel(s.meta.chapters, fromChapterId, toChapterId, cardId, toIndex),
+        };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addCharacterToCard: (chapterId, cardId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: addCharacterToCardModel(s.meta.chapters, chapterId, cardId, characterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeCharacterFromCard: (chapterId, cardId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: removeCharacterFromCardModel(s.meta.chapters, chapterId, cardId, characterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addLoreToCard: (chapterId, cardId, loreId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: addLoreToCardModel(s.meta.chapters, chapterId, cardId, loreId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeLoreFromCard: (chapterId, cardId, loreId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: removeLoreFromCardModel(s.meta.chapters, chapterId, cardId, loreId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setCardContinuityFlags: (chapterId, cardId, flags) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: setCardContinuityFlagsModel(s.meta.chapters, chapterId, cardId, flags) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    addCharacterToChapter: (chapterId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: addCharacterToChapterModel(s.meta.chapters, chapterId, characterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeCharacterFromChapter: (chapterId, characterId) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: removeCharacterFromChapterModel(s.meta.chapters, chapterId, characterId) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setChapterAct: (chapterId, act) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: setChapterActModel(s.meta.chapters, chapterId, act) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setChapterPlotPoint: (chapterId, plotPoint) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: setChapterPlotPointModel(s.meta.chapters, chapterId, plotPoint) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setChapterField: (chapterId, patch) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: editChapterField(s.meta.chapters, chapterId, patch) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    applySculpt: (chapterId, proposal, kept) =>
+      set((s) => {
+        const meta = { ...s.meta, chapters: applySculptModel(s.meta.chapters, chapterId, proposal, kept) };
         persistMeta(meta);
         return { meta };
       }),

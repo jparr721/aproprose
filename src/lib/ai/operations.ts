@@ -24,6 +24,8 @@ import type {
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
+  SculptChange,
+  SculptProposal,
   SuggestResult,
 } from "@/lib/types";
 import { getModel } from "@/lib/ai/model";
@@ -34,6 +36,7 @@ import {
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
   EDIT_SYSTEM,
+  SCULPT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
 
@@ -55,6 +58,9 @@ export interface AiContext {
   characters?: { name: string; role?: string }[];
   /** Optional free-text steering from the author's ask box; honoured when present. */
   instruction?: string;
+  /** Pre-rendered STORY STRUCTURE block (premise + served beat + chapter arc),
+   *  or undefined when the scene has no outline context. */
+  structure?: string;
 }
 
 /** What the Edit tab hands `editBlocks`: the blocks it may revise + the request. */
@@ -65,6 +71,8 @@ export interface EditRequest {
   blocks: { id: string; type: BlockType; text: string }[];
   /** The author's instruction (required for an edit). */
   instruction: string;
+  /** Pre-rendered STORY STRUCTURE block, or undefined. */
+  structure?: string;
 }
 
 /**
@@ -93,6 +101,10 @@ function buildGrounding(ctx: AiContext): string {
     parts.push(`CURSOR: ${ctx.cursorSummary}`);
   }
 
+  if (ctx.structure) {
+    parts.push(`STORY STRUCTURE:\n${ctx.structure}`);
+  }
+
   // The scene itself goes before the request so the request is the last,
   // freshest, most salient directive in the model's window.
   parts.push(`SCENE PROSE:\n${ctx.blocksText}`);
@@ -113,6 +125,9 @@ function buildEditGrounding(req: EditRequest): string {
       .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
       .join("\n");
     parts.push(`KNOWN CAST:\n${roster}`);
+  }
+  if (req.structure) {
+    parts.push(`STORY STRUCTURE:\n${req.structure}`);
   }
   const blocks = req.blocks
     .map((b) => `[${b.id}] (${b.type}): ${b.text}`)
@@ -346,6 +361,132 @@ export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
     prompt: buildEditGrounding(req),
   });
   return sanitizeEdits(output.edits, req.blocks);
+}
+
+// ── Sculpt (chapter-level AI write path) ──────────────────────────────────────
+// sculptChapter proposes structural changes to ONE chapter's plot-element cards.
+// Unlike editBlocks (in-place rewrite only), it may also add/move/remove cards.
+// The proposal is reviewed behind a gate in the board before any of it applies.
+
+/** What the board hands `sculptChapter`: one chapter's spine + cards + roster. */
+export interface SculptContext {
+  chapterId: string;
+  chapterTitle: string;
+  /** The global logline. */
+  storyPremise: string;
+  /** The chapter's own premise. */
+  premise: string;
+  goal: string;
+  conflict: string;
+  turn: string;
+  /** The chapter's cards in order, by id, for the model to reference and reorder. */
+  cards: { id: string; title: string; intention: string }[];
+  characters: { name: string }[];
+  lore: { title: string }[];
+}
+
+const sculptChangeSchema = z.object({
+  kind: z
+    .enum(["rewrite", "add", "move", "remove"])
+    .describe("rewrite revises a card in place, add inserts a new card, move repositions, remove deletes"),
+  cardId: z
+    .string()
+    .nullable()
+    .describe("for rewrite/move/remove: an id copied exactly from the supplied cards; null for add"),
+  title: z.string().nullable().describe("proposed card title for rewrite/add; null otherwise"),
+  intention: z
+    .string()
+    .nullable()
+    .describe("proposed one-to-two sentence intention for rewrite/add; null otherwise"),
+  toIndex: z
+    .number()
+    .int()
+    .nullable()
+    .describe("for move ONLY: zero-based target index within the chapter; null otherwise"),
+  reason: z.string().describe("one short sentence on why this change strengthens the chapter"),
+});
+
+const sculptProposalSchema = z.object({
+  chapterId: z.string().describe("the chapter being reshaped, echoed back from context"),
+  summary: z.string().describe("one sentence describing the overall reshape"),
+  changes: z
+    .array(sculptChangeSchema)
+    .describe("the structural changes to apply; few or none if the chapter is already tight"),
+});
+
+/** Render the sculpt grounding: the chapter's spine, its ordered cards, cast, lore. */
+function buildSculptGrounding(ctx: SculptContext): string {
+  const parts: string[] = [];
+  parts.push(`CHAPTER: ${ctx.chapterTitle}`);
+  if (ctx.storyPremise.trim()) parts.push(`STORY PREMISE: ${ctx.storyPremise.trim()}`);
+  const spine = [
+    ctx.premise.trim() ? `Premise: ${ctx.premise.trim()}` : "",
+    ctx.goal.trim() ? `Goal: ${ctx.goal.trim()}` : "",
+    ctx.conflict.trim() ? `Conflict: ${ctx.conflict.trim()}` : "",
+    ctx.turn.trim() ? `Turn: ${ctx.turn.trim()}` : "",
+  ].filter(Boolean);
+  if (spine.length > 0) parts.push(`CHAPTER SPINE:\n${spine.join("\n")}`);
+  if (ctx.characters.length > 0) {
+    parts.push(`KNOWN CAST:\n${ctx.characters.map((c) => `- ${c.name}`).join("\n")}`);
+  }
+  if (ctx.lore.length > 0) {
+    parts.push(`LORE:\n${ctx.lore.map((l) => `- ${l.title}`).join("\n")}`);
+  }
+  const cards = ctx.cards
+    .map((c, i) => `[${i}] (${c.id}) ${c.title}: ${c.intention}`)
+    .join("\n");
+  parts.push(`PLOT ELEMENTS (in order; reorder/rewrite/add/remove these):\n${cards || "(none yet)"}`);
+  return parts.join("\n\n");
+}
+
+/**
+ * Drop changes the board can't safely apply: rewrite/move/remove whose cardId is
+ * not one of `cardIds`, a `move` with no `toIndex`, and a `rewrite` that proposes
+ * no title or intention (a no-op). Pure: returns a new proposal.
+ */
+export function sanitizeSculpt(proposal: SculptProposal, cardIds: string[]): SculptProposal {
+  const known = new Set(cardIds);
+  const changes = proposal.changes.filter((c: SculptChange) => {
+    switch (c.kind) {
+      case "add":
+        return true;
+      case "rewrite":
+        return c.cardId !== null && known.has(c.cardId) && (c.title !== null || c.intention !== null);
+      case "move":
+        return c.cardId !== null && known.has(c.cardId) && c.toIndex !== null;
+      case "remove":
+        return c.cardId !== null && known.has(c.cardId);
+    }
+  });
+  return { ...proposal, changes };
+}
+
+/**
+ * Propose structural changes to ONE chapter. Returns a validated, sanitized
+ * proposal the board reviews behind its gate. A truly empty chapter (no spine,
+ * no cards) has nothing to reshape, so we skip the call.
+ */
+export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal> {
+  const empty =
+    ctx.cards.length === 0 &&
+    !ctx.premise.trim() &&
+    !ctx.goal.trim() &&
+    !ctx.conflict.trim() &&
+    !ctx.turn.trim();
+  if (empty) {
+    return { chapterId: ctx.chapterId, summary: "", changes: [] };
+  }
+  const model = await getModel();
+  const { output } = await generateText({
+    model,
+    output: Output.object({ schema: sculptProposalSchema }),
+    system: SCULPT_SYSTEM,
+    prompt: buildSculptGrounding(ctx),
+  });
+  return sanitizeSculpt(
+    { chapterId: ctx.chapterId, summary: output.summary, changes: output.changes },
+    ctx.cards.map((c) => c.id),
+  );
 }
 
 // ── Streaming + freeform operations ─────────────────────────────────────────

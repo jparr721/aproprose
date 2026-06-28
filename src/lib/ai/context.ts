@@ -8,6 +8,7 @@
 import type { AiContext, EditRequest } from "@/lib/ai/operations";
 import type { Block } from "@/lib/types";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
+import { renderStoryStructure } from "@/lib/outline/grounding";
 
 export function buildAiContext(uptoId?: string): AiContext {
   const { project, activeChapterId, blocks, meta, selectedId } =
@@ -55,11 +56,19 @@ export function buildAiContext(uptoId?: string): AiContext {
       : `Cursor sits just after a ${last.type} block.`;
   }
 
+  const structure = renderStoryStructure({
+    outline: meta.outline,
+    chapters: meta.chapters,
+    characters: meta.characters,
+    activeChapterId,
+  });
+
   return {
     chapterTitle: chapter?.title,
     blocksText: lines.join("\n\n"),
     cursorSummary,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
+    structure: structure ?? undefined,
   };
 }
 
@@ -96,10 +105,18 @@ export function buildEditRequest(
     targets = blocks.filter(isEditable);
   }
 
+  const structure = renderStoryStructure({
+    outline: meta.outline,
+    chapters: meta.chapters,
+    characters: meta.characters,
+    activeChapterId,
+  });
+
   return {
     chapterTitle: chapter?.title,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
     blocks: targets.map((b) => ({ id: b.id, type: b.type, text: b.text })),
     instruction,
+    structure: structure ?? undefined,
   };
 }

@@ -93,6 +93,16 @@
   --scratch-tint: oklch(0.95 0.025 200);
   --scratch-edge: oklch(0.84 0.05 215);
   --scratch-ink: oklch(0.42 0.08 220);
+  --act-setup: oklch(0.95 0.03 160);
+  --act-confrontation: oklch(0.95 0.04 60);
+  --act-resolution: oklch(0.95 0.04 290);
+  --beat-plot-point-tint: oklch(0.95 0.018 285);
+  --beat-inciting-tint: oklch(0.95 0.03 40);
+  --beat-pinch-tint: oklch(0.95 0.03 320);
+  --beat-action-tint: oklch(0.95 0.025 200);
+  --beat-midpoint-tint: oklch(0.96 0.045 95);
+  --beat-climax-tint: oklch(0.93 0.05 25);
+  --beat-resolution-tint: oklch(0.95 0.03 150);
   --sheet: oklch(0.99 0.008 95);
   --sheet-ink: oklch(0.22 0.015 60);
 }
@@ -146,6 +156,16 @@
   --scratch-tint: oklch(0.24 0.025 215);
   --scratch-edge: oklch(0.36 0.05 215);
   --scratch-ink: oklch(0.8 0.07 215);
+  --act-setup: oklch(0.24 0.03 160);
+  --act-confrontation: oklch(0.24 0.04 60);
+  --act-resolution: oklch(0.24 0.04 290);
+  --beat-plot-point-tint: oklch(0.28 0.022 285);
+  --beat-inciting-tint: oklch(0.3 0.04 40);
+  --beat-pinch-tint: oklch(0.3 0.04 320);
+  --beat-action-tint: oklch(0.28 0.025 200);
+  --beat-midpoint-tint: oklch(0.3 0.045 95);
+  --beat-climax-tint: oklch(0.32 0.06 25);
+  --beat-resolution-tint: oklch(0.3 0.04 150);
   --sheet: oklch(0.92 0.012 80);
   --sheet-ink: oklch(0.22 0.015 60);
 }
@@ -208,10 +228,20 @@
   --color-scratch-tint: var(--scratch-tint);
   --color-scratch-edge: var(--scratch-edge);
   --color-scratch-ink: var(--scratch-ink);
+  --color-act-setup: var(--act-setup);
+  --color-act-confrontation: var(--act-confrontation);
+  --color-act-resolution: var(--act-resolution);
+  --color-beat-plot-point-tint: var(--beat-plot-point-tint);
+  --color-beat-inciting-tint: var(--beat-inciting-tint);
+  --color-beat-pinch-tint: var(--beat-pinch-tint);
+  --color-beat-action-tint: var(--beat-action-tint);
+  --color-beat-midpoint-tint: var(--beat-midpoint-tint);
+  --color-beat-climax-tint: var(--beat-climax-tint);
+  --color-beat-resolution-tint: var(--beat-resolution-tint);
   --color-sheet: var(--sheet);
   --color-sheet-ink: var(--sheet-ink);
 
-  /* fonts — serif-forward per project convention; sans only for dense chrome */
+  /* fonts - serif is reserved for headings and manuscript prose; sans is the default for everything else */
   --font-serif: "Noto Serif Variable", "Source Serif Pro", Georgia, serif;
   --font-heading: "Lora Variable", "Newsreader", Georgia, serif;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -233,9 +263,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  /* serif-forward base (CLAUDE.md). Chrome opts into font-sans via utilities. */
+  /* sans base. Headings and manuscript prose opt into serif explicitly via the
+     typography components and the editor prose styles. */
   html {
-    @apply font-serif;
+    @apply font-sans;
   }
 }
 

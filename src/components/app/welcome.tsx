@@ -66,7 +66,7 @@ export function Welcome() {
                   >
                     <IconBook2 className="size-4 shrink-0 text-faint group-hover:text-accent-ink" />
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate font-heading text-sm text-foreground">
+                      <span className="truncate font-serif text-sm text-foreground">
                         {r.name}
                       </span>
                       <span className="truncate text-xs text-faint">{r.root}</span>

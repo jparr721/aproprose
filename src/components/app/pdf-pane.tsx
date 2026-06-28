@@ -11,9 +11,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { clamp } from "es-toolkit";
+import { toast } from "sonner";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
+  IconCheck,
+  IconCopy,
   IconMinus,
   IconPlayerPlayFilled,
   IconPlus,
@@ -23,6 +26,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { copyText } from "@/lib/clipboard";
+import { pdfPath as resolvePdfPath } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -149,6 +154,7 @@ function PdfPageView({
 }
 
 export function PdfPane() {
+  const project = useProjectStore((s) => s.project);
   const pdfBase64 = useProjectStore((s) => s.compile.pdfBase64);
   const status = useProjectStore((s) => s.compile.status);
   const at = useProjectStore((s) => s.compile.at);
@@ -311,11 +317,53 @@ export function PdfPane() {
   const numPages = doc?.numPages ?? 0;
   const compiling = status === "compiling";
 
+  // Absolute path of the compiled PDF, resolved on the Rust side (single source of
+  // truth: correct stem logic and native separator) rather than rebuilt here.
+  const root = project?.root;
+  const mainFile = project?.mainFile;
+  const [pdfPath, setPdfPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!root || !mainFile) {
+      setPdfPath(null);
+      return;
+    }
+    let cancelled = false;
+    resolvePdfPath(root, mainFile)
+      .then((p) => !cancelled && setPdfPath(p))
+      .catch(() => !cancelled && setPdfPath(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [root, mainFile]);
+
+  const [copied, setCopied] = useState(false);
+  const copyPath = async () => {
+    if (!pdfPath) return;
+    if (!(await copyText(pdfPath))) {
+      toast.error("Couldn't copy the path to the clipboard");
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <aside className="flex h-full min-h-0 flex-col bg-muted">
       <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
         <div className="flex items-center gap-2.5">
-          <span className="font-mono text-xs text-muted-foreground">preview.pdf</span>
+          <span className="flex items-center gap-0.5">
+            <span className="font-mono text-xs text-muted-foreground">preview.pdf</span>
+            {pdfPath ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title={copied ? "Copied" : `Copy path: ${pdfPath}`}
+                onClick={() => void copyPath()}
+              >
+                {copied ? <IconCheck /> : <IconCopy />}
+              </Button>
+            ) : null}
+          </span>
           <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
             <span className="size-1.5 rounded-full bg-success" />
             {at ? `compiled ${(durationMs / 1000).toFixed(1)}s` : "loaded"}

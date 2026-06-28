@@ -109,6 +109,18 @@ async fn compile_project(root: String, main_file: String) -> Result<CompileResul
     Ok(compile::compile_project(&root_path, &main_file).await)
 }
 
+/// The absolute path where the compiled PDF lands (whether or not it exists yet),
+/// resolved the same way the compiler writes it so the frontend never rebuilds it.
+#[tauri::command]
+fn pdf_path(root: String, main_file: String) -> Result<String, String> {
+    let root_path = Path::new(&root)
+        .canonicalize()
+        .map_err(|e| format!("invalid project root {root}: {e}"))?;
+    Ok(compile::pdf_output_path(&root_path, &main_file)
+        .to_string_lossy()
+        .into_owned())
+}
+
 /// Read an existing file (project-relative path) as base64, or `None` if absent.
 #[tauri::command]
 fn read_pdf(root: String, path: String) -> Result<Option<String>, String> {
@@ -397,6 +409,7 @@ pub fn run() {
             read_text_file,
             write_text_file,
             compile_project,
+            pdf_path,
             read_pdf,
             get_ai_config,
             has_openai_key,

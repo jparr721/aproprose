@@ -107,6 +107,11 @@ export function readPdf(root: string, path: string): Promise<string | null> {
   return invoke<string | null>("read_pdf", { root, path });
 }
 
+/** The absolute path where the compiled PDF lands, resolved on the Rust side. */
+export function pdfPath(root: string, mainFile: string): Promise<string> {
+  return invoke<string>("pdf_path", { root, mainFile });
+}
+
 // ── AI config ─────────────────────────────────────────────────────────────────
 // The OpenAI key is entered in Settings and stored in the app-config dir on the
 // Rust side (with optional dev fallbacks to an env var / `.env`). It is fetched

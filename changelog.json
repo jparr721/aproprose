@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.4.0",
+    "date": "2026-06-28",
+    "summary": "A visual story outline storyboard, writing stats and streaks, automatic app updates, and multi-block AI editing",
+    "highlights": [
+      "New Outline storyboard: plan your novel on a chapter-column board grouped into act bands, with a logline, per-chapter spine (premise, goal, conflict, turn), cast assignments, and drag-and-drop plot-element cards.",
+      "AI Sculpt reshapes a chapter's plot elements with proposed add/rewrite/move/remove changes you review and keep or skip before anything is applied.",
+      "AI suggestions are now grounded in your outline, so continuations, edits, and critiques aim at the chapter's intended structure.",
+      "Open the Outline from the sidebar, the top bar, the command palette, or Cmd/Ctrl+Shift+O, with a read-only chapter plan mirrored in the right panel.",
+      "New Stats tab shows total words written, days written, current and longest writing streaks, and an activity heatmap.",
+      "Multi-block selection: Cmd/Ctrl-click to select several blocks and run the AI Edit tool across all of them at once.",
+      "Insert a new block above or below any block from its context or actions menu.",
+      "Automatic updates: the app checks for new versions on launch, offers a download with a See changes link, and adds a What's New changelog dialog plus a macOS Check for Updates menu item.",
+      "Use your Codex CLI or Claude Code subscription as the AI provider instead of an OpenAI API key, selectable in Settings.",
+      "Redesigned Settings as a tabbed dialog covering Appearance, AI, Backup, Keyboard, Stats, and About.",
+      "The right assistant panel is now resizable and remembers its width, with a clearer toggle button in the top bar.",
+      "The backup indicator now tracks your edits live, updating as you write instead of only on a manual check.",
+      "Reopening a project now shows the existing PDF as already built instead of reporting it as not built.",
+      "Typography refresh across dialogs, panels, and the editor for a cleaner, more consistent look."
+    ]
+  },
+  {
     "version": "0.3.0",
     "date": "2026-06-25",
     "summary": "The first tracked release of aproprose.",

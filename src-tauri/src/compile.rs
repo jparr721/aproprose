@@ -65,7 +65,7 @@ pub async fn compile_project(root: &Path, main_file: &str) -> CompileResult {
 }
 
 /// The expected PDF output path for a given main file.
-fn pdf_output_path(root: &Path, main_file: &str) -> PathBuf {
+pub fn pdf_output_path(root: &Path, main_file: &str) -> PathBuf {
     let stem = Path::new(main_file)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())

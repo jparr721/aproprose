@@ -93,6 +93,9 @@
   --scratch-tint: oklch(0.95 0.025 200);
   --scratch-edge: oklch(0.84 0.05 215);
   --scratch-ink: oklch(0.42 0.08 220);
+  --act-setup: oklch(0.95 0.03 160);
+  --act-confrontation: oklch(0.95 0.04 60);
+  --act-resolution: oklch(0.95 0.04 290);
   --beat-plot-point-tint: oklch(0.95 0.018 285);
   --beat-inciting-tint: oklch(0.95 0.03 40);
   --beat-pinch-tint: oklch(0.95 0.03 320);
@@ -153,6 +156,9 @@
   --scratch-tint: oklch(0.24 0.025 215);
   --scratch-edge: oklch(0.36 0.05 215);
   --scratch-ink: oklch(0.8 0.07 215);
+  --act-setup: oklch(0.24 0.03 160);
+  --act-confrontation: oklch(0.24 0.04 60);
+  --act-resolution: oklch(0.24 0.04 290);
   --beat-plot-point-tint: oklch(0.28 0.022 285);
   --beat-inciting-tint: oklch(0.3 0.04 40);
   --beat-pinch-tint: oklch(0.3 0.04 320);
@@ -222,6 +228,9 @@
   --color-scratch-tint: var(--scratch-tint);
   --color-scratch-edge: var(--scratch-edge);
   --color-scratch-ink: var(--scratch-ink);
+  --color-act-setup: var(--act-setup);
+  --color-act-confrontation: var(--act-confrontation);
+  --color-act-resolution: var(--act-resolution);
   --color-beat-plot-point-tint: var(--beat-plot-point-tint);
   --color-beat-inciting-tint: var(--beat-inciting-tint);
   --color-beat-pinch-tint: var(--beat-pinch-tint);

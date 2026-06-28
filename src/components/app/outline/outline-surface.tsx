@@ -1,9 +1,12 @@
+import { IconLayoutList } from "@tabler/icons-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { TypographyEyebrow, TypographyMuted, TypographyP, TypographySmall } from "@/components/ui/typography";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { CharacterChip } from "@/components/app/outline/character-chip";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
-
+import { useViewStore } from "@/stores/view-store";
 const SPINE: { key: "premise" | "goal" | "conflict" | "turn"; label: string }[] = [
   { key: "premise", label: "Premise" },
   { key: "goal", label: "Goal" },
@@ -18,6 +21,11 @@ export function OutlineSurface() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const ch = useProjectStore((s) => (activeChapterId ? getChapterOutline(s.meta.chapters, activeChapterId) : null));
   const characters = useProjectStore((s) => s.meta.characters);
+  const toggleOutline = useViewStore((s) => s.toggleOutline);
+
+  const hasOutline = ch
+    ? SPINE.some((f) => ch[f.key].trim()) || ch.cards.length > 0
+    : false;
 
   return (
     <ScrollArea className="h-full">
@@ -31,6 +39,18 @@ export function OutlineSurface() {
 
         {!ch ? (
           <TypographyMuted className="text-sm">Open a chapter to see its plan.</TypographyMuted>
+        ) : !hasOutline ? (
+          <Empty className="min-h-[200px] border-none">
+            <EmptyHeader>
+              <EmptyTitle>No outline yet</EmptyTitle>
+              <EmptyDescription>
+                Fill in the story spine and plot cards on the outline board to see your chapter plan here.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button variant="outline" size="sm" onClick={() => toggleOutline()}>
+              <IconLayoutList className="size-4" /> Open outline
+            </Button>
+          </Empty>
         ) : (
           <>
             {SPINE.filter((f) => ch[f.key].trim()).map((f) => (

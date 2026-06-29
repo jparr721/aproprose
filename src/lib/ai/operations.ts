@@ -20,7 +20,6 @@ import { z } from "zod";
 import type {
   BlockEdit,
   BlockType,
-  CastResult,
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
@@ -31,7 +30,6 @@ import type {
 import { getModel } from "@/lib/ai/model";
 import {
   BRAINSTORM_SYSTEM,
-  CAST_SYSTEM,
   CLEAN_TRANSCRIPT_SYSTEM,
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
@@ -201,31 +199,6 @@ const continuityResultSchema = z.object({
     .describe("high-signal continuity observations grounded in the supplied text"),
 });
 
-const castMemberSchema = z.object({
-  name: z.string().describe("display name as the prose refers to them"),
-  // Nullable (not optional) for the same strict-schema reason as `speaker`.
-  color: z
-    .string()
-    .nullable()
-    .describe("oklch() colour for a known cast member that supplied one, else null"),
-  state: z
-    .string()
-    .describe("status label, e.g. POV, Active, Background, Deceased, Mentioned"),
-  detail: z.string().describe("brief phrase grounding the call in the text"),
-  offPage: z
-    .boolean()
-    .describe("false if physically present in the scene, true if only referenced"),
-});
-
-const castResultSchema = z.object({
-  inScene: z
-    .array(castMemberSchema)
-    .describe("characters physically present in the scene (offPage = false)"),
-  offPage: z
-    .array(castMemberSchema)
-    .describe("characters referenced but not present (offPage = true)"),
-});
-
 const blockEditSchema = z.object({
   blockId: z
     .string()
@@ -304,29 +277,6 @@ export async function continuityCheck(
     prompt: buildGrounding(ctx),
   });
   return output.flags;
-}
-
-/**
- * Identify who is physically in the scene versus referenced off-page, inferred
- * purely from the prose (and tagged with cast colours when context supplies them).
- */
-export async function detectCast(ctx: AiContext): Promise<CastResult> {
-  const model = await getModel();
-  const { output } = await generateText({
-    model,
-    output: Output.object({ schema: castResultSchema }),
-    system: CAST_SYSTEM,
-    prompt: buildGrounding(ctx),
-  });
-  // Normalize null -> undefined so an absent colour renders as a ghost avatar.
-  const norm = (m: (typeof output.inScene)[number]) => ({
-    ...m,
-    color: m.color ?? undefined,
-  });
-  return {
-    inScene: output.inScene.map(norm),
-    offPage: output.offPage.map(norm),
-  };
 }
 
 /**

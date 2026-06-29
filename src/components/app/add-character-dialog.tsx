@@ -67,7 +67,7 @@ export function AddCharacterDialog({
         <DialogHeader>
           <DialogTitle>Add character</DialogTitle>
           <DialogDescription>
-            Characters power dialogue speaker chips and the AI cast tracker.
+            Characters power dialogue speaker chips and outline cast assignments.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">

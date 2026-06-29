@@ -23,25 +23,3 @@ export function ColorDot({
     />
   );
 }
-
-export function ColorAvatar({
-  color,
-  initials,
-  className,
-}: {
-  color: string;
-  initials: string;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--dot)] font-serif text-xs font-medium text-white",
-        className,
-      )}
-      style={{ "--dot": color } as ColorVar}
-    >
-      {initials}
-    </span>
-  );
-}

@@ -12,7 +12,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
-import { buildAiContext } from "@/lib/ai/context";
+import { buildAiContext, buildScopedContext } from "@/lib/ai/context";
 import { useProjectStore } from "@/stores/project-store";
 import type { Block } from "@/lib/types";
 
@@ -50,6 +50,23 @@ describe("buildAiContext", () => {
       blocks: [mk({ id: "brk", type: "chapter", level: "break", text: "" })],
     });
     expect(buildAiContext().blocksText).toBe("* * *");
+  });
+});
+
+describe("buildScopedContext", () => {
+  it("cursor scope stops at the selection; chapter scope reads the whole chapter", () => {
+    useProjectStore.setState({
+      blocks: [
+        mk({ id: "n1", type: "narration", text: "First." }),
+        mk({ id: "n2", type: "narration", text: "Second." }),
+        mk({ id: "n3", type: "narration", text: "Third." }),
+      ],
+      selectedId: "n2",
+    });
+    expect(buildScopedContext("cursor").blocksText).toBe("First.\n\nSecond.");
+    expect(buildScopedContext("chapter").blocksText).toBe(
+      "First.\n\nSecond.\n\nThird.",
+    );
   });
 });
 

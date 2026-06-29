@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2026-06-28",
+    "summary": "Smarter AI panel scoping, full layout restore on relaunch, and a fixed UI freeze",
+    "highlights": [
+      "Critique and Continuity now let you choose what the AI reads: up to your cursor or the whole chapter",
+      "BUG FIX: The app reopens exactly as you left it, restoring window size and position, the PDF and Outline panels, and your last-open chapter",
+      "BUG FIX: Fixed a freeze (beach ball) that could lock up the app while using the Claude or Codex CLI providers",
+      "The Edit tab now disables its prompt with clearer guidance when no editable block is selected",
+      "Removed the AI Cast tab; character tracking now lives in outline cast assignments"
+    ]
+  },
+  {
     "version": "0.6.0",
     "date": "2026-06-28",
     "summary": "Lore entries get full worldbuilding details and your window now reopens where you left it",

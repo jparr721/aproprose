@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Block } from "@/components/app/block";
+import { FindBar } from "@/components/app/find-bar";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,6 +33,7 @@ import {
   TypographyMutedSpan,
 } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
+import { useFindStore } from "@/stores/find-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
@@ -184,6 +186,10 @@ export function Editor() {
   useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_BOLD, () => applyFormat("**"), EDITOR_HISTORY_OPTIONS);
   useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_ITALIC, () => applyFormat("_"), EDITOR_HISTORY_OPTIONS);
 
+  // Find & replace across the chapter's blocks. Cmd+F opens the widget (and
+  // re-selects the query on repeat); the widget owns its own Enter/Esc keys.
+  useKeybinding(KEYBINDING_IDS.OPEN_FIND, () => useFindStore.getState().openFind());
+
   // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
   // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders
   // and powers on-screen hints. All four bow out of the AI panel / dialogs.
@@ -263,56 +269,60 @@ export function Editor() {
   }
 
   return (
-    <ScrollArea
-      className="h-full bg-background"
-      // A press on empty editor surface (gutters, padding, the chapter header)
-      // clears the selection so the active block leaves edit mode. Blocks handle
-      // their own selection; buttons (the add-block row) and the scrollbar keep
-      // the selection so they still act on the selected block.
-      onMouseDown={(e) => {
-        const t = e.target as Element;
-        if (
-          t.closest("[data-block-id]") ||
-          t.closest("button") ||
-          t.closest('[data-slot="scroll-area-scrollbar"]')
-        )
-          return;
-        select(null);
-      }}
-    >
-      <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
-        <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
-          <TypographyMutedSpan className="font-serif text-lg italic">
-            Chapter {chapter.label}
-          </TypographyMutedSpan>
-          <TypographyForeground className="font-serif text-2xl font-medium tracking-tight">
-            {chapter.title}
-          </TypographyForeground>
-          <TypographyMutedSpan className="ml-auto text-xs tabular-nums">
-            {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
-            {chapterDirty ? "unsaved" : "saved"}
-          </TypographyMutedSpan>
-        </header>
+    <div className="relative h-full min-h-0">
+      <FindBar />
+      <ScrollArea
+        className="h-full bg-background"
+        // A press on empty editor surface (gutters, padding, the chapter header)
+        // clears the selection so the active block leaves edit mode. Blocks handle
+        // their own selection; buttons (the add-block row), the scrollbar, and the
+        // find widget keep the selection so they still act on the selected block.
+        onMouseDown={(e) => {
+          const t = e.target as Element;
+          if (
+            t.closest("[data-block-id]") ||
+            t.closest("button") ||
+            t.closest("[data-find-widget]") ||
+            t.closest('[data-slot="scroll-area-scrollbar"]')
+          )
+            return;
+          select(null);
+        }}
+      >
+        <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
+          <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
+            <TypographyMutedSpan className="font-serif text-lg italic">
+              Chapter {chapter.label}
+            </TypographyMutedSpan>
+            <TypographyForeground className="font-serif text-2xl font-medium tracking-tight">
+              {chapter.title}
+            </TypographyForeground>
+            <TypographyMutedSpan className="ml-auto text-xs tabular-nums">
+              {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
+              {chapterDirty ? "unsaved" : "saved"}
+            </TypographyMutedSpan>
+          </header>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          modifiers={[restrictToVerticalAxis]}
-          onDragEnd={onDragEnd}
-        >
-          <SortableContext
-            items={blocks.map((b) => b.id)}
-            strategy={verticalListSortingStrategy}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            onDragEnd={onDragEnd}
           >
-            {blocks.map((b) => (
-              <Block key={b.id} block={b} dictation={dictation} />
-            ))}
-          </SortableContext>
-        </DndContext>
+            <SortableContext
+              items={blocks.map((b) => b.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {blocks.map((b) => (
+                <Block key={b.id} block={b} dictation={dictation} />
+              ))}
+            </SortableContext>
+          </DndContext>
 
-        <AddBlockRow />
-        <SelectionToolbar />
-      </div>
-    </ScrollArea>
+          <AddBlockRow />
+          <SelectionToolbar />
+        </div>
+      </ScrollArea>
+    </div>
   );
 }

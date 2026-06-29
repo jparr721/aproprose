@@ -5,7 +5,7 @@
 // gutter grip and the action row: a type/speaker chip, dictation mic, an
 // AI "suggest what comes next" spark, and a more-menu (move / AI cleanup / delete).
 
-import { memo, useState, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   IconChevronDown,
@@ -47,6 +47,7 @@ import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { renderInline } from "@/components/app/inline";
 import { copyText, currentSelectionText } from "@/lib/clipboard";
 import { useProjectStore } from "@/stores/project-store";
+import { useFindStore } from "@/stores/find-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { buildAiContext } from "@/lib/ai/context";
@@ -75,6 +76,35 @@ const TYPE_SWATCH: Record<BlockType, string> = {
 };
 
 const PROSE = "font-serif text-[length:var(--prose-size,17.5px)] leading-[1.65] text-foreground";
+
+/** The active find match within this block's `text`, or null. */
+type FindHit = { start: number; end: number } | null;
+
+const MARK = "rounded-[2px] bg-warning/30 text-foreground";
+
+/** Render prose with the current find match wrapped in a <mark>. */
+function highlightInline(text: string, hit: FindHit): ReactNode {
+  if (!hit) return renderInline(text);
+  return (
+    <>
+      {renderInline(text.slice(0, hit.start))}
+      <mark className={MARK}>{renderInline(text.slice(hit.start, hit.end))}</mark>
+      {renderInline(text.slice(hit.end))}
+    </>
+  );
+}
+
+/** Same, for plain-text surfaces (scene labels, raw LaTeX) that skip inline markup. */
+function highlightPlain(text: string, hit: FindHit): ReactNode {
+  if (!hit) return text;
+  return (
+    <>
+      {text.slice(0, hit.start)}
+      <mark className={MARK}>{text.slice(hit.start, hit.end)}</mark>
+      {text.slice(hit.end)}
+    </>
+  );
+}
 
 // ── Type / speaker chip ───────────────────────────────────────────────────────
 function TypeChip({
@@ -146,12 +176,15 @@ function BlockBody({
   editing,
   speaker,
   caret,
+  hit,
 }: {
   block: BlockT;
   editing: boolean;
   speaker?: Character;
   /** One-shot caret placement for the block's primary textarea on edit-mode mount. */
   caret?: "start" | "end";
+  /** The active find match in this block's `text`, highlighted when not editing. */
+  hit: FindHit;
 }) {
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const updateBlock = useProjectStore((s) => s.updateBlock);
@@ -170,7 +203,7 @@ function BlockBody({
           />
         ) : (
           <div className="py-4 text-center font-serif tracking-[0.3em] text-muted-foreground">
-            {block.text || <span className="text-faint">* * *</span>}
+            {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">* * *</span>}
           </div>
         );
       }
@@ -185,7 +218,7 @@ function BlockBody({
         />
       ) : (
         <h2 className="my-2 text-center font-serif text-2xl font-medium tracking-wide text-foreground">
-          {block.text || <span className="text-faint">Scene heading</span>}
+          {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">Scene heading</span>}
         </h2>
       );
 
@@ -220,7 +253,7 @@ function BlockBody({
             <>
               <p className={PROSE}>
                 <span className="text-faint">“</span>
-                {renderInline(block.text)}
+                {highlightInline(block.text, hit)}
                 <span className="text-faint">”</span>
               </p>
               {block.beat ? (
@@ -273,7 +306,7 @@ function BlockBody({
               proseBody
             />
           ) : (
-            <p className="text-[13px] leading-[1.55]">{renderInline(block.text)}</p>
+            <p className="text-[13px] leading-[1.55]">{highlightInline(block.text, hit)}</p>
           )}
         </div>
       );
@@ -290,7 +323,7 @@ function BlockBody({
         />
       ) : (
         <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground">
-          {block.text}
+          {highlightPlain(block.text, hit)}
         </pre>
       );
 
@@ -308,7 +341,7 @@ function BlockBody({
         />
       ) : (
         <p className={PROSE}>
-          {block.text ? renderInline(block.text) : <span className="text-faint">Empty</span>}
+          {block.text ? highlightInline(block.text, hit) : <span className="text-faint">Empty</span>}
         </p>
       );
   }
@@ -359,6 +392,13 @@ function BlockImpl({
   const triggerSuggest = useViewStore((s) => s.triggerSuggest);
   const blocks = useProjectStore((s) => s.blocks);
   const insertAfter = useProjectStore((s) => s.insertAfter);
+  // The active find match in this block, or null for every other block (a stable
+  // null, so only the current-match block and the one it just left re-render).
+  const hit = useFindStore((s) =>
+    s.open && s.currentIndex >= 0 && s.matches[s.currentIndex]?.blockId === block.id
+      ? s.matches[s.currentIndex]
+      : null,
+  );
   const {
     attributes,
     listeners,
@@ -497,7 +537,7 @@ function BlockImpl({
 
           {/* body */}
           <div className="min-w-0 flex-1">
-            <BlockBody block={block} editing={editing} speaker={speaker} caret={caret} />
+            <BlockBody block={block} editing={editing} speaker={speaker} caret={caret} hit={hit} />
           </div>
 
           {/* actions */}

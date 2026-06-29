@@ -11,7 +11,8 @@ export function isKeyboardCaptured(element: Element | null): boolean {
   return element.closest("[data-capture-keyboard]") !== null;
 }
 
-const AUX_SURFACE_SELECTOR = '[data-right-panel],[role="dialog"],[role="alertdialog"]';
+const AUX_SURFACE_SELECTOR =
+  '[data-right-panel],[data-find-widget],[role="dialog"],[role="alertdialog"]';
 
 export function isInAuxSurface(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;

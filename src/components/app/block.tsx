@@ -44,7 +44,7 @@ import { Button } from "@/components/ui/button";
 import { ColorDot } from "@/components/app/color-dot";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
-import { renderInline } from "@/components/app/inline";
+import { renderInline, renderInlineHighlighted, FIND_MARK_CLASS } from "@/components/app/inline";
 import { copyText, currentSelectionText } from "@/lib/clipboard";
 import { useProjectStore } from "@/stores/project-store";
 import { useFindStore } from "@/stores/find-store";
@@ -80,27 +80,21 @@ const PROSE = "font-serif text-[length:var(--prose-size,17.5px)] leading-[1.65] 
 /** The active find match within this block's `text`, or null. */
 type FindHit = { start: number; end: number } | null;
 
-const MARK = "rounded-[2px] bg-warning/30 text-foreground";
-
-/** Render prose with the current find match wrapped in a <mark>. */
+/** Render prose with the current find match wrapped in a <mark>. Highlighting runs
+ *  at the inline-node layer (see renderInlineHighlighted) so a match overlapping a
+ *  bold or italic span keeps its formatting instead of splitting the markers. */
 function highlightInline(text: string, hit: FindHit): ReactNode {
-  if (!hit) return renderInline(text);
-  return (
-    <>
-      {renderInline(text.slice(0, hit.start))}
-      <mark className={MARK}>{renderInline(text.slice(hit.start, hit.end))}</mark>
-      {renderInline(text.slice(hit.end))}
-    </>
-  );
+  return hit ? renderInlineHighlighted(text, hit.start, hit.end) : renderInline(text);
 }
 
-/** Same, for plain-text surfaces (scene labels, raw LaTeX) that skip inline markup. */
+/** Same, for plain-text surfaces (scene labels, raw LaTeX) that skip inline markup,
+ *  so plain slicing is exact. */
 function highlightPlain(text: string, hit: FindHit): ReactNode {
   if (!hit) return text;
   return (
     <>
       {text.slice(0, hit.start)}
-      <mark className={MARK}>{text.slice(hit.start, hit.end)}</mark>
+      <mark className={FIND_MARK_CLASS}>{text.slice(hit.start, hit.end)}</mark>
       {text.slice(hit.end)}
     </>
   );

@@ -13,6 +13,7 @@ import type {
   ActKind,
   BeatType,
   Block,
+  BlockTextEdit,
   BlockType,
   ChapterRef,
   ChapterStatus,
@@ -209,7 +210,7 @@ interface ProjectState {
   updateBlockText: (id: string, text: string) => void;
   formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
-  applyBlockEdits: (edits: { id: string; text: string }[]) => void;
+  applyBlockEdits: (edits: BlockTextEdit[]) => void;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;

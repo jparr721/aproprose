@@ -275,14 +275,14 @@ export function Editor() {
         className="h-full bg-background"
         // A press on empty editor surface (gutters, padding, the chapter header)
         // clears the selection so the active block leaves edit mode. Blocks handle
-        // their own selection; buttons (the add-block row), the scrollbar, and the
-        // find widget keep the selection so they still act on the selected block.
+        // their own selection; buttons (the add-block row) and the scrollbar keep
+        // the selection so they still act on the selected block. (The find widget is
+        // a sibling of this ScrollArea, so its presses never reach this handler.)
         onMouseDown={(e) => {
           const t = e.target as Element;
           if (
             t.closest("[data-block-id]") ||
             t.closest("button") ||
-            t.closest("[data-find-widget]") ||
             t.closest('[data-slot="scroll-area-scrollbar"]')
           )
             return;

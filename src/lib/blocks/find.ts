@@ -4,7 +4,7 @@
 // exact string replace writes back, so search target == replace target. The
 // store + UI sit on top; this layer is stateless and unit-tested in isolation.
 
-import type { Block } from "@/lib/types";
+import type { Block, BlockTextEdit } from "@/lib/types";
 
 export interface FindOptions {
   caseSensitive: boolean;
@@ -74,29 +74,34 @@ export function replaceOne(
 ): string {
   const before = text.slice(0, match.start);
   const after = text.slice(match.end);
-  // The slice IS the match, so a non-global replace rewrites exactly it - and a
-  // function replacer keeps `$` literal when the user isn't in regex mode.
+  // The slice IS the match: regex mode rewrites exactly it, expanding $1/$&; literal
+  // mode assigns the replacement verbatim, so a `$` in it stays literal.
   const middle = opts.regex
     ? text.slice(match.start, match.end).replace(compile(query, opts, false), replacement)
     : replacement;
   return before + middle + after;
 }
 
-/** Replace every match across blocks; returns one edit per CHANGED block only. */
+/**
+ * Replace every match across blocks; returns one edit per CHANGED block only.
+ * Mirrors findMatches: an invalid pattern surfaces an `error` rather than being
+ * swallowed as "no edits", so callers (incl. a later whole-book reuse) can tell
+ * the two apart.
+ */
 export function replaceAllEdits(
   blocks: TextBlock[],
   query: string,
   replacement: string,
   opts: FindOptions,
-): { id: string; text: string }[] {
-  if (query === "") return [];
+): { edits: BlockTextEdit[]; error: string | null } {
+  if (query === "") return { edits: [], error: null };
   let re: RegExp;
   try {
     re = compile(query, opts, true);
-  } catch {
-    return [];
+  } catch (e) {
+    return { edits: [], error: e instanceof Error ? e.message : String(e) };
   }
-  const edits: { id: string; text: string }[] = [];
+  const edits: BlockTextEdit[] = [];
   for (const block of blocks) {
     re.lastIndex = 0;
     const next = opts.regex
@@ -104,5 +109,5 @@ export function replaceAllEdits(
       : block.text.replace(re, () => replacement);
     if (next !== block.text) edits.push({ id: block.id, text: next });
   }
-  return edits;
+  return { edits, error: null };
 }

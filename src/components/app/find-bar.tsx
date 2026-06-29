@@ -68,6 +68,7 @@ export function FindBar() {
   const toggleRegex = useFindStore((s) => s.toggleRegex);
   const toggleReplace = useFindStore((s) => s.toggleReplace);
   const recompute = useFindStore((s) => s.recompute);
+  const scrollToCurrent = useFindStore((s) => s.scrollToCurrent);
   const next = useFindStore((s) => s.next);
   const prev = useFindStore((s) => s.prev);
   const close = useFindStore((s) => s.close);
@@ -82,6 +83,14 @@ export function FindBar() {
   useEffect(() => {
     if (open) recompute();
   }, [open, blocks, query, caseSensitive, wholeWord, regex, recompute]);
+
+  // Center the active match when the SEARCH changes (query / options / a fresh
+  // Cmd+F) but NOT when `blocks` change, so typing in another block with find open
+  // doesn't yank the viewport. Declared after the recompute effect, and zustand's
+  // set is synchronous, so the current index is already fresh here.
+  useEffect(() => {
+    if (open) scrollToCurrent();
+  }, [open, query, caseSensitive, wholeWord, regex, focusTick, scrollToCurrent]);
 
   // Focus + select the query on open and on every Cmd+F (focusTick).
   useEffect(() => {
@@ -226,6 +235,8 @@ export function FindBar() {
             </Button>
           </div>
         ) : null}
+
+        {error != null ? <div className="px-1 text-xs text-destructive">{error}</div> : null}
       </div>
     </div>
   );

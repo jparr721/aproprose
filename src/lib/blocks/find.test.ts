@@ -73,6 +73,13 @@ describe("findMatches", () => {
     expect(matches).toEqual([]);
   });
 
+  it("steps past a zero-length match and still reports a following real match", () => {
+    // `b*` matches empty at offset 0, then "b" at offset 1; the lastIndex step must
+    // advance past the empty so the real match is found (a `break` would miss it).
+    const { matches } = findMatches([{ id: "a", text: "abc" }], "b*", opts({ regex: true }));
+    expect(matches).toEqual([{ blockId: "a", start: 1, end: 2 }]);
+  });
+
   it("returns an error and no matches for an invalid regex", () => {
     const { matches, error } = findMatches(
       [{ id: "a", text: "abc" }],
@@ -104,6 +111,11 @@ describe("replaceOne", () => {
     expect(out).toBe("the dog sat");
   });
 
+  it("rewrites only the [start,end) slice, not other occurrences of the query", () => {
+    const out = replaceOne("cat cat cat", { start: 4, end: 7 }, "cat", "dog", opts({}));
+    expect(out).toBe("cat dog cat");
+  });
+
   it("treats $ in a literal replacement verbatim", () => {
     const out = replaceOne("price x", { start: 6, end: 7 }, "x", "$1", opts({}));
     expect(out).toBe("price $1");
@@ -128,7 +140,8 @@ describe("replaceAllEdits", () => {
       { id: "b", text: "dog" },
       { id: "c", text: "a cat" },
     ];
-    const edits = replaceAllEdits(blocks, "cat", "fox", opts({}));
+    const { edits, error } = replaceAllEdits(blocks, "cat", "fox", opts({}));
+    expect(error).toBeNull();
     expect(edits).toEqual([
       { id: "a", text: "fox fox" },
       { id: "c", text: "a fox" },
@@ -136,7 +149,7 @@ describe("replaceAllEdits", () => {
   });
 
   it("expands capture groups across all matches in regex mode", () => {
-    const edits = replaceAllEdits(
+    const { edits } = replaceAllEdits(
       [{ id: "a", text: "a1 b2" }],
       "([a-z])(\\d)",
       "$2$1",
@@ -145,8 +158,37 @@ describe("replaceAllEdits", () => {
     expect(edits).toEqual([{ id: "a", text: "1a 2b" }]);
   });
 
+  it("keeps the user's capture-group numbers under wholeWord", () => {
+    // The non-capturing `\b(?:...)\b` wrapper must not renumber `$1`, and the word
+    // boundary must keep "category" (no boundary after "cat") out of the result.
+    const { edits } = replaceAllEdits(
+      [{ id: "a", text: "cat category cat" }],
+      "(cat)",
+      "[$1]",
+      opts({ wholeWord: true, regex: true }),
+    );
+    expect(edits).toEqual([{ id: "a", text: "[cat] category [cat]" }]);
+  });
+
   it("treats $ in a literal replacement verbatim", () => {
-    const edits = replaceAllEdits([{ id: "a", text: "x x" }], "x", "$&", opts({}));
+    const { edits } = replaceAllEdits([{ id: "a", text: "x x" }], "x", "$&", opts({}));
     expect(edits).toEqual([{ id: "a", text: "$& $&" }]);
+  });
+
+  it("returns no edits and no error for an empty query", () => {
+    const { edits, error } = replaceAllEdits([{ id: "a", text: "abc" }], "", "x", opts({}));
+    expect(edits).toEqual([]);
+    expect(error).toBeNull();
+  });
+
+  it("surfaces an error (not a silent empty result) for an invalid regex", () => {
+    const { edits, error } = replaceAllEdits(
+      [{ id: "a", text: "abc" }],
+      "(",
+      "x",
+      opts({ regex: true }),
+    );
+    expect(edits).toEqual([]);
+    expect(error).toBeTruthy();
   });
 });

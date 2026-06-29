@@ -1,6 +1,6 @@
 // ai-cache-store.ts -- in-memory cache for the right-panel AI results.
 //
-// The generating AI functions (Suggest, Critique, Continuity, Cast) are idle-first:
+// The generating AI functions (Suggest, Critique, Continuity) are idle-first:
 // nothing runs until the author submits. The panel mounts only the active function
 // and App.tsx unmounts the whole panel whenever the AI panel or focus mode toggles,
 // so without a cache a generated result would be lost on every switch / panel

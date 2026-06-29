@@ -1,6 +1,6 @@
-// right-panel.tsx -- the right-side assistant. Six functions, each backed by a real
+// right-panel.tsx -- the right-side assistant. Five functions, each backed by a real
 // call to the model you picked in Settings, grounded on the current scene:
-//   Suggest / Edit / Critique / Brainstorm / Continuity / Cast
+//   Suggest / Edit / Critique / Brainstorm / Continuity
 // Reached from a vertical icon rail on the far-right edge; clicking the active
 // icon collapses the panel to just the rail. Nothing infers on its own: each
 // generating function waits for an explicit composer submit (with an optional
@@ -24,7 +24,6 @@ import {
   IconRefresh,
   IconSparkles,
   IconTimeline,
-  IconUsers,
 } from "@tabler/icons-react";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Button } from "@/components/ui/button";
@@ -51,7 +50,6 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import { ColorAvatar } from "@/components/app/color-dot";
 import { OutlineSurface } from "@/components/app/outline/outline-surface";
 import { scrollSelectedIntoView } from "@/components/app/editor";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
@@ -61,27 +59,28 @@ import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-
 import {
   TypographyEyebrow,
   TypographyMuted,
-  TypographyMutedSpan,
   TypographyP,
 } from "@/components/ui/typography";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
-import { buildAiContext, buildEditRequest } from "@/lib/ai/context";
+import {
+  buildAiContext,
+  buildEditRequest,
+  buildScopedContext,
+  type ReadScope,
+} from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
 import {
   brainstorm,
   critique,
   continuityCheck,
-  detectCast,
   editBlocks,
   suggestContinuation,
 } from "@/lib/ai/operations";
 import { diffWords, type DiffSegment } from "@/lib/diff/word-diff";
 import type {
   BlockEdit,
-  CastMember,
-  CastResult,
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
@@ -91,15 +90,6 @@ import type {
 import { cn } from "@/lib/utils";
 
 // -- shared bits --------------------------------------------------------------
-function ContextLine({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="size-1.5 rounded-full bg-ai-edge shadow-[0_0_0_2px_var(--ai-tint)]" />
-      {children}
-    </div>
-  );
-}
-
 function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
@@ -165,6 +155,7 @@ function AiComposer({
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
+      <CursorAnchor />
       {toolbar}
       <PromptInput
         onSubmit={(m) => {
@@ -184,7 +175,9 @@ function AiComposer({
   );
 }
 
-/** Display strip -- the "you are here": the block the AI operations anchor to. */
+/** The "you are here": the block the AI operations anchor to. Sits just above the
+ *  composer's text input. The cursor text wraps over up to two lines so a longer
+ *  tail reads naturally instead of being clipped to one. */
 function CursorAnchor() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const blocks = useProjectStore((s) => s.blocks);
@@ -192,32 +185,32 @@ function CursorAnchor() {
   const text = block?.text.trim();
 
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-ai-tint/40 px-3 py-1.5">
-      <TypographyEyebrow className="shrink-0 text-ai-ink">
-        {block ? `Continuing after ${block.type}` : "Cursor"}
-      </TypographyEyebrow>
-      <div className="min-w-0 flex-1">
-        <TypographyMuted
-          className={cn("line-clamp-1 text-xs", !text && "text-muted-foreground")}
-        >
-          {text || "Place your cursor in the manuscript."}
-        </TypographyMuted>
+    <div className="flex flex-col gap-0.5 rounded-md bg-ai-tint/40 px-2.5 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <TypographyEyebrow className="text-ai-ink">
+          {block ? `Continuing after ${block.type}` : "Cursor"}
+        </TypographyEyebrow>
+        {block && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Scroll to block in editor"
+                onClick={() => scrollSelectedIntoView()}
+              >
+                <IconArrowDown className="size-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Go to block</TooltipContent>
+          </Tooltip>
+        )}
       </div>
-      {block && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Scroll to block in editor"
-              onClick={() => scrollSelectedIntoView()}
-            >
-              <IconArrowDown className="size-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">Go to block</TooltipContent>
-        </Tooltip>
-      )}
+      <TypographyMuted
+        className={cn("line-clamp-2 text-xs", !text && "text-muted-foreground")}
+      >
+        {text || "Place your cursor in the manuscript."}
+      </TypographyMuted>
     </div>
   );
 }
@@ -360,9 +353,13 @@ const NOTE_WORD: Record<CritiqueNote["kind"], string> = {
 function CritiqueTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const cacheKey = `critique:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [scope, setScope] = useState<ReadScope>("cursor");
+  // Cursor scope keys on the selection; chapter scope ignores it (whole chapter).
+  const cacheKey = `critique:${activeChapterId ?? ""}:${scope}:${
+    scope === "cursor" ? selectedId ?? "" : ""
+  }`;
   const { data, loading, error, instruction, run } = useAi<CritiqueNote[]>(
-    (ins) => critique({ ...buildAiContext(), instruction: ins }),
+    (ins) => critique({ ...buildScopedContext(scope), instruction: ins }),
     cacheKey,
   );
   return (
@@ -375,7 +372,11 @@ function CritiqueTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>Generate reads the scene up to your cursor and returns craft notes.</PanelHint>
+            <PanelHint>
+              Generate reads{" "}
+              {scope === "cursor" ? "the scene up to your cursor" : "the whole chapter"} and
+              returns craft notes.
+            </PanelHint>
           ) : (
             data.map((n, i) => (
               <div key={i} className="rounded-lg border border-border bg-background p-3">
@@ -403,6 +404,17 @@ function CritiqueTab() {
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "cursor", label: "Up to cursor" },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={loading}
+          />
+        }
       />
     </div>
   );
@@ -423,9 +435,13 @@ const SEV_WORD: Record<ContinuityFlag["sev"], string> = {
 function ContinuityTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const cacheKey = `continuity:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [scope, setScope] = useState<ReadScope>("cursor");
+  // Cursor scope keys on the selection; chapter scope ignores it (whole chapter).
+  const cacheKey = `continuity:${activeChapterId ?? ""}:${scope}:${
+    scope === "cursor" ? selectedId ?? "" : ""
+  }`;
   const { data, loading, error, instruction, run } = useAi<ContinuityFlag[]>(
-    (ins) => continuityCheck({ ...buildAiContext(), instruction: ins }),
+    (ins) => continuityCheck({ ...buildScopedContext(scope), instruction: ins }),
     cacheKey,
   );
   return (
@@ -438,7 +454,11 @@ function ContinuityTab() {
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>Generate sweeps the scene up to your cursor for continuity issues.</PanelHint>
+            <PanelHint>
+              Generate sweeps{" "}
+              {scope === "cursor" ? "the scene up to your cursor" : "the whole chapter"} for
+              continuity issues.
+            </PanelHint>
           ) : (
             data.map((f, i) => (
               <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
@@ -462,90 +482,17 @@ function ContinuityTab() {
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
-      />
-    </div>
-  );
-}
-
-// -- Cast ---------------------------------------------------------------------
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-function CastRow({ m }: { m: CastMember }) {
-  return (
-    <div className="grid grid-cols-[32px_1fr] items-center gap-2.5">
-      {m.color ? (
-        <ColorAvatar color={m.color} initials={initials(m.name)} />
-      ) : (
-        <TypographyMutedSpan className="grid size-8 place-items-center rounded-lg border border-dashed border-border text-xs">
-          {initials(m.name)}
-        </TypographyMutedSpan>
-      )}
-      <div>
-        <div className="flex items-baseline gap-2 text-sm font-medium text-foreground">
-          <span className="truncate">{m.name}</span>
-          <TypographyEyebrow className="rounded bg-muted px-1.5 py-0.5">
-            {m.state}
-          </TypographyEyebrow>
-        </div>
-        <div className="text-xs leading-[1.45] text-muted-foreground">{m.detail}</div>
-      </div>
-    </div>
-  );
-}
-
-function CastTab() {
-  const activeChapterId = useProjectStore((s) => s.activeChapterId);
-  const selectedId = useProjectStore((s) => s.selectedId);
-  const cacheKey = `cast:${activeChapterId ?? ""}:${selectedId ?? ""}`;
-  const { data, loading, error, instruction, run } = useAi<CastResult>(
-    (ins) => detectCast({ ...buildAiContext(), instruction: ins }),
-    cacheKey,
-  );
-  return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3 p-4">
-          <AskedCaption instruction={instruction} />
-          {loading ? (
-            <LoadingLines rows={5} />
-          ) : error ? (
-            <AiError error={error} onRetry={() => run(instruction)} />
-          ) : !data ? (
-            <PanelHint>Generate reads the scene up to your cursor and lists who's present.</PanelHint>
-          ) : (
-            <>
-              <div className="flex flex-col gap-2.5">
-                {data.inScene.map((m, i) => (
-                  <CastRow key={i} m={m} />
-                ))}
-              </div>
-              {data.offPage.length > 0 ? (
-                <>
-                  <Separator />
-                  <ContextLine>Off-page but referenced</ContextLine>
-                  <div className="flex flex-col gap-2.5">
-                    {data.offPage.map((m, i) => (
-                      <CastRow key={i} m={m} />
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </>
-          )}
-        </div>
-      </div>
-      <AiComposer
-        placeholder="Anything specific about the cast? (optional)"
-        loading={loading}
-        onSubmit={(t) => run(t || undefined)}
-        allowEmpty
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "cursor", label: "Up to cursor" },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={loading}
+          />
+        }
       />
     </div>
   );
@@ -570,28 +517,27 @@ function DiffText({ segments }: { segments: DiffSegment[] }) {
   );
 }
 
-function ScopeToggle({
-  scope,
+/** A mutually-exclusive scope chooser. Generic over the scope union so each tab
+ *  feeds its own options (Edit: block/chapter; Critique/Continuity: cursor/chapter)
+ *  while keeping the selected id type-checked against the handler. */
+function ScopeToggle<T extends string>({
+  value,
+  options,
   onChange,
   disabled,
-  blockLabel,
 }: {
-  scope: "block" | "chapter";
-  onChange: (s: "block" | "chapter") => void;
-  disabled?: boolean;
-  blockLabel: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled: boolean;
 }) {
-  const opts: { id: "block" | "chapter"; label: string }[] = [
-    { id: "block", label: blockLabel },
-    { id: "chapter", label: "Whole chapter" },
-  ];
   return (
     <ButtonGroup>
-      {opts.map((o) => (
+      {options.map((o) => (
         <Button
           key={o.id}
           size="sm"
-          variant={scope === o.id ? "default" : "outline"}
+          variant={value === o.id ? "default" : "outline"}
           disabled={disabled}
           onClick={() => onChange(o.id)}
         >
@@ -735,7 +681,17 @@ function EditTab() {
           if (targetCount === 0) return; // nothing eligible in scope; skip the model call
           run(t);
         }}
-        toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} blockLabel={blockLabel} />}
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "block", label: blockLabel },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={loading}
+          />
+        }
       />
     </div>
   );
@@ -893,7 +849,6 @@ const TAB_META: Record<AiTab, TabMeta> = {
   critique: { label: "Critique", Icon: IconNotes },
   brainstorm: { label: "Brainstorm", Icon: IconMessages },
   continuity: { label: "Continuity", Icon: IconTimeline },
-  cast: { label: "Cast", Icon: IconUsers },
 };
 
 // The ordered list the rail renders (insertion order of the meta map).
@@ -918,8 +873,6 @@ function ActivePanel({ tab }: { tab: AiTab }) {
       return <BrainstormTab />;
     case "continuity":
       return <ContinuityTab />;
-    case "cast":
-      return <CastTab />;
   }
 }
 
@@ -952,7 +905,6 @@ export function RightPanelContent() {
 
   return (
     <aside data-right-panel className="flex h-full min-h-0 w-full flex-col bg-card">
-      {tab !== "outline" && <CursorAnchor />}
       <div className="min-h-0 flex-1">
         {tab === "outline" || !(hydrated && !aiModel) ? (
           <ActivePanel tab={tab} />

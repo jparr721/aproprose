@@ -6,20 +6,17 @@
 // they don't render and shouldn't pollute the prose the model reasons about.
 
 import type { AiContext, EditRequest } from "@/lib/ai/operations";
-import type { Block } from "@/lib/types";
+import type { Block, Character } from "@/lib/types";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 
-export function buildAiContext(uptoId?: string): AiContext {
-  const { project, activeChapterId, blocks, meta, selectedId } =
-    useProjectStore.getState();
-  const chapter = project?.chapters.find((c) => c.id === activeChapterId);
+/** How much of the chapter a grounded op reads: up to the caret, or all of it. */
+export type ReadScope = "cursor" | "chapter";
 
-  const cutoff = uptoId ?? selectedId;
-  const cutoffIdx = cutoff ? blocks.findIndex((b) => b.id === cutoff) : -1;
-  const upto = cutoffIdx >= 0 ? blocks.slice(0, cutoffIdx + 1) : blocks;
-
-  const charById = new Map(meta.characters.map((c) => [c.id, c]));
+/** Shape a run of blocks into the model's view of the prose. Lore/scratchpad/
+ *  raw-latex blocks don't render and are excluded upstream; here we only render
+ *  the prose types (narration / heading / dialogue). */
+function renderProse(upto: Block[], charById: Map<string, Character>): string {
   const lines: string[] = [];
   for (const b of upto) {
     if (b.type === "narration") {
@@ -33,43 +30,69 @@ export function buildAiContext(uptoId?: string): AiContext {
       lines.push(`${sp ? `${sp}: ` : ""}"${b.text}"${b.beat ? ` ${b.beat}` : ""}`);
     }
   }
+  return lines.join("\n\n");
+}
 
+/** A one-line note on where the caret sits, derived from the last in-scope block. */
+function cursorSummaryFor(upto: Block[]): string {
   const last = upto[upto.length - 1];
-  let cursorSummary: string;
-  if (!last) {
-    cursorSummary = "Cursor is at the start of the chapter.";
-  } else {
-    // Only narration/dialogue/heading text is shown to the model; lore, scratchpad,
-    // raw-latex and scene-break blocks are excluded from the grounding, so don't
-    // leak their text into the cursor summary either. (Taking the last 12 words
-    // here is fine — this is a model-facing prompt string, not UI text, so the
-    // "no JS truncation" UI rule doesn't apply.)
-    const canShowTail =
-      last.type === "narration" ||
-      last.type === "dialogue" ||
-      (last.type === "chapter" && last.level !== "break");
-    const tail = canShowTail
-      ? last.text.trim().split(/\s+/).slice(-12).join(" ")
-      : "";
-    cursorSummary = tail
-      ? `Cursor sits just after a ${last.type} block ending: "${tail}".`
-      : `Cursor sits just after a ${last.type} block.`;
-  }
+  if (!last) return "Cursor is at the start of the chapter.";
+  // Only narration/dialogue/heading text is shown to the model; lore, scratchpad,
+  // raw-latex and scene-break blocks are excluded from the grounding, so don't
+  // leak their text into the cursor summary either. (Taking the last 12 words
+  // here is fine — this is a model-facing prompt string, not UI text, so the
+  // "no JS truncation" UI rule doesn't apply.)
+  const canShowTail =
+    last.type === "narration" ||
+    last.type === "dialogue" ||
+    (last.type === "chapter" && last.level !== "break");
+  const tail = canShowTail ? last.text.trim().split(/\s+/).slice(-12).join(" ") : "";
+  return tail
+    ? `Cursor sits just after a ${last.type} block ending: "${tail}".`
+    : `Cursor sits just after a ${last.type} block.`;
+}
 
+/** Assemble the full grounding from a run of in-scope blocks + a cursor note. */
+function assemble(upto: Block[], cursorSummary: string): AiContext {
+  const { project, activeChapterId, meta } = useProjectStore.getState();
+  const chapter = project?.chapters.find((c) => c.id === activeChapterId);
+  const charById = new Map<string, Character>(
+    meta.characters.map((c) => [c.id, c] as const),
+  );
   const structure = renderStoryStructure({
     outline: meta.outline,
     chapters: meta.chapters,
     characters: meta.characters,
     activeChapterId,
   });
-
   return {
     chapterTitle: chapter?.title,
-    blocksText: lines.join("\n\n"),
+    blocksText: renderProse(upto, charById),
     cursorSummary,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
     structure: structure ?? undefined,
   };
+}
+
+export function buildAiContext(uptoId?: string): AiContext {
+  const { blocks, selectedId } = useProjectStore.getState();
+  const cutoff = uptoId ?? selectedId;
+  const cutoffIdx = cutoff ? blocks.findIndex((b) => b.id === cutoff) : -1;
+  const upto = cutoffIdx >= 0 ? blocks.slice(0, cutoffIdx + 1) : blocks;
+  return assemble(upto, cursorSummaryFor(upto));
+}
+
+/**
+ * Grounding scoped to a reading window. `"cursor"` reads the scene up to the
+ * caret (the default for grounded ops); `"chapter"` reads every block in the
+ * active chapter, ignoring where the caret sits. Critique/Continuity expose this
+ * as a toggle so the author can judge what they've written so far vs. the whole
+ * chapter.
+ */
+export function buildScopedContext(scope: ReadScope): AiContext {
+  if (scope === "cursor") return buildAiContext();
+  const { blocks } = useProjectStore.getState();
+  return assemble(blocks, "Reviewing the whole chapter.");
 }
 
 /** Blocks the Edit tab may revise: rendered prose only (no notes/latex/breaks). */

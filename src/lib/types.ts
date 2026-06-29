@@ -312,22 +312,6 @@ export interface ContinuityFlag {
   text: string;
 }
 
-export interface CastMember {
-  name: string;
-  /** oklch() color for the avatar; omitted members render as a ghost avatar. */
-  color?: string;
-  /** State label, e.g. "POV", "Active", "Background", "Deceased", "Unknown". */
-  state: string;
-  detail: string;
-  /** True for characters referenced but not physically present in the scene. */
-  offPage: boolean;
-}
-
-export interface CastResult {
-  inScene: CastMember[];
-  offPage: CastMember[];
-}
-
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

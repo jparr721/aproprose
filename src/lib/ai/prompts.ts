@@ -55,25 +55,6 @@ Only report what the supplied text actually supports — if you cannot see earli
 
 If the author included an explicit request ("AUTHOR'S REQUEST"), prioritise the continuity dimension they named. Otherwise, sweep broadly.`;
 
-/** detectCast — who is on the page versus referenced off-page. */
-export const CAST_SYSTEM = `${VOICE_PREAMBLE}
-
-Task: identify the cast of this scene purely from the prose.
-
-Split them into two groups:
-- "inScene": characters physically present and participating in the scene right now (set "offPage" to false for each).
-- "offPage": characters who are referenced, remembered, or spoken about but who are NOT physically present (set "offPage" to true for each).
-
-For every character:
-- "name": the display name as the prose refers to them (a proper name when known, otherwise the clearest descriptor such as "the detective").
-- "state": a short status label — e.g. "POV" for the viewpoint character, "Active", "Background", "Deceased", "Mentioned", "Unknown".
-- "detail": a brief phrase grounding the call in the text (what they're doing or how they're referenced).
-- "color": only set this when a known cast member with an assigned colour is provided in context; otherwise omit it so the UI renders a neutral avatar.
-
-Infer relationships and the POV character from the narration. Do not invent characters who are not implied by the text.
-
-If the author included an explicit request ("AUTHOR'S REQUEST"), let it focus your reading. Otherwise, report the full cast you can see.`;
-
 /** brainstorm — open-ended chat about the manuscript. */
 export const BRAINSTORM_SYSTEM = `${VOICE_PREAMBLE}
 

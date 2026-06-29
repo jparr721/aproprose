@@ -9,7 +9,6 @@ const AI_TABS: { tab: AiTab; title: string }[] = [
   { tab: "critique", title: "AI: Critique" },
   { tab: "brainstorm", title: "AI: Brainstorm" },
   { tab: "continuity", title: "AI: Continuity" },
-  { tab: "cast", title: "AI: Cast" },
 ];
 
 export const aiCommands: Command[] = [

@@ -1,7 +1,7 @@
 // ai-persistence.ts -- restart-safe, per-project persistence for the AI panel.
 //
 // The AI panel's live state lives in two in-memory stores: ai-cache-store (the
-// Suggest/Critique/Continuity/Cast results) and brainstorm-store (chat threads).
+// Suggest/Critique/Continuity results) and brainstorm-store (chat threads).
 // This module serializes both into one per-project JSON blob (stored by Rust
 // under the app config dir, like project metadata) and restores them when the
 // project reopens. No SQLite: the data is kilobytes per project.

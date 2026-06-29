@@ -68,6 +68,7 @@ import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { buildAiContext, buildEditRequest } from "@/lib/ai/context";
+import { editComposerState } from "@/lib/ai/edit-composer";
 import { describeAiError } from "@/lib/ai/errors";
 import {
   brainstorm,
@@ -150,6 +151,7 @@ function AiComposer({
   allowEmpty = false,
   focusSignal,
   toolbar,
+  disabled,
 }: {
   placeholder: string;
   loading: boolean;
@@ -157,6 +159,8 @@ function AiComposer({
   allowEmpty?: boolean;
   focusSignal?: number;
   toolbar?: React.ReactNode;
+  /** Inert composer: the textarea can't be typed into (e.g. nothing to edit). */
+  disabled?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -174,7 +178,7 @@ function AiComposer({
         }}
       >
         <PromptInputBody>
-          <PromptInputTextarea placeholder={placeholder} disabled={loading} />
+          <PromptInputTextarea placeholder={placeholder} disabled={loading || disabled} />
         </PromptInputBody>
         <PromptInputFooter className="justify-end">
           <PromptInputSubmit status={loading ? "submitted" : undefined} />
@@ -641,6 +645,12 @@ function EditTab() {
     scope === "block" ? targetCount : buildEditRequest("block", "").blocks.length;
   const blockLabel = blockTargetCount > 1 ? `These ${blockTargetCount} blocks` : "This block";
 
+  // Composer messaging/enabled state: inert when the scope resolves to no editable
+  // target. `hasBlockSelection` separates "nothing selected" from "the selected
+  // block isn't an editable type" so each gets the right prompt.
+  const hasBlockSelection = selectionTargetIds(selectedIds, selectedId).length > 0;
+  const composer = editComposerState({ scope, targetCount, hasBlockSelection });
+
   // Remove one edit from the cached set, reading the LATEST cached value (not the
   // render-time `edits` closure) so two rapid accept/reject clicks in the same
   // frame can't clobber each other.
@@ -723,16 +733,11 @@ function EditTab() {
         </div>
       </div>
       <AiComposer
-        placeholder={
-          targetCount === 0
-            ? scope === "block"
-              ? "Place your cursor in an editable block"
-              : "No editable prose in this chapter yet"
-            : "Describe the edit, e.g. fix typos, tighten, make her colder"
-        }
+        placeholder={composer.placeholder}
+        disabled={composer.disabled}
         loading={loading}
         onSubmit={(t) => {
-          if (targetCount === 0) return; // nothing eligible in scope; skip the model call
+          if (composer.disabled) return; // nothing eligible in scope; skip the model call
           run(t);
         }}
         toolbar={<ScopeToggle scope={scope} onChange={setScope} disabled={loading} blockLabel={blockLabel} />}

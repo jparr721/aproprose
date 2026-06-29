@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.0",
+    "date": "2026-06-28",
+    "summary": "Lore entries get full worldbuilding details and your window now reopens where you left it",
+    "highlights": [
+      "Lore entries now hold a description, tagged labels, and linked characters, all editable in a new slide-over panel opened from the sidebar or any outline card",
+      "Assign lore to outline cards, where it shows as a tinted chip alongside characters, and the AI sculpt feature now reads lore descriptions for better suggestions",
+      "The character color picker adds a 27-shade preset grid plus a custom color option using the native OS color panel",
+      "The app window remembers its size and position and reopens exactly where you last closed it",
+      "Typing in the editor no longer jolts the page upward when you are working at the bottom of a chapter"
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-06-28",
     "summary": "Quickly copy the location of your compiled PDF straight from the preview pane.",

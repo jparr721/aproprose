@@ -74,7 +74,7 @@ import {
   setChapterAct as setChapterActModel,
   setChapterPlotPoint as setChapterPlotPointModel,
 } from "@/lib/outline/model";
-import { runMigrations, CURRENT_VERSION } from "@/lib/migration";
+import { runMigrations, EMPTY_META } from "@/lib/migration";
 import { updateLore, removeLore } from "@/lib/lore/model";
 
 type ProjectStatus = "empty" | "loading" | "ready";
@@ -94,14 +94,6 @@ export function defaultOutline(): Outline {
   return { premise: "" };
 }
 
-const EMPTY_META: ProjectMeta = {
-  version: CURRENT_VERSION,
-  characters: [],
-  lore: [],
-  statuses: {},
-  outline: defaultOutline(),
-  chapters: {},
-};
 
 const EMPTY_COMPILE: CompileState = {
   status: "idle",
@@ -321,19 +313,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     // the repo once when no in-repo file exists yet.
     let meta: ProjectMeta;
     const inRepo = await readProjectMeta(root);
-    let parsed: ProjectMeta | null = null;
+    let parsed: unknown = null;
     if (inRepo) {
       try {
-        parsed = JSON.parse(inRepo) as ProjectMeta;
+        parsed = JSON.parse(inRepo);
       } catch {
+        if (import.meta.env.DEV) console.warn("Corrupt meta.json, falling back to legacy storage");
         parsed = null;
       }
     }
-    if (parsed) {
-      meta = runMigrations(parsed as unknown as Record<string, unknown>);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      meta = runMigrations(parsed);
     } else {
       const legacy = await readAppData<ProjectMeta>(metaKey(root));
-      meta = runMigrations((legacy as unknown as Record<string, unknown>) ?? null);
+      meta = runMigrations(legacy ?? null);
       if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(meta));
     }
 

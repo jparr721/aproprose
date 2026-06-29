@@ -1,11 +1,11 @@
 // migration/index.ts — versioned migration runner.
 //
-// Persisted ProjectMeta blobs carry a `version` field; when it's absent the
-// runner treats it as 0 and applies every migration in order up to
-// CURRENT_VERSION. Each migration is a pure function keyed by its target
-// version number. The boundary accepts Record<string, unknown> | null so we
-// can feed legacy blobs without shape assumptions.
+// Persisted ProjectMeta blobs carry a `version` field. The runner validates
+// the raw blob with a Zod schema (schema.ts) that defaults every malformed
+// field safely, then chains pending migrations in order from (version ?? 0)
+// up to CURRENT_VERSION. Input is unknown — the schema is the type gate.
 
+import { metaBlobSchema, type MetaBlob } from "@/lib/migration/schema";
 import type { ProjectMeta } from "@/lib/types";
 import { migrateV1 } from "@/lib/migration/v1/migrate";
 import { migrateV2 } from "@/lib/migration/v2/migrate";
@@ -13,14 +13,14 @@ import { migrateV2 } from "@/lib/migration/v2/migrate";
 /** Bump whenever a migration is added. */
 export const CURRENT_VERSION = 2;
 
-type Migration = (meta: ProjectMeta) => ProjectMeta;
+type Migration = (meta: MetaBlob) => ProjectMeta;
 
 const migrations: Record<number, Migration> = {
   1: migrateV1,
   2: migrateV2,
 };
 
-const EMPTY_META: ProjectMeta = {
+export const EMPTY_META: ProjectMeta = {
   version: CURRENT_VERSION,
   characters: [],
   lore: [],
@@ -29,14 +29,16 @@ const EMPTY_META: ProjectMeta = {
   chapters: {},
 };
 
-export function runMigrations(raw: Record<string, unknown> | null): ProjectMeta {
-  if (!raw) return EMPTY_META;
-  const version = (raw.version as number | undefined) ?? 0;
-  let meta = raw as unknown as ProjectMeta;
+export function runMigrations(raw: unknown): ProjectMeta {
+  if (raw == null) return EMPTY_META;
+  const result = metaBlobSchema.safeParse(raw);
+  if (!result.success) return EMPTY_META;
+  let meta: ProjectMeta = result.data as unknown as ProjectMeta;
+  const version = meta.version;
   for (let v = version + 1; v <= CURRENT_VERSION; v++) {
     const fn = migrations[v];
     if (!fn) continue;
-    meta = fn(meta);
+    meta = fn(meta as unknown as MetaBlob);
   }
   return meta;
 }

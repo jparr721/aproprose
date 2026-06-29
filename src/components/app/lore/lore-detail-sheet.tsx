@@ -40,7 +40,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 export function LoreDetailSheet() {
   const loreId = useLoreSheetStore((s) => s.loreId);
   const close = useLoreSheetStore((s) => s.close);
-  const meta = useProjectStore((s) => s.meta);
+  const lore = useProjectStore((s) => s.meta.lore);
   const updateLore = useProjectStore((s) => s.updateLore);
   const removeLore = useProjectStore((s) => s.removeLore);
   const loreTags = useSettingsStore((s) => s.loreTags);
@@ -49,8 +49,11 @@ export function LoreDetailSheet() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
 
-  const entry = loreId ? meta.lore.find((l) => l.id === loreId) : null;
-  if (!entry) return null;
+  const entry = loreId ? lore.find((l) => l.id === loreId) : null;
+  if (!entry) {
+    if (loreId) close();
+    return null;
+  }
 
   const selectedTags = new Set(entry.tags);
 
@@ -102,7 +105,6 @@ export function LoreDetailSheet() {
                 <Textarea
                   value={entry.description}
                   onChange={(e) => updateLore(entry.id, { description: e.target.value })}
-                  placeholder="What this worldbuilding element is, why it matters..."
                   rows={4}
                   className="resize-y"
                 />
@@ -200,7 +202,7 @@ export function LoreDetailSheet() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete lore entry?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the entry and its links from all cards. This cannot be undone.
+              This removes the lore entry. Cards that reference it will show an unlinked chip.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

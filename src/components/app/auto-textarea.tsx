@@ -34,8 +34,17 @@ export function AutoGrowTextarea({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Measuring content height means briefly resetting to "auto", which collapses
+    // the textarea to one row. When the surrounding scroll viewport is pinned near
+    // the bottom (editing the last block, scrolled into the trailing padding) that
+    // collapse clamps the viewport's scrollTop, and the re-expand never restores
+    // it - a visible upward jump on each keystroke. Preserve the viewport scroll
+    // across the measurement so typing never moves the page.
+    const viewport = el.closest('[data-slot="scroll-area-viewport"]');
+    const scrollTop = viewport?.scrollTop;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    if (viewport && scrollTop !== undefined) viewport.scrollTop = scrollTop;
   }, [value]);
 
   // Place the caret once when the textarea mounts (i.e. when the block enters

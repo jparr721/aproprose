@@ -11,7 +11,11 @@ export function updateLore(
   id: string,
   patch: Partial<Pick<LoreEntry, "title" | "description" | "characterIds" | "tags">>,
 ): LoreEntry[] {
-  return lore.map((l) => (l.id === id ? { ...l, ...patch } : l));
+  const cleanPatch = { ...patch };
+  if (patch.tags) {
+    cleanPatch.tags = [...new Set(patch.tags.map((t) => t.trim()).filter(Boolean))];
+  }
+  return lore.map((l) => (l.id === id ? { ...l, ...cleanPatch } : l));
 }
 
 /** Remove a lore entry by id. Returns a new array. */

@@ -39,7 +39,8 @@ export const useSettingsStore = create<SettingsState>()(
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
       setAiModel: (aiModel) => set({ aiModel }),
       setAiProvider: (aiProvider) => set({ aiProvider }),
-      setLoreTags: (loreTags) => set({ loreTags }),
+      setLoreTags: (loreTags) =>
+        set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {

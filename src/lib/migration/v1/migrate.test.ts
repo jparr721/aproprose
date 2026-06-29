@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runMigrations } from "@/lib/migration";
+import { runMigrations, CURRENT_VERSION, EMPTY_META } from "@/lib/migration";
 
 const legacy = {
   characters: [{ id: "c1", name: "Mara", color: "oklch(0 0 0)", role: "POV" }],
@@ -48,13 +48,28 @@ describe("v1 migration", () => {
 });
 
 describe("new-shape pass-through", () => {
-  it("preserves chapters in new-shape blobs", () => {
+  it("preserves chapters, cards, lore, and characters in new-shape blobs", () => {
     const m = runMigrations({
       outline: { premise: "X" },
-      chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] } },
-    } as never);
+      chapters: {
+        ch1: { act: "setup", plotPoint: "inciting", premise: "P", goal: "G", conflict: "C", turn: "T", characterIds: ["c1"], cards: [
+          { id: "card1", title: "Beat", intention: "do it", characterIds: ["c1"], loreIds: ["l1"], continuityFlags: [] },
+        ] },
+        ch2: { act: "confrontation", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] },
+      },
+      characters: [{ id: "c1", name: "Mara", color: "red", role: "POV" }],
+      lore: [{ id: "l1", title: "Tile", description: "The Tile", characterIds: ["c1"], tags: ["magic"] }],
+      statuses: { ch1: "active" },
+    });
     expect(m.chapters.ch1.act).toBe("setup");
-    expect(m.chapters.ch1.characterIds).toEqual([]);
+    expect(m.chapters.ch1.characterIds).toEqual(["c1"]);
+    expect(m.chapters.ch1.cards).toHaveLength(1);
+    expect(m.chapters.ch1.cards[0].loreIds).toEqual(["l1"]);
+    expect(m.chapters.ch2.act).toBe("confrontation");
+    expect(m.characters).toHaveLength(1);
+    expect(m.lore).toHaveLength(1);
+    expect(m.lore[0].description).toBe("The Tile");
+    expect(m.version).toBe(2);
   });
 });
 
@@ -67,7 +82,7 @@ describe("v2 migration (lore backfill)", () => {
       statuses: {},
       outline: { premise: "" },
       chapters: {},
-    } as never);
+    });
     expect(m.lore[0]).toMatchObject({ id: "l1", title: "Tile", description: "", characterIds: [], tags: [] });
     expect(m.version).toBe(2);
   });
@@ -79,7 +94,36 @@ describe("v2 migration (lore backfill)", () => {
       statuses: {},
       outline: { premise: "" },
       chapters: {},
-    } as never);
+    });
     expect(m.lore[0]).toMatchObject({ id: "l1", title: "Tile", description: "A tile", characterIds: ["c1"], tags: ["magic"] });
+  });
+});
+
+describe("runMigrations edge cases", () => {
+  it("returns EMPTY_META for null input", () => {
+    const m = runMigrations(null);
+    expect(m).toBe(EMPTY_META);
+    expect(m.version).toBe(CURRENT_VERSION);
+  });
+  it("returns EMPTY_META for non-object input", () => {
+    const m = runMigrations("not an object");
+    expect(m.chapters).toEqual({});
+    expect(m.version).toBe(CURRENT_VERSION);
+  });
+  it("no-ops for CURRENT_VERSION blob", () => {
+    const input = { version: CURRENT_VERSION, characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: {} };
+    const m = runMigrations(input);
+    expect(m.version).toBe(CURRENT_VERSION);
+    expect(m.outline.premise).toBe("X");
+  });
+  it("handles corrupt version field by falling back to 0", () => {
+    const m = runMigrations({ version: "not-a-number", characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: {} });
+    expect(m.version).toBe(2);
+    expect(m.outline.premise).toBe("X");
+  });
+  it("handles corrupt chapters field by falling back to empty", () => {
+    const m = runMigrations({ version: 0, characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: "not-an-object" });
+    expect(m.chapters).toEqual({});
+    expect(m.version).toBe(2);
   });
 });

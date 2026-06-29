@@ -382,10 +382,11 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            // The plugin only flushes state to disk on RunEvent::Exit, which never
-            // fires when the app is force-quit or the dev process is killed (Ctrl+C),
-            // leaving the geometry unsaved. Force a save the instant the main window
-            // starts closing so it survives every shutdown path.
+            // The plugin only flushes state to disk on RunEvent::Exit. Save the
+            // instant the main window starts closing (close button / Cmd+Q, which
+            // fire CloseRequested before Exit) so geometry is captured even if the
+            // plugin's Exit save is skipped. A hard kill (Ctrl+C / SIGINT, force-quit
+            // / SIGKILL) runs no event loop, so neither path can persist there.
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {

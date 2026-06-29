@@ -132,6 +132,11 @@ function metaKey(root: string): string {
   return `meta-${pathHash(root)}`;
 }
 
+/** Stable, filesystem-safe key for a project's last-open chapter (local UI cursor). */
+function lastChapterKey(root: string): string {
+  return `last-chapter-${pathHash(root)}`;
+}
+
 interface ProjectState {
   status: ProjectStatus;
   project: ProjectInfo | null;
@@ -343,8 +348,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       );
     void useSyncStore.getState().init(root);
 
-    const first = project.chapters[0];
-    if (first) await get().selectChapter(first.id);
+    // Reopen the chapter the author last had open (ids are stable across loads);
+    // fall back to the first chapter if it's gone or none was recorded.
+    const savedChapterId = await readAppData<string>(lastChapterKey(root));
+    const target =
+      (savedChapterId && project.chapters.find((c) => c.id === savedChapterId)) ||
+      project.chapters[0];
+    if (target) await get().selectChapter(target.id);
 
     const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
     const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
@@ -472,6 +482,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           past: [],
           future: [],
           lastTextEditId: null,
+        });
+        // Remember this chapter so the next relaunch reopens it. Non-critical: a
+        // failed write just means the next launch falls back to the first chapter.
+        void writeAppData(lastChapterKey(project.root), id).catch((e) => {
+          if (import.meta.env.DEV) console.warn("Couldn't persist last chapter:", e);
         });
       } catch (e) {
         set({ error: String(e) });

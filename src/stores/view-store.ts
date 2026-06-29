@@ -7,10 +7,10 @@
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// `aiTab` and the right-panel width are persisted (to the app config dir, via the
-// Tauri-backed storage adapter) so the panel reopens on the tab the author last
-// used at the width they set; the rest of the state is ephemeral and the
-// `pending` callback is not serializable.
+// `aiTab`, the right-panel width, and the PDF / Outline open flags are persisted
+// (to the app config dir, via the Tauri-backed storage adapter) so a relaunch
+// reopens the same layout the author left; the rest of the state is ephemeral and
+// the `pending` callback is not serializable.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -30,7 +30,7 @@ export type AiTab =
 interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
-  /** Whether the full-page Outline storyboard replaces the editor (ephemeral). */
+  /** Whether the full-page Outline storyboard replaces the editor (persisted). */
   outlineOpen: boolean;
   focus: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
@@ -126,9 +126,16 @@ export const useViewStore = create<ViewState>()(
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // The selected tab and the right-panel width persist; visibility toggles
-      // and the collapse flag are ephemeral and `pending` is not serializable.
-      partialize: ({ aiTab, rightPanelWidth }) => ({ aiTab, rightPanelWidth }),
+      // Persisted so a relaunch lands back in the same layout: the selected tab,
+      // the right-panel width, and whether the PDF / Outline surfaces were open.
+      // The AI-panel and collapse flags stay ephemeral and `pending` isn't
+      // serializable.
+      partialize: ({ aiTab, rightPanelWidth, pdfOpen, outlineOpen }) => ({
+        aiTab,
+        rightPanelWidth,
+        pdfOpen,
+        outlineOpen,
+      }),
     },
   ),
 );

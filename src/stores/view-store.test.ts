@@ -84,6 +84,19 @@ describe("view-store buildErrorsOpen", () => {
     expect(persisted).toEqual({
       aiTab: useViewStore.getState().aiTab,
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
+      pdfOpen: useViewStore.getState().pdfOpen,
+      outlineOpen: useViewStore.getState().outlineOpen,
     });
+  });
+});
+
+describe("view-store layout persistence", () => {
+  it("persists the PDF and Outline open flags so a relaunch restores the layout", () => {
+    useViewStore.setState({ pdfOpen: true, outlineOpen: true });
+    const opts = useViewStore.persist.getOptions();
+    const persisted = opts.partialize
+      ? opts.partialize(useViewStore.getState())
+      : {};
+    expect(persisted).toMatchObject({ pdfOpen: true, outlineOpen: true });
   });
 });

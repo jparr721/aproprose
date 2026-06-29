@@ -17,6 +17,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use compile::CompileResult;
 use project::{NovelMetadata, ProjectInfo};
@@ -361,6 +362,10 @@ pub fn run() {
     // real PATH before any command can spawn a child.
     path_env::repair_path();
 
+    // Persist geometry only — restoring decorations/visibility/fullscreen would
+    // fight the frameless custom titlebar on relaunch.
+    let window_state_flags = StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -371,8 +376,26 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // Persist + restore the main window's size/position across launches so it
         // reopens exactly where it was last closed.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
-        .setup(|app| {
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(window_state_flags)
+                .build(),
+        )
+        .setup(move |app| {
+            // The plugin only flushes state to disk on RunEvent::Exit. Save the
+            // instant the main window starts closing (close button / Cmd+Q, which
+            // fire CloseRequested before Exit) so geometry is captured even if the
+            // plugin's Exit save is skipped. A hard kill (Ctrl+C / SIGINT, force-quit
+            // / SIGKILL) runs no event loop, so neither path can persist there.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                        let _ = handle.save_window_state(window_state_flags);
+                    }
+                });
+            }
+
             // macOS only: add a "Check for Updates" item to the native
             // application menu. It emits `check-for-updates`, which the webview's
             // UpdateChecker handles. Other platforms keep their default chrome
@@ -403,8 +426,6 @@ pub fn run() {
                     }
                 });
             }
-            #[cfg(not(target_os = "macos"))]
-            let _ = app;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

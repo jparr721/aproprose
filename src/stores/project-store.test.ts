@@ -24,7 +24,14 @@ vi.mock("sonner", () => ({
 
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
-import { compileProject, openProject, readPdf, readTextFile } from "@/lib/tauri";
+import {
+  compileProject,
+  openProject,
+  readAppData,
+  readPdf,
+  readTextFile,
+  writeAppData,
+} from "@/lib/tauri";
 import type { Block, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
@@ -777,6 +784,64 @@ describe("saveChapter refreshes the backup indicator", () => {
 
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     refreshSpy.mockRestore();
+  });
+});
+
+describe("finishLoad restores the last-open chapter", () => {
+  const project: ProjectInfo = {
+    root: "/tmp/book",
+    name: "Book",
+    mainFile: "main.tex",
+    title: null,
+    author: null,
+    chapters: [
+      { id: "a", title: "One", file: "a.tex", label: "I", wordCount: 0 },
+      { id: "b", title: "Two", file: "b.tex", label: "II", wordCount: 0 },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.mocked(openProject).mockResolvedValue({
+      status: "managed",
+      project,
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readTextFile).mockResolvedValue("A narration paragraph.");
+    vi.mocked(readAppData).mockResolvedValue(null);
+  });
+
+  const stubLastChapter = (saved: string | null) =>
+    vi.mocked(readAppData).mockImplementation(((key: string) =>
+      Promise.resolve(key.startsWith("last-chapter-") ? saved : null)) as typeof readAppData);
+
+  it("selects the persisted chapter instead of the first one", async () => {
+    stubLastChapter("b");
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+    expect(useProjectStore.getState().activeChapterId).toBe("b");
+  });
+
+  it("falls back to the first chapter when the saved id no longer exists", async () => {
+    stubLastChapter("deleted-chapter");
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+    expect(useProjectStore.getState().activeChapterId).toBe("a");
+  });
+
+  it("falls back to the first chapter when nothing was recorded", async () => {
+    stubLastChapter(null);
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+    expect(useProjectStore.getState().activeChapterId).toBe("a");
+  });
+
+  it("persists the chapter id whenever a chapter is selected", async () => {
+    stubLastChapter(null);
+    await useProjectStore.getState().loadProjectAt("/tmp/book");
+    vi.mocked(writeAppData).mockClear();
+    await useProjectStore.getState().selectChapter("b");
+    expect(writeAppData).toHaveBeenCalledWith(
+      expect.stringMatching(/^last-chapter-/),
+      "b",
+    );
   });
 });
 

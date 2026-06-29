@@ -117,6 +117,14 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Split block",
   },
+  OPEN_FIND: {
+    id: "open-find",
+    key: "f",
+    modifiers: { ctrl: true },
+    description: "Find and replace in the chapter",
+    category: "editor",
+    label: "Find",
+  },
   FORMAT_BOLD: {
     id: "format-bold",
     key: "b",

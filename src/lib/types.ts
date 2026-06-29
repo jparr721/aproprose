@@ -339,6 +339,12 @@ export interface SculptProposal {
   changes: SculptChange[];
 }
 
+/** A pending text rewrite for one block - the shape applyBlockEdits consumes. */
+export interface BlockTextEdit {
+  id: string;
+  text: string;
+}
+
 /** A single proposed in-place revision of one block (see the AI "Edit" tab). */
 export interface BlockEdit {
   /** The id of an existing block to revise. */

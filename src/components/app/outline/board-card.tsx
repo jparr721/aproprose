@@ -3,6 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent } from "@/components/ui/card";
 import { TypographyMutedSpan } from "@/components/ui/typography";
 import { CharacterChip } from "@/components/app/outline/character-chip";
+import { LoreChip } from "@/components/app/outline/lore-chip";
 import { SEV_DOT, beatCharacters, worstSev } from "@/lib/outline/beat-signals";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -16,11 +17,15 @@ interface DndVar extends React.CSSProperties {
 export function BoardCard(props: { card: CardModel; chapterId: string }) {
   const { card, chapterId } = props;
   const characters = useProjectStore((s) => s.meta.characters);
+  const lore = useProjectStore((s) => s.meta.lore);
   const openChapter = useOutlineBoardStore((s) => s.openChapter);
   const { setNodeRef, attributes, listeners, transform, isDragging } = useSortable({ id: card.id });
 
   const cast = beatCharacters(card.characterIds, characters);
   const sev = worstSev(card.continuityFlags);
+  const loreEntries = card.loreIds
+    .map((id) => lore.find((l) => l.id === id))
+    .filter((l): l is NonNullable<typeof l> => Boolean(l));
 
   return (
     <Card
@@ -48,6 +53,13 @@ export function BoardCard(props: { card: CardModel; chapterId: string }) {
           <div className="flex flex-wrap gap-1">
             {cast.map((c) => (
               <CharacterChip key={c.id} name={c.name} color={c.color} />
+            ))}
+          </div>
+        ) : null}
+        {loreEntries.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {loreEntries.map((l) => (
+              <LoreChip key={l.id} title={l.title} />
             ))}
           </div>
         ) : null}

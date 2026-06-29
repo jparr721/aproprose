@@ -21,6 +21,6 @@ export function buildSculptContext(chapterId: string): SculptContext {
     turn: ch.turn,
     cards: ch.cards.map((c) => ({ id: c.id, title: c.title, intention: c.intention })),
     characters: meta.characters.map((c) => ({ name: c.name })),
-    lore: meta.lore.map((l) => ({ title: l.title })),
+    lore: meta.lore.map((l) => ({ title: l.title, description: l.description, tags: l.tags })),
   };
 }

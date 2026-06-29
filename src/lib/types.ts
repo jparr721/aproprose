@@ -110,14 +110,22 @@ export interface OpenOutcome {
 export interface Character {
   id: string;
   name: string;
-  /** An oklch() color string used for the speaker dot / avatar. */
+  /** A CSS color string (hex) used for the speaker dot / avatar. */
   color: string;
   role: string;
 }
 
+/** A worldbuilding entry in the project's lore index.
+ *
+ * LoreEntry now carries body text, cast links, and tag assignments. Version
+ * 2+ fills description/characterIds/tags during migration; v0-1 blobs that lack
+ * them default to empty. Cards reference lore entries by id in `loreIds`. */
 export interface LoreEntry {
   id: string;
   title: string;
+  description: string;
+  characterIds: string[];
+  tags: string[];
 }
 
 // -- Outline ------------------------------------------------------------------
@@ -200,6 +208,9 @@ export interface ProjectInfo {
  * project path, so the user's repository is never touched.
  */
 export interface ProjectMeta {
+  /** Migration version. Absent in legacy blobs → treated as 0.
+   *  The runner in src/lib/migration/index.ts applies pending migrations in order. */
+  version: number;
   characters: Character[];
   lore: LoreEntry[];
   /** chapter id -> status override. */
@@ -226,7 +237,6 @@ export type BlockStyle = "typo" | "cards";
 export type AiProvider = "openai" | "codex" | "claude";
 /** The subscription CLI providers - exactly the non-OpenAI members of AiProvider. */
 export type CliKind = Exclude<AiProvider, "openai">;
-
 export interface Settings {
   theme: Theme;
   blockStyle: BlockStyle;
@@ -238,6 +248,8 @@ export interface Settings {
   aiModel: string | null;
   /** Active AI provider. OpenAI uses an API key; codex/claude use the local CLI subscription. */
   aiProvider: AiProvider;
+  /** Global tag list for lore entries. */
+  loreTags: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -247,6 +259,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pdfZoom: 1.1,
   aiModel: null,
   aiProvider: "openai",
+  loreTags: [],
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

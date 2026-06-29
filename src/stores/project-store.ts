@@ -74,7 +74,8 @@ import {
   setChapterAct as setChapterActModel,
   setChapterPlotPoint as setChapterPlotPointModel,
 } from "@/lib/outline/model";
-import { isNewShapeMeta, migrateLegacyMeta } from "@/lib/outline/migrate";
+import { runMigrations, EMPTY_META } from "@/lib/migration";
+import { updateLore, removeLore } from "@/lib/lore/model";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -93,33 +94,6 @@ export function defaultOutline(): Outline {
   return { premise: "" };
 }
 
-const EMPTY_META: ProjectMeta = {
-  characters: [],
-  lore: [],
-  statuses: {},
-  outline: defaultOutline(),
-  chapters: {},
-};
-
-/** Coerce any historical meta blob into the chapter-centric shape. New-shape
- *  blobs pass through (with field backfill); legacy blobs are migrated once. */
-export function normalizeMeta(m: Partial<ProjectMeta> | null): ProjectMeta {
-  if (!m) return EMPTY_META;
-  const raw = m as unknown as Record<string, unknown>;
-  if (isNewShapeMeta(raw)) {
-    const chapters = (m as ProjectMeta).chapters ?? {};
-    return {
-      characters: m.characters ?? [],
-      lore: m.lore ?? [],
-      statuses: m.statuses ?? {},
-      outline: { premise: m.outline?.premise ?? "" },
-      chapters: Object.fromEntries(
-        Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
-      ),
-    };
-  }
-  return migrateLegacyMeta(raw);
-}
 
 const EMPTY_COMPILE: CompileState = {
   status: "idle",
@@ -260,7 +234,9 @@ interface ProjectState {
   addCharacter: (c: Omit<Character, "id">) => string;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
   removeCharacter: (id: string) => void;
-  addLore: (title: string) => void;
+  addLore: (title: string) => string;
+  updateLore: (id: string, patch: Partial<Pick<LoreEntry, "title" | "description" | "characterIds" | "tags">>) => void;
+  removeLore: (id: string) => void;
   setChapterStatus: (id: string, status: ChapterStatus) => void;
 
   // outline (global)
@@ -337,19 +313,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     // the repo once when no in-repo file exists yet.
     let meta: ProjectMeta;
     const inRepo = await readProjectMeta(root);
-    let parsed: ProjectMeta | null = null;
+    let parsed: unknown = null;
     if (inRepo) {
       try {
-        parsed = JSON.parse(inRepo) as ProjectMeta;
+        parsed = JSON.parse(inRepo);
       } catch {
+        if (import.meta.env.DEV) console.warn("Corrupt meta.json, falling back to legacy storage");
         parsed = null;
       }
     }
-    if (parsed) {
-      meta = normalizeMeta(parsed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      meta = runMigrations(parsed);
     } else {
       const legacy = await readAppData<ProjectMeta>(metaKey(root));
-      meta = normalizeMeta(legacy);
+      meta = runMigrations(legacy ?? null);
       if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(meta));
     }
 
@@ -1100,10 +1077,27 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
-    addLore: (title) =>
+    addLore: (title) => {
+      const id = uid("l");
       set((s) => {
-        const entry: LoreEntry = { id: uid("l"), title };
+        const entry: LoreEntry = { id, title, description: "", characterIds: [], tags: [] };
         const meta = { ...s.meta, lore: [...s.meta.lore, entry] };
+        persistMeta(meta);
+        return { meta };
+      });
+      return id;
+    },
+
+    updateLore: (id, patch) =>
+      set((s) => {
+        const meta = { ...s.meta, lore: updateLore(s.meta.lore, id, patch) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    removeLore: (id) =>
+      set((s) => {
+        const meta = { ...s.meta, lore: removeLore(s.meta.lore, id) };
         persistMeta(meta);
         return { meta };
       }),

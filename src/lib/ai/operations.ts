@@ -382,7 +382,7 @@ export interface SculptContext {
   /** The chapter's cards in order, by id, for the model to reference and reorder. */
   cards: { id: string; title: string; intention: string }[];
   characters: { name: string }[];
-  lore: { title: string }[];
+  lore: { title: string; description: string; tags: string[] }[];
 }
 
 const sculptChangeSchema = z.object({
@@ -430,7 +430,7 @@ function buildSculptGrounding(ctx: SculptContext): string {
     parts.push(`KNOWN CAST:\n${ctx.characters.map((c) => `- ${c.name}`).join("\n")}`);
   }
   if (ctx.lore.length > 0) {
-    parts.push(`LORE:\n${ctx.lore.map((l) => `- ${l.title}`).join("\n")}`);
+    parts.push(`LORE:\n${ctx.lore.map((l) => `- ${l.title}${l.description ? `: ${l.description}` : ""}`).join("\n")}`);
   }
   const cards = ctx.cards
     .map((c, i) => `[${i}] (${c.id}) ${c.title}: ${c.intention}`)

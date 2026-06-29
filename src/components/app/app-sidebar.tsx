@@ -59,18 +59,22 @@ import { useViewStore } from "@/stores/view-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { useKeybinding } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
+import { useLoreSheetStore } from "@/stores/lore-sheet-store";
 import { IS_MAC } from "@/lib/platform";
+import { LoreDetailSheet } from "@/components/app/lore/lore-detail-sheet";
 import { cn } from "@/lib/utils";
 
 function AddLoreDialog() {
   const addLore = useProjectStore((s) => s.addLore);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const openLoreSheet = useLoreSheetStore.getState().open;
   const submit = () => {
     if (!title.trim()) return;
-    addLore(title.trim());
+    const entryId = addLore(title.trim());
     setTitle("");
     setOpen(false);
+    openLoreSheet(entryId);
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -113,6 +117,7 @@ export function AppSidebar() {
   const guard = useViewStore((s) => s.requestGuarded);
   const toggleOutline = useViewStore((s) => s.toggleOutline);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const openLoreSheet = useLoreSheetStore((s) => s.open);
 
   // The Outline toggle is guarded (a dirty chapter stages the unsaved-edits
   // dialog first). Bind the chord co-located with the action, mirroring the
@@ -236,7 +241,10 @@ export function AppSidebar() {
                   <SidebarMenu>
                     {meta.lore.map((l) => (
                       <SidebarMenuItem key={l.id}>
-                        <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
+                        <SidebarMenuButton
+                          className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal"
+                          onClick={() => openLoreSheet(l.id)}
+                        >
                           <span className="flex h-4 shrink-0 items-center">
                             <span className="size-1.5 rounded-full bg-lore-ink" />
                           </span>
@@ -270,6 +278,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarFooter>
       <ProjectSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <LoreDetailSheet />
     </Sidebar>
   );
 }

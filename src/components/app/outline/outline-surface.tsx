@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { TypographyEyebrow, TypographyMuted, TypographyP, TypographySmall } from "@/components/ui/typography";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { CharacterChip } from "@/components/app/outline/character-chip";
+import { LoreChip } from "@/components/app/outline/lore-chip";
+import { useLoreSheetStore } from "@/stores/lore-sheet-store";
 import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
@@ -26,6 +28,8 @@ export function OutlineSurface() {
   );
   const characters = useProjectStore((s) => s.meta.characters);
   const toggleOutline = useViewStore((s) => s.toggleOutline);
+  const lore = useProjectStore((s) => s.meta.lore);
+  const openLoreSheet = useLoreSheetStore((s) => s.open);
 
   const chapterCast = ch ? beatCharacters(ch.characterIds, characters) : [];
   const hasOutline = ch
@@ -82,6 +86,9 @@ export function OutlineSurface() {
                   const cast = card.characterIds
                     .map((id) => characters.find((c) => c.id === id))
                     .filter((c): c is NonNullable<typeof c> => Boolean(c));
+                  const loreEntries = card.loreIds
+                    .map((id) => lore.find((l) => l.id === id))
+                    .filter((l): l is NonNullable<typeof l> => Boolean(l));
                   return (
                     <div key={card.id} className="flex flex-col gap-1 rounded-lg border border-border p-2.5">
                       <TypographySmall className="font-semibold text-foreground">{card.title || "Untitled"}</TypographySmall>
@@ -91,6 +98,17 @@ export function OutlineSurface() {
                       {cast.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {cast.map((c) => <CharacterChip key={c.id} name={c.name} color={c.color} />)}
+                        </div>
+                      ) : null}
+                      {loreEntries.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {loreEntries.map((l) => (
+                            <LoreChip
+                              key={l.id}
+                              title={l.title}
+                              onClick={() => openLoreSheet(l.id)}
+                            />
+                          ))}
                         </div>
                       ) : null}
                     </div>

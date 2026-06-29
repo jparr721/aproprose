@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { normalizeMeta, useProjectStore } from "@/stores/project-store";
+import { runMigrations } from "@/lib/migration";
+import { useProjectStore } from "@/stores/project-store";
 
 beforeEach(() => {
   useProjectStore.setState({
     project: null,
-    meta: { characters: [], lore: [], statuses: {}, outline: { premise: "" }, chapters: {} },
+    meta: { version: 2, characters: [], lore: [], statuses: {}, outline: { premise: "" }, chapters: {} },
   } as never);
 });
 
-describe("normalizeMeta", () => {
+describe("runMigrations", () => {
   it("migrates a legacy blob and keeps premise", () => {
-    const m = normalizeMeta({
+    const m = runMigrations({
       outline: { premise: "P", acts: [{ kind: "setup", beats: [
         { title: "b", intention: "i", chapterIds: ["ch1"], type: "inciting" },
       ] }] },
@@ -21,11 +22,11 @@ describe("normalizeMeta", () => {
     expect(m.chapters.ch1.goal).toBe("g");
   });
   it("passes a new-shape blob through", () => {
-    const m = normalizeMeta({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.act).toBe("setup");
   });
   it("backfills characterIds on chapters that predate the field", () => {
-    const m = normalizeMeta({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.characterIds).toEqual([]);
   });
 });

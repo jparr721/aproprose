@@ -17,18 +17,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ColorDot } from "@/components/app/color-dot";
+import {
+  CHARACTER_COLORS,
+  CharacterColorPicker,
+} from "@/components/app/character-color-picker";
 import { useProjectStore } from "@/stores/project-store";
-import { cn } from "@/lib/utils";
-
-export const CHARACTER_COLORS = [
-  "oklch(0.55 0.12 30)",
-  "oklch(0.5 0.08 235)",
-  "oklch(0.55 0.1 145)",
-  "oklch(0.58 0.12 300)",
-  "oklch(0.6 0.12 60)",
-  "oklch(0.5 0.06 100)",
-];
 
 export function AddCharacterDialog({
   open,
@@ -100,23 +93,7 @@ export function AddCharacterDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Color</Label>
-            <div className="flex gap-2">
-              {CHARACTER_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  aria-label="color"
-                  aria-pressed={c === color}
-                  onClick={() => setColor(c)}
-                  className={cn(
-                    "size-6 rounded-full ring-offset-2 ring-offset-background transition-shadow",
-                    c === color && "ring-2 ring-ring",
-                  )}
-                >
-                  <ColorDot color={c} className="size-6" />
-                </button>
-              ))}
-            </div>
+            <CharacterColorPicker value={color} onChange={setColor} />
           </div>
         </div>
         <DialogFooter>

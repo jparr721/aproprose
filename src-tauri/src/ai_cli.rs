@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use tokio::process::Command;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -61,8 +61,12 @@ struct CliProbe {
 /// spawned at all (false only when the OS reports NotFound), so a present binary
 /// whose `--version` exits non-zero or prints nothing is still reported as
 /// installed. `version` is the parsed `--version` string when that call succeeds.
-fn cli_probe(kind: CliKind) -> CliProbe {
-    match Command::new(binary_name(kind)).arg("--version").output() {
+async fn cli_probe(kind: CliKind) -> CliProbe {
+    match Command::new(binary_name(kind))
+        .arg("--version")
+        .output()
+        .await
+    {
         Ok(out) => {
             let version = if out.status.success() {
                 let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -150,9 +154,9 @@ fn parse_claude_model(json: &str) -> Option<String> {
 
 /// Detect a CLI provider and its login. Never spawns the agent itself.
 #[tauri::command]
-pub fn cli_provider_status(kind: CliKind) -> Result<CliProviderStatus, String> {
+pub async fn cli_provider_status(kind: CliKind) -> Result<CliProviderStatus, String> {
     let home = home_dir()?;
-    let probe = cli_probe(kind);
+    let probe = cli_probe(kind).await;
     Ok(CliProviderStatus {
         installed: probe.installed,
         authenticated: auth_path(kind, &home).exists(),
@@ -353,7 +357,7 @@ fn parse_claude_output(stdout: &str, want_schema: bool) -> Result<CliGenerateRes
     Ok(CliGenerateResult { text, model })
 }
 
-fn run_cli(
+async fn run_cli(
     kind: CliKind,
     system: Option<&str>,
     prompt: &str,
@@ -390,6 +394,7 @@ fn run_cli(
             scrub_secret_env(&mut cmd);
             let output = cmd
                 .output()
+                .await
                 .map_err(|e| format!("failed to run codex: {e}"))?;
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
@@ -416,6 +421,7 @@ fn run_cli(
             scrub_secret_env(&mut cmd);
             let output = cmd
                 .output()
+                .await
                 .map_err(|e| format!("failed to run claude: {e}"))?;
             let stdout = String::from_utf8_lossy(&output.stdout);
             if !output.status.success() {
@@ -429,7 +435,7 @@ fn run_cli(
 
 /// Generate text (or schema-conforming JSON) through the selected CLI's subscription.
 #[tauri::command]
-pub fn cli_generate(args: CliGenerateArgs) -> Result<CliGenerateResult, String> {
+pub async fn cli_generate(args: CliGenerateArgs) -> Result<CliGenerateResult, String> {
     let CliGenerateArgs {
         kind,
         system,
@@ -437,7 +443,7 @@ pub fn cli_generate(args: CliGenerateArgs) -> Result<CliGenerateResult, String> 
         schema,
     } = args;
     let home = home_dir()?;
-    let probe = cli_probe(kind);
+    let probe = cli_probe(kind).await;
     guard_ready(probe.installed, auth_path(kind, &home).exists(), kind)?;
 
     // tempfile gives a fresh 0700 dir with a random suffix that fails if the path
@@ -454,7 +460,8 @@ pub fn cli_generate(args: CliGenerateArgs) -> Result<CliGenerateResult, String> 
         schema.as_ref(),
         &home,
         dir.path(),
-    );
+    )
+    .await;
     if let Err(e) = dir.close() {
         eprintln!("aproprose: failed to clean temp dir: {e}");
     }
@@ -464,6 +471,25 @@ pub fn cli_generate(args: CliGenerateArgs) -> Result<CliGenerateResult, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard for the main-thread freeze. Tauri runs *non-async*
+    /// commands on the main thread, so the blocking `.output()` wait on the
+    /// `claude`/`codex` child froze the whole app (beach ball) until the CLI
+    /// returned. Both CLI commands MUST be async so Tauri schedules them off the
+    /// main thread, matching every other subprocess command (compile.rs, git.rs).
+    /// Building a future runs none of its body, so this spawns no CLI - it only
+    /// pins the async shape that keeps the UI responsive.
+    #[test]
+    fn cli_commands_are_async_and_never_block_the_main_thread() {
+        fn assert_future<F: std::future::Future>(_: F) {}
+        assert_future(cli_provider_status(CliKind::Claude));
+        assert_future(cli_generate(CliGenerateArgs {
+            kind: CliKind::Claude,
+            system: None,
+            prompt: String::new(),
+            schema: None,
+        }));
+    }
 
     #[test]
     fn auth_paths_are_per_cli() {

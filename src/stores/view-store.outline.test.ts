@@ -26,7 +26,7 @@ describe("view-store outline toggle", () => {
     expect(s.pdfOpen).toBe(true);
   });
 
-  it("does not persist outlineOpen (partialize is aiTab + rightPanelWidth only)", () => {
+  it("persists outlineOpen so a relaunch reopens the storyboard", () => {
     useViewStore.getState().toggleOutline();
     const persisted = JSON.parse(
       JSON.stringify(useViewStore.persist.getOptions().partialize!(useViewStore.getState())),
@@ -34,7 +34,9 @@ describe("view-store outline toggle", () => {
     expect(persisted).toStrictEqual({
       aiTab: useViewStore.getState().aiTab,
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
+      pdfOpen: useViewStore.getState().pdfOpen,
+      outlineOpen: useViewStore.getState().outlineOpen,
     });
-    expect("outlineOpen" in persisted).toBe(false);
+    expect(persisted.outlineOpen).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   IconArrowDown,
   IconArrowRight,
+  IconArrowUp,
   IconCheck,
   IconCopy,
   IconListTree,
@@ -24,6 +25,7 @@ import {
   IconRefresh,
   IconSparkles,
   IconTimeline,
+  IconWand,
 } from "@tabler/icons-react";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import {
   PromptInput,
   PromptInputBody,
@@ -62,11 +70,13 @@ import {
   TypographyP,
 } from "@/components/ui/typography";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useAi } from "@/hooks/use-ai";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import {
   buildAiContext,
   buildEditRequest,
+  buildRefineRequest,
   buildScopedContext,
   type ReadScope,
 } from "@/lib/ai/context";
@@ -81,6 +91,7 @@ import {
 } from "@/lib/ai/operations";
 import { diffWords, type DiffSegment } from "@/lib/diff/word-diff";
 import type {
+  Block,
   BlockEdit,
   ChatMessage,
   CritiqueNote,
@@ -142,6 +153,7 @@ function AiComposer({
   focusSignal,
   toolbar,
   disabled,
+  wholeChapter,
 }: {
   placeholder: string;
   loading: boolean;
@@ -151,6 +163,9 @@ function AiComposer({
   toolbar?: React.ReactNode;
   /** Inert composer: the textarea can't be typed into (e.g. nothing to edit). */
   disabled?: boolean;
+  /** Whole-chapter scope: the op reads the whole chapter, so the anchor names the
+   *  chapter rather than the cursor block. Omitted by cursor/block-only tabs. */
+  wholeChapter?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -159,7 +174,7 @@ function AiComposer({
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
-      <CursorAnchor />
+      <ContextAnchor wholeChapter={wholeChapter ?? false} />
       {toolbar}
       <PromptInput
         onSubmit={(m) => {
@@ -179,20 +194,26 @@ function AiComposer({
   );
 }
 
-/** The "you are here": the block the AI operations anchor to. Sits just above the
- *  composer's text input. The cursor text wraps over up to two lines so a longer
- *  tail reads naturally instead of being clipped to one. */
-function CursorAnchor() {
+/** The "you are here": the grounding the AI operation anchors to. Sits just above
+ *  the composer's text input. In cursor/block mode it names the block under the
+ *  caret (its text wraps over up to two lines so a longer tail reads naturally);
+ *  in whole-chapter mode the caret is irrelevant, so it names the chapter being
+ *  read instead of claiming to continue after the selected block. */
+export function ContextAnchor({ wholeChapter }: { wholeChapter: boolean }) {
   const selectedId = useProjectStore((s) => s.selectedId);
   const blocks = useProjectStore((s) => s.blocks);
-  const block = selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
+  const chapterTitle = useProjectStore((s) =>
+    s.project?.chapters.find((c) => c.id === s.activeChapterId)?.title,
+  );
+  const block =
+    !wholeChapter && selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
   const text = block?.text.trim();
 
   return (
     <div className="flex flex-col gap-0.5 rounded-md bg-ai-tint/40 px-2.5 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <TypographyEyebrow className="text-ai-ink">
-          {block ? `Continuing after ${block.type}` : "Cursor"}
+          {wholeChapter ? "Whole chapter" : block ? `Continuing after ${block.type}` : "Cursor"}
         </TypographyEyebrow>
         {block && (
           <Tooltip>
@@ -211,9 +232,11 @@ function CursorAnchor() {
         )}
       </div>
       <TypographyMuted
-        className={cn("line-clamp-2 text-xs", !text && "text-muted-foreground")}
+        className={cn("line-clamp-2 text-xs", !wholeChapter && !text && "text-muted-foreground")}
       >
-        {text || "Place your cursor in the manuscript."}
+        {wholeChapter
+          ? chapterTitle ?? "Reading every block in this chapter."
+          : text || "Place your cursor in the manuscript."}
       </TypographyMuted>
     </div>
   );
@@ -231,6 +254,7 @@ function SuggestTab() {
   const { data, loading, error, instruction, run } = useAi<SuggestResult>(
     (ins) => suggestContinuation({ ...buildAiContext(), instruction: ins }),
     cacheKey,
+    "suggest",
   );
 
   const [variant, setVariant] = useState(0);
@@ -365,6 +389,7 @@ function CritiqueTab() {
   const { data, loading, error, instruction, run } = useAi<CritiqueNote[]>(
     (ins) => critique({ ...buildScopedContext(scope), instruction: ins }),
     cacheKey,
+    "critique",
   );
   return (
     <div className="flex h-full flex-col">
@@ -408,6 +433,7 @@ function CritiqueTab() {
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
+        wholeChapter={scope === "chapter"}
         toolbar={
           <ScopeToggle
             value={scope}
@@ -447,6 +473,7 @@ function ContinuityTab() {
   const { data, loading, error, instruction, run } = useAi<ContinuityFlag[]>(
     (ins) => continuityCheck({ ...buildScopedContext(scope), instruction: ins }),
     cacheKey,
+    "continuity",
   );
   return (
     <div className="flex h-full flex-col">
@@ -486,6 +513,7 @@ function ContinuityTab() {
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
+        wholeChapter={scope === "chapter"}
         toolbar={
           <ScopeToggle
             value={scope}
@@ -552,6 +580,112 @@ function ScopeToggle<T extends string>({
   );
 }
 
+/** One proposed block revision: the before/after diff, its rationale, the
+ *  accept/reject/refine actions, and an inline composer for refining *this*
+ *  proposal in place (the model reworks the draft, not the original block).
+ *  Refine state is per-card and local; the parent owns the cache mutation. */
+function EditProposal({
+  edit,
+  block,
+  onAccept,
+  onReject,
+  onRefine,
+}: {
+  edit: BlockEdit;
+  block: Block;
+  onAccept: () => void;
+  onReject: () => void;
+  /** Resolves true when the proposal changed, false when the refine was a no-op. */
+  onRefine: (instruction: string) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [noChange, setNoChange] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = value.trim();
+    if (!text || refining) return;
+    setRefining(true);
+    setRefineError(null);
+    setNoChange(false);
+    try {
+      const changed = await onRefine(text);
+      // Clear the box on a real change (the diff now reflects it, ready for another
+      // pass); keep the text on a no-op so the author can adjust and retry.
+      if (changed) setValue("");
+      else setNoChange(true);
+    } catch (err) {
+      setRefineError(describeAiError(err));
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3">
+      <TypographyEyebrow className="text-ai-ink">{block.type}</TypographyEyebrow>
+      <DiffText segments={diffWords(block.text, edit.newText)} />
+      <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
+        <TypographyEyebrow className="text-ai-ink/70">Why</TypographyEyebrow>
+        <TypographyMuted className="text-xs">{edit.reason}</TypographyMuted>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" onClick={onAccept} disabled={refining}>
+          Accept
+        </Button>
+        <Button size="sm" variant="outline" onClick={onReject} disabled={refining}>
+          Reject
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen((v) => !v)}
+          disabled={refining}
+        >
+          <IconWand /> Refine
+        </Button>
+      </div>
+      {open ? (
+        <form onSubmit={submit} className="flex flex-col gap-1">
+          <InputGroup>
+            <InputGroupInput
+              autoFocus
+              placeholder="Refine this edit, e.g. keep it shorter, warmer"
+              value={value}
+              disabled={refining}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setNoChange(false);
+              }}
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                type="submit"
+                variant="default"
+                size="icon-xs"
+                disabled={refining || !value.trim()}
+                aria-label="Send refinement"
+              >
+                {refining ? <Spinner /> : <IconArrowUp />}
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+          {refineError ? (
+            <TypographyMuted className="text-xs text-destructive">
+              {refineError}
+            </TypographyMuted>
+          ) : noChange ? (
+            <TypographyMuted className="text-xs">No further change suggested.</TypographyMuted>
+          ) : null}
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 function EditTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const selectedIds = useProjectStore((s) => s.selectedIds);
@@ -572,6 +706,7 @@ function EditTab() {
   const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
     (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
     cacheKey,
+    "edit",
   );
 
   const edits = data ?? [];
@@ -616,6 +751,21 @@ function EditTab() {
   };
   const rejectAll = () => patch(cacheKey, { data: [] });
 
+  // Refine one proposed edit in place: re-run the model with the PROPOSAL as the
+  // base text (not the block's stored text), so the author can iterate on an edit
+  // they like instead of regenerating from scratch. Replaces just that edit in the
+  // cached set, reading the latest value so it can't clobber a sibling accept/reject.
+  const refine = async (edit: BlockEdit, block: Block, instruction: string): Promise<boolean> => {
+    const [result] = await editBlocks(buildRefineRequest(block, edit.newText, instruction));
+    if (!result) return false; // no-op refine: keep the existing proposal as-is
+    const cur =
+      (useAiCacheStore.getState().entries[cacheKey]?.data as BlockEdit[] | null) ?? [];
+    patch(cacheKey, {
+      data: cur.map((e) => (e.blockId === edit.blockId ? result : e)),
+    });
+    return true;
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -648,31 +798,14 @@ function EditTab() {
                 </div>
               </div>
               {live.map(({ edit, block }) => (
-                <div
+                <EditProposal
                   key={edit.blockId}
-                  className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3"
-                >
-                  <TypographyEyebrow className="text-ai-ink">
-                    {block.type}
-                  </TypographyEyebrow>
-                  <DiffText segments={diffWords(block.text, edit.newText)} />
-                  <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
-                    <TypographyEyebrow className="text-ai-ink/70">
-                      Why
-                    </TypographyEyebrow>
-                    <TypographyMuted className="text-xs">
-                      {edit.reason}
-                    </TypographyMuted>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button size="sm" onClick={() => accept(edit)}>
-                      Accept
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => dismiss(edit.blockId)}>
-                      Reject
-                    </Button>
-                  </div>
-                </div>
+                  edit={edit}
+                  block={block}
+                  onAccept={() => accept(edit)}
+                  onReject={() => dismiss(edit.blockId)}
+                  onRefine={(instruction) => refine(edit, block, instruction)}
+                />
               ))}
             </>
           )}
@@ -682,6 +815,7 @@ function EditTab() {
         placeholder={composer.placeholder}
         disabled={composer.disabled}
         loading={loading}
+        wholeChapter={scope === "chapter"}
         onSubmit={(t) => {
           if (composer.disabled) return; // nothing eligible in scope; skip the model call
           run(t);
@@ -756,6 +890,7 @@ function BrainstormTab() {
     const chapterId = activeChapterId;
     const onThisChapter = () =>
       useProjectStore.getState().activeChapterId === chapterId;
+    useAiActivityStore.getState().start("brainstorm");
     setStreaming("");
     setError(null);
     let acc = "";
@@ -778,6 +913,7 @@ function BrainstormTab() {
       if (onThisChapter()) setError(describeAiError(e));
     } finally {
       if (onThisChapter()) setStreaming(null);
+      useAiActivityStore.getState().finish("brainstorm");
     }
   };
 
@@ -908,6 +1044,12 @@ export function RightPanelContent() {
   const aiModel = useSettingsStore((s) => s.aiModel);
   const hydrated = useSettingsStore((s) => s.hydrated);
 
+  // This column mounts only while the panel is open and expanded, so whichever tab
+  // is shown here is the one the author is watching: clear its finished badge.
+  useEffect(() => {
+    useAiActivityStore.getState().markSeen(tab);
+  }, [tab]);
+
   return (
     <aside data-right-panel className="flex h-full min-h-0 w-full flex-col bg-card">
       <div className="min-h-0 flex-1">
@@ -928,6 +1070,7 @@ export function RightPanelRail() {
   const setTab = useViewStore((s) => s.setAiTab);
   const collapsed = useViewStore((s) => s.aiCollapsed);
   const setCollapsed = useViewStore((s) => s.setAiCollapsed);
+  const status = useAiActivityStore((s) => s.status);
 
   // Click the active icon -> collapse/expand; click another -> switch + expand.
   const pick = (id: AiTab) => {
@@ -942,29 +1085,48 @@ export function RightPanelRail() {
     <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-card py-2">
       {TABS.map(({ id, label, Icon }) => {
         const active = id === tab && !collapsed;
-        const button = (
-          <Tooltip key={id}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={label}
-                onClick={() => pick(id)}
+        // The shown tab needs no flag -- its body shows the state directly and
+        // opening it marks it seen. Off-screen tabs surface a pulsing dot while a
+        // job runs and a solid dot once it finishes.
+        const activity = active ? undefined : status[id];
+        const item = (
+          <div key={id} className="relative">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={
+                    activity
+                      ? `${label} (${activity === "running" ? "working" : "ready"})`
+                      : label
+                  }
+                  onClick={() => pick(id)}
+                  className={cn(
+                    "text-muted-foreground hover:text-foreground",
+                    active && "bg-accent text-foreground",
+                  )}
+                >
+                  <Icon className="size-[18px]" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{label}</TooltipContent>
+            </Tooltip>
+            {activity ? (
+              <span
+                aria-hidden
                 className={cn(
-                  "text-muted-foreground hover:text-foreground",
-                  active && "bg-accent text-foreground",
+                  "pointer-events-none absolute right-1 top-1 size-1.5 rounded-full bg-primary",
+                  activity === "running" && "animate-pulse bg-primary/70",
                 )}
-              >
-                <Icon className="size-[18px]" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">{label}</TooltipContent>
-          </Tooltip>
+              />
+            ) : null}
+          </div>
         );
         // Divide the Outline surface from the AI tools.
         return id === "suggest"
-          ? [<div key="sep" className="my-1 h-px w-5 bg-border" />, button]
-          : button;
+          ? [<div key="sep" className="my-1 h-px w-5 bg-border" />, item]
+          : item;
       })}
     </nav>
   );

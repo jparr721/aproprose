@@ -10,6 +10,7 @@ import { useRef, useEffect } from "react";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
 import { useAiCacheStore, type AiCacheEntry } from "@/stores/ai-cache-store";
+import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { useProjectStore } from "@/stores/project-store";
 import type { ChatMessage } from "@/lib/types";
@@ -54,10 +55,11 @@ export function fromSnapshot(snapshot: PersistedAiState | null): {
   return { entries, threads: snapshot.threads ?? {} };
 }
 
-/** Clear both AI stores (project closed / switching before a load completes). */
+/** Clear the AI stores (project closed / switching before a load completes). */
 export function resetAiStores(): void {
   useAiCacheStore.getState().reset();
   useBrainstormStore.getState().reset();
+  useAiActivityStore.getState().reset();
 }
 
 /** Load a project's saved AI state into the live stores (empty if none). */

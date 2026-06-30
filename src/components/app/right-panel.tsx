@@ -22,10 +22,12 @@ import {
   IconMessages,
   IconNotes,
   IconPencil,
+  IconPlus,
   IconRefresh,
   IconSparkles,
   IconTimeline,
   IconWand,
+  IconX,
 } from "@tabler/icons-react";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+} from "@/components/ui/empty";
 import {
   InputGroup,
   InputGroupAddon,
@@ -42,6 +51,7 @@ import {
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputButton,
   PromptInputTextarea,
   PromptInputFooter,
   PromptInputSubmit,
@@ -142,9 +152,42 @@ function PanelHint({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Centered, full-height empty state for a generating tab before its first run --
+ *  an Empty card (tinted icon, heading, description) rather than a top-aligned hint,
+ *  so the idle panel reads as a clear invitation instead of a footnote. */
+function PanelEmpty({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: typeof IconSparkles;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon" className="size-12 rounded-xl bg-ai-tint text-ai-ink">
+          <Icon className="size-6" />
+        </EmptyMedia>
+        <EmptyTitle className="text-base">{title}</EmptyTitle>
+        <EmptyDescription className="text-sm">{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+}
+
+// The last Suggest focus tick the composer has acted on. Module scope so it
+// survives the tab unmounting/remounting: opening Suggest from the rail leaves the
+// composer collapsed, while the spark (which bumps the tick) opens + focuses the
+// direction box even when it mounts the tab fresh from another surface.
+let lastHandledFocusSignal = 0;
+
 /** Bottom-pinned composer shared by every function (ai-elements/prompt-input,
- *  which owns Enter-to-submit / Shift+Enter-newline). `allowEmpty` lets the
- *  generating tabs fire with no instruction; Brainstorm and Edit require text. */
+ *  which owns Enter-to-submit / Shift+Enter-newline). The generating tabs
+ *  (`allowEmpty`) rest as a single Generate button with the steering input tucked
+ *  behind an "Add a direction" disclosure; Brainstorm and Edit keep the textarea up
+ *  front because they require typed input. */
 function AiComposer({
   placeholder,
   loading,
@@ -168,28 +211,81 @@ function AiComposer({
   wholeChapter?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // `allowEmpty` tabs rest collapsed; revealing the direction box swaps in the textarea.
+  const [steering, setSteering] = useState(false);
+
+  // Open + focus the direction box only on a *new* focus request (the Suggest spark
+  // bumps a monotonic tick), never on a plain mount -- so opening the tab from the
+  // rail stays collapsed.
   useEffect(() => {
-    if (focusSignal !== undefined) ref.current?.querySelector("textarea")?.focus();
-  }, [focusSignal]);
+    if (focusSignal === undefined || focusSignal === lastHandledFocusSignal) return;
+    lastHandledFocusSignal = focusSignal;
+    if (allowEmpty) setSteering(true);
+    requestAnimationFrame(() => ref.current?.querySelector("textarea")?.focus());
+  }, [focusSignal, allowEmpty]);
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
       <ContextAnchor wholeChapter={wholeChapter ?? false} />
       {toolbar}
-      <PromptInput
-        onSubmit={(m) => {
-          const t = m.text.trim();
-          if (loading || (!t && !allowEmpty)) return;
-          onSubmit(t);
-        }}
-      >
-        <PromptInputBody>
-          <PromptInputTextarea placeholder={placeholder} disabled={loading || disabled} />
-        </PromptInputBody>
-        <PromptInputFooter className="justify-end">
-          <PromptInputSubmit status={loading ? "submitted" : undefined} />
-        </PromptInputFooter>
-      </PromptInput>
+      {allowEmpty && !steering ? (
+        <div className="flex flex-col gap-1.5">
+          <Button
+            className="w-full"
+            disabled={loading || disabled}
+            onClick={() => {
+              if (!loading && !disabled) onSubmit("");
+            }}
+          >
+            {loading ? <Spinner /> : <IconSparkles />} Generate
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mx-auto text-muted-foreground"
+            disabled={loading || disabled}
+            onClick={() => setSteering(true)}
+          >
+            <IconPlus /> Add a direction
+          </Button>
+        </div>
+      ) : (
+        <PromptInput
+          onSubmit={(m) => {
+            const t = m.text.trim();
+            if (loading || (!t && !allowEmpty)) return;
+            onSubmit(t);
+          }}
+        >
+          <PromptInputBody>
+            <PromptInputTextarea placeholder={placeholder} disabled={loading || disabled} />
+          </PromptInputBody>
+          {allowEmpty ? (
+            <PromptInputFooter>
+              <PromptInputButton variant="ghost" onClick={() => setSteering(false)}>
+                <IconX /> Clear direction
+              </PromptInputButton>
+              <PromptInputSubmit
+                status={loading ? "submitted" : undefined}
+                disabled={loading}
+                size="sm"
+              >
+                {loading ? (
+                  <Spinner />
+                ) : (
+                  <>
+                    <IconSparkles /> Generate
+                  </>
+                )}
+              </PromptInputSubmit>
+            </PromptInputFooter>
+          ) : (
+            <PromptInputFooter className="justify-end">
+              <PromptInputSubmit status={loading ? "submitted" : undefined} />
+            </PromptInputFooter>
+          )}
+        </PromptInput>
+      )}
     </div>
   );
 }
@@ -277,16 +373,16 @@ function SuggestTab() {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3.5 p-4">
+        <div className="flex min-h-full flex-col gap-3.5 p-4">
           <AskedCaption instruction={instruction} />
           {loading ? (
             <LoadingLines rows={5} />
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>
+            <PanelEmpty icon={IconSparkles} title="Suggest a continuation">
               Generate reads the scene up to your cursor and proposes three ways to continue.
-            </PanelHint>
+            </PanelEmpty>
           ) : !v ? (
             <PanelHint>No suggestion.</PanelHint>
           ) : (
@@ -356,7 +452,7 @@ function SuggestTab() {
         </div>
       </div>
       <AiComposer
-        placeholder="Ask for a direction, e.g. more tension, have her lie (optional)"
+        placeholder="e.g. more tension, have her lie"
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
@@ -394,18 +490,18 @@ function CritiqueTab() {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3 p-4">
+        <div className="flex min-h-full flex-col gap-3 p-4">
           <AskedCaption instruction={instruction} />
           {loading ? (
             <LoadingLines rows={6} />
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>
+            <PanelEmpty icon={IconNotes} title="Critique this scene">
               Generate reads{" "}
               {scope === "cursor" ? "the scene up to your cursor" : "the whole chapter"} and
               returns craft notes.
-            </PanelHint>
+            </PanelEmpty>
           ) : (
             data.map((n, i) => (
               <div key={i} className="rounded-lg border border-border bg-background p-3">
@@ -429,7 +525,7 @@ function CritiqueTab() {
         </div>
       </div>
       <AiComposer
-        placeholder="Focus the critique, e.g. pacing, dialogue (optional)"
+        placeholder="e.g. tighten the pacing, sharpen the dialogue"
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
@@ -478,18 +574,18 @@ function ContinuityTab() {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3 p-4">
+        <div className="flex min-h-full flex-col gap-3 p-4">
           <AskedCaption instruction={instruction} />
           {loading ? (
             <LoadingLines rows={6} />
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>
+            <PanelEmpty icon={IconTimeline} title="Continuity sweep">
               Generate sweeps{" "}
               {scope === "cursor" ? "the scene up to your cursor" : "the whole chapter"} for
               continuity issues.
-            </PanelHint>
+            </PanelEmpty>
           ) : (
             data.map((f, i) => (
               <div key={i} className="grid grid-cols-[14px_1fr] gap-2 rounded-lg border border-border p-2.5">
@@ -509,7 +605,7 @@ function ContinuityTab() {
         </div>
       </div>
       <AiComposer
-        placeholder="Anything specific to check? (optional)"
+        placeholder="e.g. check the timeline, watch eye color"
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
@@ -769,17 +865,17 @@ function EditTab() {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-3 p-4">
+        <div className="flex min-h-full flex-col gap-3 p-4">
           <AskedCaption instruction={instruction} />
           {loading ? (
             <LoadingLines rows={5} />
           ) : error ? (
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
-            <PanelHint>
+            <PanelEmpty icon={IconPencil} title="Describe an edit">
               Describe an edit and pick a scope. Changes come back block by block as before/after
               diffs you can accept or reject.
-            </PanelHint>
+            </PanelEmpty>
           ) : live.length === 0 ? (
             <PanelHint>No changes suggested.</PanelHint>
           ) : (
@@ -936,39 +1032,40 @@ function BrainstormTab() {
 
   return (
     <div className="flex h-full flex-col">
-      <Conversation>
-        <ConversationContent className="gap-4 p-4">
-          {messages.length === 0 && streaming == null ? (
-            <PanelHint>
-              Riff on the scene: ask about motivations, plant a thread, pressure-test a beat. The AI
-              reads everything up to your cursor.
-            </PanelHint>
-          ) : null}
-          {messages.map((m, i) => (
-            <Message key={i} from={m.role}>
-              <MessageContent>
-                {m.role === "assistant" ? (
-                  <MessageResponse>{m.content}</MessageResponse>
-                ) : (
-                  <span className="whitespace-pre-wrap text-sm leading-[1.55]">
-                    {m.content}
-                  </span>
-                )}
-              </MessageContent>
-              {m.role === "assistant" ? <CopyButton text={m.content} /> : null}
-            </Message>
-          ))}
-          {streaming != null ? (
-            <Message from="assistant">
-              <MessageContent>
-                {streaming === "" ? <Spinner /> : <MessageResponse>{streaming}</MessageResponse>}
-              </MessageContent>
-            </Message>
-          ) : null}
-          {error ? <AiError error={error} onRetry={retry} /> : null}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+      {messages.length === 0 && streaming == null && !error ? (
+        <PanelEmpty icon={IconMessages} title="Brainstorm the scene">
+          Riff on the scene: ask about motivations, plant a thread, pressure-test a beat. The AI
+          reads everything up to your cursor.
+        </PanelEmpty>
+      ) : (
+        <Conversation>
+          <ConversationContent className="gap-4 p-4">
+            {messages.map((m, i) => (
+              <Message key={i} from={m.role}>
+                <MessageContent>
+                  {m.role === "assistant" ? (
+                    <MessageResponse>{m.content}</MessageResponse>
+                  ) : (
+                    <span className="whitespace-pre-wrap text-sm leading-[1.55]">
+                      {m.content}
+                    </span>
+                  )}
+                </MessageContent>
+                {m.role === "assistant" ? <CopyButton text={m.content} /> : null}
+              </Message>
+            ))}
+            {streaming != null ? (
+              <Message from="assistant">
+                <MessageContent>
+                  {streaming === "" ? <Spinner /> : <MessageResponse>{streaming}</MessageResponse>}
+                </MessageContent>
+              </Message>
+            ) : null}
+            {error ? <AiError error={error} onRetry={retry} /> : null}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+      )}
       <AiComposer
         placeholder={activeChapterId ? "Ask, riff, push back" : "Open a chapter to brainstorm"}
         loading={streaming != null}

@@ -19,11 +19,16 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
-import { buildAiContext } from "@/lib/ai/context";
+import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
 import { brainstorm } from "@/lib/ai/operations";
 import type { ChatMessage } from "@/lib/types";
-import { AiComposer, AiError, PanelEmpty } from "@/components/app/right-panel/shared";
+import {
+  AiComposer,
+  AiError,
+  PanelEmpty,
+  ScopeToggle,
+} from "@/components/app/right-panel/shared";
 
 const EMPTY_THREAD: ChatMessage[] = [];
 
@@ -59,6 +64,7 @@ export function BrainstormTab() {
     activeChapterId ? s.threads[activeChapterId] ?? EMPTY_THREAD : EMPTY_THREAD,
   );
   const setThread = useBrainstormStore((s) => s.setThread);
+  const [scope, setScope] = useState<ReadScope>("cursor");
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,7 +91,7 @@ export function BrainstormTab() {
     try {
       const result = await brainstorm(
         history.map(({ role, content }) => ({ role, content })),
-        buildAiContext(),
+        buildScopedContext(scope),
       );
       for await (const delta of result.textStream) {
         acc += delta;
@@ -127,7 +133,7 @@ export function BrainstormTab() {
       {messages.length === 0 && streaming == null && !error ? (
         <PanelEmpty icon={IconMessages} title="Brainstorm the scene">
           Riff on the scene: ask about motivations, plant a thread, pressure-test a beat. The AI
-          reads everything up to your cursor.
+          reads {scope === "cursor" ? "everything up to your cursor" : "the whole chapter"}.
         </PanelEmpty>
       ) : (
         <Conversation>
@@ -162,6 +168,18 @@ export function BrainstormTab() {
         placeholder={activeChapterId ? "Ask, riff, push back" : "Open a chapter to brainstorm"}
         loading={streaming != null}
         onSubmit={send}
+        anchorMode={scope === "cursor" ? "cursor" : "chapter"}
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "cursor", label: "Up to cursor" },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={streaming != null}
+          />
+        }
       />
     </div>
   );

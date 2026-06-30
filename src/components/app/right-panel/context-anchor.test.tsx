@@ -2,14 +2,14 @@
 //
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ContextAnchor } from "@/components/app/right-panel/context-anchor";
+import { ContextAnchor, type AnchorMode } from "@/components/app/right-panel/context-anchor";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useProjectStore } from "@/stores/project-store";
 
-const renderAnchor = (wholeChapter: boolean) =>
+const renderAnchor = (mode: AnchorMode) =>
   render(
     <TooltipProvider>
-      <ContextAnchor wholeChapter={wholeChapter} />
+      <ContextAnchor mode={mode} />
     </TooltipProvider>,
   );
 
@@ -29,18 +29,28 @@ beforeEach(() => {
 });
 
 describe("ContextAnchor", () => {
-  it("anchors to the cursor block in cursor scope", () => {
-    renderAnchor(false);
+  it("anchors to the cursor block in cursor mode", () => {
+    renderAnchor("cursor");
     expect(screen.getByText("Continuing after narration")).toBeTruthy();
     expect(screen.getByText("The door creaked open.")).toBeTruthy();
   });
 
-  it("anchors to the whole chapter (not the cursor) in chapter scope", () => {
-    renderAnchor(true);
-    // The cursor is irrelevant when the op reads the whole chapter, so the
+  it("anchors to the whole chapter (not the cursor) in chapter mode", () => {
+    renderAnchor("chapter");
+    // The cursor is irrelevant when the op only reviews the whole chapter, so the
     // anchor must not claim to continue after the selected block.
     expect(screen.queryByText(/continuing after/i)).toBeNull();
     expect(screen.getByText("Whole chapter")).toBeTruthy();
     expect(screen.getByText("What the Letter Said")).toBeTruthy();
+  });
+
+  it("shows both the whole-chapter read and the insertion point in chapter-insert mode", () => {
+    renderAnchor("chapter-insert");
+    // Suggest reads the whole chapter but still inserts after the caret block, so
+    // the eyebrow names the read scope while the body names where the block lands.
+    expect(screen.getByText("Whole chapter")).toBeTruthy();
+    expect(screen.getByText("Continues after narration - The door creaked open.")).toBeTruthy();
+    // The go-to-block affordance stays available since there is an insertion anchor.
+    expect(screen.getByLabelText("Scroll to block in editor")).toBeTruthy();
   });
 });

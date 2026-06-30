@@ -15,7 +15,7 @@ import { scrollSelectedIntoView } from "@/components/app/editor";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAi } from "@/hooks/use-ai";
-import { buildAiContext } from "@/lib/ai/context";
+import { buildSuggestContext, type ReadScope } from "@/lib/ai/context";
 import { suggestContinuation } from "@/lib/ai/operations";
 import type { SuggestResult, Suggestion } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ import {
   LoadingLines,
   PanelEmpty,
   PanelHint,
+  ScopeToggle,
 } from "@/components/app/right-panel/shared";
 
 export function SuggestTab() {
@@ -35,9 +36,14 @@ export function SuggestTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const characters = useProjectStore((s) => s.meta.characters);
 
-  const cacheKey = `suggest:${activeChapterId ?? ""}:${selectedId ?? ""}`;
+  const [scope, setScope] = useState<ReadScope>("cursor");
+  // Cursor scope keys on the selection; chapter scope reads every block (but still
+  // inserts after the caret), so it ignores the selection in the cache key.
+  const cacheKey = `suggest:${activeChapterId ?? ""}:${scope}:${
+    scope === "cursor" ? selectedId ?? "" : ""
+  }`;
   const { data, loading, error, instruction, run } = useAi<SuggestResult>(
-    (ins) => suggestContinuation({ ...buildAiContext(), instruction: ins }),
+    (ins) => suggestContinuation({ ...buildSuggestContext(scope), instruction: ins }),
     cacheKey,
     "suggest",
   );
@@ -70,7 +76,9 @@ export function SuggestTab() {
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
             <PanelEmpty icon={IconSparkles} title="Suggest a continuation">
-              Generate reads the scene up to your cursor and proposes three ways to continue.
+              Generate reads{" "}
+              {scope === "cursor" ? "the scene up to your cursor" : "the whole chapter"} and
+              proposes three ways to continue.
             </PanelEmpty>
           ) : !v ? (
             <PanelHint>No suggestion.</PanelHint>
@@ -146,6 +154,18 @@ export function SuggestTab() {
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
         focusSignal={focusTick}
+        anchorMode={scope === "cursor" ? "cursor" : "chapter-insert"}
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "cursor", label: "Up to cursor" },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={loading}
+          />
+        }
       />
     </div>
   );

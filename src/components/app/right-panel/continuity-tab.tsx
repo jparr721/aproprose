@@ -81,7 +81,7 @@ export function ContinuityTab() {
         loading={loading}
         onSubmit={(t) => run(t || undefined)}
         allowEmpty
-        wholeChapter={scope === "chapter"}
+        anchorMode={scope === "chapter" ? "chapter" : "cursor"}
         toolbar={
           <ScopeToggle
             value={scope}

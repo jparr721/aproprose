@@ -23,7 +23,7 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input";
 import { TypographyMuted } from "@/components/ui/typography";
-import { ContextAnchor } from "@/components/app/right-panel/context-anchor";
+import { ContextAnchor, type AnchorMode } from "@/components/app/right-panel/context-anchor";
 
 export function AiError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
@@ -140,7 +140,7 @@ export function AiComposer({
   focusSignal,
   toolbar,
   disabled,
-  wholeChapter,
+  anchorMode,
 }: {
   placeholder: string;
   loading: boolean;
@@ -150,9 +150,8 @@ export function AiComposer({
   toolbar?: React.ReactNode;
   /** Inert composer: the textarea can't be typed into (e.g. nothing to edit). */
   disabled?: boolean;
-  /** Whole-chapter scope: the op reads the whole chapter, so the anchor names the
-   *  chapter rather than the cursor block. Omitted by cursor/block-only tabs. */
-  wholeChapter?: boolean;
+  /** What the anchor describes for this tab/scope. Defaults to the caret block. */
+  anchorMode?: AnchorMode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // `allowEmpty` tabs rest collapsed; revealing the direction box swaps in the textarea.
@@ -170,7 +169,7 @@ export function AiComposer({
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
-      <ContextAnchor wholeChapter={wholeChapter ?? false} />
+      <ContextAnchor mode={anchorMode ?? "cursor"} />
       {toolbar}
       {allowEmpty && !steering ? (
         <div className="flex flex-col gap-1.5">

@@ -95,6 +95,22 @@ export function buildScopedContext(scope: ReadScope): AiContext {
   return assemble(blocks, "Reviewing the whole chapter.");
 }
 
+/**
+ * Grounding for Suggest's continuation. `"cursor"` reads up to the caret (like
+ * `buildAiContext`); `"chapter"` reads every block for context but *keeps the
+ * caret anchor* (the cursor note from the run up to the caret) so the model
+ * continues at the cursor with full-chapter awareness. This is why Suggest can't
+ * reuse `buildScopedContext("chapter")`: that drops the caret because
+ * Critique/Continuity only review, whereas Suggest generates *at* the cursor.
+ */
+export function buildSuggestContext(scope: ReadScope): AiContext {
+  if (scope === "cursor") return buildAiContext();
+  const { blocks, selectedId } = useProjectStore.getState();
+  const cutoffIdx = selectedId ? blocks.findIndex((b) => b.id === selectedId) : -1;
+  const upto = cutoffIdx >= 0 ? blocks.slice(0, cutoffIdx + 1) : blocks;
+  return assemble(blocks, cursorSummaryFor(upto));
+}
+
 /** Blocks the Edit tab may revise: rendered prose only (no notes/latex/breaks). */
 function isEditable(b: Block): boolean {
   return (

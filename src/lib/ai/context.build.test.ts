@@ -12,7 +12,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
-import { buildAiContext, buildScopedContext } from "@/lib/ai/context";
+import { buildAiContext, buildScopedContext, buildSuggestContext } from "@/lib/ai/context";
 import { useProjectStore } from "@/stores/project-store";
 import type { Block } from "@/lib/types";
 
@@ -67,6 +67,33 @@ describe("buildScopedContext", () => {
     expect(buildScopedContext("chapter").blocksText).toBe(
       "First.\n\nSecond.\n\nThird.",
     );
+  });
+});
+
+describe("buildSuggestContext", () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      blocks: [
+        mk({ id: "n1", type: "narration", text: "First." }),
+        mk({ id: "n2", type: "narration", text: "Second." }),
+        mk({ id: "n3", type: "narration", text: "Third." }),
+      ],
+      selectedId: "n2",
+    });
+  });
+
+  it("cursor scope reads up to the caret, like buildAiContext", () => {
+    expect(buildSuggestContext("cursor").blocksText).toBe("First.\n\nSecond.");
+  });
+
+  it("chapter scope reads the whole chapter but keeps the caret anchor", () => {
+    const ctx = buildSuggestContext("chapter");
+    // Reads every block for context...
+    expect(ctx.blocksText).toBe("First.\n\nSecond.\n\nThird.");
+    // ...but still continues at the caret (n2), unlike buildScopedContext which
+    // drops the caret because Critique/Continuity only review.
+    expect(ctx.cursorSummary).not.toBe("Reviewing the whole chapter.");
+    expect(ctx.cursorSummary).toContain("Second.");
   });
 });
 

@@ -289,7 +289,7 @@ export function EditTab() {
         placeholder={composer.placeholder}
         disabled={composer.disabled}
         loading={loading}
-        wholeChapter={scope === "chapter"}
+        anchorMode={scope === "chapter" ? "chapter" : "cursor"}
         onSubmit={(t) => {
           if (composer.disabled) return; // nothing eligible in scope; skip the model call
           run(t);

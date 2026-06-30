@@ -1,4 +1,4 @@
-// block-toolbar.tsx — the hover/selection action row floating above a block: the
+// block-toolbar.tsx -- the hover/selection action row floating above a block: the
 // type/speaker chip, dictation mic, AI "suggest what comes next" spark, and the
 // more-menu (move / insert / AI cleanup / delete).
 

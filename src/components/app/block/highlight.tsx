@@ -1,4 +1,4 @@
-// highlight.tsx — render block prose with the active find match wrapped in a <mark>.
+// highlight.tsx -- render block prose with the active find match wrapped in a <mark>.
 
 import type { ReactNode } from "react";
 import { renderInline, renderInlineHighlighted, FIND_MARK_CLASS } from "@/components/app/inline";

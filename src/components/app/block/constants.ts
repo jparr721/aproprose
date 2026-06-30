@@ -1,4 +1,4 @@
-// constants.ts — shared block presentation tokens (labels, swatches, prose class).
+// constants.ts -- shared block presentation tokens (labels, swatches, prose class).
 
 import type { BlockType } from "@/lib/types";
 

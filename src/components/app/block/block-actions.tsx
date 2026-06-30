@@ -1,4 +1,4 @@
-// block-actions.tsx — the block's structural actions (move / insert / AI cleanup /
+// block-actions.tsx -- the block's structural actions (move / insert / AI cleanup /
 // delete), defined once and rendered into both the toolbar's more-menu and the
 // right-click context menu so the two never drift apart.
 

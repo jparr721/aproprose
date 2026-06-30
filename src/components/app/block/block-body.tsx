@@ -1,4 +1,4 @@
-// block-body.tsx — type-aware rendering of a block's body: finished prose out of
+// block-body.tsx -- type-aware rendering of a block's body: finished prose out of
 // edit mode, seamless borderless textareas while editing.
 
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";

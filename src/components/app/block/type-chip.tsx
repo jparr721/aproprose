@@ -1,4 +1,4 @@
-// type-chip.tsx — the block's type/speaker chip: switch block type, or pick the
+// type-chip.tsx -- the block's type/speaker chip: switch block type, or pick the
 // speaker (and add a new character) for dialogue.
 
 import { useState } from "react";

@@ -1,4 +1,4 @@
-// index.tsx — one authoring block: type-aware body + in-place editing, wrapped in
+// index.tsx -- one authoring block: type-aware body + in-place editing, wrapped in
 // selection/drag wiring and a right-click menu.
 //
 // Out of selection a block renders like finished prose; selecting it turns the

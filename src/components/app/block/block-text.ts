@@ -1,4 +1,4 @@
-// block-text.ts — pure helpers shared across the block surfaces: speaker lookup
+// block-text.ts -- pure helpers shared across the block surfaces: speaker lookup
 // and a whole block rendered as readable plain text (the "Copy block" action).
 
 import type { Block as BlockT, Character } from "@/lib/types";

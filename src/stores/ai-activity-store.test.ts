@@ -30,15 +30,22 @@ describe("ai-activity-store", () => {
   it("finish on a tab the author isn't watching flags it done", () => {
     const s = useAiActivityStore.getState();
     s.start("suggest");
-    s.finish("suggest");
+    s.finish("suggest", "done");
     expect(useAiActivityStore.getState().status.suggest).toBe("done");
   });
 
-  it("finish while watching the tab clears it -- a visible result needs no badge", () => {
+  it("finish with a failed outcome flags the tab failed when away", () => {
+    const s = useAiActivityStore.getState();
+    s.start("suggest");
+    s.finish("suggest", "failed");
+    expect(useAiActivityStore.getState().status.suggest).toBe("failed");
+  });
+
+  it("finish while watching the tab clears it whatever the outcome -- a visible result needs no badge", () => {
     viewing("suggest");
     const s = useAiActivityStore.getState();
     s.start("suggest");
-    s.finish("suggest");
+    s.finish("suggest", "failed");
     expect(useAiActivityStore.getState().status.suggest).toBeUndefined();
   });
 
@@ -46,14 +53,38 @@ describe("ai-activity-store", () => {
     useViewStore.setState({ aiOpen: true, focus: false, aiCollapsed: true, aiTab: "suggest" });
     const s = useAiActivityStore.getState();
     s.start("suggest");
-    s.finish("suggest");
+    s.finish("suggest", "done");
+    expect(useAiActivityStore.getState().status.suggest).toBe("done");
+  });
+
+  it("focus mode does not count as watching, so finish flags even the selected tab", () => {
+    useViewStore.setState({ aiOpen: true, focus: true, aiCollapsed: false, aiTab: "suggest" });
+    const s = useAiActivityStore.getState();
+    s.start("suggest");
+    s.finish("suggest", "done");
+    expect(useAiActivityStore.getState().status.suggest).toBe("done");
+  });
+
+  it("a closed panel does not count as watching, so finish flags the selected tab", () => {
+    useViewStore.setState({ aiOpen: false, focus: false, aiCollapsed: false, aiTab: "suggest" });
+    const s = useAiActivityStore.getState();
+    s.start("suggest");
+    s.finish("suggest", "done");
     expect(useAiActivityStore.getState().status.suggest).toBe("done");
   });
 
   it("markSeen clears a done badge", () => {
     const s = useAiActivityStore.getState();
     s.start("critique");
-    s.finish("critique");
+    s.finish("critique", "done");
+    s.markSeen("critique");
+    expect(useAiActivityStore.getState().status.critique).toBeUndefined();
+  });
+
+  it("markSeen clears a failed badge", () => {
+    const s = useAiActivityStore.getState();
+    s.start("critique");
+    s.finish("critique", "failed");
     s.markSeen("critique");
     expect(useAiActivityStore.getState().status.critique).toBeUndefined();
   });

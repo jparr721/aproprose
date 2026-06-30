@@ -11,13 +11,13 @@
 import { create } from "zustand";
 import { useViewStore, type AiTab } from "@/stores/view-store";
 
-export type AiActivity = "running" | "done";
+export type AiActivity = "running" | "done" | "failed";
 
 interface AiActivityState {
   /** Per-tab status; absent means nothing to surface. */
   status: Partial<Record<AiTab, AiActivity>>;
   start: (tab: AiTab) => void;
-  finish: (tab: AiTab) => void;
+  finish: (tab: AiTab, outcome: "done" | "failed") => void;
   markSeen: (tab: AiTab) => void;
   reset: () => void;
 }
@@ -33,18 +33,19 @@ function isWatched(tab: AiTab): boolean {
 export const useAiActivityStore = create<AiActivityState>((set) => ({
   status: {},
   start: (tab) => set((s) => ({ status: { ...s.status, [tab]: "running" } })),
-  finish: (tab) =>
+  finish: (tab, outcome) =>
     set((s) => {
       const next = { ...s.status };
       if (isWatched(tab)) delete next[tab];
-      else next[tab] = "done";
+      else next[tab] = outcome;
       return { status: next };
     }),
-  // Opening a tab clears its finished badge, but a still-running job keeps its
-  // indicator so navigating away again re-surfaces it.
+  // Opening a tab clears its settled badge (done or failed -- the body now shows
+  // the result or the error), but a still-running job keeps its indicator so
+  // navigating away again re-surfaces it.
   markSeen: (tab) =>
     set((s) => {
-      if (s.status[tab] !== "done") return s;
+      if (s.status[tab] === "running" || s.status[tab] === undefined) return s;
       const next = { ...s.status };
       delete next[tab];
       return { status: next };

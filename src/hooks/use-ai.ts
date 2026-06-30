@@ -32,11 +32,23 @@ export function useAi<T>(
       const { start, finish } = useAiActivityStore.getState();
       patch(cacheKey, { loading: true, error: null, instruction });
       start(tab);
-      opRef
-        .current(instruction)
-        .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
-        .catch((e) => patch(cacheKey, { loading: false, error: describeAiError(e) }))
-        .finally(() => finish(tab));
+      // Invoke the op inside the chain so a *synchronous* throw from its request
+      // builder (buildSuggestContext / buildEditRequest, run before the async call)
+      // becomes a rejection the handler clears -- otherwise it would escape run(),
+      // leaving the tab stuck loading with a "running" rail badge that never clears.
+      // The two-arg `then` (not `.catch`) settles the rail exactly once per run.
+      Promise.resolve()
+        .then(() => opRef.current(instruction))
+        .then(
+          (d) => {
+            patch(cacheKey, { data: d, loading: false, error: null });
+            finish(tab, "done");
+          },
+          (e) => {
+            patch(cacheKey, { loading: false, error: describeAiError(e) });
+            finish(tab, "failed");
+          },
+        );
     },
     [cacheKey, patch, tab],
   );

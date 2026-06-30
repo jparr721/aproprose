@@ -143,8 +143,10 @@ export function RightPanelRail() {
         const active = id === tab && !collapsed;
         // The shown tab needs no flag -- its body shows the state directly and
         // opening it marks it seen. Off-screen tabs surface a pulsing dot while a
-        // job runs and a solid dot once it finishes.
+        // job runs, a solid dot once it finishes, and a destructive dot if it failed.
         const activity = active ? undefined : status[id];
+        const activityWord =
+          activity === "running" ? "working" : activity === "failed" ? "failed" : "ready";
         const item = (
           <div key={id} className="relative">
             <Tooltip>
@@ -152,11 +154,7 @@ export function RightPanelRail() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={
-                    activity
-                      ? `${label} (${activity === "running" ? "working" : "ready"})`
-                      : label
-                  }
+                  aria-label={activity ? `${label} (${activityWord})` : label}
                   onClick={() => pick(id)}
                   className={cn(
                     "text-muted-foreground hover:text-foreground",
@@ -172,8 +170,10 @@ export function RightPanelRail() {
               <span
                 aria-hidden
                 className={cn(
-                  "pointer-events-none absolute right-1 top-1 size-1.5 rounded-full bg-primary",
+                  "pointer-events-none absolute right-1 top-1 size-1.5 rounded-full",
                   activity === "running" && "animate-pulse bg-primary/70",
+                  activity === "done" && "bg-primary",
+                  activity === "failed" && "bg-destructive",
                 )}
               />
             ) : null}

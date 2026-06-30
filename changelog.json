@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.9.0",
+    "date": "2026-06-30",
+    "summary": "The writing assistant gains scope controls, in-place edit refinement, and clearer job status.",
+    "highlights": [
+      "Suggest and Brainstorm now let you choose whether the AI reads just up to your cursor or the whole chapter",
+      "You can now refine a proposed edit in place (e.g. ask to make it shorter or colder) instead of regenerating it from scratch",
+      "The assistant rail now flags when a tool is working or has just finished on a tab you are not currently viewing",
+      "The generating tools now rest as a single Generate button, with the optional steering instruction tucked behind an Add a direction toggle, and idle panels show a centered prompt",
+      "A whole-chapter suggestion stays anchored to the block it was generated for, so it inserts in the right place even after you move your cursor",
+      "Failed Brainstorm replies no longer leave a truncated partial answer behind, and AI requests that error now report the failure instead of getting stuck loading",
+      "The block action toolbar sits a little higher so it no longer covers the first line of a block",
+      "Removed the Typographic/Cards block style setting in favor of a single consistent layout"
+    ]
+  },
+  {
     "version": "0.8.0",
     "date": "2026-06-29",
     "summary": "Find and replace comes to the chapter editor.",

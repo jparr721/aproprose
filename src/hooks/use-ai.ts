@@ -1,5 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiActivityStore } from "@/stores/ai-activity-store";
+import type { AiTab } from "@/stores/view-store";
 import { describeAiError } from "@/lib/ai/errors";
 
 /**
@@ -11,9 +13,15 @@ import { describeAiError } from "@/lib/ai/errors";
  * `run` stays memoised on `cacheKey` -- moving the cursor mid-flight can never
  * land a stale result against the new anchor; the in-flight run just populates
  * the old key. The instruction that produced a result is stored on the entry so
- * a remounted tab can caption it.
+ * a remounted tab can caption it. `tab` is the rail function this result belongs
+ * to, so the rail can flag in-progress / freshly-finished work on a tab the
+ * author has navigated away from (see ai-activity-store).
  */
-export function useAi<T>(op: (instruction?: string) => Promise<T>, cacheKey: string) {
+export function useAi<T>(
+  op: (instruction?: string) => Promise<T>,
+  cacheKey: string,
+  tab: AiTab,
+) {
   const entry = useAiCacheStore((s) => s.entries[cacheKey]);
   const patch = useAiCacheStore((s) => s.patch);
   const opRef = useRef(op);
@@ -21,13 +29,28 @@ export function useAi<T>(op: (instruction?: string) => Promise<T>, cacheKey: str
 
   const run = useCallback(
     (instruction?: string) => {
+      const { start, finish } = useAiActivityStore.getState();
       patch(cacheKey, { loading: true, error: null, instruction });
-      opRef
-        .current(instruction)
-        .then((d) => patch(cacheKey, { data: d, loading: false, error: null }))
-        .catch((e) => patch(cacheKey, { loading: false, error: describeAiError(e) }));
+      start(tab);
+      // Invoke the op inside the chain so a *synchronous* throw from its request
+      // builder (buildSuggestContext / buildEditRequest, run before the async call)
+      // becomes a rejection the handler clears -- otherwise it would escape run(),
+      // leaving the tab stuck loading with a "running" rail badge that never clears.
+      // The two-arg `then` (not `.catch`) settles the rail exactly once per run.
+      Promise.resolve()
+        .then(() => opRef.current(instruction))
+        .then(
+          (d) => {
+            patch(cacheKey, { data: d, loading: false, error: null });
+            finish(tab, "done");
+          },
+          (e) => {
+            patch(cacheKey, { loading: false, error: describeAiError(e) });
+            finish(tab, "failed");
+          },
+        );
     },
-    [cacheKey, patch],
+    [cacheKey, patch, tab],
   );
 
   return {

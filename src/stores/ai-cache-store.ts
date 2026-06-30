@@ -23,6 +23,11 @@ export interface AiCacheEntry {
   /** The ask-box instruction that produced `data`, so a remounted tab can
    *  restore its box and keep it in sync with the result shown. */
   instruction?: string;
+  /** Suggest only: the block the cached continuation was generated to follow.
+   *  Chapter scope keeps a suggestion across cursor moves, so the anchor (where
+   *  it inserts and what the context pill names) must travel with the result
+   *  rather than tracking the live caret. Absent for cursor-scope / other tabs. */
+  anchorId?: string;
 }
 
 interface AiCacheState {

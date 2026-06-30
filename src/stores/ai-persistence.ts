@@ -10,6 +10,7 @@ import { useRef, useEffect } from "react";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
 import { useAiCacheStore, type AiCacheEntry } from "@/stores/ai-cache-store";
+import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { useProjectStore } from "@/stores/project-store";
 import type { ChatMessage } from "@/lib/types";
@@ -34,7 +35,13 @@ export function toSnapshot(
   const kept: Record<string, AiCacheEntry> = {};
   for (const [key, e] of Object.entries(entries)) {
     if (e && e.data != null) {
-      kept[key] = { data: e.data, instruction: e.instruction, loading: false, error: null };
+      kept[key] = {
+        data: e.data,
+        instruction: e.instruction,
+        anchorId: e.anchorId,
+        loading: false,
+        error: null,
+      };
     }
   }
   return { v: 1, entries: kept, threads };
@@ -49,15 +56,22 @@ export function fromSnapshot(snapshot: PersistedAiState | null): {
   if (!snapshot || snapshot.v !== 1) return { entries: {}, threads: {} };
   const entries: Record<string, AiCacheEntry> = {};
   for (const [key, e] of Object.entries(snapshot.entries ?? {})) {
-    entries[key] = { data: e.data, instruction: e.instruction, loading: false, error: null };
+    entries[key] = {
+      data: e.data,
+      instruction: e.instruction,
+      anchorId: e.anchorId,
+      loading: false,
+      error: null,
+    };
   }
   return { entries, threads: snapshot.threads ?? {} };
 }
 
-/** Clear both AI stores (project closed / switching before a load completes). */
+/** Clear the AI stores (project closed / switching before a load completes). */
 export function resetAiStores(): void {
   useAiCacheStore.getState().reset();
   useBrainstormStore.getState().reset();
+  useAiActivityStore.getState().reset();
 }
 
 /** Load a project's saved AI state into the live stores (empty if none). */

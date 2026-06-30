@@ -4,7 +4,7 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Field } from "@/components/app/settings/field";
 import { useSettingsStore } from "@/stores/settings-store";
-import type { BlockStyle, Theme } from "@/lib/types";
+import type { Theme } from "@/lib/types";
 
 const THEMES: { value: Theme; label: string }[] = [
   { value: "light", label: "Light" },
@@ -12,17 +12,10 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
-const BLOCK_STYLES: { value: BlockStyle; label: string }[] = [
-  { value: "typo", label: "Typographic" },
-  { value: "cards", label: "Cards" },
-];
-
 export function AppearanceTab() {
   const theme = useSettingsStore((s) => s.theme);
-  const blockStyle = useSettingsStore((s) => s.blockStyle);
   const proseSize = useSettingsStore((s) => s.proseSize);
   const setTheme = useSettingsStore((s) => s.setTheme);
-  const setBlockStyle = useSettingsStore((s) => s.setBlockStyle);
   const setProseSize = useSettingsStore((s) => s.setProseSize);
 
   return (
@@ -42,20 +35,6 @@ export function AppearanceTab() {
       </Field>
 
       <Separator />
-
-      <Field label="Block style">
-        <ButtonGroup>
-          {BLOCK_STYLES.map((b) => (
-            <Button
-              key={b.value}
-              variant={blockStyle === b.value ? "default" : "outline"}
-              onClick={() => setBlockStyle(b.value)}
-            >
-              {b.label}
-            </Button>
-          ))}
-        </ButtonGroup>
-      </Field>
 
       <Field label="Prose size" hint={`${proseSize}px`}>
         <Slider

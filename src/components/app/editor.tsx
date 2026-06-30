@@ -52,14 +52,19 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
   ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
 };
 
-// After a nav-key move, bring the newly-selected block into view. The block node
-// already exists (selection only restyles it), so a synchronous query is fine.
-export function scrollSelectedIntoView() {
-  const id = useProjectStore.getState().selectedId;
-  if (!id) return;
+// Bring a specific block into view by id. The block node already exists (selection
+// only restyles it), so a synchronous query is fine.
+export function scrollBlockIntoView(id: string) {
   document
     .querySelector(`[data-block-id="${id}"]`)
     ?.scrollIntoView({ block: "nearest" });
+}
+
+// After a nav-key move, bring the newly-selected block into view.
+export function scrollSelectedIntoView() {
+  const id = useProjectStore.getState().selectedId;
+  if (!id) return;
+  scrollBlockIntoView(id);
 }
 
 function AddBlockRow() {

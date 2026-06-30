@@ -9,7 +9,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
   type AiProvider,
-  type BlockStyle,
   type Settings,
   type Theme,
 } from "@/lib/types";
@@ -19,7 +18,6 @@ interface SettingsState extends Settings {
   /** Whether persisted settings have been read back from disk yet. */
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
-  setBlockStyle: (blockStyle: BlockStyle) => void;
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
   setAiModel: (aiModel: string | null) => void;
@@ -34,7 +32,6 @@ export const useSettingsStore = create<SettingsState>()(
       ...DEFAULT_SETTINGS,
       hydrated: false,
       setTheme: (theme) => set({ theme }),
-      setBlockStyle: (blockStyle) => set({ blockStyle }),
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
       setAiModel: (aiModel) => set({ aiModel }),
@@ -46,9 +43,8 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, blockStyle, proseSize, pdfZoom, aiModel, aiProvider, loreTags }) => ({
+      partialize: ({ theme, proseSize, pdfZoom, aiModel, aiProvider, loreTags }) => ({
         theme,
-        blockStyle,
         proseSize,
         pdfZoom,
         aiModel,

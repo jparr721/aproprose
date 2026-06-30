@@ -6,7 +6,7 @@
 // they don't render and shouldn't pollute the prose the model reasons about.
 
 import type { AiContext, EditRequest } from "@/lib/ai/operations";
-import type { Block, Character } from "@/lib/types";
+import type { Block, BlockType, Character } from "@/lib/types";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 
@@ -95,6 +95,22 @@ export function buildScopedContext(scope: ReadScope): AiContext {
   return assemble(blocks, "Reviewing the whole chapter.");
 }
 
+/**
+ * Grounding for Suggest's continuation. `"cursor"` reads up to the caret (like
+ * `buildAiContext`); `"chapter"` reads every block for context but *keeps the
+ * caret anchor* (the cursor note from the run up to the caret) so the model
+ * continues at the cursor with full-chapter awareness. This is why Suggest can't
+ * reuse `buildScopedContext("chapter")`: that drops the caret because
+ * Critique/Continuity only review, whereas Suggest generates *at* the cursor.
+ */
+export function buildSuggestContext(scope: ReadScope): AiContext {
+  if (scope === "cursor") return buildAiContext();
+  const { blocks, selectedId } = useProjectStore.getState();
+  const cutoffIdx = selectedId ? blocks.findIndex((b) => b.id === selectedId) : -1;
+  const upto = cutoffIdx >= 0 ? blocks.slice(0, cutoffIdx + 1) : blocks;
+  return assemble(blocks, cursorSummaryFor(upto));
+}
+
 /** Blocks the Edit tab may revise: rendered prose only (no notes/latex/breaks). */
 function isEditable(b: Block): boolean {
   return (
@@ -102,6 +118,33 @@ function isEditable(b: Block): boolean {
     b.type === "dialogue" ||
     (b.type === "chapter" && b.level !== "break")
   );
+}
+
+/**
+ * Wrap a resolved set of target blocks in the shared edit envelope: the active
+ * chapter title, the cast roster, and the story structure, so revisions keep
+ * voice. The single place `buildEditRequest` and `buildRefineRequest` agree on
+ * the grounding; only the target blocks differ between them.
+ */
+function editRequestFor(
+  targets: { id: string; type: BlockType; text: string }[],
+  instruction: string,
+): EditRequest {
+  const { project, activeChapterId, meta } = useProjectStore.getState();
+  const chapter = project?.chapters.find((c) => c.id === activeChapterId);
+  const structure = renderStoryStructure({
+    outline: meta.outline,
+    chapters: meta.chapters,
+    characters: meta.characters,
+    activeChapterId,
+  });
+  return {
+    chapterTitle: chapter?.title,
+    characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
+    blocks: targets,
+    instruction,
+    structure: structure ?? undefined,
+  };
 }
 
 /**
@@ -115,9 +158,7 @@ export function buildEditRequest(
   scope: "block" | "chapter",
   instruction: string,
 ): EditRequest {
-  const { project, activeChapterId, blocks, meta, selectedId, selectedIds } =
-    useProjectStore.getState();
-  const chapter = project?.chapters.find((c) => c.id === activeChapterId);
+  const { blocks, selectedId, selectedIds } = useProjectStore.getState();
 
   let targets: Block[];
   if (scope === "block") {
@@ -128,18 +169,23 @@ export function buildEditRequest(
     targets = blocks.filter(isEditable);
   }
 
-  const structure = renderStoryStructure({
-    outline: meta.outline,
-    chapters: meta.chapters,
-    characters: meta.characters,
-    activeChapterId,
-  });
-
-  return {
-    chapterTitle: chapter?.title,
-    characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
-    blocks: targets.map((b) => ({ id: b.id, type: b.type, text: b.text })),
+  return editRequestFor(
+    targets.map((b) => ({ id: b.id, type: b.type, text: b.text })),
     instruction,
-    structure: structure ?? undefined,
-  };
+  );
+}
+
+/**
+ * Build a single-block edit request whose base text is a caller-supplied draft -
+ * a revision the Edit tab already proposed - rather than the block's stored text.
+ * This is the seam that lets the author refine a proposal ("now make it colder")
+ * so the model reworks the draft they liked instead of re-editing the original
+ * block from scratch.
+ */
+export function buildRefineRequest(
+  block: { id: string; type: BlockType },
+  baseText: string,
+  instruction: string,
+): EditRequest {
+  return editRequestFor([{ id: block.id, type: block.type, text: baseText }], instruction);
 }

@@ -132,4 +132,34 @@ describe("buildRefineRequest", () => {
     expect(req.characters).toEqual([{ name: "Mara", role: "PI" }]);
     expect(req.blocks[0].text).toBe("Refined line.");
   });
+
+  it("forwards the story structure through the shared editRequestFor envelope", () => {
+    // structure flows from editRequestFor, the helper buildEditRequest and
+    // buildRefineRequest share; without this it is asserted on no edit/refine path.
+    useProjectStore.setState({
+      project: { chapters: [{ id: "c1", title: "One" }] } as unknown as ProjectInfo,
+      activeChapterId: "c1",
+      meta: {
+        characters: [],
+        lore: [],
+        statuses: {},
+        outline: { premise: "" },
+        chapters: {
+          c1: {
+            act: "setup",
+            plotPoint: null,
+            premise: "",
+            goal: "Introduce the protagonist",
+            conflict: "",
+            turn: "",
+            characterIds: [],
+            cards: [],
+          },
+        },
+      },
+    });
+    const req = buildRefineRequest({ id: "n1", type: "narration" }, "draft", "x");
+    expect(req.structure).toContain("Act I");
+    expect(req.structure).toContain("Goal: Introduce the protagonist");
+  });
 });

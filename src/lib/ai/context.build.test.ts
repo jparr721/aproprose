@@ -92,7 +92,6 @@ describe("buildSuggestContext", () => {
     expect(ctx.blocksText).toBe("First.\n\nSecond.\n\nThird.");
     // ...but still continues at the caret (n2), unlike buildScopedContext which
     // drops the caret because Critique/Continuity only review.
-    expect(ctx.cursorSummary).not.toBe("Reviewing the whole chapter.");
     expect(ctx.cursorSummary).toContain("Second.");
   });
 });

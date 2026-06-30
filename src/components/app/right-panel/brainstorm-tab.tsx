@@ -22,6 +22,7 @@ import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
 import { brainstorm } from "@/lib/ai/operations";
+import { copyText } from "@/lib/clipboard";
 import type { ChatMessage } from "@/lib/types";
 import {
   AiComposer,
@@ -41,15 +42,13 @@ function CopyButton({ text }: { text: string }) {
         tooltip={copied ? "Copied" : "Copy"}
         label="Copy reply"
         onClick={() => {
-          // Only show the "copied" checkmark once the write actually succeeds;
-          // a blocked/unavailable clipboard logs instead of flashing false success.
-          navigator.clipboard
-            .writeText(text)
-            .then(() => {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            })
-            .catch((e) => console.warn("[right-panel] copy failed:", e));
+          // copyText handles the WebKitGTK fallback; only flash "copied" when the
+          // write actually succeeds, never on a blocked/unavailable clipboard.
+          void copyText(text).then((ok) => {
+            if (!ok) return;
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          });
         }}
       >
         {copied ? <IconCheck className="size-3.5" /> : <IconCopy className="size-3.5" />}
@@ -98,16 +97,19 @@ export function BrainstormTab() {
         if (onThisChapter()) setStreaming(acc);
       }
       setThread(chapterId, [...history, { role: "assistant", content: acc }]);
+      useAiActivityStore.getState().finish("brainstorm", "done");
     } catch (e) {
-      // Keep whatever streamed before the failure; surface the error alongside it.
-      setThread(
-        chapterId,
-        acc ? [...history, { role: "assistant", content: acc }] : history,
-      );
+      // A failed stream is not a real reply: drop the partial (keeping the user
+      // turn so "Try again" works) rather than persisting a truncated answer that
+      // reads as a short success after reload. Log unconditionally so a failure
+      // that lands after the author switched chapters is still diagnosable; only
+      // surface it in-panel while this chapter is the one on screen.
+      setThread(chapterId, history);
+      console.error("[brainstorm] stream failed for chapter", chapterId, "-", e);
       if (onThisChapter()) setError(describeAiError(e));
+      useAiActivityStore.getState().finish("brainstorm", "failed");
     } finally {
       if (onThisChapter()) setStreaming(null);
-      useAiActivityStore.getState().finish("brainstorm");
     }
   };
 

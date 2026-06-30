@@ -12,7 +12,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
-import { buildEditRequest } from "@/lib/ai/context";
+import { buildEditRequest, buildRefineRequest } from "@/lib/ai/context";
 import { useProjectStore } from "@/stores/project-store";
 import type { Block, ProjectInfo } from "@/lib/types";
 
@@ -96,5 +96,40 @@ describe("buildEditRequest", () => {
     const req = buildEditRequest("block", "tighten");
     expect(req.chapterTitle).toBe("The Gate");
     expect(req.characters).toEqual([{ name: "Mara", role: "PI" }]);
+  });
+});
+
+describe("buildRefineRequest", () => {
+  it("grounds the request on the supplied draft text, not the block's stored text", () => {
+    // "n1" is stored as "Narr one"; a refine must edit the proposed draft instead,
+    // so the model tightens the revision the author liked, not the original block.
+    const req = buildRefineRequest(
+      { id: "n1", type: "narration" },
+      "A tighter draft of the proposal.",
+      "shorten the last line",
+    );
+    expect(req.blocks).toEqual([
+      { id: "n1", type: "narration", text: "A tighter draft of the proposal." },
+    ]);
+    expect(req.instruction).toBe("shorten the last line");
+  });
+
+  it("forwards the active chapter title and cast like buildEditRequest", () => {
+    useProjectStore.setState({
+      project: { chapters: [{ id: "ch1", title: "The Gate" }] } as unknown as ProjectInfo,
+      activeChapterId: "ch1",
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [{ id: "c1", name: "Mara", color: "oklch(0.7 0.1 30)", role: "PI" }],
+      },
+    });
+    const req = buildRefineRequest(
+      { id: "d1", type: "dialogue" },
+      "Refined line.",
+      "make her colder",
+    );
+    expect(req.chapterTitle).toBe("The Gate");
+    expect(req.characters).toEqual([{ name: "Mara", role: "PI" }]);
+    expect(req.blocks[0].text).toBe("Refined line.");
   });
 });

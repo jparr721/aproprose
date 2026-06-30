@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.8.0",
+    "date": "2026-06-29",
+    "summary": "Find and replace comes to the chapter editor.",
+    "highlights": [
+      "Press Cmd+F in a chapter to open a find and replace bar that searches across all blocks",
+      "Match the current result is highlighted in place and the view scrolls to center it as you step through results",
+      "Toggle match case, whole word, and regular expression search, with a live count of how many matches were found",
+      "Jump between matches with the up/down arrows or Enter and Shift+Enter, wrapping around at the ends",
+      "Replace the current match or replace all at once, with capture group support like $1 and $2 in regex mode"
+    ]
+  },
+  {
     "version": "0.7.0",
     "date": "2026-06-28",
     "summary": "Smarter AI panel scoping, full layout restore on relaunch, and a fixed UI freeze",

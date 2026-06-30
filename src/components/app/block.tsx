@@ -537,7 +537,7 @@ function BlockImpl({
           {/* actions */}
           <div
             className={cn(
-              "absolute right-2 top-0 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
+              "absolute right-2 -top-2 hidden -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
               "group-hover:flex has-[[data-state=open]]:flex",
               selected && "flex",
             )}

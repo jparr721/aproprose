@@ -2,7 +2,7 @@
 //
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ContextAnchor } from "@/components/app/right-panel";
+import { ContextAnchor } from "@/components/app/right-panel/context-anchor";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useProjectStore } from "@/stores/project-store";
 

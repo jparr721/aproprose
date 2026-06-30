@@ -87,7 +87,7 @@ export function WhatsNewDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
+      <DialogContent className="flex h-[80vh] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>What's New</DialogTitle>
           <DialogDescription>Recent changes to aproprose.</DialogDescription>

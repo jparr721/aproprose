@@ -3,7 +3,7 @@
 import { IconArrowDown } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { scrollSelectedIntoView } from "@/components/app/editor";
+import { scrollBlockIntoView } from "@/components/app/editor";
 import { useProjectStore } from "@/stores/project-store";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { cn } from "@/lib/utils";
@@ -19,17 +19,21 @@ export type AnchorMode = "cursor" | "chapter" | "chapter-insert";
 
 /** The "you are here": the grounding the AI operation anchors to. Sits just above
  *  the composer's text input. The caret-block text (and the Suggest insertion line)
- *  wrap over up to two lines so a longer tail reads naturally. */
-export function ContextAnchor({ mode }: { mode: AnchorMode }) {
+ *  wrap over up to two lines so a longer tail reads naturally. `anchorId` overrides
+ *  the live caret when a tab has frozen its anchor to a specific block (Suggest
+ *  keeps a chapter-scope continuation pinned to the block it was generated against);
+ *  it falls back to the live selection when absent. */
+export function ContextAnchor({ mode, anchorId }: { mode: AnchorMode; anchorId?: string }) {
   const selectedId = useProjectStore((s) => s.selectedId);
   const blocks = useProjectStore((s) => s.blocks);
   const chapterTitle = useProjectStore((s) =>
     s.project?.chapters.find((c) => c.id === s.activeChapterId)?.title,
   );
-  // The caret block backs the cursor anchor and the Suggest insertion point; plain
-  // chapter scope ignores the caret entirely.
+  // The effective block backs the cursor anchor and the Suggest insertion point;
+  // plain chapter scope ignores it entirely.
+  const effectiveId = anchorId ?? selectedId;
   const block =
-    mode !== "chapter" && selectedId ? blocks.find((b) => b.id === selectedId) : undefined;
+    mode !== "chapter" && effectiveId ? blocks.find((b) => b.id === effectiveId) : undefined;
   const text = block?.text.trim();
 
   // Eyebrow names the read scope in both chapter modes; the caret block otherwise.
@@ -63,7 +67,7 @@ export function ContextAnchor({ mode }: { mode: AnchorMode }) {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Scroll to block in editor"
-                onClick={() => scrollSelectedIntoView()}
+                onClick={() => scrollBlockIntoView(block.id)}
               >
                 <IconArrowDown className="size-3" />
               </Button>

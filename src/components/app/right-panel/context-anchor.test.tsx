@@ -53,4 +53,25 @@ describe("ContextAnchor", () => {
     // The go-to-block affordance stays available since there is an insertion anchor.
     expect(screen.getByLabelText("Scroll to block in editor")).toBeTruthy();
   });
+
+  it("anchors to an explicit anchor block over the live selection", () => {
+    // Suggest freezes a chapter-scope continuation to the block it was generated
+    // against, so the anchor must name that block even after the caret moves away.
+    useProjectStore.setState({
+      selectedId: "b2",
+      blocks: [
+        { id: "b1", type: "narration", text: "The door creaked open." },
+        { id: "b2", type: "narration", text: "She turned the key." },
+      ],
+    } as never);
+    render(
+      <TooltipProvider>
+        <ContextAnchor mode="chapter-insert" anchorId="b1" />
+      </TooltipProvider>,
+    );
+    expect(
+      screen.getByText("Continues after narration - The door creaked open."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/She turned the key\./)).toBeNull();
+  });
 });

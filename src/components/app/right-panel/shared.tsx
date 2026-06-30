@@ -141,6 +141,7 @@ export function AiComposer({
   toolbar,
   disabled,
   anchorMode,
+  anchorId,
 }: {
   placeholder: string;
   loading: boolean;
@@ -152,6 +153,9 @@ export function AiComposer({
   disabled?: boolean;
   /** What the anchor describes for this tab/scope. Defaults to the caret block. */
   anchorMode?: AnchorMode;
+  /** Pin the anchor to a specific block instead of the live caret (Suggest's frozen
+   *  chapter-scope anchor); falls back to the live selection when omitted. */
+  anchorId?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // `allowEmpty` tabs rest collapsed; revealing the direction box swaps in the textarea.
@@ -169,7 +173,7 @@ export function AiComposer({
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
-      <ContextAnchor mode={anchorMode ?? "cursor"} />
+      <ContextAnchor mode={anchorMode ?? "cursor"} anchorId={anchorId} />
       {toolbar}
       {allowEmpty && !steering ? (
         <div className="flex flex-col gap-1.5">

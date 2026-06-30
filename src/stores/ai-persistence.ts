@@ -35,7 +35,13 @@ export function toSnapshot(
   const kept: Record<string, AiCacheEntry> = {};
   for (const [key, e] of Object.entries(entries)) {
     if (e && e.data != null) {
-      kept[key] = { data: e.data, instruction: e.instruction, loading: false, error: null };
+      kept[key] = {
+        data: e.data,
+        instruction: e.instruction,
+        anchorId: e.anchorId,
+        loading: false,
+        error: null,
+      };
     }
   }
   return { v: 1, entries: kept, threads };
@@ -50,7 +56,13 @@ export function fromSnapshot(snapshot: PersistedAiState | null): {
   if (!snapshot || snapshot.v !== 1) return { entries: {}, threads: {} };
   const entries: Record<string, AiCacheEntry> = {};
   for (const [key, e] of Object.entries(snapshot.entries ?? {})) {
-    entries[key] = { data: e.data, instruction: e.instruction, loading: false, error: null };
+    entries[key] = {
+      data: e.data,
+      instruction: e.instruction,
+      anchorId: e.anchorId,
+      loading: false,
+      error: null,
+    };
   }
   return { entries, threads: snapshot.threads ?? {} };
 }

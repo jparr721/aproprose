@@ -12,9 +12,11 @@ import {
   fromSnapshot,
   loadAiState,
   saveAiState,
+  resetAiStores,
   type PersistedAiState,
 } from "@/stores/ai-persistence";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 
 beforeEach(() => {
@@ -22,6 +24,21 @@ beforeEach(() => {
   writeAppData.mockClear();
   useAiCacheStore.setState({ entries: {} });
   useBrainstormStore.setState({ threads: {} });
+  useAiActivityStore.setState({ status: {} });
+});
+
+describe("resetAiStores", () => {
+  it("clears the cache, brainstorm, and activity stores on project switch", () => {
+    useAiCacheStore.setState({ entries: { a: { data: 1, loading: false, error: null } } });
+    useBrainstormStore.setState({ threads: { c: [{ role: "user", content: "x" }] } });
+    useAiActivityStore.setState({ status: { suggest: "done" } });
+
+    resetAiStores();
+
+    expect(useAiCacheStore.getState().entries).toEqual({});
+    expect(useBrainstormStore.getState().threads).toEqual({});
+    expect(useAiActivityStore.getState().status).toEqual({});
+  });
 });
 
 describe("toSnapshot", () => {
@@ -56,6 +73,15 @@ describe("fromSnapshot", () => {
       entries: { a: { data: 5, instruction: "i", loading: false, error: null } },
       threads: { ch: [{ role: "assistant", content: "y" }] },
     });
+  });
+
+  it("round-trips a Suggest anchor id so the frozen anchor survives a restart", () => {
+    const snap = toSnapshot(
+      { s: { data: { x: 1 }, loading: false, error: null, anchorId: "blk-7" } },
+      {},
+    );
+    expect(snap.entries.s.anchorId).toBe("blk-7");
+    expect(fromSnapshot(snap).entries.s.anchorId).toBe("blk-7");
   });
 
   it("tolerates a v1 blob missing the threads field", () => {

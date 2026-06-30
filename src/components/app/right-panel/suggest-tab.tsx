@@ -1,5 +1,6 @@
 // suggest-tab.tsx -- proposes three ways to continue the scene, grounded on the
-// prose up to the caret; inserts the chosen one after the selected block.
+// prose up to the caret (or the whole chapter); inserts the chosen one after the
+// block the suggestion was generated against.
 
 import { useEffect, useState } from "react";
 import { IconArrowRight, IconSparkles } from "@tabler/icons-react";
@@ -14,6 +15,7 @@ import {
 import { scrollSelectedIntoView } from "@/components/app/editor";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
 import { buildSuggestContext, type ReadScope } from "@/lib/ai/context";
 import { suggestContinuation } from "@/lib/ai/operations";
@@ -34,6 +36,7 @@ export function SuggestTab() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
+  const blocks = useProjectStore((s) => s.blocks);
   const characters = useProjectStore((s) => s.meta.characters);
 
   const [scope, setScope] = useState<ReadScope>("cursor");
@@ -42,11 +45,29 @@ export function SuggestTab() {
   const cacheKey = `suggest:${activeChapterId ?? ""}:${scope}:${
     scope === "cursor" ? selectedId ?? "" : ""
   }`;
+  const patch = useAiCacheStore((s) => s.patch);
   const { data, loading, error, instruction, run } = useAi<SuggestResult>(
     (ins) => suggestContinuation({ ...buildSuggestContext(scope), instruction: ins }),
     cacheKey,
     "suggest",
   );
+
+  // The block this cached suggestion was generated to follow. Chapter scope keeps a
+  // suggestion across cursor moves, so the anchor (where it inserts, what the pill
+  // names) stays pinned here instead of drifting to the live caret. If that block
+  // was since deleted the frozen id no longer resolves, so fall back to the live
+  // caret rather than handing a dead id to insertAfter (which would prepend at the
+  // chapter top) or to the pill (which would claim "end of the chapter").
+  const anchorId = useAiCacheStore((s) => s.entries[cacheKey]?.anchorId);
+  const anchorBlockId =
+    anchorId != null && blocks.some((b) => b.id === anchorId) ? anchorId : selectedId;
+
+  // Freeze the anchor to the caret at generation time, then run. Used for both the
+  // first run (composer submit) and every regenerate (Try again / retry).
+  const generate = (ins?: string) => {
+    patch(cacheKey, { anchorId: selectedId ?? undefined });
+    run(ins);
+  };
 
   const [variant, setVariant] = useState(0);
   useEffect(() => setVariant(0), [data]);
@@ -56,7 +77,7 @@ export function SuggestTab() {
       s.type === "dialogue" && s.speaker
         ? characters.find((c) => c.name.toLowerCase() === s.speaker?.toLowerCase())?.id
         : undefined;
-    insertAfter(selectedId, { type: s.type, text: s.text, speaker: speakerId });
+    insertAfter(anchorBlockId, { type: s.type, text: s.text, speaker: speakerId });
     requestAnimationFrame(() => scrollSelectedIntoView());
   };
 
@@ -73,7 +94,7 @@ export function SuggestTab() {
           {loading ? (
             <LoadingLines rows={5} />
           ) : error ? (
-            <AiError error={error} onRetry={() => run(instruction)} />
+            <AiError error={error} onRetry={() => generate(instruction)} />
           ) : !data ? (
             <PanelEmpty icon={IconSparkles} title="Suggest a continuation">
               Generate reads{" "}
@@ -119,7 +140,7 @@ export function SuggestTab() {
                   <Button size="sm" onClick={() => insert(v)}>
                     Insert below
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => run(instruction)}>
+                  <Button size="sm" variant="outline" onClick={() => generate(instruction)}>
                     Try again
                   </Button>
                 </div>
@@ -151,10 +172,11 @@ export function SuggestTab() {
       <AiComposer
         placeholder="e.g. more tension, have her lie"
         loading={loading}
-        onSubmit={(t) => run(t || undefined)}
+        onSubmit={(t) => generate(t || undefined)}
         allowEmpty
         focusSignal={focusTick}
         anchorMode={scope === "cursor" ? "cursor" : "chapter-insert"}
+        anchorId={anchorBlockId ?? undefined}
         toolbar={
           <ScopeToggle
             value={scope}

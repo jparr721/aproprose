@@ -233,13 +233,11 @@ export interface RecentProject {
 
 export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
-export type BlockStyle = "typo" | "cards";
 export type AiProvider = "openai" | "codex" | "claude";
 /** The subscription CLI providers - exactly the non-OpenAI members of AiProvider. */
 export type CliKind = Exclude<AiProvider, "openai">;
 export interface Settings {
   theme: Theme;
-  blockStyle: BlockStyle;
   /** Editor prose font-size in px. */
   proseSize: number;
   /** PDF preview zoom as a scale factor (1 = 100%). */
@@ -254,7 +252,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
-  blockStyle: "typo",
   proseSize: 17.5,
   pdfZoom: 1.1,
   aiModel: null,

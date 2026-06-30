@@ -1,9 +1,7 @@
-// commands/settings.ts - open settings, theme, block style, prose size.
+// commands/settings.ts - open settings, theme, prose size.
 
 import { clamp } from "es-toolkit";
 import {
-  IconCards,
-  IconLetterCase,
   IconMoon,
   IconSettings,
   IconSun,
@@ -56,20 +54,6 @@ export const settingsCommands: Command[] = [
     icon: IconMoon,
     keywords: ["dark mode", "night"],
     run: () => useSettingsStore.getState().setTheme("dark"),
-  },
-  {
-    id: "settings.block-typo",
-    group: "Settings",
-    title: "Block style: Typographic",
-    icon: IconLetterCase,
-    run: () => useSettingsStore.getState().setBlockStyle("typo"),
-  },
-  {
-    id: "settings.block-cards",
-    group: "Settings",
-    title: "Block style: Cards",
-    icon: IconCards,
-    run: () => useSettingsStore.getState().setBlockStyle("cards"),
   },
   {
     id: "settings.prose-larger",

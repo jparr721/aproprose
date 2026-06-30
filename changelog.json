@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.9.1",
+    "date": "2026-06-30",
+    "summary": "The What's New dialog now scrolls properly so you can read the full list of recent changes.",
+    "highlights": [
+      "BUG FIX: Fixed the What's New dialog so longer change lists scroll instead of getting cut off"
+    ]
+  },
+  {
     "version": "0.9.0",
     "date": "2026-06-30",
     "summary": "The writing assistant gains scope controls, in-place edit refinement, and clearer job status.",

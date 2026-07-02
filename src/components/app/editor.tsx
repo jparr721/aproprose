@@ -35,7 +35,7 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { useFindStore } from "@/stores/find-store";
 import { useSyncStore } from "@/stores/sync-store";
-import { useViewStore } from "@/stores/view-store";
+import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
@@ -70,7 +70,6 @@ export function scrollSelectedIntoView() {
 function AddBlockRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
-  const triggerSuggest = useViewStore((s) => s.triggerSuggest);
 
   const add = (type: BlockType) => insertAfter(selectedId, { type });
 
@@ -91,7 +90,7 @@ function AddBlockRow() {
       <Button
         size="sm"
         className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
-        onClick={triggerSuggest}
+        onClick={() => dispatchAiIntent({ tab: "suggest" })}
       >
         <IconSparkles className="size-3.5" />
         Suggest from context

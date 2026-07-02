@@ -2,6 +2,7 @@
 
 import { IconSparkles, IconMessageCircle, IconListTree } from "@tabler/icons-react";
 import { useViewStore, type AiTab } from "@/stores/view-store";
+import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import type { Command } from "./types";
 
 const AI_TABS: { tab: AiTab; title: string }[] = [
@@ -26,7 +27,7 @@ export const aiCommands: Command[] = [
     title: "Suggest from context",
     icon: IconSparkles,
     keywords: ["continuation", "spark"],
-    run: () => useViewStore.getState().triggerSuggest(),
+    run: () => dispatchAiIntent({ tab: "suggest" }),
   },
   ...AI_TABS.map<Command>(({ tab, title }) => ({
     id: `ai.tab-${tab}`,

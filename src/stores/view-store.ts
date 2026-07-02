@@ -40,8 +40,6 @@ interface ViewState {
 
   /** Active AI panel tab. */
   aiTab: AiTab;
-  /** Bumped to focus the Suggest ask box (e.g. from the spark). Never runs the model. */
-  suggestFocusTick: number;
   /** True when the panel is collapsed to just the icon rail (ephemeral). */
   aiCollapsed: boolean;
   /** Persisted px width of the right panel's resizable content column. */
@@ -57,8 +55,6 @@ interface ViewState {
   setRightPanelWidth: (px: number) => void;
   /** Open + expand the AI panel and switch to `tab` in one step (command palette). */
   openAiTab: (tab: AiTab) => void;
-  /** Open the AI panel, focus Suggest, and put the cursor in the ask box. Does not infer. */
-  triggerSuggest: () => void;
 
   /** Run `action` now, or stage it behind the confirm dialog if edits are unsaved. */
   requestGuarded: (action: () => void) => void;
@@ -78,13 +74,12 @@ export const useViewStore = create<ViewState>()(
       pending: null,
 
       aiTab: "suggest",
-      suggestFocusTick: 0,
       aiCollapsed: false,
       rightPanelWidth: 360,
 
       // Clear aiCollapsed on every toggle so reopening always restores the panel
       // content, never a bare icon rail (aiOpen + aiCollapsed must agree on "is
-      // content visible"). Matches openAiTab / triggerSuggest.
+      // content visible"). Matches openAiTab.
       toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false, aiCollapsed: false })),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
       toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen, focus: false })),
@@ -102,14 +97,6 @@ export const useViewStore = create<ViewState>()(
       setRightPanelWidth: (rightPanelWidth) => set({ rightPanelWidth }),
       openAiTab: (tab) =>
         set({ aiOpen: true, focus: false, aiTab: tab, aiCollapsed: false }),
-      triggerSuggest: () =>
-        set((s) => ({
-          aiOpen: true,
-          focus: false,
-          aiTab: "suggest",
-          aiCollapsed: false,
-          suggestFocusTick: s.suggestFocusTick + 1,
-        })),
 
       requestGuarded: (action) => {
         if (useProjectStore.getState().chapterDirty) set({ pending: () => action() });

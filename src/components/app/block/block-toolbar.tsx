@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
-import { useViewStore } from "@/stores/view-store";
+import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TypeChip } from "./type-chip";
@@ -33,7 +33,6 @@ export function BlockToolbar({
   actions: BlockAction[][];
 }) {
   const select = useProjectStore((s) => s.select);
-  const triggerSuggest = useViewStore((s) => s.triggerSuggest);
 
   const onMic = () => {
     select(block.id);
@@ -72,7 +71,7 @@ export function BlockToolbar({
         title="Suggest what comes next here"
         onClick={() => {
           select(block.id);
-          triggerSuggest();
+          dispatchAiIntent({ tab: "suggest" });
         }}
       >
         <IconSparkles className="text-ai-ink" />

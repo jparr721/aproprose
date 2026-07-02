@@ -7,6 +7,7 @@ import type { Command } from "./types";
 
 const AI_TABS: { tab: AiTab; title: string }[] = [
   { tab: "suggest", title: "AI: Suggest" },
+  { tab: "edit", title: "AI: Edit" },
   { tab: "critique", title: "AI: Critique" },
   { tab: "brainstorm", title: "AI: Brainstorm" },
   { tab: "continuity", title: "AI: Continuity" },

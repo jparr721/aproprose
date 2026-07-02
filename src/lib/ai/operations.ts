@@ -18,7 +18,7 @@ import { generateText, Output, streamText } from "ai";
 import { z } from "zod";
 
 import type {
-  BlockEdit,
+  BlockChange,
   BlockType,
   ChatMessage,
   CritiqueNote,
@@ -313,29 +313,20 @@ export async function continuityCheck(
 }
 
 /**
- * Drop edits the UI can't safely apply: ones targeting a block that wasn't
- * offered, and no-ops where the revised text matches the current text (trimmed).
- */
-export function sanitizeEdits(
-  edits: BlockEdit[],
-  blocks: { id: string; text: string }[],
-): BlockEdit[] {
-  const textById = new Map(blocks.map((b) => [b.id, b.text]));
-  return edits.filter((e) => {
-    const current = textById.get(e.blockId);
-    return current !== undefined && e.newText.trim() !== current.trim();
-  });
-}
-
-/**
  * Propose in-place revisions for the supplied blocks that satisfy the author's
- * instruction. Returns the full revised text per changed block, already
- * sanitized (unknown ids and no-ops removed).
+ * instruction. Rewrite-only: the result is a ManuscriptProposal whose changes
+ * are all rewrites, so every AI write path reviews through one envelope.
+ * Sanitized (unknown ids and no-ops removed).
  */
-export async function editBlocks(req: EditRequest, opts?: AiOpOptions): Promise<BlockEdit[]> {
+export async function editBlocks(
+  req: EditRequest,
+  opts?: AiOpOptions,
+): Promise<ManuscriptProposal> {
   // Nothing to act on without a direction or an eligible block: skip the model
   // call entirely (the UI also guards this, but defend the boundary too).
-  if (!req.instruction.trim() || req.blocks.length === 0) return [];
+  if (!req.instruction.trim() || req.blocks.length === 0) {
+    return { chapterId: req.chapterId, summary: "", changes: [] };
+  }
   const model = await getModel();
   const { output } = await generateText({
     model,
@@ -344,7 +335,18 @@ export async function editBlocks(req: EditRequest, opts?: AiOpOptions): Promise<
     prompt: buildEditGrounding(req),
     abortSignal: opts?.signal,
   });
-  return sanitizeEdits(output.edits, req.blocks);
+  // The edit schema stays rewrite-shaped; map it onto the shared envelope.
+  const changes: BlockChange[] = output.edits.map((e) => ({
+    kind: "rewrite",
+    blockId: e.blockId,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: e.newText,
+    toIndex: null,
+    reason: e.reason,
+  }));
+  return sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
 }
 
 // -- Revise (structural chapter write path) -----------------------------------

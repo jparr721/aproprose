@@ -3,39 +3,15 @@ import { describe, it, expect, vi } from "vitest";
 // Stub the model layer so importing operations.ts does not pull the Tauri/model stack.
 vi.mock("@/lib/ai/model", () => ({ getModel: vi.fn() }));
 
-import { reviseChapter, reviseResultSchema, sanitizeEdits, sanitizeProposal } from "@/lib/ai/operations";
+import { editBlocks, reviseChapter, reviseResultSchema, sanitizeProposal } from "@/lib/ai/operations";
 import { getModel } from "@/lib/ai/model";
-import type { BlockChange, BlockEdit, ManuscriptProposal } from "@/lib/types";
+import type { BlockChange, ManuscriptProposal } from "@/lib/types";
 
 const blocks = [
   { id: "b1", text: "the cat sat" },
   { id: "b2", text: "hello world" },
   { id: "empty", text: "" },
 ];
-
-describe("sanitizeEdits", () => {
-  it("drops edits whose blockId is not a provided block", () => {
-    const edits: BlockEdit[] = [{ blockId: "nope", newText: "x", reason: "r" }];
-    expect(sanitizeEdits(edits, blocks)).toEqual([]);
-  });
-
-  it("drops a whitespace-for-empty no-op (both trim to empty)", () => {
-    const edits: BlockEdit[] = [{ blockId: "empty", newText: "   ", reason: "r" }];
-    expect(sanitizeEdits(edits, blocks)).toEqual([]);
-  });
-
-  it("drops no-op edits (newText equals current text, trimmed)", () => {
-    const edits: BlockEdit[] = [{ blockId: "b1", newText: "  the cat sat  ", reason: "r" }];
-    expect(sanitizeEdits(edits, blocks)).toEqual([]);
-  });
-
-  it("keeps genuine changes", () => {
-    const edits: BlockEdit[] = [{ blockId: "b2", newText: "hello there", reason: "r" }];
-    expect(sanitizeEdits(edits, blocks)).toEqual([
-      { blockId: "b2", newText: "hello there", reason: "r" },
-    ]);
-  });
-});
 
 const change = (p: Partial<BlockChange> & { kind: BlockChange["kind"] }): BlockChange => ({
   blockId: null,
@@ -134,9 +110,9 @@ describe("sanitizeProposal insert/remove/move rules", () => {
   });
 });
 
-describe("reviseChapter guards", () => {
-  it("resolves an empty proposal without a model call when the instruction is blank", async () => {
-    const out = await reviseChapter({
+describe("guard shortcircuits (no model call)", () => {
+  it("editBlocks resolves an empty proposal when the instruction is blank", async () => {
+    const out = await editBlocks({
       chapterId: "ch1",
       blocks: [{ id: "b1", type: "narration", text: "t" }],
       instruction: "   ",
@@ -145,7 +121,7 @@ describe("reviseChapter guards", () => {
     expect(getModel).not.toHaveBeenCalled();
   });
 
-  it("resolves an empty proposal without a model call when no blocks are eligible", async () => {
+  it("reviseChapter resolves an empty proposal when no blocks are eligible", async () => {
     const out = await reviseChapter({ chapterId: "ch1", blocks: [], instruction: "go" });
     expect(out).toEqual({ chapterId: "ch1", summary: "", changes: [] });
     expect(getModel).not.toHaveBeenCalled();

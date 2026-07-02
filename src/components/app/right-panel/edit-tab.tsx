@@ -1,7 +1,11 @@
-// edit-tab.tsx -- model revisions returned block by block as before/after diffs the
-// author can accept, reject, or refine in place. Scope: selected block(s) or chapter.
+// edit-tab.tsx -- the review surface for manuscript proposals. Model changes
+// come back one reviewable card at a time (rewrite diffs, inserts, removals,
+// moves) for the author to accept, reject, or refine. Scope routes the op:
+// block scope revises the selected prose in place (editBlocks); chapter scope
+// may also restructure the chapter (reviseChapter).
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { IconArrowUp, IconPencil, IconWand } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -23,10 +27,10 @@ import { useAiIntent } from "@/hooks/use-ai-intent";
 import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildEditRequest, buildRefineRequest } from "@/lib/ai/context";
 import { editComposerState } from "@/lib/ai/edit-composer";
-import { describeAiError } from "@/lib/ai/errors";
-import { editBlocks } from "@/lib/ai/operations";
+import { describeAiError, withAiRetry } from "@/lib/ai/errors";
+import { editBlocks, reviseChapter } from "@/lib/ai/operations";
 import { diffWords, type DiffSegment } from "@/lib/diff/word-diff";
-import type { Block, BlockEdit } from "@/lib/types";
+import type { Block, ManuscriptProposal } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   AiComposer,
@@ -56,19 +60,64 @@ function DiffText({ segments }: { segments: DiffSegment[] }) {
   );
 }
 
-/** One proposed block revision: the before/after diff, its rationale, the
- *  accept/reject/refine actions, and an inline composer for refining *this*
- *  proposal in place (the model reworks the draft, not the original block).
- *  Refine state is per-card and local; the parent owns the cache mutation. */
-function EditProposal({
-  edit,
+/** A proposal change resolved against the live block list, ready to render.
+ *  Changes whose target block has vanished drop out of this view; they stay in
+ *  the cached proposal and count as "skipped" if the author accepts all. */
+type LiveChange =
+  | { index: number; kind: "rewrite"; block: Block; newText: string; reason: string }
+  | { index: number; kind: "insert"; text: string; anchor: Block | null; reason: string }
+  | { index: number; kind: "remove"; block: Block; reason: string }
+  | { index: number; kind: "move"; block: Block; toIndex: number; reason: string };
+
+/** Shared chrome for the structural cards: kind eyebrow, body, reason, actions. */
+function ChangeCard({
+  label,
+  reason,
+  onAccept,
+  onReject,
+  children,
+}: {
+  label: string;
+  reason: string;
+  onAccept: () => void;
+  onReject: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3">
+      <TypographyEyebrow className="text-ai-ink">{label}</TypographyEyebrow>
+      {children}
+      <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
+        <TypographyEyebrow className="text-ai-ink/70">Why</TypographyEyebrow>
+        <TypographyMuted className="text-xs">{reason}</TypographyMuted>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" onClick={onAccept}>
+          Accept
+        </Button>
+        <Button size="sm" variant="outline" onClick={onReject}>
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** One proposed rewrite: the before/after diff, its rationale, the accept/
+ *  reject/refine actions, and an inline composer for refining *this* proposal
+ *  in place (the model reworks the draft, not the original block). Refine
+ *  state is per-card and local; the parent owns the cache mutation. */
+function RewriteCard({
   block,
+  newText,
+  reason,
   onAccept,
   onReject,
   onRefine,
 }: {
-  edit: BlockEdit;
   block: Block;
+  newText: string;
+  reason: string;
   onAccept: () => void;
   onReject: () => void;
   /** Resolves true when the proposal changed, false when the refine was a no-op. */
@@ -89,8 +138,8 @@ function EditProposal({
     setNoChange(false);
     try {
       const changed = await onRefine(text);
-      // Clear the box on a real change (the diff now reflects it, ready for another
-      // pass); keep the text on a no-op so the author can adjust and retry.
+      // Clear the box on a real change (the diff now reflects it, ready for
+      // another pass); keep the text on a no-op so the author can adjust and retry.
       if (changed) setValue("");
       else setNoChange(true);
     } catch (err) {
@@ -103,10 +152,10 @@ function EditProposal({
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-ai-edge bg-ai-tint p-3">
       <TypographyEyebrow className="text-ai-ink">{block.type}</TypographyEyebrow>
-      <DiffText segments={diffWords(block.text, edit.newText)} />
+      <DiffText segments={diffWords(block.text, newText)} />
       <div className="flex flex-col gap-0.5 border-t border-ai-edge pt-2">
         <TypographyEyebrow className="text-ai-ink/70">Why</TypographyEyebrow>
-        <TypographyMuted className="text-xs">{edit.reason}</TypographyMuted>
+        <TypographyMuted className="text-xs">{reason}</TypographyMuted>
       </div>
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" onClick={onAccept} disabled={refining}>
@@ -167,40 +216,80 @@ export function EditTab() {
   const selectedIds = useProjectStore((s) => s.selectedIds);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
-  const updateBlockText = useProjectStore((s) => s.updateBlockText);
-  const applyBlockEdits = useProjectStore((s) => s.applyBlockEdits);
+  const applyManuscriptProposal = useProjectStore((s) => s.applyManuscriptProposal);
   const setSelection = useProjectStore((s) => s.setSelection);
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
-  // Intent consumption (Send to Edit and later handoffs): select the intent's
-  // blocks, map its scope, prefill the ask box, and focus it. Never auto-runs
-  // in P1 - the author reviews the instruction first.
+  // P1 seam: composer prefill + focus, driven by cross-tab intents.
+  const [prefill, setPrefill] = useState("");
   const [focusKey, setFocusKey] = useState(0);
-  const [prefill, setPrefill] = useState<string | undefined>(undefined);
+
+  // P1 seam: consume a parked edit intent (Send to Edit, brainstorm handoffs).
   useAiIntent("edit", (intent) => {
     setSelection(intent.blockIds ?? []);
     if (intent.scope) setScope(intent.scope === "chapter" ? "chapter" : "block");
-    setPrefill(intent.instruction);
+    setPrefill(intent.instruction ?? "");
     setFocusKey((k) => k + 1);
   });
+
   // Identity of the block scope: the same targets buildEditRequest resolves,
   // sorted so the key tracks set membership, not click order, matching its
   // order-independent target list.
   const blockKey = [...selectionTargetIds(selectedIds, selectedId)].sort().join(",");
-  const cacheKey = aiCacheKey("edit", activeChapterId, scope, scope === "block" ? blockKey : "");
-  const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
-    (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
+  const cacheKey = aiCacheKey(
+    "edit",
+    activeChapterId,
+    scope,
+    scope === "block" ? blockKey : "",
+  );
+  // Scope routes the operation: block -> in-place rewrites, chapter -> full
+  // structural revision. Both come back as one reviewable ManuscriptProposal.
+  const { data, loading, error, instruction, run } = useAi<ManuscriptProposal>(
+    (ins) =>
+      scope === "chapter"
+        ? reviseChapter(buildEditRequest("chapter", ins ?? ""))
+        : editBlocks(buildEditRequest("block", ins ?? "")),
     cacheKey,
     "edit",
   );
 
-  const edits = data ?? [];
-  // Resolve each edit against the live block so the diff reflects current text;
-  // drop edits whose block has since been removed.
-  const live = edits.flatMap((edit) => {
-    const block = blocks.find((b) => b.id === edit.blockId);
-    return block ? [{ edit, block }] : [];
+  // Resolve each cached change against the live block list so cards reflect
+  // current text; vanished-target changes drop out of the render.
+  const live: LiveChange[] = (data?.changes ?? []).flatMap<LiveChange>((c, index) => {
+    switch (c.kind) {
+      case "rewrite": {
+        const block = blocks.find((b) => b.id === c.blockId);
+        return block && c.newText !== null
+          ? [{ index, kind: "rewrite" as const, block, newText: c.newText, reason: c.reason }]
+          : [];
+      }
+      case "insert":
+        return c.newText !== null
+          ? [
+              {
+                index,
+                kind: "insert" as const,
+                text: c.newText,
+                anchor:
+                  c.afterId !== null
+                    ? blocks.find((b) => b.id === c.afterId) ?? null
+                    : null,
+                reason: c.reason,
+              },
+            ]
+          : [];
+      case "remove": {
+        const block = blocks.find((b) => b.id === c.blockId);
+        return block ? [{ index, kind: "remove" as const, block, reason: c.reason }] : [];
+      }
+      case "move": {
+        const block = blocks.find((b) => b.id === c.blockId);
+        return block && c.toIndex !== null
+          ? [{ index, kind: "move" as const, block, toIndex: c.toIndex, reason: c.reason }]
+          : [];
+      }
+    }
   });
 
   // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the
@@ -217,42 +306,72 @@ export function EditTab() {
       : buildEditRequest("block", "").blocks.length;
   const blockLabel = blockTargetCount > 1 ? `These ${blockTargetCount} blocks` : "This block";
 
-  // Composer messaging/enabled state: inert when the scope resolves to no editable
-  // target. `hasBlockSelection` separates "nothing selected" from "the selected
-  // block isn't an editable type" so each gets the right prompt.
   const hasBlockSelection = selectionTargetIds(selectedIds, selectedId).length > 0;
   const composer = editComposerState({ scope, targetCount, hasBlockSelection });
 
-  // Remove one edit from the cached set, reading the LATEST cached value (not the
-  // render-time `edits` closure) so two rapid accept/reject clicks in the same
-  // frame can't clobber each other.
-  const dismiss = (blockId: string) => {
-    const cur =
-      (useAiCacheStore.getState().entries[cacheKey]?.data as BlockEdit[] | null) ?? [];
-    patch(cacheKey, { data: cur.filter((e) => e.blockId !== blockId) });
-  };
-  const accept = (e: BlockEdit) => {
-    updateBlockText(e.blockId, e.newText);
-    dismiss(e.blockId);
-  };
-  // Apply every proposed edit as a SINGLE undo step, then clear the set.
-  const acceptAll = () => {
-    applyBlockEdits(live.map(({ edit }) => ({ id: edit.blockId, text: edit.newText })));
-    patch(cacheKey, { data: [] });
-  };
-  const rejectAll = () => patch(cacheKey, { data: [] });
+  // Mutate the cached proposal from its LATEST value (not the render closure) so
+  // rapid accept/reject clicks in the same frame can't clobber each other.
+  const latest = (): ManuscriptProposal | null =>
+    (useAiCacheStore.getState().entries[cacheKey]?.data as ManuscriptProposal | null) ?? null;
 
-  // Refine one proposed edit in place: re-run the model with the PROPOSAL as the
-  // base text (not the block's stored text), so the author can iterate on an edit
-  // they like instead of regenerating from scratch. Replaces just that edit in the
-  // cached set, reading the latest value so it can't clobber a sibling accept/reject.
-  const refine = async (edit: BlockEdit, block: Block, instruction: string): Promise<boolean> => {
-    const [result] = await editBlocks(buildRefineRequest(block, edit.newText, instruction));
-    if (!result) return false; // no-op refine: keep the existing proposal as-is
-    const cur =
-      (useAiCacheStore.getState().entries[cacheKey]?.data as BlockEdit[] | null) ?? [];
+  const removeFromCache = (index: number) => {
+    const cur = latest();
+    if (!cur) return;
+    patch(cacheKey, { data: { ...cur, changes: cur.changes.filter((_, i) => i !== index) } });
+  };
+
+  const accept = (index: number) => {
+    const cur = latest();
+    if (!cur) return;
+    applyManuscriptProposal(cur, [index]);
+    removeFromCache(index);
+  };
+
+  // Apply every remaining change as a SINGLE undo step, then clear the set.
+  // The reducer skips vanished-target changes; warn with the count so the
+  // author knows part of the proposal no longer applied.
+  const acceptAll = () => {
+    const cur = latest();
+    if (!cur || cur.changes.length === 0) return;
+    const result = applyManuscriptProposal(
+      cur,
+      cur.changes.map((_, i) => i),
+    );
+    if (result.skipped > 0) {
+      toast.warning(
+        result.skipped === 1
+          ? "1 change skipped - its block changed since"
+          : `${result.skipped} changes skipped - their blocks changed since`,
+      );
+    }
+    patch(cacheKey, { data: { ...cur, changes: [] } });
+  };
+
+  const rejectAll = () => {
+    const cur = latest();
+    if (!cur) return;
+    patch(cacheKey, { data: { ...cur, changes: [] } });
+  };
+
+  // Refine one proposed rewrite in place: re-run the model with the PROPOSAL as
+  // the base text (not the block's stored text) so the author iterates on a
+  // draft they like. Rewrite-only: structural changes are accepted or rejected.
+  // Direct op call (not through useAi), so it wraps its own retry.
+  const refine = async (
+    index: number,
+    block: Block,
+    baseText: string,
+    instructionText: string,
+  ): Promise<boolean> => {
+    const refined = await withAiRetry(() =>
+      editBlocks(buildRefineRequest({ id: block.id, type: block.type }, baseText, instructionText)),
+    );
+    const next = refined.changes.find((c) => c.kind === "rewrite" && c.newText !== null);
+    if (!next) return false; // no-op refine: keep the existing proposal as-is
+    const cur = latest();
+    if (!cur) return false;
     patch(cacheKey, {
-      data: cur.map((e) => (e.blockId === edit.blockId ? result : e)),
+      data: { ...cur, changes: cur.changes.map((c, i) => (i === index ? next : c)) },
     });
     return true;
   };
@@ -268,8 +387,9 @@ export function EditTab() {
             <AiError error={error} onRetry={() => run(instruction)} />
           ) : !data ? (
             <PanelEmpty icon={IconPencil} title="Describe an edit">
-              Describe an edit and pick a scope. Changes come back block by block as before/after
-              diffs you can accept or reject.
+              Describe an edit and pick a scope. Block scope revises the selected prose in
+              place; chapter scope may also insert, remove, and reorder blocks. Review each
+              change before it lands.
             </PanelEmpty>
           ) : live.length === 0 ? (
             <PanelHint>No changes suggested.</PanelHint>
@@ -277,7 +397,7 @@ export function EditTab() {
             <>
               <div className="flex items-center justify-between">
                 <TypographyEyebrow>
-                  {live.length} proposed {live.length === 1 ? "edit" : "edits"}
+                  {live.length} proposed {live.length === 1 ? "change" : "changes"}
                 </TypographyEyebrow>
                 <div className="flex gap-1.5">
                   <Button size="sm" onClick={acceptAll}>
@@ -288,16 +408,68 @@ export function EditTab() {
                   </Button>
                 </div>
               </div>
-              {live.map(({ edit, block }) => (
-                <EditProposal
-                  key={edit.blockId}
-                  edit={edit}
-                  block={block}
-                  onAccept={() => accept(edit)}
-                  onReject={() => dismiss(edit.blockId)}
-                  onRefine={(instruction) => refine(edit, block, instruction)}
-                />
-              ))}
+              {live.map((item) => {
+                if (item.kind === "rewrite") {
+                  return (
+                    <RewriteCard
+                      key={`rw-${item.block.id}`}
+                      block={item.block}
+                      newText={item.newText}
+                      reason={item.reason}
+                      onAccept={() => accept(item.index)}
+                      onReject={() => removeFromCache(item.index)}
+                      onRefine={(ins) => refine(item.index, item.block, item.newText, ins)}
+                    />
+                  );
+                }
+                if (item.kind === "insert") {
+                  return (
+                    <ChangeCard
+                      key={`ins-${item.index}`}
+                      label="Insert"
+                      reason={item.reason}
+                      onAccept={() => accept(item.index)}
+                      onReject={() => removeFromCache(item.index)}
+                    >
+                      <TypographyP className="mt-0 text-sm">{item.text}</TypographyP>
+                      <TypographyMuted className="line-clamp-1 text-xs">
+                        {item.anchor ? `After: ${item.anchor.text}` : "At chapter end"}
+                      </TypographyMuted>
+                    </ChangeCard>
+                  );
+                }
+                if (item.kind === "remove") {
+                  return (
+                    <ChangeCard
+                      key={`rm-${item.block.id}`}
+                      label="Remove"
+                      reason={item.reason}
+                      onAccept={() => accept(item.index)}
+                      onReject={() => removeFromCache(item.index)}
+                    >
+                      <TypographyP className="mt-0 text-sm text-muted-foreground line-through">
+                        {item.block.text}
+                      </TypographyP>
+                    </ChangeCard>
+                  );
+                }
+                return (
+                  <ChangeCard
+                    key={`mv-${item.block.id}`}
+                    label="Move"
+                    reason={item.reason}
+                    onAccept={() => accept(item.index)}
+                    onReject={() => removeFromCache(item.index)}
+                  >
+                    <TypographyP className="mt-0 line-clamp-2 text-sm">
+                      {item.block.text}
+                    </TypographyP>
+                    <TypographyMuted className="text-xs">
+                      Move to position {item.toIndex + 1}
+                    </TypographyMuted>
+                  </ChangeCard>
+                );
+              })}
             </>
           )}
         </div>
@@ -306,9 +478,9 @@ export function EditTab() {
         placeholder={composer.placeholder}
         disabled={composer.disabled}
         loading={loading}
-        focusKey={focusKey}
-        prefill={prefill}
         anchorMode={scope === "chapter" ? "chapter" : "cursor"}
+        prefill={prefill}
+        focusKey={focusKey}
         onSubmit={(t) => {
           if (composer.disabled) return; // nothing eligible in scope; skip the model call
           run(t);

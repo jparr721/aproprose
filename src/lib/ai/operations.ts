@@ -259,7 +259,9 @@ export async function critique(ctx: AiContext): Promise<CritiqueNote[]> {
     system: CRITIQUE_SYSTEM,
     prompt: buildGrounding(ctx),
   });
-  return output.notes;
+  // Anchoring lands with the id-labeled grounding (grounding-render); until
+  // then every note is scene-level.
+  return output.notes.map((n) => ({ ...n, blockIds: [] }));
 }
 
 /**
@@ -276,7 +278,7 @@ export async function continuityCheck(
     system: CONTINUITY_SYSTEM,
     prompt: buildGrounding(ctx),
   });
-  return output.flags;
+  return output.flags.map((f) => ({ ...f, blockIds: [] }));
 }
 
 /**

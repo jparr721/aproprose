@@ -300,6 +300,8 @@ export interface CritiqueNote {
   /** Short category tag, e.g. "Voice", "Pacing". */
   tag: string;
   text: string;
+  /** Ids of the blocks this note is about; [] for a scene-level note. */
+  blockIds: string[];
 }
 
 export type ContinuitySeverity = "ok" | "warn" | "flag";
@@ -307,6 +309,8 @@ export interface ContinuityFlag {
   sev: ContinuitySeverity;
   tag: string;
   text: string;
+  /** Ids of the blocks this flag is about; [] for a scene-level flag. */
+  blockIds: string[];
 }
 
 export interface ChatMessage {

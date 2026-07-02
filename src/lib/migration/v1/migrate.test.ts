@@ -42,8 +42,8 @@ describe("v1 migration", () => {
     expect(m.chapters).toEqual({});
     expect(m.outline.premise).toBe("");
   });
-  it("stamps version 2 on legacy blobs", () => {
-    expect(runMigrations(legacy).version).toBe(2);
+  it("stamps CURRENT_VERSION on legacy blobs", () => {
+    expect(runMigrations(legacy).version).toBe(CURRENT_VERSION);
   });
 });
 
@@ -69,7 +69,7 @@ describe("new-shape pass-through", () => {
     expect(m.characters).toHaveLength(1);
     expect(m.lore).toHaveLength(1);
     expect(m.lore[0].description).toBe("The Tile");
-    expect(m.version).toBe(2);
+    expect(m.version).toBe(CURRENT_VERSION);
   });
 });
 
@@ -84,7 +84,7 @@ describe("v2 migration (lore backfill)", () => {
       chapters: {},
     });
     expect(m.lore[0]).toMatchObject({ id: "l1", title: "Tile", description: "", characterIds: [], tags: [] });
-    expect(m.version).toBe(2);
+    expect(m.version).toBe(CURRENT_VERSION);
   });
   it("passes through already-full lore entries unchanged", () => {
     const m = runMigrations({
@@ -118,12 +118,12 @@ describe("runMigrations edge cases", () => {
   });
   it("handles corrupt version field by falling back to 0", () => {
     const m = runMigrations({ version: "not-a-number", characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: {} });
-    expect(m.version).toBe(2);
+    expect(m.version).toBe(CURRENT_VERSION);
     expect(m.outline.premise).toBe("X");
   });
   it("handles corrupt chapters field by falling back to empty", () => {
     const m = runMigrations({ version: 0, characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: "not-an-object" });
     expect(m.chapters).toEqual({});
-    expect(m.version).toBe(2);
+    expect(m.version).toBe(CURRENT_VERSION);
   });
 });

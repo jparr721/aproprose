@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { worstSev, SEV_DOT, beatCharacters } from "@/lib/outline/beat-signals";
 import type { Character, ContinuityFlag } from "@/lib/types";
 
-const f = (sev: ContinuityFlag["sev"]): ContinuityFlag => ({ sev, tag: "t", text: "x" });
+const f = (sev: ContinuityFlag["sev"]): ContinuityFlag => ({ sev, tag: "t", text: "x", blockIds: [] });
 
 describe("worstSev", () => {
   it("returns null for no flags", () => {

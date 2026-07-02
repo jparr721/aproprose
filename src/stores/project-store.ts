@@ -983,32 +983,26 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const reparsed = parseChapter(source);
         const wordCount = countWords(reparsed);
         set((s) => {
-          // parseChapter re-mints every block id, so map the selection onto the
-          // reparsed blocks by position to keep the user's place (and not strand
-          // the Edit scope on dead ids). Positional remap is only sound when the
-          // reparse preserved the block count; if a dirty block re-segments (e.g.
-          // a blank line splits a narration in two) the indices no longer denote
-          // the same blocks, so clear the selection rather than land it on a wrong
-          // or dead block.
+          // parseChapter re-mints every block id. When the reparse preserved the
+          // block count, adopt the OLD ids positionally so a plain save keeps ids
+          // stable - pending proposals, finding anchors, and the selection all
+          // stay pointed at the same blocks. When counts differ (a dirty block
+          // re-segmented, e.g. a blank line split a narration in two) positions
+          // no longer denote the same blocks, so fall back to fresh ids and a
+          // cleared selection rather than land it on a wrong or dead block.
           const sameCount = reparsed.length === s.blocks.length;
           if (import.meta.env.DEV && !sameCount) {
             console.warn(
-              `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional remap unreliable)`,
+              `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional id adoption unreliable)`,
             );
           }
-          const remap = (id: string): string | null => {
-            if (!sameCount) return null;
-            const i = s.blocks.findIndex((b) => b.id === id);
-            return i >= 0 ? reparsed[i].id : null;
-          };
-          const selectedId = s.selectedId ? remap(s.selectedId) : null;
-          const selectedIds = s.selectedIds
-            .map(remap)
-            .filter((id): id is string => id !== null);
+          const blocks = sameCount
+            ? reparsed.map((b, i) => ({ ...b, id: s.blocks[i].id }))
+            : reparsed;
           return {
-            blocks: reparsed,
-            selectedId,
-            selectedIds,
+            blocks,
+            selectedId: sameCount ? s.selectedId : null,
+            selectedIds: sameCount ? s.selectedIds : [],
             chapterDirty: false,
             saving: false,
             past: [],

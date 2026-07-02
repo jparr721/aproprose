@@ -710,7 +710,7 @@ describe("multi-selection stays live across structural edits (selectedIds invari
   });
 });
 
-describe("saveChapter reconciles selection across the id-reminting reparse", () => {
+describe("saveChapter preserves block ids across the reparse", () => {
   beforeEach(() => {
     useProjectStore.setState({
       project: {
@@ -733,20 +733,19 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     });
   });
 
-  it("remaps selectedId and selectedIds onto the reparsed blocks by position", async () => {
+  it("adopts the old ids positionally and keeps the selection as-is", async () => {
     await useProjectStore.getState().saveChapter();
     const { blocks, selectedId, selectedIds } = useProjectStore.getState();
-    const byId = new Map(blocks.map((b) => [b.id, b]));
-    // parseChapter re-mints every id, so the pre-save ids must be gone.
-    expect(blocks.some((b) => ["x0", "x1", "x2"].includes(b.id))).toBe(false);
-    // The selection now resolves to live blocks at the same positions/content.
-    expect(byId.get(selectedId!)?.text).toBe("Beta");
-    expect(selectedIds.map((id) => byId.get(id)?.text)).toEqual(["Alpha", "Gamma"]);
+    // Ids survive the save: pending proposals and finding anchors stay valid.
+    expect(blocks.map((b) => b.id)).toEqual(["x0", "x1", "x2"]);
+    expect(blocks.map((b) => b.text)).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(selectedId).toBe("x1");
+    expect(selectedIds).toEqual(["x0", "x2"]);
   });
 
-  it("clears the selection when the reparse changes the block count (positional remap unreliable)", async () => {
-    // A narration containing a blank line reparses into two blocks, so the
-    // positional remap can no longer be trusted to map ids to the same blocks.
+  it("clears the selection and re-mints ids when the reparse changes the block count", async () => {
+    // A narration containing a blank line reparses into two blocks, so positions
+    // no longer denote the same blocks and id adoption would lie.
     useProjectStore.setState({
       blocks: [mkBlock({ id: "x0", type: "narration", text: "Line one\n\nLine two", dirty: true })],
       selectedId: "x0",
@@ -756,6 +755,7 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     await useProjectStore.getState().saveChapter();
     const { blocks, selectedId, selectedIds } = useProjectStore.getState();
     expect(blocks.length).toBe(2); // count diverged
+    expect(blocks.some((b) => b.id === "x0")).toBe(false);
     expect(selectedId).toBeNull();
     expect(selectedIds).toEqual([]);
   });

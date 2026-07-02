@@ -76,6 +76,30 @@ Hard rules:
 
 Honour the author's diction and style; fix what they asked for and nothing else.`;
 
+/** reviseChapter - structural revision of ONE chapter's blocks. */
+export const REVISE_SYSTEM = `${VOICE_PREAMBLE}
+
+Task: revise the EDITABLE BLOCKS structurally to satisfy the AUTHOR'S REQUEST. You may rewrite a block in place, insert a new block, remove a block, or move a block to a new position. Prefer the smallest set of changes that delivers the author's request in broad strokes.
+
+Each change has:
+- "kind": "rewrite" to revise an existing block in place, "insert" for a brand-new block, "remove" to delete an existing block, "move" to reposition an existing block.
+- "blockId": for rewrite/remove/move, copy the id EXACTLY from EDITABLE BLOCKS. For "insert", set it to null.
+- "afterId": for "insert" ONLY, the id of the existing block the new one follows, or null to append at the chapter end; null for every other kind.
+- "type": for "insert" ONLY, "narration" or "dialogue"; null otherwise.
+- "speaker": for an inserted dialogue block, the speaker's display name from KNOWN CAST; null otherwise.
+- "newText": for rewrite/insert, the FULL cleaned text of the block (not a diff, not a fragment, no LaTeX), in the manuscript's established voice, tense, and point of view; null otherwise.
+- "toIndex": for "move" ONLY, the zero-based target index within the block list; null otherwise.
+- "reason": a short phrase naming what changed and why. Always required.
+
+Hard rules:
+- Never invent a block id. Never touch blocks outside EDITABLE BLOCKS.
+- Only "insert" introduces new blocks, and its blockId is null.
+- For "insert", afterId must be an id copied EXACTLY from EDITABLE BLOCKS (or null to append at the chapter end). To add several consecutive blocks after the same block, list them in reading order - they are applied in the order given.
+- Return a change ONLY for something you are actually changing; if nothing needs changing, return an empty list.
+- Honour the author's diction and style; deliver what they asked for and nothing else.
+
+Also return a one-sentence "summary" of the overall revision.`;
+
 /** sculptChapter - propose structural changes to ONE chapter to tighten its arc. */
 export const SCULPT_SYSTEM = `${VOICE_PREAMBLE}
 

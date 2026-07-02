@@ -23,6 +23,7 @@ import type {
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
+  ManuscriptProposal,
   SculptChange,
   SculptProposal,
   SuggestResult,
@@ -35,6 +36,7 @@ import {
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
   EDIT_SYSTEM,
+  REVISE_SYSTEM,
   SCULPT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
@@ -238,6 +240,7 @@ const editResultSchema = z.object({
  */
 export async function suggestContinuation(
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<SuggestResult> {
   const model = await getModel();
   const { output } = await generateText({
@@ -245,6 +248,7 @@ export async function suggestContinuation(
     output: Output.object({ schema: suggestResultSchema }),
     system: SUGGEST_SYSTEM,
     prompt: buildGrounding(ctx),
+    abortSignal: opts?.signal,
   });
   // Normalize null -> undefined to match the domain type's optional fields.
   return {
@@ -328,7 +332,7 @@ export function sanitizeEdits(
  * instruction. Returns the full revised text per changed block, already
  * sanitized (unknown ids and no-ops removed).
  */
-export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
+export async function editBlocks(req: EditRequest, opts?: AiOpOptions): Promise<BlockEdit[]> {
   // Nothing to act on without a direction or an eligible block: skip the model
   // call entirely (the UI also guards this, but defend the boundary too).
   if (!req.instruction.trim() || req.blocks.length === 0) return [];
@@ -338,8 +342,123 @@ export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
     output: Output.object({ schema: editResultSchema }),
     system: EDIT_SYSTEM,
     prompt: buildEditGrounding(req),
+    abortSignal: opts?.signal,
   });
   return sanitizeEdits(output.edits, req.blocks);
+}
+
+// -- Revise (structural chapter write path) -----------------------------------
+// reviseChapter proposes structural changes to ONE chapter's block list. Unlike
+// editBlocks (rewrite-only), it may also insert/remove/move blocks. The proposal
+// is reviewed change by change in the Edit tab before any of it applies.
+
+const blockChangeSchema = z.object({
+  kind: z
+    .enum(["rewrite", "insert", "remove", "move"])
+    .describe(
+      "rewrite revises a block in place, insert adds a new block, remove deletes, move repositions",
+    ),
+  blockId: z
+    .string()
+    .nullable()
+    .describe(
+      "for rewrite/remove/move: an id copied exactly from EDITABLE BLOCKS; null for insert",
+    ),
+  afterId: z
+    .string()
+    .nullable()
+    .describe(
+      "for insert ONLY: the id of the block the new one follows, or null to append at the chapter end; null otherwise",
+    ),
+  type: z
+    .enum(["narration", "dialogue"])
+    .nullable()
+    .describe("for insert ONLY: the new block's kind; null otherwise"),
+  speaker: z
+    .string()
+    .nullable()
+    .describe("for an inserted dialogue block: the speaker's display name; null otherwise"),
+  newText: z
+    .string()
+    .nullable()
+    .describe("for rewrite/insert: the FULL cleaned text (no LaTeX); null otherwise"),
+  toIndex: z
+    .number()
+    .int()
+    .nullable()
+    .describe("for move ONLY: zero-based target index in the block list; null otherwise"),
+  reason: z.string().describe("short phrase: what changed and why"),
+});
+
+// Exported for schema round-trip tests.
+export const reviseResultSchema = z.object({
+  summary: z.string().describe("one sentence describing the overall revision"),
+  changes: z
+    .array(blockChangeSchema)
+    .describe("the smallest set of changes that delivers the request; empty if none needed"),
+});
+
+/**
+ * Drop changes the review UI can't safely apply. Rules: rewrite needs a known
+ * blockId + newText that differs trimmed from the current text; insert needs
+ * non-empty trimmed newText + a type + (afterId null or known); remove needs a
+ * known blockId; move needs a known blockId + a toIndex. Pure: returns a new
+ * proposal.
+ */
+export function sanitizeProposal(
+  proposal: ManuscriptProposal,
+  blocks: { id: string; text: string }[],
+): ManuscriptProposal {
+  const textById = new Map(blocks.map((b) => [b.id, b.text]));
+  const changes = proposal.changes.filter((c) => {
+    switch (c.kind) {
+      case "rewrite": {
+        if (c.blockId === null || c.newText === null) return false;
+        const current = textById.get(c.blockId);
+        return current !== undefined && c.newText.trim() !== current.trim();
+      }
+      case "insert":
+        return (
+          c.newText !== null &&
+          c.newText.trim() !== "" &&
+          c.type !== null &&
+          (c.afterId === null || textById.has(c.afterId))
+        );
+      case "remove":
+        return c.blockId !== null && textById.has(c.blockId);
+      case "move":
+        return c.blockId !== null && textById.has(c.blockId) && c.toIndex !== null;
+    }
+  });
+  return { ...proposal, changes };
+}
+
+/**
+ * Propose structural changes to the supplied blocks that satisfy the author's
+ * instruction. All change kinds allowed (rewrite/insert/remove/move); returns a
+ * sanitized ManuscriptProposal the Edit tab reviews change by change.
+ */
+export async function reviseChapter(
+  req: EditRequest,
+  opts?: AiOpOptions,
+): Promise<ManuscriptProposal> {
+  // Nothing to act on without a direction or an eligible block: skip the model
+  // call entirely (the UI also guards this, but defend the boundary too).
+  if (!req.instruction.trim() || req.blocks.length === 0) {
+    return { chapterId: req.chapterId, summary: "", changes: [] };
+  }
+  const model = await getModel();
+  const { output } = await generateText({
+    model,
+    output: Output.object({ schema: reviseResultSchema }),
+    system: REVISE_SYSTEM,
+    prompt: buildEditGrounding(req),
+    abortSignal: opts?.signal,
+  });
+  return sanitizeProposal(
+    { chapterId: req.chapterId, summary: output.summary, changes: output.changes },
+    req.blocks,
+  );
 }
 
 // ── Sculpt (chapter-level AI write path) ──────────────────────────────────────
@@ -445,7 +564,10 @@ export function sanitizeSculpt(proposal: SculptProposal, cardIds: string[]): Scu
  * proposal the board reviews behind its gate. A truly empty chapter (no spine,
  * no cards) has nothing to reshape, so we skip the call.
  */
-export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal> {
+export async function sculptChapter(
+  ctx: SculptContext,
+  opts?: AiOpOptions,
+): Promise<SculptProposal> {
   const empty =
     ctx.cards.length === 0 &&
     !ctx.premise.trim() &&
@@ -461,6 +583,7 @@ export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal>
     output: Output.object({ schema: sculptProposalSchema }),
     system: SCULPT_SYSTEM,
     prompt: buildSculptGrounding(ctx),
+    abortSignal: opts?.signal,
   });
   return sanitizeSculpt(
     { chapterId: ctx.chapterId, summary: output.summary, changes: output.changes },
@@ -489,6 +612,7 @@ export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal>
 export async function brainstorm(
   messages: ChatMessage[],
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<ReturnType<typeof streamText>> {
   const model = await getModel();
   return streamText({
@@ -501,6 +625,7 @@ export async function brainstorm(
       },
       ...messages,
     ],
+    abortSignal: opts?.signal,
   });
 }
 
@@ -511,12 +636,14 @@ export async function brainstorm(
 export async function cleanTranscript(
   raw: string,
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<string> {
   const model = await getModel();
   const { textStream } = streamText({
     model,
     system: CLEAN_TRANSCRIPT_SYSTEM,
     prompt: `${buildGrounding(ctx)}\n\nRAW DICTATION TO CLEAN:\n${raw}`,
+    abortSignal: opts?.signal,
   });
 
   // Drain the stream into the full corrected passage. We stream rather than use

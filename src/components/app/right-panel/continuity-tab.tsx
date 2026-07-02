@@ -19,6 +19,7 @@ import {
   PanelEmpty,
   ScopeToggle,
 } from "@/components/app/right-panel/shared";
+import { FindingActions } from "@/components/app/right-panel/finding-actions";
 
 const SEV_DOT: Record<ContinuityFlag["sev"], string> = {
   ok: "bg-success",
@@ -74,6 +75,7 @@ export function ContinuityTab() {
                     </TypographyEyebrow>
                   </div>
                   <TypographyMuted className="text-xs">{f.text}</TypographyMuted>
+                  <FindingActions blockIds={f.blockIds} instruction={f.text} />
                 </div>
               </div>
             ))

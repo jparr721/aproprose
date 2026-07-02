@@ -19,6 +19,7 @@ import {
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
+import { useAiIntent } from "@/hooks/use-ai-intent";
 import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildEditRequest, buildRefineRequest } from "@/lib/ai/context";
 import { editComposerState } from "@/lib/ai/edit-composer";
@@ -168,9 +169,21 @@ export function EditTab() {
   const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const applyBlockEdits = useProjectStore((s) => s.applyBlockEdits);
+  const setSelection = useProjectStore((s) => s.setSelection);
   const patch = useAiCacheStore((s) => s.patch);
 
   const [scope, setScope] = useState<"block" | "chapter">("block");
+  // Intent consumption (Send to Edit and later handoffs): select the intent's
+  // blocks, map its scope, prefill the ask box, and focus it. Never auto-runs
+  // in P1 - the author reviews the instruction first.
+  const [focusKey, setFocusKey] = useState(0);
+  const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  useAiIntent("edit", (intent) => {
+    setSelection(intent.blockIds ?? []);
+    if (intent.scope) setScope(intent.scope === "chapter" ? "chapter" : "block");
+    setPrefill(intent.instruction);
+    setFocusKey((k) => k + 1);
+  });
   // Identity of the block scope: the same targets buildEditRequest resolves,
   // sorted so the key tracks set membership, not click order, matching its
   // order-independent target list.
@@ -288,6 +301,8 @@ export function EditTab() {
         placeholder={composer.placeholder}
         disabled={composer.disabled}
         loading={loading}
+        focusKey={focusKey}
+        prefill={prefill}
         anchorMode={scope === "chapter" ? "chapter" : "cursor"}
         onSubmit={(t) => {
           if (composer.disabled) return; // nothing eligible in scope; skip the model call

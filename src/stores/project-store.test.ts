@@ -882,3 +882,32 @@ describe("selectionTargetIds (the block-scope precedence rule)", () => {
     expect(selectionTargetIds([], null)).toEqual([]);
   });
 });
+
+describe("setSelection", () => {
+  it("selects a single id plainly (nav mode, no multi set)", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    useProjectStore.setState({ blocks: [a, b], editing: true, editCaret: "start" });
+    useProjectStore.getState().setSelection(["b"]);
+    const s = useProjectStore.getState();
+    expect(s.selectedId).toBe("b");
+    expect(s.selectedIds).toEqual([]);
+    expect(s.editing).toBe(false);
+    expect(s.editCaret).toBeNull();
+  });
+
+  it("selects multiple ids as the multi set with the last id active", () => {
+    useProjectStore.getState().setSelection(["a", "b", "c"]);
+    const s = useProjectStore.getState();
+    expect(s.selectedIds).toEqual(["a", "b", "c"]);
+    expect(s.selectedId).toBe("c");
+  });
+
+  it("deselects on an empty list", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().setSelection([]);
+    const s = useProjectStore.getState();
+    expect(s.selectedId).toBeNull();
+    expect(s.selectedIds).toEqual([]);
+  });
+});

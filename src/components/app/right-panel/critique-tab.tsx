@@ -19,6 +19,7 @@ import {
   PanelEmpty,
   ScopeToggle,
 } from "@/components/app/right-panel/shared";
+import { FindingActions } from "@/components/app/right-panel/finding-actions";
 
 const NOTE_TONE: Record<CritiqueNote["kind"], string> = {
   strength: "bg-success/15 text-success",
@@ -79,6 +80,7 @@ export function CritiqueTab() {
                   </TypographyEyebrow>
                 </div>
                 <TypographyMuted>{n.text}</TypographyMuted>
+                <FindingActions blockIds={n.blockIds} instruction={n.text} />
               </div>
             ))
           )}

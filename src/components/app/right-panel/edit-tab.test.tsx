@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri", () => ({
@@ -9,7 +9,9 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("@/lib/ai/operations", () => ({ editBlocks: vi.fn() }));
 vi.mock("@/components/app/right-panel/shared", () => ({
-  AiComposer: () => <div />,
+  AiComposer: ({ focusKey, prefill }: { focusKey?: number; prefill?: string }) => (
+    <div data-testid="composer" data-focus-key={focusKey} data-prefill={prefill ?? ""} />
+  ),
   AiError: () => <div>err</div>,
   AskedCaption: () => <div />,
   LoadingLines: () => <div />,
@@ -22,6 +24,7 @@ import { EditTab } from "@/components/app/right-panel/edit-tab";
 import { editBlocks } from "@/lib/ai/operations";
 import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiIntentStore, dispatchAiIntent } from "@/stores/ai-intent-store";
 import type { BlockEdit } from "@/lib/types";
 
 const CACHE_KEY = "edit:ch1:block:e1,e2";
@@ -56,6 +59,7 @@ beforeEach(() => {
     meta: { ...useProjectStore.getState().meta, characters: [] },
   } as never);
   useAiCacheStore.setState({ entries: {} });
+  useAiIntentStore.setState({ pending: null });
 });
 
 describe("EditTab refine", () => {
@@ -101,5 +105,31 @@ describe("EditTab refine", () => {
       { blockId: "e1", newText: "E1 v1", reason: "r1" },
       { blockId: "e2", newText: "E2 v1", reason: "r2" },
     ]);
+  });
+});
+
+describe("EditTab intents", () => {
+  it("consumes an edit intent: selects the blocks, prefills, focuses, never auto-runs", () => {
+    render(<EditTab />);
+    act(() => {
+      dispatchAiIntent({ tab: "edit", instruction: "Fix the pacing here", blockIds: ["e2"], scope: "block" });
+    });
+    expect(useProjectStore.getState().selectedId).toBe("e2");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    const composer = screen.getByTestId("composer");
+    expect(composer.getAttribute("data-prefill")).toBe("Fix the pacing here");
+    expect(composer.getAttribute("data-focus-key")).toBe("1");
+    // No autoRun in P1: nothing may enter loading.
+    expect(Object.values(useAiCacheStore.getState().entries).every((e) => !e.loading)).toBe(true);
+    expect(useAiIntentStore.getState().pending).toBeNull();
+  });
+
+  it("maps a chapter-scope intent onto the chapter scope with no selection", () => {
+    render(<EditTab />);
+    act(() => {
+      dispatchAiIntent({ tab: "edit", instruction: "Raise the tension", blockIds: [], scope: "chapter" });
+    });
+    expect(useProjectStore.getState().selectedId).toBeNull();
+    expect(screen.getByTestId("composer").getAttribute("data-prefill")).toBe("Raise the tension");
   });
 });

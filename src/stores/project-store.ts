@@ -205,6 +205,10 @@ interface ProjectState {
   stopEdit: () => void;
   /** Clear the selection entirely. */
   deselect: () => void;
+  /** Replace the selection wholesale (nav mode, never edit). Empty = deselect;
+   *  a single id selects it plainly; multiple ids become the multi-selection
+   *  set with the last id active. */
+  setSelection: (ids: string[]) => void;
   /** Move the highlight to the prev/next block in nav mode, clamped at the ends. */
   moveSelection: (dir: -1 | 1) => void;
   updateBlockText: (id: string, text: string) => void;
@@ -663,6 +667,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     stopEdit: () => set({ editing: false, editCaret: null }),
 
     deselect: () => set({ selectedId: null, selectedIds: [], editing: false, editCaret: null }),
+
+    // Wholesale selection replacement (AI intents / finding jumps). Mirrors
+    // select()'s nav-mode invariants; several ids form a multi-selection with
+    // the last id active (toggleSelection precedent).
+    setSelection: (ids) =>
+      set({
+        selectedId: ids.length > 0 ? ids[ids.length - 1] : null,
+        selectedIds: ids.length > 1 ? [...ids] : [],
+        editing: false,
+        editCaret: null,
+      }),
 
     moveSelection: (dir) =>
       set((s) => {

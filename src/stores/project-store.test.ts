@@ -32,7 +32,7 @@ import {
   readTextFile,
   writeAppData,
 } from "@/lib/tauri";
-import type { Block, ProjectInfo } from "@/lib/types";
+import type { Block, BlockChange, ManuscriptProposal, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
   id: Math.random().toString(36).slice(2),
@@ -909,5 +909,147 @@ describe("setSelection", () => {
     const s = useProjectStore.getState();
     expect(s.selectedId).toBeNull();
     expect(s.selectedIds).toEqual([]);
+  });
+});
+
+describe("applyManuscriptProposal", () => {
+  const change = (p: Partial<BlockChange> & { kind: BlockChange["kind"] }): BlockChange => ({
+    blockId: null,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: null,
+    toIndex: null,
+    reason: "r",
+    ...p,
+  });
+  const proposal = (changes: BlockChange[]): ManuscriptProposal => ({
+    chapterId: "ch1",
+    summary: "s",
+    changes,
+  });
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      blocks: [
+        mkBlock({ id: "a", text: "alpha" }),
+        mkBlock({ id: "b", text: "bravo" }),
+        mkBlock({ id: "c", text: "charlie" }),
+      ],
+      selectedId: null,
+      selectedIds: [],
+      past: [],
+      future: [],
+      chapterDirty: false,
+      lastTextEditId: null,
+    });
+  });
+
+  it("applies the kept changes as ONE undo step and returns the counts", () => {
+    const result = useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+        change({ kind: "remove", blockId: "b" }),
+        change({ kind: "insert", afterId: null, type: "narration", newText: "coda" }),
+      ]),
+      [0, 1, 2],
+    );
+    const { blocks, past, future, chapterDirty, lastTextEditId } = useProjectStore.getState();
+    expect(result).toEqual({ applied: 3, skipped: 0 });
+    expect(blocks.map((x) => x.text)).toEqual(["ALPHA", "charlie", "coda"]);
+    expect(past).toHaveLength(1);
+    expect(future).toEqual([]);
+    expect(chapterDirty).toBe(true);
+    expect(lastTextEditId).toBeNull();
+
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+    ]);
+  });
+
+  it("applies only the kept indices", () => {
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+        change({ kind: "remove", blockId: "b" }),
+      ]),
+      [0],
+    );
+    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
+      "ALPHA",
+      "bravo",
+      "charlie",
+    ]);
+  });
+
+  it("is a no-op returning zero counts when kept is empty", () => {
+    const result = useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "a" })]), []);
+    expect(result).toEqual({ applied: 0, skipped: 0 });
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useProjectStore.getState().chapterDirty).toBe(false);
+  });
+
+  it("counts a vanished-target change as skipped while applying the rest", () => {
+    const result = useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "ghost", newText: "x" }),
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+      ]),
+      [0, 1],
+    );
+    expect(result).toEqual({ applied: 1, skipped: 1 });
+    expect(useProjectStore.getState().blocks[0].text).toBe("ALPHA");
+  });
+
+  it("reports skips without burning an undo step when nothing applies", () => {
+    const result = useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "ghost" })]), [0]);
+    expect(result).toEqual({ applied: 0, skipped: 1 });
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("prunes removed blocks from the selection (deleteBlock precedent)", () => {
+    useProjectStore.setState({ selectedId: "b", selectedIds: ["a", "b"], editing: true });
+    useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "b" })]), [0]);
+    const { selectedId, selectedIds, editing } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["a"]);
+    expect(selectedId).toBe("a");
+    expect(editing).toBe(false);
+  });
+
+  it("resolves an inserted dialogue speaker case-insensitively from the cast", () => {
+    useProjectStore.setState({
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [{ id: "c9", name: "Mara", color: "#aabbcc", role: "PI" }],
+      },
+    });
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "mara", newText: "Hi" }),
+      ]),
+      [0],
+    );
+    const inserted = useProjectStore.getState().blocks[1];
+    expect(inserted.type).toBe("dialogue");
+    expect(inserted.speaker).toBe("c9");
+  });
+
+  it("leaves speaker unset when the name matches no character", () => {
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "Nobody", newText: "Hi" }),
+      ]),
+      [0],
+    );
+    expect(useProjectStore.getState().blocks[1].speaker).toBeUndefined();
   });
 });

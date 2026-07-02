@@ -21,10 +21,12 @@ import type {
   CompileError,
   ContinuityFlag,
   LoreEntry,
+  ManuscriptProposal,
   NovelMetadata,
   Outline,
   ProjectInfo,
   ProjectMeta,
+  ProposalApplyResult,
   RecentProject,
   SkeletonModel,
   SculptProposal,
@@ -56,6 +58,7 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import { applyProposal } from "@/lib/blocks/proposal";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
@@ -215,6 +218,9 @@ interface ProjectState {
   formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: BlockTextEdit[]) => void;
+  /** Apply the kept changes of a reviewed proposal as ONE undo step. Returns
+   *  counts so the caller can warn about skipped (vanished-target) changes. */
+  applyManuscriptProposal: (proposal: ManuscriptProposal, kept: number[]) => ProposalApplyResult;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
@@ -737,6 +743,42 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: null,
         };
       }),
+
+    // Apply the author-kept changes of a reviewed ManuscriptProposal as ONE undo
+    // step. The pure fold lives in lib/blocks/proposal.ts; this wraps it with
+    // history, selection pruning, and the meta-backed speaker resolver.
+    applyManuscriptProposal: (proposal, kept) => {
+      if (kept.length === 0) return { applied: 0, skipped: 0 };
+      const s = get();
+      const resolveSpeakerId = (name: string): string | undefined =>
+        s.meta.characters.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id;
+      const changes = kept.map((i) => proposal.changes[i]).filter((c) => c !== undefined);
+      const outcome = applyProposal(s.blocks, changes, resolveSpeakerId);
+      // Nothing landed (every kept change targeted a vanished block): report the
+      // skips without burning an undo step on an identical snapshot.
+      if (outcome.applied === 0) return { applied: 0, skipped: outcome.skipped };
+      // Keep the selection in lockstep with the live list (deleteBlock precedent):
+      // prune removed ids; if the active block was removed, fall to the last
+      // surviving set member and drop out of edit mode.
+      const liveIds = new Set(outcome.blocks.map((b) => b.id));
+      const selectedIds = s.selectedIds.filter((id) => liveIds.has(id));
+      const selectionLost = s.selectedId !== null && !liveIds.has(s.selectedId);
+      const selectedId = selectionLost
+        ? selectedIds[selectedIds.length - 1] ?? null
+        : s.selectedId;
+      set({
+        blocks: outcome.blocks,
+        selectedId,
+        selectedIds,
+        editing: selectionLost ? false : s.editing,
+        editCaret: selectionLost ? null : s.editCaret,
+        chapterDirty: true,
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+        future: [],
+        lastTextEditId: null,
+      });
+      return { applied: outcome.applied, skipped: outcome.skipped };
+    },
 
     updateBlock: (id, patch) =>
       set((s) => {

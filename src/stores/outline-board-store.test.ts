@@ -71,7 +71,7 @@ describe("outline-board-store sculpt fields", () => {
     expect(s.sculptingChapterId).toBeNull();
   });
 
-  it("clearProposal clears proposal and decisions but leaves sculptingChapterId", () => {
+  it("clearProposal (accept) ends the sculpt lifecycle: clears the chapter marker too", () => {
     useOutlineBoardStore.getState().startSculpt("ch1");
     useOutlineBoardStore.getState().setProposal(proposal);
     useOutlineBoardStore.getState().setDecision(0, "keep");
@@ -79,6 +79,6 @@ describe("outline-board-store sculpt fields", () => {
     const s = useOutlineBoardStore.getState();
     expect(s.proposal).toBeNull();
     expect(s.decisions).toEqual({});
-    expect(s.sculptingChapterId).toBe("ch1");
+    expect(s.sculptingChapterId).toBeNull();
   });
 });

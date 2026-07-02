@@ -12,7 +12,7 @@ import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { buildSculptContext } from "@/lib/ai/sculpt-context";
 import { sculptChapter } from "@/lib/ai/operations";
-import { describeAiError } from "@/lib/ai/errors";
+import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
 import type { ChapterRef } from "@/lib/types";
@@ -41,7 +41,7 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
 
   const runSculpt = () => {
     startSculpt(chapterRef.id);
-    sculptChapter(buildSculptContext(chapterRef.id))
+    withAiRetry(() => sculptChapter(buildSculptContext(chapterRef.id)))
       .then((p) => setProposal(p))
       .catch((e: unknown) => setSculptError(describeAiError(e)));
   };

@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import type { AiTab } from "@/stores/view-store";
-import { describeAiError } from "@/lib/ai/errors";
+import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 
 /**
  * Cache-backed, manual async result. Idle-first: a request fires only on an
@@ -38,7 +38,7 @@ export function useAi<T>(
       // leaving the tab stuck loading with a "running" rail badge that never clears.
       // The two-arg `then` (not `.catch`) settles the rail exactly once per run.
       Promise.resolve()
-        .then(() => opRef.current(instruction))
+        .then(() => withAiRetry(() => opRef.current(instruction)))
         .then(
           (d) => {
             patch(cacheKey, { data: d, loading: false, error: null });

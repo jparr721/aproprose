@@ -14,7 +14,7 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { buildAiContext } from "@/lib/ai/context";
 import { cleanTranscript } from "@/lib/ai/operations";
-import { describeAiError } from "@/lib/ai/errors";
+import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 import type { Block as BlockT } from "@/lib/types";
 
 export type BlockAction = {
@@ -46,7 +46,7 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     setCleaning(true);
     const t = toast.loading("Cleaning up with AI");
     try {
-      const cleaned = await cleanTranscript(block.text, buildAiContext(block.id));
+      const cleaned = await withAiRetry(() => cleanTranscript(block.text, buildAiContext(block.id)));
       updateBlockText(block.id, cleaned.trim());
       toast.success("Tidied up", { id: t });
     } catch (e) {

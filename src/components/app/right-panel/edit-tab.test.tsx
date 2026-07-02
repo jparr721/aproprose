@@ -133,3 +133,10 @@ describe("EditTab intents", () => {
     expect(screen.getByTestId("composer").getAttribute("data-prefill")).toBe("Raise the tension");
   });
 });
+
+describe("EditTab without an open chapter", () => {
+  it("renders the inert composer state instead of crashing", () => {
+    useProjectStore.setState({ activeChapterId: null } as never);
+    expect(() => render(<EditTab />)).not.toThrow();
+  });
+});

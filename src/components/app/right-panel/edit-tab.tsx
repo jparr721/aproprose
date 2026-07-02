@@ -203,13 +203,18 @@ export function EditTab() {
     return block ? [{ edit, block }] : [];
   });
 
-  // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the call.
-  const targetCount = buildEditRequest(scope, "").blocks.length;
+  // Eligible blocks in scope (reusing buildEditRequest's filter); 0 -> skip the
+  // call. buildEditRequest requires an active chapter (it stamps chapterId onto
+  // the request), so without one nothing is editable and the composer is inert.
+  const targetCount = activeChapterId ? buildEditRequest(scope, "").blocks.length : 0;
   // The block-scope button names the editable targets it will act on: "This
   // block" for one, "These N blocks" for a multi-selection. Reuse targetCount
   // under block scope rather than recomputing the same request.
-  const blockTargetCount =
-    scope === "block" ? targetCount : buildEditRequest("block", "").blocks.length;
+  const blockTargetCount = !activeChapterId
+    ? 0
+    : scope === "block"
+      ? targetCount
+      : buildEditRequest("block", "").blocks.length;
   const blockLabel = blockTargetCount > 1 ? `These ${blockTargetCount} blocks` : "This block";
 
   // Composer messaging/enabled state: inert when the scope resolves to no editable

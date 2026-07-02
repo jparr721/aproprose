@@ -64,6 +64,8 @@ export interface AiContext {
 
 /** What the Edit tab hands `editBlocks`: the blocks it may revise + the request. */
 export interface EditRequest {
+  /** The chapter the blocks belong to (becomes ManuscriptProposal.chapterId). */
+  chapterId: string;
   chapterTitle?: string;
   characters?: { name: string; role?: string }[];
   /** Blocks the model may revise (already scoped + filtered to eligible types). */

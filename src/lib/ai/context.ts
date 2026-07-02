@@ -159,6 +159,9 @@ function editRequestFor(
   instruction: string,
 ): EditRequest {
   const { project, activeChapterId, meta } = useProjectStore.getState();
+  // Required data: a proposal must name the chapter it belongs to. No fallback -
+  // an edit request without an open chapter is a bug upstream.
+  if (activeChapterId === null) throw new Error("No active chapter.");
   const chapter = project?.chapters.find((c) => c.id === activeChapterId);
   const structure = renderStoryStructure({
     outline: meta.outline,
@@ -167,6 +170,7 @@ function editRequestFor(
     activeChapterId,
   });
   return {
+    chapterId: activeChapterId,
     chapterTitle: chapter?.title,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
     blocks: targets,

@@ -19,6 +19,7 @@ import {
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
+import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildEditRequest, buildRefineRequest } from "@/lib/ai/context";
 import { editComposerState } from "@/lib/ai/edit-composer";
 import { describeAiError } from "@/lib/ai/errors";
@@ -174,9 +175,7 @@ export function EditTab() {
   // sorted so the key tracks set membership, not click order, matching its
   // order-independent target list.
   const blockKey = [...selectionTargetIds(selectedIds, selectedId)].sort().join(",");
-  const cacheKey = `edit:${activeChapterId ?? ""}:${scope}:${
-    scope === "block" ? blockKey : ""
-  }`;
+  const cacheKey = aiCacheKey("edit", activeChapterId, scope, scope === "block" ? blockKey : "");
   const { data, loading, error, instruction, run } = useAi<BlockEdit[]>(
     (ins) => editBlocks(buildEditRequest(scope, ins ?? "")),
     cacheKey,

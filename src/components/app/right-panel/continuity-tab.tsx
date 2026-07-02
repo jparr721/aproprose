@@ -6,6 +6,7 @@ import { IconTimeline } from "@tabler/icons-react";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useAi } from "@/hooks/use-ai";
+import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildAnchoredContext, type ReadScope } from "@/lib/ai/context";
 import { continuityCheck } from "@/lib/ai/operations";
 import type { ContinuityFlag } from "@/lib/types";
@@ -35,9 +36,12 @@ export function ContinuityTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const [scope, setScope] = useState<ReadScope>("cursor");
   // Cursor scope keys on the selection; chapter scope ignores it (whole chapter).
-  const cacheKey = `continuity:${activeChapterId ?? ""}:${scope}:${
-    scope === "cursor" ? selectedId ?? "" : ""
-  }`;
+  const cacheKey = aiCacheKey(
+    "continuity",
+    activeChapterId,
+    scope,
+    scope === "cursor" ? selectedId ?? "" : "",
+  );
   const { data, loading, error, instruction, run } = useAi<ContinuityFlag[]>(
     (ins) => continuityCheck({ ...buildAnchoredContext(scope), instruction: ins }),
     cacheKey,

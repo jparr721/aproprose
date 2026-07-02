@@ -17,6 +17,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
+import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildSuggestContext, type ReadScope } from "@/lib/ai/context";
 import { suggestContinuation } from "@/lib/ai/operations";
 import type { SuggestResult, Suggestion } from "@/lib/types";
@@ -42,9 +43,12 @@ export function SuggestTab() {
   const [scope, setScope] = useState<ReadScope>("cursor");
   // Cursor scope keys on the selection; chapter scope reads every block (but still
   // inserts after the caret), so it ignores the selection in the cache key.
-  const cacheKey = `suggest:${activeChapterId ?? ""}:${scope}:${
-    scope === "cursor" ? selectedId ?? "" : ""
-  }`;
+  const cacheKey = aiCacheKey(
+    "suggest",
+    activeChapterId,
+    scope,
+    scope === "cursor" ? selectedId ?? "" : "",
+  );
   const patch = useAiCacheStore((s) => s.patch);
   const { data, loading, error, instruction, run } = useAi<SuggestResult>(
     (ins) => suggestContinuation({ ...buildSuggestContext(scope), instruction: ins }),

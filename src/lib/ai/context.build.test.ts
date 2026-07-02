@@ -12,7 +12,12 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
-import { buildAiContext, buildScopedContext, buildSuggestContext } from "@/lib/ai/context";
+import {
+  buildAiContext,
+  buildAnchoredContext,
+  buildScopedContext,
+  buildSuggestContext,
+} from "@/lib/ai/context";
 import { useProjectStore } from "@/stores/project-store";
 import type { Block } from "@/lib/types";
 
@@ -146,5 +151,38 @@ describe("buildAiContext structure", () => {
     const structure = buildAiContext().structure;
     expect(structure).toContain("Act I");
     expect(structure).toContain("Goal: Introduce the protagonist");
+  });
+});
+
+describe("buildAnchoredContext", () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      blocks: [
+        mk({ id: "n1", type: "narration", text: "First." }),
+        mk({ id: "lore1", type: "lore", text: "secret" }),
+        mk({ id: "d1", type: "dialogue", text: "Second." }),
+        mk({ id: "n3", type: "narration", text: "Third." }),
+      ],
+      selectedId: "d1",
+    });
+  });
+
+  it("cursor scope offers the prose blocks up to the caret, keeping blocksText parity", () => {
+    const ctx = buildAnchoredContext("cursor");
+    expect(ctx.blocks).toEqual([
+      { id: "n1", type: "narration", text: "First." },
+      { id: "d1", type: "dialogue", text: "Second." },
+    ]);
+    expect(ctx.blocksText).toBe('First.\n\n"Second."');
+  });
+
+  it("chapter scope offers every prose block and reviews the whole chapter", () => {
+    const ctx = buildAnchoredContext("chapter");
+    expect(ctx.blocks.map((b) => b.id)).toEqual(["n1", "d1", "n3"]);
+    expect(ctx.cursorSummary).toBe("Reviewing the whole chapter.");
+  });
+
+  it("excludes lore/scratchpad/latex blocks from the offered anchors", () => {
+    expect(buildAnchoredContext("chapter").blocks.map((b) => b.id)).not.toContain("lore1");
   });
 });

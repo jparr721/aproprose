@@ -6,7 +6,7 @@ import { IconTimeline } from "@tabler/icons-react";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useAi } from "@/hooks/use-ai";
-import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
+import { buildAnchoredContext, type ReadScope } from "@/lib/ai/context";
 import { continuityCheck } from "@/lib/ai/operations";
 import type { ContinuityFlag } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -39,7 +39,7 @@ export function ContinuityTab() {
     scope === "cursor" ? selectedId ?? "" : ""
   }`;
   const { data, loading, error, instruction, run } = useAi<ContinuityFlag[]>(
-    (ins) => continuityCheck({ ...buildScopedContext(scope), instruction: ins }),
+    (ins) => continuityCheck({ ...buildAnchoredContext(scope), instruction: ins }),
     cacheKey,
     "continuity",
   );

@@ -36,6 +36,7 @@ Each note has:
 - "kind": "strength" for what is working and should be preserved, "watch" for a risk or weakness to keep an eye on, "idea" for an optional opportunity to push further.
 - "tag": a one- or two-word craft category, e.g. "Voice", "Pacing", "Tension", "Imagery", "Dialogue", "Clarity".
 - "text": one or two sentences naming the specific moment and why it lands or wavers. Quote or paraphrase the actual line you mean.
+- "blockIds": the ids of the specific SCENE BLOCKS the note is about, copied exactly from their [id] labels. Use [] when the note concerns the whole scene.
 
 Return a balanced handful (roughly 4–7 notes). Lead with at least one genuine strength; never produce only criticism. Do not invent problems that aren't on the page.
 
@@ -50,6 +51,7 @@ Each observation has:
 - "sev": "ok" when something is tracked cleanly and worth confirming, "warn" for a soft inconsistency or ambiguity the author may have intended, "flag" for a likely error that breaks continuity.
 - "tag": a short label for the thing being tracked, e.g. "Cast", "Props", "Timeline", "Geography", "Pronouns".
 - "text": one or two sentences describing the observation, naming the specific detail and where it appears.
+- "blockIds": the ids of the specific SCENE BLOCKS the observation is about, copied exactly from their [id] labels. Use [] when it concerns the whole scene.
 
 Only report what the supplied text actually supports — if you cannot see earlier chapters, do not assume a contradiction with them. Prefer a few high-signal observations over an exhaustive list.
 

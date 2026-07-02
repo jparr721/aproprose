@@ -28,6 +28,7 @@ import type {
   SuggestResult,
 } from "@/lib/types";
 import { getModel } from "@/lib/ai/model";
+import { renderGrounding } from "@/lib/ai/grounding-render";
 import {
   BRAINSTORM_SYSTEM,
   CLEAN_TRANSCRIPT_SYSTEM,
@@ -73,6 +74,17 @@ export interface EditRequest {
   structure?: string;
 }
 
+/** Options every AI op accepts; the agent threads its AbortSignal through. */
+export interface AiOpOptions {
+  signal?: AbortSignal;
+}
+
+/** AiContext plus the id-labeled blocks offered for anchoring findings. */
+export interface AnchoredContext extends AiContext {
+  /** Blocks offered for anchoring; rendered id-labeled in the grounding. */
+  blocks: { id: string; type: BlockType; text: string }[];
+}
+
 /**
  * Render the grounding the model reads before doing any work: the chapter, the
  * cast roster, the cursor position, the scene prose, and — when the author
@@ -82,57 +94,44 @@ export interface EditRequest {
  * instructions live in `system`.
  */
 function buildGrounding(ctx: AiContext): string {
-  const parts: string[] = [];
-
-  if (ctx.chapterTitle) {
-    parts.push(`CHAPTER: ${ctx.chapterTitle}`);
-  }
-
-  if (ctx.characters && ctx.characters.length > 0) {
-    const roster = ctx.characters
-      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
-      .join("\n");
-    parts.push(`KNOWN CAST:\n${roster}`);
-  }
-
-  if (ctx.cursorSummary) {
-    parts.push(`CURSOR: ${ctx.cursorSummary}`);
-  }
-
-  if (ctx.structure) {
-    parts.push(`STORY STRUCTURE:\n${ctx.structure}`);
-  }
-
-  // The scene itself goes before the request so the request is the last,
-  // freshest, most salient directive in the model's window.
-  parts.push(`SCENE PROSE:\n${ctx.blocksText}`);
-
-  if (ctx.instruction?.trim()) {
-    parts.push(`AUTHOR'S REQUEST (follow this):\n${ctx.instruction.trim()}`);
-  }
-
-  return parts.join("\n\n");
+  return renderGrounding({
+    chapterTitle: ctx.chapterTitle,
+    characters: ctx.characters,
+    cursorSummary: ctx.cursorSummary,
+    structure: ctx.structure,
+    prose: ctx.blocksText,
+    instruction:
+      ctx.instruction !== undefined
+        ? { label: "AUTHOR'S REQUEST (follow this)", text: ctx.instruction }
+        : undefined,
+  });
 }
 
 /** Grounding for editBlocks: list each editable block by id, then the request. */
 function buildEditGrounding(req: EditRequest): string {
-  const parts: string[] = [];
-  if (req.chapterTitle) parts.push(`CHAPTER: ${req.chapterTitle}`);
-  if (req.characters && req.characters.length > 0) {
-    const roster = req.characters
-      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
-      .join("\n");
-    parts.push(`KNOWN CAST:\n${roster}`);
-  }
-  if (req.structure) {
-    parts.push(`STORY STRUCTURE:\n${req.structure}`);
-  }
-  const blocks = req.blocks
-    .map((b) => `[${b.id}] (${b.type}): ${b.text}`)
-    .join("\n\n");
-  parts.push(`EDITABLE BLOCKS (revise only these, by id):\n${blocks}`);
-  parts.push(`AUTHOR'S REQUEST (apply to the blocks above):\n${req.instruction.trim()}`);
-  return parts.join("\n\n");
+  return renderGrounding({
+    chapterTitle: req.chapterTitle,
+    characters: req.characters,
+    structure: req.structure,
+    blocks: { label: "EDITABLE BLOCKS (revise only these, by id)", items: req.blocks },
+    instruction: { label: "AUTHOR'S REQUEST (apply to the blocks above)", text: req.instruction },
+  });
+}
+
+/** Grounding for the anchored review ops: id-labeled blocks instead of prose,
+ *  so the model can cite real block ids in its findings. */
+function buildAnchoredGrounding(ctx: AnchoredContext): string {
+  return renderGrounding({
+    chapterTitle: ctx.chapterTitle,
+    characters: ctx.characters,
+    cursorSummary: ctx.cursorSummary,
+    structure: ctx.structure,
+    blocks: { label: "SCENE BLOCKS (cite these ids in blockIds)", items: ctx.blocks },
+    instruction:
+      ctx.instruction !== undefined
+        ? { label: "AUTHOR'S REQUEST (follow this)", text: ctx.instruction }
+        : undefined,
+  });
 }
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
@@ -175,9 +174,14 @@ const critiqueNoteSchema = z.object({
   text: z
     .string()
     .describe("one or two sentences naming the specific moment and why"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe("ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene"),
 });
 
-const critiqueResultSchema = z.object({
+// Exported for the schema round-trip tests.
+export const critiqueResultSchema = z.object({
   notes: z
     .array(critiqueNoteSchema)
     .describe("a balanced handful of notes, leading with at least one strength"),
@@ -191,9 +195,14 @@ const continuityFlagSchema = z.object({
   text: z
     .string()
     .describe("one or two sentences describing the observation and where it appears"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe("ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene"),
 });
 
-const continuityResultSchema = z.object({
+// Exported for the schema round-trip tests.
+export const continuityResultSchema = z.object({
   flags: z
     .array(continuityFlagSchema)
     .describe("high-signal continuity observations grounded in the supplied text"),
@@ -247,38 +256,54 @@ export async function suggestContinuation(
   };
 }
 
+/** Drop finding blockIds that were not offered. Pure, exported for tests. */
+export function sanitizeFindingIds<T extends { blockIds: string[] }>(
+  findings: T[],
+  offeredIds: string[],
+): T[] {
+  const known = new Set(offeredIds);
+  return findings.map((f) => ({ ...f, blockIds: f.blockIds.filter((id) => known.has(id)) }));
+}
+
 /**
  * Read the scene and return craft notes (strengths / things to watch / ideas),
- * each pinned to a concrete moment in the prose.
+ * each pinned to a concrete moment and anchored to the block ids it cites.
  */
-export async function critique(ctx: AiContext): Promise<CritiqueNote[]> {
+export async function critique(ctx: AnchoredContext, opts?: AiOpOptions): Promise<CritiqueNote[]> {
   const model = await getModel();
   const { output } = await generateText({
     model,
     output: Output.object({ schema: critiqueResultSchema }),
     system: CRITIQUE_SYSTEM,
-    prompt: buildGrounding(ctx),
+    prompt: buildAnchoredGrounding(ctx),
+    abortSignal: opts?.signal,
   });
-  // Anchoring lands with the id-labeled grounding (grounding-render); until
-  // then every note is scene-level.
-  return output.notes.map((n) => ({ ...n, blockIds: [] }));
+  return sanitizeFindingIds(
+    output.notes.map((n) => ({ ...n, blockIds: n.blockIds ?? [] })),
+    ctx.blocks.map((b) => b.id),
+  );
 }
 
 /**
  * Scan the scene for internal consistency and return continuity observations
- * (ok / warn / flag), grounded only on what the supplied text supports.
+ * (ok / warn / flag), anchored to the block ids each observation cites.
  */
 export async function continuityCheck(
-  ctx: AiContext,
+  ctx: AnchoredContext,
+  opts?: AiOpOptions,
 ): Promise<ContinuityFlag[]> {
   const model = await getModel();
   const { output } = await generateText({
     model,
     output: Output.object({ schema: continuityResultSchema }),
     system: CONTINUITY_SYSTEM,
-    prompt: buildGrounding(ctx),
+    prompt: buildAnchoredGrounding(ctx),
+    abortSignal: opts?.signal,
   });
-  return output.flags.map((f) => ({ ...f, blockIds: [] }));
+  return sanitizeFindingIds(
+    output.flags.map((f) => ({ ...f, blockIds: f.blockIds ?? [] })),
+    ctx.blocks.map((b) => b.id),
+  );
 }
 
 /**

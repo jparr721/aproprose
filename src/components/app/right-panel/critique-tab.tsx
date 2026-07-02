@@ -6,7 +6,7 @@ import { IconNotes } from "@tabler/icons-react";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useAi } from "@/hooks/use-ai";
-import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
+import { buildAnchoredContext, type ReadScope } from "@/lib/ai/context";
 import { critique } from "@/lib/ai/operations";
 import type { CritiqueNote } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -39,7 +39,7 @@ export function CritiqueTab() {
     scope === "cursor" ? selectedId ?? "" : ""
   }`;
   const { data, loading, error, instruction, run } = useAi<CritiqueNote[]>(
-    (ins) => critique({ ...buildScopedContext(scope), instruction: ins }),
+    (ins) => critique({ ...buildAnchoredContext(scope), instruction: ins }),
     cacheKey,
     "critique",
   );

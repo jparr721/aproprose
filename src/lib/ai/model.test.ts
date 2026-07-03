@@ -6,7 +6,7 @@ vi.mock("@/lib/ai/cli-provider", () => ({
 vi.mock("@/lib/tauri", () => ({ getAiConfig: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
-import { getModel } from "@/lib/ai/model";
+import { getModel, supportsTools } from "@/lib/ai/model";
 import { useSettingsStore } from "@/stores/settings-store";
 import { createCliModel } from "@/lib/ai/cli-provider";
 
@@ -36,5 +36,19 @@ describe("getModel provider routing", () => {
     useSettingsStore.setState({ aiProvider: "openai", aiModel: null });
     await expect(getModel()).rejects.toThrow(/Select an AI model/);
     expect(mockCreateCliModel).not.toHaveBeenCalled();
+  });
+});
+
+describe("supportsTools", () => {
+  it("is true for the OpenAI provider", () => {
+    useSettingsStore.setState({ aiProvider: "openai" });
+    expect(supportsTools()).toBe(true);
+  });
+
+  it("is false for the CLI providers, which drop tool messages", () => {
+    useSettingsStore.setState({ aiProvider: "codex" });
+    expect(supportsTools()).toBe(false);
+    useSettingsStore.setState({ aiProvider: "claude" });
+    expect(supportsTools()).toBe(false);
   });
 });

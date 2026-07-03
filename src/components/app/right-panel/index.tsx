@@ -18,6 +18,7 @@ import {
   IconPencil,
   IconSparkles,
   IconTimeline,
+  IconWand,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,6 +34,7 @@ import { EditTab } from "@/components/app/right-panel/edit-tab";
 import { CritiqueTab } from "@/components/app/right-panel/critique-tab";
 import { ContinuityTab } from "@/components/app/right-panel/continuity-tab";
 import { BrainstormTab } from "@/components/app/right-panel/brainstorm-tab";
+import { MuseTab } from "@/components/app/right-panel/muse-tab";
 
 // -- Panel shell --------------------------------------------------------------
 type TabMeta = { label: string; Icon: typeof IconSparkles };
@@ -46,6 +48,7 @@ const TAB_META: Record<AiTab, TabMeta> = {
   critique: { label: "Critique", Icon: IconNotes },
   brainstorm: { label: "Brainstorm", Icon: IconMessages },
   continuity: { label: "Continuity", Icon: IconTimeline },
+  muse: { label: "Muse", Icon: IconWand },
 };
 
 // The ordered list the rail renders (insertion order of the meta map).
@@ -70,6 +73,8 @@ function ActivePanel({ tab }: { tab: AiTab }) {
       return <BrainstormTab />;
     case "continuity":
       return <ContinuityTab />;
+    case "muse":
+      return <MuseTab />;
   }
 }
 

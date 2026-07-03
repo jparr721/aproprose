@@ -11,6 +11,7 @@ const AI_TABS: { tab: AiTab; title: string }[] = [
   { tab: "critique", title: "AI: Critique" },
   { tab: "brainstorm", title: "AI: Brainstorm" },
   { tab: "continuity", title: "AI: Continuity" },
+  { tab: "muse", title: "AI: Muse" },
 ];
 
 export const aiCommands: Command[] = [

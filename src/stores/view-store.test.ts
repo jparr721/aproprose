@@ -24,6 +24,11 @@ describe("view-store aiTab", () => {
     useViewStore.getState().setAiTab("outline");
     expect(useViewStore.getState().aiTab).toBe("outline");
   });
+
+  it("setAiTab can switch to the muse tab", () => {
+    useViewStore.getState().setAiTab("muse");
+    expect(useViewStore.getState().aiTab).toBe("muse");
+  });
 });
 
 describe("view-store aiCollapsed", () => {

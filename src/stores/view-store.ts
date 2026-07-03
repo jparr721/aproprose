@@ -24,7 +24,8 @@ export type AiTab =
   | "edit"
   | "critique"
   | "brainstorm"
-  | "continuity";
+  | "continuity"
+  | "muse";
 
 interface ViewState {
   aiOpen: boolean;

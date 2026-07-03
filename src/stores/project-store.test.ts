@@ -105,12 +105,26 @@ describe("mergeWithPrevious (Backspace at block start)", () => {
 
     const s = useProjectStore.getState();
     expect(s.blocks).toHaveLength(1);
-    expect(s.blocks[0].text).toBe("First.Second.");
+    // A space is restored at the bare word boundary (splits trim the cut), and
+    // the caret lands after it - a second Backspace fuses if really wanted.
+    expect(s.blocks[0].text).toBe("First. Second.");
     expect(s.blocks[0].dirty).toBe(true);
     expect(s.selectedId).toBe(a.id);
     expect(s.editing).toBe(true);
-    expect(s.editCaret).toBe("First.".length);
+    expect(s.editCaret).toBe("First. ".length);
     expect(s.past).toHaveLength(1); // one undo step
+  });
+
+  it("does not double a space that already exists at the boundary", () => {
+    const a = mkBlock({ text: "First. " });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    const s = useProjectStore.getState();
+    expect(s.blocks[0].text).toBe("First. Second.");
+    expect(s.editCaret).toBe("First. ".length);
   });
 
   it("is a no-op on the first block", () => {

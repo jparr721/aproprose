@@ -13,6 +13,8 @@ export type ProseKeyAction =
   | { kind: "insert-after"; type: BlockType }
   | { kind: "merge" }
   | { kind: "delete-empty" }
+  /** Swallow the key: acting would corrupt text (e.g. a newline typed at offset 0). */
+  | { kind: "suppress" }
   | { kind: "none" };
 
 /**
@@ -20,7 +22,7 @@ export type ProseKeyAction =
  * dialogue continues the conversation, and headings/breaks/notes hand off to
  * narration (they are asides or markers, not runs of prose).
  */
-export const CONTINUATION: Record<BlockType, BlockType> = {
+const CONTINUATION: Record<BlockType, BlockType> = {
   narration: "narration",
   dialogue: "dialogue",
   chapter: "narration",
@@ -34,6 +36,19 @@ export const CONTINUATION: Record<BlockType, BlockType> = {
  * merging would silently fold one speaker's line into another's quote.
  */
 export const MERGEABLE: ReadonlySet<BlockType> = new Set(["narration", "lore", "scratchpad"]);
+
+/**
+ * The one merge rule, shared by the key router and the store action so the two
+ * can never drift: same mergeable type, and the absorbed block must not carry
+ * a beat/title the merge would silently drop.
+ */
+export function canMerge(
+  prevType: BlockType | null,
+  curType: BlockType,
+  carriesFields: boolean,
+): boolean {
+  return prevType === curType && MERGEABLE.has(curType) && !carriesFields;
+}
 
 export function proseKeyAction(opts: {
   key: string;
@@ -54,18 +69,20 @@ export function proseKeyAction(opts: {
   const caret = opts.selectionStart === opts.selectionEnd ? opts.selectionStart : null;
 
   if (opts.key === "Enter" && !opts.shift) {
-    // A selection (or shift) keeps the native newline behavior.
+    // A selection keeps the native replace-with-newline behavior.
     if (caret === null) return { kind: "none" };
     if (caret >= opts.valueLength) return { kind: "insert-after", type: CONTINUATION[opts.blockType] };
-    // Caret at the very start: a split would only mint an empty twin above.
-    if (caret === 0) return { kind: "none" };
+    // Caret at the very start: a split would only mint an empty twin above,
+    // and falling through would type a hidden newline at the head of the text.
+    if (caret === 0) return { kind: "suppress" };
     return { kind: "split", at: caret };
   }
 
   if (opts.key === "Backspace" && caret === 0) {
-    if (opts.prevType === null || opts.carriesFields) return { kind: "none" };
-    if (opts.blockEmpty) return { kind: "delete-empty" };
-    if (MERGEABLE.has(opts.blockType) && opts.prevType === opts.blockType) return { kind: "merge" };
+    if (opts.prevType === null) return { kind: "none" };
+    if (opts.blockEmpty && !opts.carriesFields) return { kind: "delete-empty" };
+    if (!opts.blockEmpty && canMerge(opts.prevType, opts.blockType, opts.carriesFields))
+      return { kind: "merge" };
     return { kind: "none" };
   }
 

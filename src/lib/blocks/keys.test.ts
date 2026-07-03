@@ -50,9 +50,9 @@ describe("proseKeyAction - Enter", () => {
     expect(proseKeyAction({ ...base, selectionEnd: 9 })).toEqual({ kind: "none" });
   });
 
-  it("does nothing at the very start of the text", () => {
+  it("suppresses Enter at the very start (no hidden leading newline)", () => {
     expect(proseKeyAction({ ...base, selectionStart: 0, selectionEnd: 0 })).toEqual({
-      kind: "none",
+      kind: "suppress",
     });
   });
 });

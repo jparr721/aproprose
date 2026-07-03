@@ -48,11 +48,12 @@ export function BlockToolbar({
 
   return (
     <div
-      // Fades in like the grip (same 150ms opacity recipe) instead of the old
-      // display toggle, so chrome materializes rather than popping. Hidden
-      // state also drops pointer events so it never blocks the prose above.
+      // Mounted only while hovered/selected (see Block); the mount fade gives
+      // the same 150ms materialize as the grip, and the opacity gating handles
+      // the mounted-but-idle case (menu just closed, pointer elsewhere).
       className={cn(
         "absolute right-2 -top-2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-sm",
+        "animate-in fade-in-0 duration-150",
         "pointer-events-none opacity-0 transition-opacity duration-150",
         "group-hover:pointer-events-auto group-hover:opacity-100",
         "has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100",

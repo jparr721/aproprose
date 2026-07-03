@@ -23,6 +23,7 @@ export function AutoGrowTextarea({
   onKeyDown,
   proseBody,
   caret,
+  sizingSuffix,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -36,6 +37,11 @@ export function AutoGrowTextarea({
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Mark this as a carve-eligible prose body (selection toolbar + split shortcut). */
   proseBody?: boolean;
+  /**
+   * Sizing-only text appended to the replica — decoration the read view renders
+   * inline after the text (dialogue's closing quote) so both modes wrap alike.
+   */
+  sizingSuffix?: string;
   /**
    * One-shot caret placement on mount: `"start"` for `i` / new-block insert,
    * `"end"` to land at the end, a number for an exact offset (block merges).
@@ -66,7 +72,7 @@ export function AutoGrowTextarea({
       {/* The replica owns the cell height. The trailing space keeps a trailing
           newline (and the empty value) one line tall, matching the textarea. */}
       <div aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words">
-        {`${value || placeholder || ""} `}
+        {`${value || placeholder || ""}${sizingSuffix ?? ""} `}
       </div>
       <textarea
         ref={ref}

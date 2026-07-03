@@ -43,10 +43,10 @@ import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { countWords } from "@/lib/latex";
-import { isInAuxSurface } from "@/lib/dom";
+import { isInAuxSurface, isInteractiveTarget, scrollBlockIntoView } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/hooks/use-dictation";
-import type { BlockType } from "@/lib/types";
+import type { Block as BlockT, BlockType } from "@/lib/types";
 
 // Editor history defers to native undo/redo while the AI panel or a dialog holds
 // focus, so those inputs keep their own history.
@@ -55,19 +55,32 @@ const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
   ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
 };
 
-// Bring a specific block into view by id. The block node already exists (selection
-// only restyles it), so a synchronous query is fine.
-export function scrollBlockIntoView(id: string) {
-  document
-    .querySelector(`[data-block-id="${id}"]`)
-    ?.scrollIntoView({ block: "nearest" });
-}
+// Re-exported for the right-panel jump affordances (the helper itself lives in
+// lib/dom so non-component modules can share it).
+export { scrollBlockIntoView };
 
 // After a nav-key move, bring the newly-selected block into view.
 export function scrollSelectedIntoView() {
   const id = useProjectStore.getState().selectedId;
   if (!id) return;
   scrollBlockIntoView(id);
+}
+
+// Per-block word counts cached by object identity: updateBlockText keeps every
+// untouched block's identity, so a keystroke recounts only the edited block
+// instead of re-splitting the whole chapter's text.
+const blockWords = new WeakMap<BlockT, number>();
+function liveWordCount(blocks: BlockT[]): number {
+  let total = 0;
+  for (const b of blocks) {
+    let n = blockWords.get(b);
+    if (n === undefined) {
+      n = countWords([b]);
+      blockWords.set(b, n);
+    }
+    total += n;
+  }
+  return total;
 }
 
 function AddBlockRow() {
@@ -234,11 +247,21 @@ export function Editor() {
     navOptions,
   );
   // Nav-mode Enter resumes typing where the block left off (appending is the
-  // common case), complementing `i`'s caret-at-start.
+  // common case), complementing `i`'s caret-at-start. Unlike `i`/arrows, Enter
+  // is also the native activation key, so it must yield to a focused button or
+  // menu item instead of hijacking its press.
+  const enterNavOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: selectedId != null && !editing,
+      ignoreEventWhen: (e) =>
+        isInAuxSurface(e.target as Element | null) || isInteractiveTarget(e.target),
+    }),
+    [selectedId, editing],
+  );
   useKeybindingWithOptions(
     KEYBINDING_IDS.EDIT_BLOCK_ENTER,
     () => useProjectStore.getState().beginEdit("end"),
-    navOptions,
+    enterNavOptions,
   );
 
   // Esc exits edit mode (back to nav), or deselects when already in nav mode. It
@@ -267,7 +290,7 @@ export function Editor() {
 
   // Live word count: chapter.wordCount only refreshes on save, which reads as
   // a stuck number to a writer chasing a daily quota.
-  const liveWords = useMemo(() => countWords(blocks), [blocks]);
+  const liveWords = useMemo(() => liveWordCount(blocks), [blocks]);
 
   if (!chapter) {
     return (

@@ -13,8 +13,11 @@ import {
 } from "@/lib/latex/markup";
 
 // Shared <mark> styling for the active find match, reused by the plain-text
-// surfaces in block.tsx so the highlight reads identically everywhere.
-export const FIND_MARK_CLASS = "rounded-[2px] bg-warning/30 text-foreground";
+// surfaces in block.tsx so the highlight reads identically everywhere. The
+// scroll margins keep a nearest-scrolled match clear of the viewport edges and
+// the floating find bar (find-store scrolls the mark itself).
+export const FIND_MARK_CLASS =
+  "rounded-[2px] bg-warning/30 text-foreground scroll-mt-16 scroll-mb-10";
 
 function nodesToReact(nodes: InlineNode[]): ReactNode {
   return nodes.map((n, i) => {

@@ -13,6 +13,7 @@ import { renderInline } from "@/components/app/inline";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { proseKeyAction } from "@/lib/blocks/keys";
+import { scrollBlockIntoView } from "@/lib/dom";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +22,7 @@ import {
   DIALOGUE_QUOTE,
   LATEX_BODY,
   NOTE_BODY,
+  PLACEHOLDERS,
   PROSE,
   SCENE_BREAK,
   SCENE_HEADING,
@@ -34,13 +36,18 @@ import { highlightInline, highlightPlain, type FindHit } from "./highlight";
 // The latex body and the beat/title fields keep fully native keys.
 function proseKeys(block: BlockT): (e: React.KeyboardEvent<HTMLTextAreaElement>) => void {
   return (e) => {
+    // Everything except a bare Enter/Backspace is native; bail before touching
+    // the store so ordinary typing pays nothing here. An IME Enter committing a
+    // composition must also stay native or the candidate text gets mangled.
+    if ((e.key !== "Enter" && e.key !== "Backspace") || e.metaKey || e.ctrlKey) return;
+    if (e.nativeEvent.isComposing) return;
     const el = e.currentTarget;
     const st = useProjectStore.getState();
     const idx = st.blocks.findIndex((b) => b.id === block.id);
     const action = proseKeyAction({
       key: e.key,
       shift: e.shiftKey,
-      mod: e.metaKey || e.ctrlKey,
+      mod: false,
       selectionStart: el.selectionStart,
       selectionEnd: el.selectionEnd,
       valueLength: el.value.length,
@@ -51,6 +58,7 @@ function proseKeys(block: BlockT): (e: React.KeyboardEvent<HTMLTextAreaElement>)
     });
     if (action.kind === "none") return;
     e.preventDefault();
+    if (action.kind === "suppress") return;
     if (action.kind === "split") st.splitBlock(block.id, action.at);
     else if (action.kind === "insert-after") st.insertAfter(block.id, { type: action.type });
     else if (action.kind === "merge") st.mergeWithPrevious(block.id);
@@ -58,8 +66,15 @@ function proseKeys(block: BlockT): (e: React.KeyboardEvent<HTMLTextAreaElement>)
       // delete-empty: the neighbour deleteBlock selects is the previous block
       // (the router guarantees one exists); resume typing at its end.
       st.deleteBlock(block.id);
-      useProjectStore.getState().beginEdit("end");
+      st.beginEdit("end");
     }
+    // The target textarea focuses with preventScroll (never yank the page), so
+    // structural moves do their own minimal reveal - e.g. Enter at the end of
+    // the last block must bring the new empty block above the fold.
+    requestAnimationFrame(() => {
+      const id = useProjectStore.getState().selectedId;
+      if (id) scrollBlockIntoView(id);
+    });
   };
 }
 
@@ -90,13 +105,17 @@ export function BlockBody({
             onChange={(v) => updateBlockText(block.id, v)}
             autoFocus
             caret={caret}
-            placeholder="* * *"
+            placeholder={PLACEHOLDERS.break}
             onKeyDown={proseKeys(block)}
             className={SCENE_BREAK}
           />
         ) : (
           <div className={SCENE_BREAK}>
-            {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">* * *</span>}
+            {block.text ? (
+              highlightPlain(block.text, hit)
+            ) : (
+              <span className="text-faint">{PLACEHOLDERS.break}</span>
+            )}
           </div>
         );
       }
@@ -106,13 +125,17 @@ export function BlockBody({
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
           caret={caret}
-          placeholder="Scene heading"
+          placeholder={PLACEHOLDERS.scene}
           onKeyDown={proseKeys(block)}
           className={SCENE_HEADING}
         />
       ) : (
         <h2 className={SCENE_HEADING}>
-          {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">Scene heading</span>}
+          {block.text ? (
+            highlightPlain(block.text, hit)
+          ) : (
+            <span className="text-faint">{PLACEHOLDERS.scene}</span>
+          )}
         </h2>
       );
 
@@ -125,49 +148,49 @@ export function BlockBody({
               {speaker.name}
             </TypographyEyebrow>
           ) : null}
-          {editing ? (
-            <div className={cn(PROSE, DIALOGUE_INDENT)}>
-              <span aria-hidden className={DIALOGUE_QUOTE}>
-                “
-              </span>
+          {/* One wrapper for both modes: the hung open quote and the indent can
+              never drift between read and edit. */}
+          <div className={cn(PROSE, DIALOGUE_INDENT)}>
+            <span aria-hidden className={DIALOGUE_QUOTE}>
+              “
+            </span>
+            {editing ? (
               <AutoGrowTextarea
                 value={block.text}
                 onChange={(v) => updateBlockText(block.id, v)}
                 autoFocus
                 caret={caret}
-                placeholder="What do they say?"
+                placeholder={PLACEHOLDERS.dialogue}
                 onKeyDown={proseKeys(block)}
+                sizingSuffix="”"
                 proseBody
               />
-            </div>
-          ) : (
-            <p className={cn(PROSE, DIALOGUE_INDENT)}>
-              <span aria-hidden className={DIALOGUE_QUOTE}>
-                “
-              </span>
-              {block.text ? (
-                highlightInline(block.text, hit)
-              ) : (
-                <span className="text-faint">What do they say?</span>
-              )}
-              <span className="text-faint">”</span>
-            </p>
-          )}
+            ) : (
+              <p>
+                {block.text ? (
+                  highlightInline(block.text, hit)
+                ) : (
+                  <span className="text-faint">{PLACEHOLDERS.dialogue}</span>
+                )}
+                <span className="text-faint">”</span>
+              </p>
+            )}
+          </div>
           {/* The beat row mounts only when a beat exists, in BOTH modes, so
-              entering edit never grows the block. "Add action beat" lives in
-              the block's action menus. */}
+              entering edit never grows the block. "Add action beat" (and its
+              inverse, once emptied) live in the block's action menus. */}
           {block.beat !== undefined ? (
             editing ? (
               <AutoGrowTextarea
                 value={block.beat}
                 onChange={(v) => updateBlock(block.id, { beat: v })}
-                placeholder="Action beat"
+                placeholder={PLACEHOLDERS.beat}
                 className={DIALOGUE_BEAT}
               />
             ) : block.beat ? (
               <p className={DIALOGUE_BEAT}>{renderInline(block.beat)}</p>
             ) : (
-              <p className={cn(DIALOGUE_BEAT, "text-faint")}>Action beat</p>
+              <p className={cn(DIALOGUE_BEAT, "text-faint")}>{PLACEHOLDERS.beat}</p>
             )
           ) : null}
         </div>
@@ -176,7 +199,7 @@ export function BlockBody({
     case "lore":
     case "scratchpad": {
       const isLore = block.type === "lore";
-      const placeholder = isLore ? "Worldbuilding note" : "Brainstorm, reminders";
+      const placeholder = PLACEHOLDERS[block.type];
       return (
         <div
           className={cn(
@@ -249,14 +272,18 @@ export function BlockBody({
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
           caret={caret}
-          placeholder="Write"
+          placeholder={PLACEHOLDERS.narration}
           onKeyDown={proseKeys(block)}
           className={PROSE}
           proseBody
         />
       ) : (
         <p className={PROSE}>
-          {block.text ? highlightInline(block.text, hit) : <span className="text-faint">Write</span>}
+          {block.text ? (
+            highlightInline(block.text, hit)
+          ) : (
+            <span className="text-faint">{PLACEHOLDERS.narration}</span>
+          )}
         </p>
       );
   }

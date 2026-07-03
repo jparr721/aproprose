@@ -44,4 +44,22 @@ export const DIALOGUE_QUOTE = "absolute left-0 select-none text-faint";
 
 export const NOTE_BODY = "text-sm leading-[1.55]";
 
-export const LATEX_BODY = "whitespace-pre-wrap rounded-md border border-border bg-muted p-2.5 font-mono text-xs leading-[1.6] text-muted-foreground";
+// break-words matches the textarea's native overflow-wrap so an unspaced LaTeX
+// run wraps identically in both modes instead of overflowing the read view.
+export const LATEX_BODY = "whitespace-pre-wrap break-words rounded-md border border-border bg-muted p-2.5 font-mono text-xs leading-[1.6] text-muted-foreground";
+
+/** Types that draw their own tinted card surface; the block row treats them
+ *  specially (no hover wash, selection edge only) to avoid box-in-a-box. */
+export const CARD_TYPES: ReadonlySet<BlockType> = new Set(["lore", "scratchpad"]);
+
+/** Empty-state text, shared verbatim by the read view and the edit placeholder
+ *  so an empty block never changes copy when it enters edit mode. */
+export const PLACEHOLDERS = {
+  narration: "Write",
+  dialogue: "What do they say?",
+  beat: "Action beat",
+  scene: "Scene heading",
+  break: "* * *",
+  lore: "Worldbuilding note",
+  scratchpad: "Brainstorm, reminders",
+} as const;

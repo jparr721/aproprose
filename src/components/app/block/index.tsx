@@ -21,12 +21,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { copyText, currentSelectionText } from "@/lib/clipboard";
 import { useProjectStore } from "@/stores/project-store";
 import { useFindStore } from "@/stores/find-store";
-import { blockClickAction } from "@/lib/blocks/click";
+import { blockClickAction, rangeSpan } from "@/lib/blocks/click";
 import type { Block as BlockT } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BlockBody } from "./block-body";
 import { BlockToolbar } from "./block-toolbar";
 import { BlockActionItems, useBlockActions, type BlockAction } from "./block-actions";
+import { CARD_TYPES } from "./constants";
 import { blockPlainText, findSpeaker } from "./block-text";
 
 // Memoized: editing one block re-serializes only that block's `raw`/identity, so
@@ -74,6 +75,11 @@ function BlockImpl({
   // Text selected at right-click time — captured before Radix opens its menu and
   // moves focus, which would otherwise drop the selection (see onContextMenuCapture).
   const [selText, setSelText] = useState("");
+  // The floating toolbar (type chip, mic, AI, menus - several Radix roots) only
+  // mounts while the pointer is over the block or it is selected, so a long
+  // chapter doesn't pay for hundreds of dormant menu/tooltip trees, and hidden
+  // toolbars contribute no invisible tab stops.
+  const [chromeLive, setChromeLive] = useState(false);
   const speaker = findSpeaker(block, characters);
   // The active block plus every Cmd/Ctrl-clicked member of the multi-selection get
   // the selected highlight; only the active block (`selected`) shows the action row
@@ -83,7 +89,7 @@ function BlockImpl({
   const actions = useBlockActions(block);
   // Tinted note cards own their surface; the row treats them specially (no
   // hover wash, edge-only selection) so they never read as a box in a box.
-  const isCard = block.type === "lore" || block.type === "scratchpad";
+  const isCard = CARD_TYPES.has(block.type);
   // The whole block as plain text — copied verbatim and used to gate the item.
   const blockText = blockPlainText(block, characters);
 
@@ -133,25 +139,25 @@ function BlockImpl({
             else if (action === "select") select(block.id);
             else if (action === "edit") beginEdit();
             else if (action === "range") {
-              // Contiguous span from the active block to this one, walked in
-              // click direction so the clicked block ends up active. Suppress
-              // the browser's shift-extend text selection across blocks.
+              // Suppress the browser's shift-extend text selection across
+              // blocks; the span keeps the clicked block active (it lands last).
               e.preventDefault();
-              const anchor = st.selectedId;
-              const ids = st.blocks.map((b) => b.id);
-              const from = anchor ? ids.indexOf(anchor) : -1;
-              const to = ids.indexOf(block.id);
-              if (from === -1 || to === -1 || from === to) {
-                select(block.id);
-                return;
-              }
-              const step = from < to ? 1 : -1;
-              const span: string[] = [];
-              for (let i = from; i !== to + step; i += step) span.push(ids[i]);
-              setSelection(span);
+              const span = rangeSpan(
+                st.blocks.map((b) => b.id),
+                st.selectedId,
+                block.id,
+              );
+              if (span) setSelection(span);
+              else select(block.id);
             }
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
+          onMouseEnter={() => setChromeLive(true)}
+          onMouseLeave={(e) => {
+            // Keep the chrome mounted while one of its menus is open (the
+            // trigger inside the row carries data-state="open").
+            if (!e.currentTarget.querySelector('[data-state="open"]')) setChromeLive(false);
+          }}
           // dnd-kit drives the live drag offset and the FLIP ease of displaced
           // siblings; surface both as CSS vars (per the no-inline-style rule).
           // While a drag is idle the transition var is unset and the fallback
@@ -170,11 +176,9 @@ function BlockImpl({
             "[transition:var(--dnd-transition,color_120ms,background-color_120ms,border-color_120ms)]",
             // Tinted note cards draw their own surface; the row highlight would
             // double-box them, so they take only the selection edge.
-            highlighted
-              ? isCard
-                ? "border-select-edge"
-                : "border-select-edge bg-select-tint"
-              : !isCard && "hover:bg-muted/50",
+            highlighted && "border-select-edge",
+            highlighted && !isCard && "bg-select-tint",
+            !highlighted && !isCard && "hover:bg-muted/50",
             isDragging && "z-10 opacity-90 shadow-lg",
           )}
         >
@@ -203,13 +207,15 @@ function BlockImpl({
           </div>
 
           {/* actions */}
-          <BlockToolbar
-            block={block}
-            characters={characters}
-            dictation={dictation}
-            selected={selected}
-            actions={actions}
-          />
+          {chromeLive || selected ? (
+            <BlockToolbar
+              block={block}
+              characters={characters}
+              dictation={dictation}
+              selected={selected}
+              actions={actions}
+            />
+          ) : null}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">

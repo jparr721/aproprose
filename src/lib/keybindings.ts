@@ -229,8 +229,8 @@ function formatKey(key: string): string {
 
 /**
  * The display glyphs of a shortcut, in press order — e.g. `["⌘", "⇧", "P"]` on
- * macOS, `["⌃", "⇧", "P"]` elsewhere. Render each in its own `<Kbd>` (see
- * `KeybindingHint`). Pass `IS_MAC` from `@/lib/platform`.
+ * macOS, `["⌃", "⇧", "P"]` elsewhere. `KeybindingHint` renders them joined as a
+ * quiet chromeless run. Pass `IS_MAC` from `@/lib/platform`.
  */
 export function keybindingParts(
   keybinding: Pick<KeybindingDefinition, "key" | "modifiers">,

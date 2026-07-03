@@ -58,7 +58,7 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
-import { MERGEABLE } from "@/lib/blocks/keys";
+import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import {
   addCard as addCardModel,
@@ -893,19 +893,27 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (idx < 1) return {};
         const prev = s.blocks[idx - 1];
         const cur = s.blocks[idx];
-        // Guard here too, not just in the key router, so no caller can silently
-        // fold a speaker's line into another block or drop a beat/title.
-        if (prev.type !== cur.type || !MERGEABLE.has(cur.type)) return {};
-        if (cur.beat || cur.title) return {};
+        // Same predicate as the key router (one rule, two enforcement points),
+        // so no caller can fold a speaker's line away or drop a beat/title.
+        if (!canMerge(prev.type, cur.type, Boolean(cur.beat) || Boolean(cur.title))) return {};
+        // Splits trim the whitespace at the cut, so the symmetric merge restores
+        // one space at a bare word boundary — otherwise Enter-then-Backspace
+        // would silently fuse words. The caret lands after the join; a second
+        // Backspace removes the restored space when fusion really is wanted.
+        const needsSpace =
+          prev.text.length > 0 &&
+          cur.text.length > 0 &&
+          !/\s$/.test(prev.text) &&
+          !/^\s/.test(cur.text);
+        const join = needsSpace ? " " : "";
         const blocks = [...s.blocks];
-        blocks.splice(idx - 1, 2, { ...prev, text: prev.text + cur.text, dirty: true });
+        blocks.splice(idx - 1, 2, { ...prev, text: prev.text + join + cur.text, dirty: true });
         return {
           blocks,
           selectedId: prev.id,
           selectedIds: [],
           editing: true,
-          // The caret lands exactly at the join, like Backspace-merge anywhere.
-          editCaret: prev.text.length,
+          editCaret: prev.text.length + join.length,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],

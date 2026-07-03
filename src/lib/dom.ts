@@ -33,3 +33,24 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     target.isContentEditable
   );
 }
+
+/**
+ * True when the target is (or is inside) a natively-activatable control. Used
+ * by bare activation keys (nav-mode Enter) that must yield to a focused button
+ * or menu item instead of hijacking its press.
+ */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return (
+    target.closest('button, a[href], select, summary, [role="button"], [role="menuitem"]') !== null
+  );
+}
+
+/**
+ * Bring a block's row into view by id, moving the viewport as little as
+ * possible. The block node already exists whenever this is called (selection
+ * and edit-mode changes only restyle it), so a synchronous query is fine.
+ */
+export function scrollBlockIntoView(id: string): void {
+  document.querySelector(`[data-block-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+}

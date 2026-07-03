@@ -91,7 +91,9 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
       { icon: IconSquareRoundedPlus, label: "Insert block above", onSelect: insertAbove },
       { icon: IconSquareRoundedPlus, label: "Insert block below", onSelect: () => insertAfter(block.id) },
       // The beat row only renders once a beat exists (edit-mode layout parity),
-      // so giving a dialogue its first beat is an explicit action.
+      // so giving a dialogue its first beat is an explicit action - and an
+      // emptied beat needs an explicit way back out, or its placeholder row
+      // would haunt the read view until a save-reload dropped it.
       ...(block.type === "dialogue" && block.beat === undefined
         ? [
             {
@@ -102,6 +104,15 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
                 select(block.id);
                 beginEdit();
               },
+            },
+          ]
+        : []),
+      ...(block.type === "dialogue" && block.beat === ""
+        ? [
+            {
+              icon: IconTextPlus,
+              label: "Remove action beat",
+              onSelect: () => updateBlock(block.id, { beat: undefined }),
             },
           ]
         : []),

@@ -158,10 +158,11 @@ export function TopBar() {
           size="sm"
           onClick={() => void compileNow()}
           disabled={compiling}
+          className="px-3"
         >
           {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
           Compile
-          <KeybindingHint keybinding={KEYBINDINGS.COMPILE} />
+          <KeybindingHint keybinding={KEYBINDINGS.COMPILE} className="ml-0.5" />
         </Button>
       ) : null}
 
@@ -175,11 +176,12 @@ export function TopBar() {
               aria-pressed={pdfOpen && !focus}
               onClick={togglePdf}
               className={cn(
+                "px-2.5",
                 pdfOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >
               <IconFileTypePdf /> PDF
-              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} />
+              <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} className="ml-0.5" />
             </Button>
             {/* Right-panel toggle, mirroring the left SidebarTrigger (⌘⇧A). */}
             <Button

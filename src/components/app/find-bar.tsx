@@ -134,7 +134,7 @@ export function FindBar() {
   return (
     <div
       data-find-widget
-      className="absolute right-4 top-3 z-20 flex items-start gap-1 rounded-lg border border-border bg-card p-1.5 font-sans shadow-md"
+      className="absolute right-4 top-3 z-20 flex items-start gap-1 rounded-lg border border-border bg-card p-1.5 font-sans shadow-md animate-in fade-in-0 slide-in-from-top-2 duration-150"
     >
       <Button
         variant="ghost"

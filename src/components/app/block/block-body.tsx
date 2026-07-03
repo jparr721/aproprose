@@ -10,6 +10,7 @@
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { ColorDot } from "@/components/app/color-dot";
 import { renderInline } from "@/components/app/inline";
+import { TypographyEyebrow } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { proseKeyAction } from "@/lib/blocks/keys";
 import type { Block as BlockT, Character } from "@/lib/types";
@@ -119,10 +120,10 @@ export function BlockBody({
       return (
         <div className="flex flex-col gap-1">
           {speaker ? (
-            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <TypographyEyebrow className="flex items-center gap-1.5">
               <ColorDot color={speaker.color} />
               {speaker.name}
-            </div>
+            </TypographyEyebrow>
           ) : null}
           {editing ? (
             <div className={cn(PROSE, DIALOGUE_INDENT)}>
@@ -186,9 +187,10 @@ export function BlockBody({
           )}
         >
           <div className="mb-1.5 flex items-baseline gap-2">
-            <span className="text-[9.5px] font-semibold uppercase tracking-[0.1em] opacity-70">
-              {isLore ? "Lore · won't render" : "Scratchpad · won't render"}
-            </span>
+            <TypographyEyebrow className="text-current opacity-70">
+              {isLore ? "Lore" : "Scratchpad"}
+            </TypographyEyebrow>
+            <TypographyEyebrow className="text-current opacity-45">won't render</TypographyEyebrow>
             {isLore && (block.title || editing) ? (
               editing ? (
                 <input

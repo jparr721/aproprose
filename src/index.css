@@ -82,6 +82,7 @@
   --faint: var(--ink-300); /* tertiary text, fainter than muted-foreground */
   --accent-ink: var(--clay-600); /* clay accent ink for emphasis text / marks */
   --select-edge: oklch(0.48 0.12 150); /* forest-green border on the selected block */
+  --select-tint: oklch(0.945 0.02 150); /* selection surface: green-cast paper lift */
 
   /* ── kept app tokens (irreducible) ────────────────────────────────────── */
   --ai-tint: oklch(0.95 0.018 285);
@@ -123,6 +124,7 @@
   --clay-600: oklch(0.5 0.12 35);
   --clay-tint: oklch(0.88 0.05 65);
   --select-edge: oklch(0.46 0.12 145); /* forest green, warmed for sepia paper */
+  --select-tint: oklch(0.905 0.035 135); /* selection surface on sepia paper */
 
   --sheet: oklch(0.96 0.03 82);
   --sheet-ink: oklch(0.26 0.04 50);
@@ -146,6 +148,7 @@
   --clay-tint: oklch(0.3 0.04 50); /* accent surface */
   --danger-500: oklch(0.704 0.191 22.216);
   --select-edge: oklch(0.56 0.12 150); /* forest green, lifted for dark bg */
+  --select-tint: oklch(0.245 0.02 160); /* selection surface on dark paper */
 
   --ai-tint: oklch(0.24 0.022 285);
   --ai-edge: oklch(0.36 0.04 285);
@@ -219,6 +222,7 @@
   --color-faint: var(--faint);
   --color-accent-ink: var(--accent-ink);
   --color-select-edge: var(--select-edge);
+  --color-select-tint: var(--select-tint);
   --color-ai-tint: var(--ai-tint);
   --color-ai-edge: var(--ai-edge);
   --color-ai-ink: var(--ai-ink);

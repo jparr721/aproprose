@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   IconGitMerge,
+  IconPlus,
   IconSparkles,
   IconWriting,
 } from "@tabler/icons-react";
@@ -41,6 +42,7 @@ import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding"
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
+import { countWords } from "@/lib/latex";
 import { isInAuxSurface } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/hooks/use-dictation";
@@ -75,22 +77,22 @@ function AddBlockRow() {
   const add = (type: BlockType) => insertAfter(selectedId, { type });
 
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5 py-4 pl-7">
+    <div className="mt-2 flex flex-wrap gap-1.5 py-4">
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("narration")}>
-        + Narration
+        <IconPlus /> Narration
       </Button>
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("dialogue")}>
-        + Dialogue
+        <IconPlus /> Dialogue
       </Button>
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => add("scratchpad")}>
-        + Scratchpad
+        <IconPlus /> Scratchpad
       </Button>
       <Button variant="outline" size="sm" className="rounded-full border-dashed" onClick={() => insertAfter(selectedId, { type: "chapter", level: "break", text: "* * *" })}>
-        + Scene break
+        <IconPlus /> Scene break
       </Button>
       <Button
         size="sm"
-        className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-tint hover:brightness-95"
+        className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-edge/60"
         onClick={() => dispatchAiIntent({ tab: "suggest" })}
       >
         <IconSparkles className="size-3.5" />
@@ -263,6 +265,10 @@ export function Editor() {
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
 
+  // Live word count: chapter.wordCount only refreshes on save, which reads as
+  // a stuck number to a writer chasing a daily quota.
+  const liveWords = useMemo(() => countWords(blocks), [blocks]);
+
   if (!chapter) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
@@ -315,7 +321,7 @@ export function Editor() {
               {chapter.title}
             </TypographyForeground>
             <TypographyMutedSpan className="ml-auto text-xs tabular-nums">
-              {blocks.length} blocks · {chapter.wordCount.toLocaleString()} words ·{" "}
+              {blocks.length} blocks - {liveWords.toLocaleString()} words -{" "}
               {chapterDirty ? "unsaved" : "saved"}
             </TypographyMutedSpan>
           </header>

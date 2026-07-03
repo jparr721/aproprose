@@ -1,5 +1,11 @@
 // block-body.tsx -- type-aware rendering of a block's body: finished prose out of
 // edit mode, seamless borderless textareas while editing.
+//
+// Read view and edit surface share one class constant per type (constants.ts)
+// and mount the same rows, so toggling edit mode never shifts layout — that
+// parity (plus AutoGrowTextarea's replica sizing) is what keeps the viewport
+// perfectly still when a block is clicked. Empty blocks show the same
+// placeholder text in both modes for the same reason.
 
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { ColorDot } from "@/components/app/color-dot";
@@ -7,7 +13,16 @@ import { renderInline } from "@/components/app/inline";
 import { useProjectStore } from "@/stores/project-store";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { PROSE } from "./constants";
+import {
+  DIALOGUE_BEAT,
+  DIALOGUE_INDENT,
+  DIALOGUE_QUOTE,
+  LATEX_BODY,
+  NOTE_BODY,
+  PROSE,
+  SCENE_BREAK,
+  SCENE_HEADING,
+} from "./constants";
 import { highlightInline, highlightPlain, type FindHit } from "./highlight";
 
 export function BlockBody({
@@ -21,7 +36,7 @@ export function BlockBody({
   editing: boolean;
   speaker?: Character;
   /** One-shot caret placement for the block's primary textarea on edit-mode mount. */
-  caret?: "start" | "end";
+  caret?: "start" | "end" | number;
   /** The active find match in this block's `text`, highlighted when not editing. */
   hit: FindHit;
 }) {
@@ -38,10 +53,10 @@ export function BlockBody({
             autoFocus
             caret={caret}
             placeholder="* * *"
-            className="text-center font-serif text-muted-foreground"
+            className={SCENE_BREAK}
           />
         ) : (
-          <div className="py-4 text-center font-serif tracking-[0.3em] text-muted-foreground">
+          <div className={SCENE_BREAK}>
             {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">* * *</span>}
           </div>
         );
@@ -53,10 +68,10 @@ export function BlockBody({
           autoFocus
           caret={caret}
           placeholder="Scene heading"
-          className="text-center font-serif text-2xl font-medium tracking-wide text-foreground"
+          className={SCENE_HEADING}
         />
       ) : (
-        <h2 className="my-2 text-center font-serif text-2xl font-medium tracking-wide text-foreground">
+        <h2 className={SCENE_HEADING}>
           {block.text ? highlightPlain(block.text, hit) : <span className="text-faint">Scene heading</span>}
         </h2>
       );
@@ -71,43 +86,56 @@ export function BlockBody({
             </div>
           ) : null}
           {editing ? (
-            <>
+            <div className={cn(PROSE, DIALOGUE_INDENT)}>
+              <span aria-hidden className={DIALOGUE_QUOTE}>
+                “
+              </span>
               <AutoGrowTextarea
                 value={block.text}
                 onChange={(v) => updateBlockText(block.id, v)}
                 autoFocus
                 caret={caret}
                 placeholder="What do they say?"
-                className={PROSE}
                 proseBody
               />
-              <AutoGrowTextarea
-                value={block.beat ?? ""}
-                onChange={(v) => updateBlock(block.id, { beat: v })}
-                placeholder="Action beat (optional)"
-                className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-muted-foreground"
-              />
-            </>
+            </div>
           ) : (
-            <>
-              <p className={PROSE}>
-                <span className="text-faint">“</span>
-                {highlightInline(block.text, hit)}
-                <span className="text-faint">”</span>
-              </p>
-              {block.beat ? (
-                <p className="font-serif text-[length:calc(var(--prose-size,17.5px)-1.5px)] leading-[1.6] text-muted-foreground">
-                  {renderInline(block.beat)}
-                </p>
-              ) : null}
-            </>
+            <p className={cn(PROSE, DIALOGUE_INDENT)}>
+              <span aria-hidden className={DIALOGUE_QUOTE}>
+                “
+              </span>
+              {block.text ? (
+                highlightInline(block.text, hit)
+              ) : (
+                <span className="text-faint">What do they say?</span>
+              )}
+              <span className="text-faint">”</span>
+            </p>
           )}
+          {/* The beat row mounts only when a beat exists, in BOTH modes, so
+              entering edit never grows the block. "Add action beat" lives in
+              the block's action menus. */}
+          {block.beat !== undefined ? (
+            editing ? (
+              <AutoGrowTextarea
+                value={block.beat}
+                onChange={(v) => updateBlock(block.id, { beat: v })}
+                placeholder="Action beat"
+                className={DIALOGUE_BEAT}
+              />
+            ) : block.beat ? (
+              <p className={DIALOGUE_BEAT}>{renderInline(block.beat)}</p>
+            ) : (
+              <p className={cn(DIALOGUE_BEAT, "text-faint")}>Action beat</p>
+            )
+          ) : null}
         </div>
       );
 
     case "lore":
     case "scratchpad": {
       const isLore = block.type === "lore";
+      const placeholder = isLore ? "Worldbuilding note" : "Brainstorm, reminders";
       return (
         <div
           className={cn(
@@ -140,12 +168,18 @@ export function BlockBody({
               onChange={(v) => updateBlockText(block.id, v)}
               autoFocus
               caret={caret}
-              placeholder={isLore ? "Worldbuilding note" : "Brainstorm, reminders"}
-              className="text-[13px] leading-[1.55]"
+              placeholder={placeholder}
+              className={NOTE_BODY}
               proseBody
             />
           ) : (
-            <p className="text-[13px] leading-[1.55]">{highlightInline(block.text, hit)}</p>
+            <p className={NOTE_BODY}>
+              {block.text ? (
+                highlightInline(block.text, hit)
+              ) : (
+                <span className="text-faint">{placeholder}</span>
+              )}
+            </p>
           )}
         </div>
       );
@@ -158,12 +192,10 @@ export function BlockBody({
           onChange={(v) => updateBlockText(block.id, v)}
           autoFocus
           caret={caret}
-          className="rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground"
+          className={LATEX_BODY}
         />
       ) : (
-        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2.5 font-mono text-[12.5px] leading-[1.6] text-muted-foreground">
-          {highlightPlain(block.text, hit)}
-        </pre>
+        <pre className={LATEX_BODY}>{highlightPlain(block.text, hit)}</pre>
       );
 
     case "narration":
@@ -180,7 +212,7 @@ export function BlockBody({
         />
       ) : (
         <p className={PROSE}>
-          {block.text ? highlightInline(block.text, hit) : <span className="text-faint">Empty</span>}
+          {block.text ? highlightInline(block.text, hit) : <span className="text-faint">Write</span>}
         </p>
       );
   }

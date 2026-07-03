@@ -10,20 +10,29 @@ vi.mock("@/lib/tauri", () => ({
 vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/ai/operations", () => ({ editBlocks: vi.fn(), reviseChapter: vi.fn() }));
 vi.mock("@/components/app/right-panel/shared", () => ({
-  AiComposer: () => <div />,
+  // The composer/scope stubs surface their props as text so tests can assert
+  // what the tab handed them (intent prefill, scope routing).
+  AiComposer: ({ prefill, toolbar }: { prefill?: string; toolbar?: React.ReactNode }) => (
+    <div>
+      {`prefill:${prefill ?? ""}`}
+      {toolbar}
+    </div>
+  ),
   AiError: () => <div>err</div>,
   AskedCaption: () => <div />,
   LoadingLines: () => <div />,
   PanelEmpty: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   PanelHint: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ScopeToggle: () => <div />,
+  ScopeToggle: ({ value }: { value: string }) => <div>{`scope:${value}`}</div>,
 }));
 
+import { act } from "react";
 import { toast } from "sonner";
 import { EditTab } from "@/components/app/right-panel/edit-tab";
 import { editBlocks } from "@/lib/ai/operations";
 import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiIntentStore } from "@/stores/ai-intent-store";
 import type { BlockChange, ManuscriptProposal } from "@/lib/types";
 
 const CACHE_KEY = "edit:ch1:block:e1,e2";
@@ -70,6 +79,7 @@ beforeEach(() => {
     meta: { ...useProjectStore.getState().meta, characters: [] },
   } as never);
   useAiCacheStore.setState({ entries: {} });
+  useAiIntentStore.setState({ pending: null });
 });
 
 describe("EditTab without an open chapter", () => {
@@ -145,6 +155,35 @@ describe("EditTab accept", () => {
     render(<EditTab />);
     fireEvent.click(screen.getByText("Accept all"));
     expect(toast.warning).not.toHaveBeenCalled();
+  });
+});
+
+describe("EditTab intent handler", () => {
+  it("consumes a live edit intent: sets the selection, switches scope, prefills the composer", async () => {
+    render(<EditTab />);
+
+    // First park a chapter-scope intent so the block intent below provably
+    // switches the scope back rather than reading the default.
+    act(() => {
+      useAiIntentStore.getState().dispatch({ tab: "edit", scope: "chapter" });
+    });
+    await waitFor(() => expect(screen.getByText("scope:chapter")).toBeTruthy());
+
+    act(() => {
+      useAiIntentStore.getState().dispatch({
+        tab: "edit",
+        instruction: "tighten this paragraph",
+        blockIds: ["e2"],
+        scope: "block",
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("prefill:tighten this paragraph")).toBeTruthy(),
+    );
+    expect(screen.getByText("scope:block")).toBeTruthy();
+    expect(useProjectStore.getState().selectedId).toBe("e2");
+    expect(useAiIntentStore.getState().pending).toBeNull();
   });
 });
 

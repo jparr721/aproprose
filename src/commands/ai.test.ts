@@ -26,6 +26,17 @@ const runPickUp = () => {
   void cmd.run({ toggleSidebar: () => {} });
 };
 
+describe("pickUpCursorSuffix", () => {
+  // Raw literals on purpose: the directive's wording promises exactly these
+  // lines, so a drift in the helper must fail here, not be rebuilt by it.
+  it("pins the exact cursor-line literals", () => {
+    expect(pickUpCursorSuffix("b7")).toBe("\n\nThe cursor block id is [b7].");
+    expect(pickUpCursorSuffix(null)).toBe(
+      "\n\nNo cursor is set; continue from where the chapter's prose currently ends.",
+    );
+  });
+});
+
 describe("ai.pick-up command", () => {
   beforeEach(() => {
     useAiIntentStore.setState({ pending: null });

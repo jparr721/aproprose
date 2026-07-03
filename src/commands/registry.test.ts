@@ -114,7 +114,7 @@ describe("command registry", () => {
 
   it("exposes every AI tab in the palette, including Edit", () => {
     const ids = STATIC_COMMANDS.map((c) => c.id);
-    for (const tab of ["suggest", "edit", "critique", "brainstorm", "continuity"]) {
+    for (const tab of ["suggest", "edit", "critique", "brainstorm", "continuity", "muse"]) {
       expect(ids).toContain(`ai.tab-${tab}`);
     }
   });

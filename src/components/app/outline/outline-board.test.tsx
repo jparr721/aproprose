@@ -68,4 +68,3 @@ describe("BoardChapterColumn sculpt states", () => {
     expect(screen.queryByText("Try again")).toBeNull();
   });
 });
-

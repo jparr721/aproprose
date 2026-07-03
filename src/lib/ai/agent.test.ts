@@ -138,6 +138,28 @@ describe("runAgent tool loop", () => {
     expect(proposal?.changes.map((c) => c.blockId)).toEqual(["b1"]);
   });
 
+  it("fails the run when the active chapter changes between steps", async () => {
+    const results = [
+      toolCall("read_chapter", {}),
+      toolCall("stage_proposal", {
+        summary: "Tighten the opening",
+        changes: [rewrite("b1", "Rain hammered the glass.")],
+      }),
+    ];
+    let i = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        // The author switches chapters after read_chapter, just before staging.
+        if (i === 1) useProjectStore.setState({ activeChapterId: "ch2" });
+        return results[i++];
+      },
+    });
+    vi.mocked(getModel).mockResolvedValue(model);
+    await expect(
+      runAgent("tighten", { signal: new AbortController().signal, onStep: () => {} }),
+    ).rejects.toThrow("Chapter changed during the Muse run.");
+  });
+
   it("rejects when the signal aborts before the model answers", async () => {
     vi.mocked(getModel).mockResolvedValue(
       new MockLanguageModelV3({

@@ -126,6 +126,27 @@ describe("MuseTab", () => {
     await waitFor(() => expect(useMuseStore.getState().status).toBe("idle"));
   });
 
+  it("Stop still aborts after the tab is unmounted and remounted mid-run", async () => {
+    vi.mocked(runAgent).mockImplementation(
+      (_directive, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+
+    // ActivePanel unmounts inactive tabs. Start a run, leave (unmount), come
+    // back (remount): the fresh mount must still own the in-flight controller.
+    const { unmount } = render(<MuseTab />);
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => expect(useMuseStore.getState().status).toBe("running"));
+    unmount();
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("Stop"));
+    await waitFor(() => expect(useMuseStore.getState().status).toBe("idle"));
+  });
+
   it("shows the error state when the run fails", async () => {
     vi.mocked(runAgent).mockRejectedValue(new Error("boom"));
     render(<MuseTab />);

@@ -4,7 +4,7 @@
 // where the author reviews and applies it change by change. Runs are ephemeral
 // (muse-store); only the staged proposal persists, via ai-cache-store.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { IconCheck, IconPencil, IconPlayerStop, IconWand } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,12 @@ import {
   PanelHint,
 } from "@/components/app/right-panel/shared";
 
+// The run's abort controller lives at module scope, not in a component ref:
+// ActivePanel unmounts inactive tabs, so a ref would reset to null when the
+// author switches to Edit and back mid-run, leaving Stop a no-op. One owner
+// survives remounts - starting a run replaces it, Stop aborts it.
+let activeController: AbortController | null = null;
+
 function MuseTabBody() {
   const status = useMuseStore((s) => s.status);
   const steps = useMuseStore((s) => s.steps);
@@ -46,7 +52,6 @@ function MuseTabBody() {
   // Settings; the copy below also names the provider that can't run tools.
   const aiProvider = useSettingsStore((s) => s.aiProvider);
   const composer = usePromptInputController();
-  const abortRef = useRef<AbortController | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const running = status === "running";
 
@@ -55,7 +60,7 @@ function MuseTabBody() {
     if (!trimmed || useMuseStore.getState().status === "running") return;
     if (!useProjectStore.getState().activeChapterId) return;
     const controller = new AbortController();
-    abortRef.current = controller;
+    activeController = controller;
     useMuseStore.getState().start(trimmed);
     useAiActivityStore.getState().start("muse");
     void (async () => {
@@ -92,12 +97,12 @@ function MuseTabBody() {
         }
         useAiActivityStore.getState().finish("muse", "failed");
       } finally {
-        abortRef.current = null;
+        if (activeController === controller) activeController = null;
       }
     })();
   };
 
-  const stop = () => abortRef.current?.abort();
+  const stop = () => activeController?.abort();
 
   // The one-click writer's-block helper: the same flow as an autoRun intent,
   // the canned directive plus the cursor line the dispatch sites also append

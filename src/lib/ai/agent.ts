@@ -83,6 +83,17 @@ export async function runAgent(
   if (!activeChapterId) throw new Error("No active chapter.");
   const chapterId = activeChapterId;
 
+  // The tools read the live store while chapterId stays pinned, so a mid-run
+  // chapter switch would stage under the old chapter's key citing the new
+  // chapter's block ids, and cache the new chapter's critique under the old key.
+  // Guard at every point that touches chapter-scoped state, and once more after
+  // the loop: a tool's throw becomes a tool-error part in the SDK (it never
+  // rejects generateText), so the post-loop check is what surfaces the change.
+  const assertSameChapter = () => {
+    if (useProjectStore.getState().activeChapterId !== chapterId)
+      throw new Error("Chapter changed during the Muse run.");
+  };
+
   const model = await getModel();
   let staged: ManuscriptProposal | null = null;
   const step = (toolName: string, label: string) => opts.onStep({ tool: toolName, label });
@@ -145,6 +156,7 @@ export async function runAgent(
       inputSchema: z.object({}),
       execute: async () => {
         step("get_critique", "Critiquing");
+        assertSameChapter();
         const key = aiCacheKey("critique", chapterId, "chapter", "");
         const cached = useAiCacheStore.getState().entries[key]?.data as
           | CritiqueNote[]
@@ -179,6 +191,7 @@ export async function runAgent(
       }),
       execute: async ({ summary, changes }) => {
         step("stage_proposal", "Drafting changes");
+        assertSameChapter();
         const { blocks } = useProjectStore.getState();
         staged = sanitizeProposal(
           { chapterId, summary, changes },
@@ -198,5 +211,6 @@ export async function runAgent(
     abortSignal: opts.signal,
   });
 
+  assertSameChapter();
   return staged;
 }

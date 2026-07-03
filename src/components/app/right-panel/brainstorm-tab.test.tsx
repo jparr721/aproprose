@@ -9,7 +9,8 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("@/lib/ai/operations", () => ({ brainstorm: vi.fn() }));
 // The AI-elements chat surface and the shared composer pull in scroll/observer
-// APIs happy-dom lacks; stub them to the minimum this test drives (a send button).
+// APIs happy-dom lacks; stub them to the minimum these tests drive (a send
+// button, and per-reply action buttons that keep their label + onClick).
 vi.mock("@/components/app/right-panel/shared", () => ({
   AiComposer: ({ onSubmit }: { onSubmit: (t: string) => void }) => (
     <button onClick={() => onSubmit("hi")}>send</button>
@@ -26,7 +27,19 @@ vi.mock("@/components/ai-elements/conversation", () => ({
 vi.mock("@/components/ai-elements/message", () => ({
   Message: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   MessageActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  MessageAction: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  MessageAction: ({
+    children,
+    label,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    label?: string;
+    onClick?: () => void;
+  }) => (
+    <button aria-label={label} onClick={onClick}>
+      {children}
+    </button>
+  ),
   MessageContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   MessageResponse: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -35,14 +48,32 @@ import { BrainstormTab } from "@/components/app/right-panel/brainstorm-tab";
 import { brainstorm } from "@/lib/ai/operations";
 import { useProjectStore } from "@/stores/project-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
+import { useAiIntentStore } from "@/stores/ai-intent-store";
 
 const CH = "ch1";
+const REPLY = "Kill the lights mid-toast.";
 
 // Yields one chunk, then the stream fails (provider drop / rate-limit mid-stream).
 async function* failingStream(): AsyncGenerator<string> {
   yield "Half a thought";
   throw new Error("stream boom");
 }
+
+// Yields one chunk, then stays open: a reply still streaming in.
+async function* hangingStream(): AsyncGenerator<string> {
+  yield "Partial reply";
+  await new Promise<never>(() => {});
+}
+
+const seedThread = () =>
+  useBrainstormStore.setState({
+    threads: {
+      [CH]: [
+        { role: "user", content: "raise the stakes" },
+        { role: "assistant", content: REPLY },
+      ],
+    },
+  });
 
 afterEach(() => {
   cleanup();
@@ -52,6 +83,7 @@ afterEach(() => {
 beforeEach(() => {
   useProjectStore.setState({ activeChapterId: CH, blocks: [], selectedId: null });
   useBrainstormStore.setState({ threads: {} });
+  useAiIntentStore.setState({ pending: null });
   vi.mocked(brainstorm).mockResolvedValue({
     textStream: failingStream(),
   } as unknown as Awaited<ReturnType<typeof brainstorm>>);
@@ -72,5 +104,50 @@ describe("BrainstormTab stream failure", () => {
     expect(useBrainstormStore.getState().threads[CH]).toEqual([
       { role: "user", content: "hi" },
     ]);
+  });
+});
+
+describe("BrainstormTab reply handoffs", () => {
+  it("renders handoff actions on committed assistant replies only", () => {
+    seedThread();
+    render(<BrainstormTab />);
+    // One assistant reply -> exactly one of each action; the user turn gets none.
+    expect(screen.getAllByLabelText("Draft this")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Apply this")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Copy reply")).toHaveLength(1);
+  });
+
+  it("Draft this parks a suggest prefill carrying the reply", () => {
+    seedThread();
+    render(<BrainstormTab />);
+    fireEvent.click(screen.getByLabelText("Draft this"));
+    expect(useAiIntentStore.getState().pending).toEqual({
+      tab: "suggest",
+      instruction: REPLY,
+      autoRun: false,
+    });
+  });
+
+  it("Apply this parks a chapter-scope edit prefill carrying the reply", () => {
+    seedThread();
+    render(<BrainstormTab />);
+    fireEvent.click(screen.getByLabelText("Apply this"));
+    expect(useAiIntentStore.getState().pending).toEqual({
+      tab: "edit",
+      instruction: REPLY,
+      scope: "chapter",
+      autoRun: false,
+    });
+  });
+
+  it("shows no handoff actions on the in-flight streaming reply", async () => {
+    vi.mocked(brainstorm).mockResolvedValue({
+      textStream: hangingStream(),
+    } as unknown as Awaited<ReturnType<typeof brainstorm>>);
+    render(<BrainstormTab />);
+    fireEvent.click(screen.getByText("send"));
+    await screen.findByText("Partial reply");
+    expect(screen.queryByLabelText("Draft this")).toBeNull();
+    expect(screen.queryByLabelText("Apply this")).toBeNull();
   });
 });

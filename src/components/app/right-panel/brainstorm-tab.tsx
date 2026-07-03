@@ -2,7 +2,13 @@
 // per turn. Threads live in brainstorm-store keyed by chapter.
 
 import { useEffect, useState } from "react";
-import { IconCheck, IconCopy, IconMessages } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconCopy,
+  IconMessages,
+  IconPencil,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Conversation,
@@ -19,6 +25,7 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { useBrainstormStore } from "@/stores/brainstorm-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
+import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
 import { describeAiError } from "@/lib/ai/errors";
 import { brainstorm } from "@/lib/ai/operations";
@@ -33,25 +40,50 @@ import {
 
 const EMPTY_THREAD: ChatMessage[] = [];
 
-/** One-click copy of a chat reply's markdown source. Reveals on message hover. */
-function CopyButton({ text }: { text: string }) {
+/** One-click copy of a chat reply's markdown source. */
+function CopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
+    <MessageAction
+      tooltip={copied ? "Copied" : "Copy"}
+      label="Copy reply"
+      onClick={() => {
+        // copyText handles the WebKitGTK fallback; only flash "copied" when the
+        // write actually succeeds, never on a blocked/unavailable clipboard.
+        void copyText(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? <IconCheck className="size-3.5" /> : <IconCopy className="size-3.5" />}
+    </MessageAction>
+  );
+}
+
+/** Quiet per-reply actions, revealed on message hover: copy, plus handoffs that
+ *  prefill Suggest / Edit with this reply. Prefill only (autoRun false): the
+ *  author reviews the instruction before submitting. */
+function ReplyActions({ text }: { text: string }) {
+  return (
     <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100">
+      <CopyAction text={text} />
       <MessageAction
-        tooltip={copied ? "Copied" : "Copy"}
-        label="Copy reply"
-        onClick={() => {
-          // copyText handles the WebKitGTK fallback; only flash "copied" when the
-          // write actually succeeds, never on a blocked/unavailable clipboard.
-          void copyText(text).then((ok) => {
-            if (!ok) return;
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-          });
-        }}
+        tooltip="Draft this"
+        label="Draft this"
+        onClick={() => dispatchAiIntent({ tab: "suggest", instruction: text, autoRun: false })}
       >
-        {copied ? <IconCheck className="size-3.5" /> : <IconCopy className="size-3.5" />}
+        <IconSparkles className="size-3.5" />
+      </MessageAction>
+      <MessageAction
+        tooltip="Apply this"
+        label="Apply this"
+        onClick={() =>
+          dispatchAiIntent({ tab: "edit", instruction: text, scope: "chapter", autoRun: false })
+        }
+      >
+        <IconPencil className="size-3.5" />
       </MessageAction>
     </MessageActions>
   );
@@ -151,7 +183,7 @@ export function BrainstormTab() {
                     </span>
                   )}
                 </MessageContent>
-                {m.role === "assistant" ? <CopyButton text={m.content} /> : null}
+                {m.role === "assistant" ? <ReplyActions text={m.content} /> : null}
               </Message>
             ))}
             {streaming != null ? (

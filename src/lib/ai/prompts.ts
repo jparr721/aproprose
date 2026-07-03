@@ -138,3 +138,27 @@ How to work:
 - Copy block ids exactly from read_chapter; never invent an id. Rewrites carry the FULL revised text for the block. Inserts specify "afterId" (or null to append at the chapter end), a "type" of narration or dialogue, and for dialogue a "speaker" display name. Moves use a zero-based "toIndex". Use plain cleaned prose - no LaTeX.
 - Prefer the smallest set of changes that delivers the directive in broad strokes; do not rewrite the whole chapter when a few targeted changes do the job.
 - Never answer in prose alone when the directive asks for manuscript changes - stage them with stage_proposal. Only finish without staging when the directive genuinely requires no change.`;
+
+/** Pick up and go - the canned directive behind the one-click writer's-block
+ *  helper (palette command, block action, Muse idle button). A USER directive
+ *  for the Muse agent, not a system prompt: it rides through the tool loop as
+ *  the author's request, so MUSE_SYSTEM still governs how the agent works.
+ *  Every entry point appends exactly one cursor line after it - either
+ *  "The cursor block id is [<id>]." or the no-cursor fallback - so the
+ *  directive's wording promises that line below. */
+export const PICK_UP_AND_GO_DIRECTIVE = `I am stuck. Pick this scene up and carry it forward.
+
+Study the scene at my cursor - a line naming the cursor block follows this request. Read the chapter, and pull in the outline or a critique only if you genuinely need them. Work out the strongest immediate continuation - the next beat the prose is already leaning toward - honouring the manuscript's voice, tense, point of view, and the beat this scene serves.
+
+Then stage 1 to 3 "insert" changes that carry the scene forward. Anchor every insert to an existing block id from the chapter: give each one the cursor block's id as its afterId (or a null afterId to land at the chapter's end when no cursor is set), and list them in reading order - inserts sharing an afterId land in the order you stage them. Each insert is a tight beat of narration or dialogue, ready to drop into the page.
+
+Do not rewrite, remove, or move any existing block. This is a continuation, not a revision.`;
+
+/** The single cursor line every pick-up entry point appends to
+ *  PICK_UP_AND_GO_DIRECTIVE - names the cursor block, or falls back when no
+ *  block is selected. Kept here so the three call sites stay byte-identical. */
+export function pickUpCursorSuffix(selectedId: string | null): string {
+  return selectedId !== null
+    ? "\n\nThe cursor block id is [" + selectedId + "]."
+    : "\n\nNo cursor is set; continue from where the chapter's prose currently ends.";
+}

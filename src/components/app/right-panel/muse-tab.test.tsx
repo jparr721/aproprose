@@ -39,6 +39,7 @@ import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useAiIntentStore } from "@/stores/ai-intent-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import type { ManuscriptProposal } from "@/lib/types";
 
 const PROPOSAL: ManuscriptProposal = {
@@ -150,5 +151,18 @@ describe("MuseTab", () => {
     render(<MuseTab />);
     expect(screen.getByText("Muse needs the OpenAI provider")).toBeTruthy();
     expect(screen.queryByText("send")).toBeNull();
+  });
+
+  it("offers Pick up and go in the idle state, which starts a cursor-anchored run", async () => {
+    vi.mocked(runAgent).mockResolvedValue(null);
+    useProjectStore.setState({ selectedId: "b2" });
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("Pick up and go"));
+    await waitFor(() =>
+      expect(runAgent).toHaveBeenCalledWith(
+        PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix("b2"),
+        expect.anything(),
+      ),
+    );
   });
 });

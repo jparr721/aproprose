@@ -22,6 +22,7 @@ import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { useAiIntent } from "@/hooks/use-ai-intent";
 import { aiCacheKey } from "@/lib/ai/cache-key";
+import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import { runAgent } from "@/lib/ai/agent";
 import { supportsTools } from "@/lib/ai/model";
 import { describeAiError, isAbortError } from "@/lib/ai/errors";
@@ -98,6 +99,14 @@ function MuseTabBody() {
 
   const stop = () => abortRef.current?.abort();
 
+  // The one-click writer's-block helper: the same flow as an autoRun intent,
+  // the canned directive plus the cursor line the dispatch sites also append
+  // (the agent's read_chapter grounding does not carry the selection).
+  const onPickUpAndGo = () => {
+    const { selectedId } = useProjectStore.getState();
+    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(selectedId));
+  };
+
   // Prefill + focus on a parked intent; autoRun intents (Pick up and go)
   // start the run immediately. PromptInputProvider is prompt-input's own
   // controlled mode, so prefill needs no new AiComposer prop.
@@ -128,11 +137,23 @@ function MuseTabBody() {
         <div className="flex min-h-full flex-col gap-3.5 p-4">
           <AskedCaption instruction={directive || undefined} />
           {status === "idle" ? (
-            <PanelEmpty icon={IconWand} title="Direct the Muse">
-              Give Muse a directive and it reads the chapter, gathers what it
-              needs, and stages a reviewable set of changes in the Edit tab.
-              Nothing applies without your review.
-            </PanelEmpty>
+            <>
+              <PanelEmpty icon={IconWand} title="Direct the Muse">
+                Give Muse a directive and it reads the chapter, gathers what it
+                needs, and stages a reviewable set of changes in the Edit tab.
+                Nothing applies without your review.
+              </PanelEmpty>
+              <div className="flex justify-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!activeChapterId}
+                  onClick={onPickUpAndGo}
+                >
+                  <IconWand /> Pick up and go
+                </Button>
+              </div>
+            </>
           ) : (
             <div className="flex flex-col gap-1.5">
               {steps.map((step, i) => {

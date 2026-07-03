@@ -1,6 +1,6 @@
 // block-actions.tsx -- the block's structural actions (move / insert / AI cleanup /
-// delete), defined once and rendered into both the toolbar's more-menu and the
-// right-click context menu so the two never drift apart.
+// pick up / delete), defined once and rendered into both the toolbar's more-menu
+// and the right-click context menu so the two never drift apart.
 
 import { Fragment, useState, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -12,9 +12,11 @@ import {
   IconWand,
 } from "@tabler/icons-react";
 import { useProjectStore } from "@/stores/project-store";
+import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { buildAiContext } from "@/lib/ai/context";
 import { cleanTranscript } from "@/lib/ai/operations";
 import { describeAiError, withAiRetry } from "@/lib/ai/errors";
+import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import type { Block as BlockT } from "@/lib/types";
 
 export type BlockAction = {
@@ -34,6 +36,7 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
+  const setSelection = useProjectStore((s) => s.setSelection);
   const [cleaning, setCleaning] = useState(false);
 
   const insertAbove = () => {
@@ -56,6 +59,22 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     }
   };
 
+  // Continuing from a lore/scratchpad/latex block would ground the muse run
+  // off-manuscript, so the handoff only offers itself on prose.
+  const prose = block.type === "narration" || block.type === "dialogue";
+
+  const onPickUp = () => {
+    // Select the block so the author lands oriented when the panel opens. The
+    // cursor itself travels in the directive's suffix line - the agent's
+    // read_chapter grounding does not carry the selection.
+    setSelection([block.id]);
+    dispatchAiIntent({
+      tab: "muse",
+      instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(block.id),
+      autoRun: true,
+    });
+  };
+
   return [
     [
       { icon: IconArrowUp, label: "Move up", onSelect: () => moveBlock(block.id, -1) },
@@ -71,6 +90,12 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
         label: "Clean up with AI",
         onSelect: () => void onClean(),
         disabled: cleaning || !block.text.trim(),
+      },
+      {
+        icon: IconWand,
+        label: "Pick up from here",
+        onSelect: onPickUp,
+        disabled: !prose,
       },
     ],
     [{ icon: IconTrash, label: "Delete block", onSelect: () => deleteBlock(block.id), destructive: true }],

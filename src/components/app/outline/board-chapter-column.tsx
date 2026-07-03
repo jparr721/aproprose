@@ -1,7 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { IconChevronRight, IconPlus, IconRefresh, IconWand } from "@tabler/icons-react";
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { BoardCard } from "@/components/app/outline/board-card";
@@ -75,11 +75,9 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
             <AlertDescription className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words">
               {sculptError}
             </AlertDescription>
-            <AlertAction>
-              <Button variant="outline" size="sm" onClick={runSculpt}>
-                <IconRefresh className="size-3.5" /> Try again
-              </Button>
-            </AlertAction>
+            <Button variant="outline" size="sm" className="w-fit" onClick={runSculpt}>
+              <IconRefresh className="size-3.5" /> Try again
+            </Button>
           </Alert>
         ) : null}
         {cast.length > 0 ? (

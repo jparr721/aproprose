@@ -51,6 +51,7 @@ function BlockImpl({
   const characters = useProjectStore((s) => s.meta.characters);
   const select = useProjectStore((s) => s.select);
   const toggleSelection = useProjectStore((s) => s.toggleSelection);
+  const setSelection = useProjectStore((s) => s.setSelection);
   const beginEdit = useProjectStore((s) => s.beginEdit);
   // The active find match in this block, or null for every other block (a stable
   // null, so only the current-match block and the one it just left re-render).
@@ -118,6 +119,7 @@ function BlockImpl({
             const action = blockClickAction({
               button: e.button,
               modifier: e.metaKey || e.ctrlKey,
+              shift: e.shiftKey,
               selected,
               multiActive: st.selectedIds.length > 0,
               editing: st.editing,
@@ -125,6 +127,24 @@ function BlockImpl({
             if (action === "toggle") toggleSelection(block.id);
             else if (action === "select") select(block.id);
             else if (action === "edit") beginEdit();
+            else if (action === "range") {
+              // Contiguous span from the active block to this one, walked in
+              // click direction so the clicked block ends up active. Suppress
+              // the browser's shift-extend text selection across blocks.
+              e.preventDefault();
+              const anchor = st.selectedId;
+              const ids = st.blocks.map((b) => b.id);
+              const from = anchor ? ids.indexOf(anchor) : -1;
+              const to = ids.indexOf(block.id);
+              if (from === -1 || to === -1 || from === to) {
+                select(block.id);
+                return;
+              }
+              const step = from < to ? 1 : -1;
+              const span: string[] = [];
+              for (let i = from; i !== to + step; i += step) span.push(ids[i]);
+              setSelection(span);
+            }
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
           // dnd-kit drives the live drag offset; surface it as a CSS var (per the

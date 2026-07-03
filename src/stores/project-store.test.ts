@@ -82,6 +82,82 @@ describe("splitBlock", () => {
     expect(blocks).toHaveLength(1);
     expect(past).toHaveLength(0);
   });
+
+  it("lands the caret at the start of the trailing piece", () => {
+    const b = mkBlock({ text: "Hello world" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id });
+
+    useProjectStore.getState().splitBlock(b.id, 5);
+
+    const { editing, editCaret } = useProjectStore.getState();
+    expect(editing).toBe(true);
+    expect(editCaret).toBe("start");
+  });
+});
+
+describe("mergeWithPrevious (Backspace at block start)", () => {
+  it("joins same-type prose, keeps edit mode, and lands the caret at the join", () => {
+    const a = mkBlock({ text: "First." });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id, editing: true });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    const s = useProjectStore.getState();
+    expect(s.blocks).toHaveLength(1);
+    expect(s.blocks[0].text).toBe("First.Second.");
+    expect(s.blocks[0].dirty).toBe(true);
+    expect(s.selectedId).toBe(a.id);
+    expect(s.editing).toBe(true);
+    expect(s.editCaret).toBe("First.".length);
+    expect(s.past).toHaveLength(1); // one undo step
+  });
+
+  it("is a no-op on the first block", () => {
+    const a = mkBlock({ text: "Only." });
+    useProjectStore.setState({ blocks: [a], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(a.id);
+
+    expect(useProjectStore.getState().blocks).toHaveLength(1);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("never merges across types or into dialogue", () => {
+    const d = mkBlock({ type: "dialogue", text: "A line.", speaker: "x" });
+    const n = mkBlock({ text: "Prose." });
+    const d2 = mkBlock({ type: "dialogue", text: "Reply.", speaker: "y" });
+    useProjectStore.setState({ blocks: [d, n, d2], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(n.id); // narration into dialogue: cross-type
+    useProjectStore.getState().mergeWithPrevious(d2.id); // dialogue: excluded by MERGEABLE
+
+    expect(useProjectStore.getState().blocks).toHaveLength(3);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("refuses when the merged block carries a beat or title", () => {
+    const a = mkBlock({ type: "lore", text: "One." });
+    const b = mkBlock({ type: "lore", text: "Two.", title: "Keep me" });
+    useProjectStore.setState({ blocks: [a, b], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    expect(useProjectStore.getState().blocks).toHaveLength(2);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("undo restores both blocks", () => {
+    const a = mkBlock({ text: "First." });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+    useProjectStore.getState().undo();
+
+    const s = useProjectStore.getState();
+    expect(s.blocks.map((x) => x.text)).toEqual(["First.", "Second."]);
+  });
 });
 
 describe("convertSelection", () => {

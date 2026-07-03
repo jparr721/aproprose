@@ -167,6 +167,14 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Edit block",
   },
+  EDIT_BLOCK_ENTER: {
+    id: "edit-block-enter",
+    key: "enter",
+    modifiers: {},
+    description: "Edit the selected block, caret at the end",
+    category: "editor",
+    label: "Edit block",
+  },
   EXIT_BLOCK: {
     id: "exit-block",
     key: "escape",

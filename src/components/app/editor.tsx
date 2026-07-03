@@ -231,6 +231,13 @@ export function Editor() {
     () => useProjectStore.getState().beginEdit("start"),
     navOptions,
   );
+  // Nav-mode Enter resumes typing where the block left off (appending is the
+  // common case), complementing `i`'s caret-at-start.
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.EDIT_BLOCK_ENTER,
+    () => useProjectStore.getState().beginEdit("end"),
+    navOptions,
+  );
 
   // Esc exits edit mode (back to nav), or deselects when already in nav mode. It
   // fires from inside the block textarea (firesWhileEditing) but bows out of the

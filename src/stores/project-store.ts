@@ -58,6 +58,7 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import { MERGEABLE } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import {
   addCard as addCardModel,
@@ -170,10 +171,12 @@ interface ProjectState {
   editing: boolean;
   /**
    * One-shot caret request consumed by the editing block's textarea on mount:
-   * `"start"` places the caret at the beginning (used by `i` / new-block insert);
-   * `null` leaves the native caret (click-to-edit lands it at the click point).
+   * `"start"` places the caret at the beginning (`i` / new-block insert),
+   * `"end"` at the end (nav-mode Enter, delete-empty), a number at an exact
+   * offset (block merges land at the join point); `null` leaves the native
+   * caret (click-to-edit lands it at the click point).
    */
-  editCaret: "start" | null;
+  editCaret: "start" | "end" | number | null;
   chapterDirty: boolean;
   saving: boolean;
 
@@ -203,7 +206,7 @@ interface ProjectState {
    *  set, seeding it from the current single selection. Never enters edit mode. */
   toggleSelection: (id: string) => void;
   /** Enter edit mode on the selected block (no-op if nothing is selected). */
-  beginEdit: (caret?: "start") => void;
+  beginEdit: (caret?: "start" | "end") => void;
   /** Leave edit mode but keep the block highlighted (nav mode). */
   stopEdit: () => void;
   /** Clear the selection entirely. */
@@ -227,6 +230,13 @@ interface ProjectState {
   insertAfter: (afterId: string | null, partial?: Partial<Block>) => string;
   splitBlock: (id: string, at: number) => void;
   convertSelection: (id: string, start: number, end: number, type: BlockType) => void;
+  /**
+   * Backspace at a block's start: join its text onto the end of the previous
+   * SAME-type block (mergeable types only — see MERGEABLE in lib/blocks/keys)
+   * and land the caret at the join point. One undo step. No-op when the pair
+   * isn't mergeable or the block carries a beat/title a merge would drop.
+   */
+  mergeWithPrevious: (id: string) => void;
   deleteBlock: (id: string) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
   /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
@@ -864,11 +874,38 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: plan.focusId,
-          // Splitting happens mid-edit; stay in edit mode on the focused piece.
+          // Splitting happens mid-edit; stay in edit mode on the focused piece,
+          // caret at its start (the writer's caret was at the cut point).
           // Editing is single-block, so dismiss any multi-selection.
           selectedIds: [],
           editing: true,
-          editCaret: null,
+          editCaret: "start",
+          chapterDirty: true,
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    mergeWithPrevious: (id) =>
+      set((s) => {
+        const idx = s.blocks.findIndex((b) => b.id === id);
+        if (idx < 1) return {};
+        const prev = s.blocks[idx - 1];
+        const cur = s.blocks[idx];
+        // Guard here too, not just in the key router, so no caller can silently
+        // fold a speaker's line into another block or drop a beat/title.
+        if (prev.type !== cur.type || !MERGEABLE.has(cur.type)) return {};
+        if (cur.beat || cur.title) return {};
+        const blocks = [...s.blocks];
+        blocks.splice(idx - 1, 2, { ...prev, text: prev.text + cur.text, dirty: true });
+        return {
+          blocks,
+          selectedId: prev.id,
+          selectedIds: [],
+          editing: true,
+          // The caret lands exactly at the join, like Backspace-merge anywhere.
+          editCaret: prev.text.length,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],

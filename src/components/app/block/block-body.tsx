@@ -11,6 +11,7 @@ import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { ColorDot } from "@/components/app/color-dot";
 import { renderInline } from "@/components/app/inline";
 import { useProjectStore } from "@/stores/project-store";
+import { proseKeyAction } from "@/lib/blocks/keys";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +25,42 @@ import {
   SCENE_HEADING,
 } from "./constants";
 import { highlightInline, highlightPlain, type FindHit } from "./highlight";
+
+// The Enter/Backspace block grammar for a block's primary prose textarea:
+// Enter splits (or continues into a fresh block at the end), Backspace at the
+// start merges into / deletes into the previous block. Routing is the pure
+// table in lib/blocks/keys; everything else falls through to the native key.
+// The latex body and the beat/title fields keep fully native keys.
+function proseKeys(block: BlockT): (e: React.KeyboardEvent<HTMLTextAreaElement>) => void {
+  return (e) => {
+    const el = e.currentTarget;
+    const st = useProjectStore.getState();
+    const idx = st.blocks.findIndex((b) => b.id === block.id);
+    const action = proseKeyAction({
+      key: e.key,
+      shift: e.shiftKey,
+      mod: e.metaKey || e.ctrlKey,
+      selectionStart: el.selectionStart,
+      selectionEnd: el.selectionEnd,
+      valueLength: el.value.length,
+      blockType: block.type,
+      blockEmpty: el.value.trim().length === 0,
+      carriesFields: Boolean(block.beat) || Boolean(block.title),
+      prevType: idx > 0 ? st.blocks[idx - 1].type : null,
+    });
+    if (action.kind === "none") return;
+    e.preventDefault();
+    if (action.kind === "split") st.splitBlock(block.id, action.at);
+    else if (action.kind === "insert-after") st.insertAfter(block.id, { type: action.type });
+    else if (action.kind === "merge") st.mergeWithPrevious(block.id);
+    else {
+      // delete-empty: the neighbour deleteBlock selects is the previous block
+      // (the router guarantees one exists); resume typing at its end.
+      st.deleteBlock(block.id);
+      useProjectStore.getState().beginEdit("end");
+    }
+  };
+}
 
 export function BlockBody({
   block,
@@ -53,6 +90,7 @@ export function BlockBody({
             autoFocus
             caret={caret}
             placeholder="* * *"
+            onKeyDown={proseKeys(block)}
             className={SCENE_BREAK}
           />
         ) : (
@@ -68,6 +106,7 @@ export function BlockBody({
           autoFocus
           caret={caret}
           placeholder="Scene heading"
+          onKeyDown={proseKeys(block)}
           className={SCENE_HEADING}
         />
       ) : (
@@ -96,6 +135,7 @@ export function BlockBody({
                 autoFocus
                 caret={caret}
                 placeholder="What do they say?"
+                onKeyDown={proseKeys(block)}
                 proseBody
               />
             </div>
@@ -169,6 +209,7 @@ export function BlockBody({
               autoFocus
               caret={caret}
               placeholder={placeholder}
+              onKeyDown={proseKeys(block)}
               className={NOTE_BODY}
               proseBody
             />
@@ -207,6 +248,7 @@ export function BlockBody({
           autoFocus
           caret={caret}
           placeholder="Write"
+          onKeyDown={proseKeys(block)}
           className={PROSE}
           proseBody
         />

@@ -1,6 +1,7 @@
 // editor.tsx — the center column: the chapter as an editable block stream.
 
 import { useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   IconGitMerge,
   IconSparkles,
@@ -103,6 +104,11 @@ export function Editor() {
   const project = useProjectStore((s) => s.project);
   const activeId = useProjectStore((s) => s.activeChapterId);
   const blocks = useProjectStore((s) => s.blocks);
+  // Shallow-stable id list: text edits change the blocks array identity every
+  // keystroke, and a fresh items array makes dnd-kit's SortableContext push a
+  // new context value to every block's useSortable — re-rendering the whole
+  // chapter. useShallow keeps the previous array while the ids are unchanged.
+  const blockIds = useProjectStore(useShallow((s) => s.blocks.map((b) => b.id)));
   const chapterDirty = useProjectStore((s) => s.chapterDirty);
   const selectedId = useProjectStore((s) => s.selectedId);
   const editing = useProjectStore((s) => s.editing);
@@ -314,7 +320,7 @@ export function Editor() {
             onDragEnd={onDragEnd}
           >
             <SortableContext
-              items={blocks.map((b) => b.id)}
+              items={blockIds}
               strategy={verticalListSortingStrategy}
             >
               {blocks.map((b) => (

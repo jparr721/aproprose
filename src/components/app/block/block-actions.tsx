@@ -34,12 +34,15 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const moveBlock = useProjectStore((s) => s.moveBlock);
   const deleteBlock = useProjectStore((s) => s.deleteBlock);
   const insertAfter = useProjectStore((s) => s.insertAfter);
-  const blocks = useProjectStore((s) => s.blocks);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const setSelection = useProjectStore((s) => s.setSelection);
   const [cleaning, setCleaning] = useState(false);
 
   const insertAbove = () => {
+    // Click-time read: subscribing to s.blocks here would re-render every Block
+    // on every keystroke (the array's identity changes per edit), defeating the
+    // Block memo for the whole chapter.
+    const blocks = useProjectStore.getState().blocks;
     const idx = blocks.findIndex((b) => b.id === block.id);
     insertAfter(idx > 0 ? blocks[idx - 1].id : null);
   };

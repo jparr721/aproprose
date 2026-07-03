@@ -39,9 +39,15 @@ function BlockImpl({
 }) {
   const selected = useProjectStore((s) => s.selectedId === block.id);
   const inMultiSelection = useProjectStore((s) => s.selectedIds.includes(block.id));
-  const multiActive = useProjectStore((s) => s.selectedIds.length > 0);
-  const storeEditing = useProjectStore((s) => s.editing);
-  const editCaret = useProjectStore((s) => s.editCaret);
+  // Selection (highlight) and editing (caret in the textarea) are distinct: a block
+  // is only editing when it's the selected block AND the store's editing flag is
+  // set. Both derive per-block here so a global edit-mode flip re-renders only
+  // the block it affects, not the whole chapter.
+  const editing = useProjectStore((s) => s.editing && s.selectedId === block.id);
+  // The one-shot caret hint only applies to the block currently in edit mode.
+  const caret = useProjectStore((s) =>
+    s.editing && s.selectedId === block.id && s.editCaret != null ? s.editCaret : undefined,
+  );
   const characters = useProjectStore((s) => s.meta.characters);
   const select = useProjectStore((s) => s.select);
   const toggleSelection = useProjectStore((s) => s.toggleSelection);
@@ -66,11 +72,6 @@ function BlockImpl({
   // moves focus, which would otherwise drop the selection (see onContextMenuCapture).
   const [selText, setSelText] = useState("");
   const speaker = findSpeaker(block, characters);
-  // Selection (highlight) and editing (caret in the textarea) are distinct: a block
-  // is only editing when it's the selected block AND the store's editing flag is set.
-  const editing = selected && storeEditing;
-  // The one-shot caret hint only applies to the block currently in edit mode.
-  const caret = editing && editCaret ? editCaret : undefined;
   // The active block plus every Cmd/Ctrl-clicked member of the multi-selection get
   // the selected highlight; only the active block (`selected`) shows the action row
   // and can enter edit mode.
@@ -111,12 +112,15 @@ function BlockImpl({
           // or swapping prose for textareas drops the highlight being copied.
           // The routing table is `blockClickAction` (unit-tested in isolation).
           onMouseDown={(e) => {
+            // Click-time reads: subscribing to selectedIds.length / editing here
+            // would re-render every block whenever any block's mode changes.
+            const st = useProjectStore.getState();
             const action = blockClickAction({
               button: e.button,
               modifier: e.metaKey || e.ctrlKey,
               selected,
-              multiActive,
-              editing: storeEditing,
+              multiActive: st.selectedIds.length > 0,
+              editing: st.editing,
             });
             if (action === "toggle") toggleSelection(block.id);
             else if (action === "select") select(block.id);

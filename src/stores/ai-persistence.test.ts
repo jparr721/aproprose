@@ -42,7 +42,7 @@ describe("resetAiStores", () => {
 });
 
 describe("toSnapshot", () => {
-  it("keeps only entries with data, normalizing loading/error, stamping v:1", () => {
+  it("keeps only entries with data, normalizing loading/error, stamping v:2", () => {
     const snap = toSnapshot(
       {
         good: { data: { x: 1 }, loading: true, error: "boom", instruction: "go" },
@@ -51,7 +51,7 @@ describe("toSnapshot", () => {
       { ch1: [{ role: "user", content: "hi" }] },
     );
     expect(snap).toEqual({
-      v: 1,
+      v: 2,
       entries: { good: { data: { x: 1 }, instruction: "go", loading: false, error: null } },
       threads: { ch1: [{ role: "user", content: "hi" }] },
     });
@@ -61,7 +61,7 @@ describe("toSnapshot", () => {
 describe("fromSnapshot", () => {
   it("returns empty maps for null or wrong-version input", () => {
     expect(fromSnapshot(null)).toEqual({ entries: {}, threads: {} });
-    expect(fromSnapshot({ v: 2 } as unknown as PersistedAiState)).toEqual({ entries: {}, threads: {} });
+    expect(fromSnapshot({ v: 99 } as unknown as PersistedAiState)).toEqual({ entries: {}, threads: {} });
   });
 
   it("round-trips a snapshot with loading forced false", () => {
@@ -84,23 +84,30 @@ describe("fromSnapshot", () => {
     expect(fromSnapshot(snap).entries.s.anchorId).toBe("blk-7");
   });
 
-  it("tolerates a v1 blob missing the threads field", () => {
+  it("keeps threads and drops entries from a v1 blob (cached shapes changed)", () => {
     expect(
       fromSnapshot({
         v: 1,
         entries: { a: { data: 7, loading: false, error: null } },
+        threads: { ch: [{ role: "user", content: "hi" }] },
       } as unknown as PersistedAiState),
     ).toEqual({
-      entries: { a: { data: 7, instruction: undefined, loading: false, error: null } },
-      threads: {},
+      entries: {},
+      threads: { ch: [{ role: "user", content: "hi" }] },
     });
+  });
+
+  it("tolerates a v1 blob missing the threads field", () => {
+    expect(
+      fromSnapshot({ v: 1, entries: {} } as unknown as PersistedAiState),
+    ).toEqual({ entries: {}, threads: {} });
   });
 });
 
 describe("loadAiState / saveAiState", () => {
   it("loadAiState reads the project key and hydrates both stores", async () => {
     readAppData.mockResolvedValue({
-      v: 1,
+      v: 2,
       entries: { a: { data: 9, loading: true, error: null } },
       threads: { ch1: [{ role: "user", content: "hi" }] },
     } satisfies PersistedAiState);
@@ -133,7 +140,7 @@ describe("loadAiState / saveAiState", () => {
     await saveAiState("/proj");
 
     expect(writeAppData).toHaveBeenCalledWith(aiStateKey("/proj"), {
-      v: 1,
+      v: 2,
       entries: { keep: { data: { ok: true }, instruction: "go", loading: false, error: null } },
       threads: { ch1: [{ role: "user", content: "hi" }] },
     });

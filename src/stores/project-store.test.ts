@@ -32,7 +32,7 @@ import {
   readTextFile,
   writeAppData,
 } from "@/lib/tauri";
-import type { Block, ProjectInfo } from "@/lib/types";
+import type { Block, BlockChange, ManuscriptProposal, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
   id: Math.random().toString(36).slice(2),
@@ -81,6 +81,96 @@ describe("splitBlock", () => {
     const { blocks, past } = useProjectStore.getState();
     expect(blocks).toHaveLength(1);
     expect(past).toHaveLength(0);
+  });
+
+  it("lands the caret at the start of the trailing piece", () => {
+    const b = mkBlock({ text: "Hello world" });
+    useProjectStore.setState({ blocks: [b], selectedId: b.id });
+
+    useProjectStore.getState().splitBlock(b.id, 5);
+
+    const { editing, editCaret } = useProjectStore.getState();
+    expect(editing).toBe(true);
+    expect(editCaret).toBe("start");
+  });
+});
+
+describe("mergeWithPrevious (Backspace at block start)", () => {
+  it("joins same-type prose, keeps edit mode, and lands the caret at the join", () => {
+    const a = mkBlock({ text: "First." });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id, editing: true });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    const s = useProjectStore.getState();
+    expect(s.blocks).toHaveLength(1);
+    // A space is restored at the bare word boundary (splits trim the cut), and
+    // the caret lands after it - a second Backspace fuses if really wanted.
+    expect(s.blocks[0].text).toBe("First. Second.");
+    expect(s.blocks[0].dirty).toBe(true);
+    expect(s.selectedId).toBe(a.id);
+    expect(s.editing).toBe(true);
+    expect(s.editCaret).toBe("First. ".length);
+    expect(s.past).toHaveLength(1); // one undo step
+  });
+
+  it("does not double a space that already exists at the boundary", () => {
+    const a = mkBlock({ text: "First. " });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    const s = useProjectStore.getState();
+    expect(s.blocks[0].text).toBe("First. Second.");
+    expect(s.editCaret).toBe("First. ".length);
+  });
+
+  it("is a no-op on the first block", () => {
+    const a = mkBlock({ text: "Only." });
+    useProjectStore.setState({ blocks: [a], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(a.id);
+
+    expect(useProjectStore.getState().blocks).toHaveLength(1);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("never merges across types or into dialogue", () => {
+    const d = mkBlock({ type: "dialogue", text: "A line.", speaker: "x" });
+    const n = mkBlock({ text: "Prose." });
+    const d2 = mkBlock({ type: "dialogue", text: "Reply.", speaker: "y" });
+    useProjectStore.setState({ blocks: [d, n, d2], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(n.id); // narration into dialogue: cross-type
+    useProjectStore.getState().mergeWithPrevious(d2.id); // dialogue: excluded by MERGEABLE
+
+    expect(useProjectStore.getState().blocks).toHaveLength(3);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("refuses when the merged block carries a beat or title", () => {
+    const a = mkBlock({ type: "lore", text: "One." });
+    const b = mkBlock({ type: "lore", text: "Two.", title: "Keep me" });
+    useProjectStore.setState({ blocks: [a, b], past: [] });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+
+    expect(useProjectStore.getState().blocks).toHaveLength(2);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("undo restores both blocks", () => {
+    const a = mkBlock({ text: "First." });
+    const b = mkBlock({ text: "Second." });
+    useProjectStore.setState({ blocks: [a, b], selectedId: b.id });
+
+    useProjectStore.getState().mergeWithPrevious(b.id);
+    useProjectStore.getState().undo();
+
+    const s = useProjectStore.getState();
+    expect(s.blocks.map((x) => x.text)).toEqual(["First.", "Second."]);
   });
 });
 
@@ -710,7 +800,7 @@ describe("multi-selection stays live across structural edits (selectedIds invari
   });
 });
 
-describe("saveChapter reconciles selection across the id-reminting reparse", () => {
+describe("saveChapter preserves block ids across the reparse", () => {
   beforeEach(() => {
     useProjectStore.setState({
       project: {
@@ -733,20 +823,19 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     });
   });
 
-  it("remaps selectedId and selectedIds onto the reparsed blocks by position", async () => {
+  it("adopts the old ids positionally and keeps the selection as-is", async () => {
     await useProjectStore.getState().saveChapter();
     const { blocks, selectedId, selectedIds } = useProjectStore.getState();
-    const byId = new Map(blocks.map((b) => [b.id, b]));
-    // parseChapter re-mints every id, so the pre-save ids must be gone.
-    expect(blocks.some((b) => ["x0", "x1", "x2"].includes(b.id))).toBe(false);
-    // The selection now resolves to live blocks at the same positions/content.
-    expect(byId.get(selectedId!)?.text).toBe("Beta");
-    expect(selectedIds.map((id) => byId.get(id)?.text)).toEqual(["Alpha", "Gamma"]);
+    // Ids survive the save: pending proposals and finding anchors stay valid.
+    expect(blocks.map((b) => b.id)).toEqual(["x0", "x1", "x2"]);
+    expect(blocks.map((b) => b.text)).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(selectedId).toBe("x1");
+    expect(selectedIds).toEqual(["x0", "x2"]);
   });
 
-  it("clears the selection when the reparse changes the block count (positional remap unreliable)", async () => {
-    // A narration containing a blank line reparses into two blocks, so the
-    // positional remap can no longer be trusted to map ids to the same blocks.
+  it("clears the selection and re-mints ids when the reparse changes the block count", async () => {
+    // A narration containing a blank line reparses into two blocks, so positions
+    // no longer denote the same blocks and id adoption would lie.
     useProjectStore.setState({
       blocks: [mkBlock({ id: "x0", type: "narration", text: "Line one\n\nLine two", dirty: true })],
       selectedId: "x0",
@@ -756,6 +845,7 @@ describe("saveChapter reconciles selection across the id-reminting reparse", () 
     await useProjectStore.getState().saveChapter();
     const { blocks, selectedId, selectedIds } = useProjectStore.getState();
     expect(blocks.length).toBe(2); // count diverged
+    expect(blocks.some((b) => b.id === "x0")).toBe(false);
     expect(selectedId).toBeNull();
     expect(selectedIds).toEqual([]);
   });
@@ -880,5 +970,176 @@ describe("selectionTargetIds (the block-scope precedence rule)", () => {
 
   it("is empty when nothing is selected", () => {
     expect(selectionTargetIds([], null)).toEqual([]);
+  });
+});
+
+describe("setSelection", () => {
+  it("selects a single id plainly (nav mode, no multi set)", () => {
+    const a = mkBlock({ id: "a" });
+    const b = mkBlock({ id: "b" });
+    useProjectStore.setState({ blocks: [a, b], editing: true, editCaret: "start" });
+    useProjectStore.getState().setSelection(["b"]);
+    const s = useProjectStore.getState();
+    expect(s.selectedId).toBe("b");
+    expect(s.selectedIds).toEqual([]);
+    expect(s.editing).toBe(false);
+    expect(s.editCaret).toBeNull();
+  });
+
+  it("selects multiple ids as the multi set with the last id active", () => {
+    useProjectStore.getState().setSelection(["a", "b", "c"]);
+    const s = useProjectStore.getState();
+    expect(s.selectedIds).toEqual(["a", "b", "c"]);
+    expect(s.selectedId).toBe("c");
+  });
+
+  it("deselects on an empty list", () => {
+    useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "b"] });
+    useProjectStore.getState().setSelection([]);
+    const s = useProjectStore.getState();
+    expect(s.selectedId).toBeNull();
+    expect(s.selectedIds).toEqual([]);
+  });
+});
+
+describe("applyManuscriptProposal", () => {
+  const change = (p: Partial<BlockChange> & { kind: BlockChange["kind"] }): BlockChange => ({
+    blockId: null,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: null,
+    toIndex: null,
+    reason: "r",
+    ...p,
+  });
+  const proposal = (changes: BlockChange[]): ManuscriptProposal => ({
+    chapterId: "ch1",
+    summary: "s",
+    changes,
+  });
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      blocks: [
+        mkBlock({ id: "a", text: "alpha" }),
+        mkBlock({ id: "b", text: "bravo" }),
+        mkBlock({ id: "c", text: "charlie" }),
+      ],
+      selectedId: null,
+      selectedIds: [],
+      past: [],
+      future: [],
+      chapterDirty: false,
+      lastTextEditId: null,
+    });
+  });
+
+  it("applies the kept changes as ONE undo step and returns the counts", () => {
+    const result = useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+        change({ kind: "remove", blockId: "b" }),
+        change({ kind: "insert", afterId: null, type: "narration", newText: "coda" }),
+      ]),
+      [0, 1, 2],
+    );
+    const { blocks, past, future, chapterDirty, lastTextEditId } = useProjectStore.getState();
+    expect(result).toEqual({ applied: 3, skipped: 0 });
+    expect(blocks.map((x) => x.text)).toEqual(["ALPHA", "charlie", "coda"]);
+    expect(past).toHaveLength(1);
+    expect(future).toEqual([]);
+    expect(chapterDirty).toBe(true);
+    expect(lastTextEditId).toBeNull();
+
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+    ]);
+  });
+
+  it("applies only the kept indices", () => {
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+        change({ kind: "remove", blockId: "b" }),
+      ]),
+      [0],
+    );
+    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
+      "ALPHA",
+      "bravo",
+      "charlie",
+    ]);
+  });
+
+  it("is a no-op returning zero counts when kept is empty", () => {
+    const result = useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "a" })]), []);
+    expect(result).toEqual({ applied: 0, skipped: 0 });
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useProjectStore.getState().chapterDirty).toBe(false);
+  });
+
+  it("counts a vanished-target change as skipped while applying the rest", () => {
+    const result = useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "ghost", newText: "x" }),
+        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
+      ]),
+      [0, 1],
+    );
+    expect(result).toEqual({ applied: 1, skipped: 1 });
+    expect(useProjectStore.getState().blocks[0].text).toBe("ALPHA");
+  });
+
+  it("reports skips without burning an undo step when nothing applies", () => {
+    const result = useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "ghost" })]), [0]);
+    expect(result).toEqual({ applied: 0, skipped: 1 });
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("prunes removed blocks from the selection (deleteBlock precedent)", () => {
+    useProjectStore.setState({ selectedId: "b", selectedIds: ["a", "b"], editing: true });
+    useProjectStore
+      .getState()
+      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "b" })]), [0]);
+    const { selectedId, selectedIds, editing } = useProjectStore.getState();
+    expect(selectedIds).toEqual(["a"]);
+    expect(selectedId).toBe("a");
+    expect(editing).toBe(false);
+  });
+
+  it("resolves an inserted dialogue speaker case-insensitively from the cast", () => {
+    useProjectStore.setState({
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [{ id: "c9", name: "Mara", color: "#aabbcc", role: "PI" }],
+      },
+    });
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "mara", newText: "Hi" }),
+      ]),
+      [0],
+    );
+    const inserted = useProjectStore.getState().blocks[1];
+    expect(inserted.type).toBe("dialogue");
+    expect(inserted.speaker).toBe("c9");
+  });
+
+  it("leaves speaker unset when the name matches no character", () => {
+    useProjectStore.getState().applyManuscriptProposal(
+      proposal([
+        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "Nobody", newText: "Hi" }),
+      ]),
+      [0],
+    );
+    expect(useProjectStore.getState().blocks[1].speaker).toBeUndefined();
   });
 });

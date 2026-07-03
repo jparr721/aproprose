@@ -15,6 +15,7 @@ const continuityFlagSchema = z.object({
   sev: z.enum(["ok", "warn", "flag"]).catch("ok"),
   tag: z.string().catch(""),
   text: z.string().catch(""),
+  blockIds: z.array(z.string()).catch([]),
 });
 
 const cardSchema = z.object({

@@ -6,7 +6,8 @@ import { IconNotes } from "@tabler/icons-react";
 import { TypographyEyebrow, TypographyMuted } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { useAi } from "@/hooks/use-ai";
-import { buildScopedContext, type ReadScope } from "@/lib/ai/context";
+import { aiCacheKey } from "@/lib/ai/cache-key";
+import { buildAnchoredContext, type ReadScope } from "@/lib/ai/context";
 import { critique } from "@/lib/ai/operations";
 import type { CritiqueNote } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ import {
   PanelEmpty,
   ScopeToggle,
 } from "@/components/app/right-panel/shared";
+import { FindingActions } from "@/components/app/right-panel/finding-actions";
 
 const NOTE_TONE: Record<CritiqueNote["kind"], string> = {
   strength: "bg-success/15 text-success",
@@ -35,11 +37,14 @@ export function CritiqueTab() {
   const selectedId = useProjectStore((s) => s.selectedId);
   const [scope, setScope] = useState<ReadScope>("cursor");
   // Cursor scope keys on the selection; chapter scope ignores it (whole chapter).
-  const cacheKey = `critique:${activeChapterId ?? ""}:${scope}:${
-    scope === "cursor" ? selectedId ?? "" : ""
-  }`;
+  const cacheKey = aiCacheKey(
+    "critique",
+    activeChapterId,
+    scope,
+    scope === "cursor" ? selectedId ?? "" : "",
+  );
   const { data, loading, error, instruction, run } = useAi<CritiqueNote[]>(
-    (ins) => critique({ ...buildScopedContext(scope), instruction: ins }),
+    (ins) => critique({ ...buildAnchoredContext(scope), instruction: ins }),
     cacheKey,
     "critique",
   );
@@ -75,6 +80,7 @@ export function CritiqueTab() {
                   </TypographyEyebrow>
                 </div>
                 <TypographyMuted>{n.text}</TypographyMuted>
+                <FindingActions blockIds={n.blockIds} instruction={n.text} />
               </div>
             ))
           )}

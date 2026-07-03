@@ -121,12 +121,6 @@ export function ScopeToggle<T extends string>({
   );
 }
 
-// The last Suggest focus tick the composer has acted on. Module scope so it
-// survives the tab unmounting/remounting: opening Suggest from the rail leaves the
-// composer collapsed, while the spark (which bumps the tick) opens + focuses the
-// direction box even when it mounts the tab fresh from another surface.
-let lastHandledFocusSignal = 0;
-
 /** Bottom-pinned composer shared by every function (ai-elements/prompt-input,
  *  which owns Enter-to-submit / Shift+Enter-newline). The generating tabs
  *  (`allowEmpty`) rest as a single Generate button with the steering input tucked
@@ -137,7 +131,8 @@ export function AiComposer({
   loading,
   onSubmit,
   allowEmpty = false,
-  focusSignal,
+  focusKey,
+  prefill,
   toolbar,
   disabled,
   anchorMode,
@@ -147,7 +142,11 @@ export function AiComposer({
   loading: boolean;
   onSubmit: (text: string) => void;
   allowEmpty?: boolean;
-  focusSignal?: number;
+  /** Bump to open + focus the ask box once (an AI intent landing on this tab).
+   *  Latched per instance, so a plain mount never focuses. */
+  focusKey?: number;
+  /** Text written into the ask box when focusKey fires (an intent's instruction). */
+  prefill?: string;
   toolbar?: React.ReactNode;
   /** Inert composer: the textarea can't be typed into (e.g. nothing to edit). */
   disabled?: boolean;
@@ -160,16 +159,25 @@ export function AiComposer({
   const ref = useRef<HTMLDivElement>(null);
   // `allowEmpty` tabs rest collapsed; revealing the direction box swaps in the textarea.
   const [steering, setSteering] = useState(false);
+  // The last focusKey this instance handled, seeded with the mount value so only
+  // a post-mount bump opens/focuses the box - opening the tab from the rail
+  // stays collapsed. Per-instance (a ref, not module scope), so one tab's bump
+  // can never swallow another's.
+  const lastFocusKey = useRef(focusKey);
 
-  // Open + focus the direction box only on a *new* focus request (the Suggest spark
-  // bumps a monotonic tick), never on a plain mount -- so opening the tab from the
-  // rail stays collapsed.
   useEffect(() => {
-    if (focusSignal === undefined || focusSignal === lastHandledFocusSignal) return;
-    lastHandledFocusSignal = focusSignal;
+    if (focusKey === undefined || focusKey === lastFocusKey.current) return;
+    lastFocusKey.current = focusKey;
     if (allowEmpty) setSteering(true);
-    requestAnimationFrame(() => ref.current?.querySelector("textarea")?.focus());
-  }, [focusSignal, allowEmpty]);
+    requestAnimationFrame(() => {
+      const box = ref.current?.querySelector("textarea");
+      if (!box) return;
+      // The textarea is uncontrolled and submit reads FormData, so writing the
+      // value directly is the prefill seam.
+      if (prefill !== undefined) box.value = prefill;
+      box.focus();
+    });
+  }, [focusKey, allowEmpty, prefill]);
 
   return (
     <div ref={ref} className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">

@@ -30,7 +30,12 @@ interface Selection {
 
 export function SelectionToolbar() {
   const [sel, setSel] = useState<Selection | null>(null);
-  const blocks = useProjectStore((s) => s.blocks);
+  // Narrow subscription: only the block under the live selection, so the
+  // (usually dormant) toolbar doesn't re-render on every keystroke in the
+  // chapter via a whole-array subscription.
+  const block = useProjectStore((s) =>
+    sel ? s.blocks.find((b) => b.id === sel.blockId) : undefined,
+  );
   const convertSelection = useProjectStore((s) => s.convertSelection);
   const formatBlockText = useProjectStore((s) => s.formatBlockText);
 
@@ -84,9 +89,7 @@ export function SelectionToolbar() {
     return () => document.removeEventListener("keydown", onKey);
   }, [sel]);
 
-  if (!sel) return null;
-  const block = blocks.find((b) => b.id === sel.blockId);
-  if (!block) return null;
+  if (!sel || !block) return null;
 
   const targets = CONVERT_TARGETS.filter((t) => t.type !== block.type);
   const apply = (type: BlockType) => {
@@ -124,6 +127,9 @@ export function SelectionToolbar() {
         "fixed z-50 left-[var(--tb-x)] top-[var(--tb-y)] -translate-x-1/2",
         below ? "translate-y-0" : "-translate-y-full",
         "flex items-center gap-0.5 rounded-lg border border-border bg-card p-1 shadow-md",
+        // Mount-only entrance; repositioning while the selection changes stays
+        // instant (the component unmounts whenever the selection collapses).
+        "animate-in fade-in-0 duration-150",
       )}
     >
       <Button

@@ -300,6 +300,8 @@ export interface CritiqueNote {
   /** Short category tag, e.g. "Voice", "Pacing". */
   tag: string;
   text: string;
+  /** Ids of the blocks this note is about; [] for a scene-level note. */
+  blockIds: string[];
 }
 
 export type ContinuitySeverity = "ok" | "warn" | "flag";
@@ -307,6 +309,8 @@ export interface ContinuityFlag {
   sev: ContinuitySeverity;
   tag: string;
   text: string;
+  /** Ids of the blocks this flag is about; [] for a scene-level flag. */
+  blockIds: string[];
 }
 
 export interface ChatMessage {
@@ -342,14 +346,43 @@ export interface BlockTextEdit {
   text: string;
 }
 
-/** A single proposed in-place revision of one block (see the AI "Edit" tab). */
-export interface BlockEdit {
-  /** The id of an existing block to revise. */
-  blockId: string;
-  /** The full revised cleaned text for that block. */
-  newText: string;
-  /** A short phrase: what changed and why. */
+// -- Manuscript proposals ------------------------------------------------------
+// A reviewable set of structural changes to ONE chapter's block list - the
+// shared envelope every AI write path stages for review behind the Edit tab.
+
+export type BlockChangeKind = "rewrite" | "insert" | "remove" | "move";
+
+/** One reviewable change to the active chapter's block list. */
+export interface BlockChange {
+  kind: BlockChangeKind;
+  /** rewrite/remove/move: id of an existing block. Null for insert. */
+  blockId: string | null;
+  /** insert: id of the block the new one follows; null appends at the end. */
+  afterId: string | null;
+  /** insert: the new block's kind. Null otherwise. */
+  type: "narration" | "dialogue" | null;
+  /** insert dialogue: speaker display name (resolved to an id at apply). */
+  speaker: string | null;
+  /** rewrite/insert: the FULL cleaned text. Null otherwise. */
+  newText: string | null;
+  /** move: zero-based target index in the chapter's block list. Null otherwise. */
+  toIndex: number | null;
+  /** Short phrase: what changed and why. */
   reason: string;
+}
+
+/** A reviewable set of manuscript changes for ONE chapter. */
+export interface ManuscriptProposal {
+  chapterId: string;
+  summary: string;
+  changes: BlockChange[];
+}
+
+/** Counts returned by applyManuscriptProposal so the caller can warn about
+ *  skipped (vanished-target) changes instead of silently dropping them. */
+export interface ProposalApplyResult {
+  applied: number;
+  skipped: number;
 }
 
 // ── Backup / sync ─────────────────────────────────────────────────────────────

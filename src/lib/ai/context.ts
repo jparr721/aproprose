@@ -5,7 +5,7 @@
 // the known cast. Lore/scratchpad/raw-latex blocks are intentionally excluded —
 // they don't render and shouldn't pollute the prose the model reasons about.
 
-import type { AiContext, EditRequest } from "@/lib/ai/operations";
+import type { AiContext, AnchoredContext, EditRequest } from "@/lib/ai/operations";
 import type { Block, BlockType, Character } from "@/lib/types";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { renderStoryStructure } from "@/lib/outline/grounding";
@@ -95,6 +95,34 @@ export function buildScopedContext(scope: ReadScope): AiContext {
   return assemble(blocks, "Reviewing the whole chapter.");
 }
 
+/** Block types offered as anchors: the same prose set renderProse shows. */
+const ANCHORABLE_TYPES: readonly BlockType[] = ["narration", "dialogue", "chapter"];
+
+/**
+ * Like buildScopedContext, but also carries the offered blocks so critique and
+ * continuity findings can cite real block ids. blocksText stays the rendered
+ * prose (cursor-summary parity); the anchored ops ground on `.blocks`.
+ */
+export function buildAnchoredContext(scope: ReadScope): AnchoredContext {
+  const { blocks, selectedId } = useProjectStore.getState();
+  let upto: Block[];
+  let summary: string;
+  if (scope === "cursor") {
+    const cutoffIdx = selectedId ? blocks.findIndex((b) => b.id === selectedId) : -1;
+    upto = cutoffIdx >= 0 ? blocks.slice(0, cutoffIdx + 1) : blocks;
+    summary = cursorSummaryFor(upto);
+  } else {
+    upto = blocks;
+    summary = "Reviewing the whole chapter.";
+  }
+  return {
+    ...assemble(upto, summary),
+    blocks: upto
+      .filter((b) => ANCHORABLE_TYPES.includes(b.type))
+      .map((b) => ({ id: b.id, type: b.type, text: b.text })),
+  };
+}
+
 /**
  * Grounding for Suggest's continuation. `"cursor"` reads up to the caret (like
  * `buildAiContext`); `"chapter"` reads every block for context but *keeps the
@@ -131,6 +159,9 @@ function editRequestFor(
   instruction: string,
 ): EditRequest {
   const { project, activeChapterId, meta } = useProjectStore.getState();
+  // Required data: a proposal must name the chapter it belongs to. No fallback -
+  // an edit request without an open chapter is a bug upstream.
+  if (activeChapterId === null) throw new Error("No active chapter.");
   const chapter = project?.chapters.find((c) => c.id === activeChapterId);
   const structure = renderStoryStructure({
     outline: meta.outline,
@@ -139,6 +170,7 @@ function editRequestFor(
     activeChapterId,
   });
   return {
+    chapterId: activeChapterId,
     chapterTitle: chapter?.title,
     characters: meta.characters.map((c) => ({ name: c.name, role: c.role })),
     blocks: targets,

@@ -12,7 +12,9 @@ vi.mock("@/components/app/editor", () => ({ scrollSelectedIntoView: vi.fn() }));
 // The shared composer pulls in scroll/observer APIs happy-dom lacks; the result
 // card (with "Insert below") lives in SuggestTab itself, so a stub composer is enough.
 vi.mock("@/components/app/right-panel/shared", () => ({
-  AiComposer: () => <div />,
+  AiComposer: ({ focusKey, prefill }: { focusKey?: number; prefill?: string }) => (
+    <div data-testid="composer" data-focus-key={focusKey} data-prefill={prefill ?? ""} />
+  ),
   AiError: () => <div>err</div>,
   AskedCaption: () => <div />,
   LoadingLines: () => <div />,
@@ -24,6 +26,7 @@ vi.mock("@/components/app/right-panel/shared", () => ({
 import { SuggestTab } from "@/components/app/right-panel/suggest-tab";
 import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useAiIntentStore, dispatchAiIntent } from "@/stores/ai-intent-store";
 import type { SuggestResult } from "@/lib/types";
 
 afterEach(() => cleanup());
@@ -39,6 +42,23 @@ beforeEach(() => {
     meta: { ...useProjectStore.getState().meta, characters: [] },
   } as never);
   useAiCacheStore.setState({ entries: {} });
+  useAiIntentStore.setState({ pending: null });
+});
+
+describe("SuggestTab intents", () => {
+  it("consumes a parked suggest intent: bumps the composer focusKey and prefills", () => {
+    dispatchAiIntent({ tab: "suggest", instruction: "more tension" });
+    render(<SuggestTab />);
+    const composer = screen.getByTestId("composer");
+    expect(composer.getAttribute("data-focus-key")).toBe("1");
+    expect(composer.getAttribute("data-prefill")).toBe("more tension");
+    expect(useAiIntentStore.getState().pending).toBeNull();
+  });
+
+  it("mounting without an intent leaves the composer unfocused (focusKey 0)", () => {
+    render(<SuggestTab />);
+    expect(screen.getByTestId("composer").getAttribute("data-focus-key")).toBe("0");
+  });
 });
 
 describe("SuggestTab insert", () => {

@@ -18,22 +18,25 @@ import { generateText, Output, streamText } from "ai";
 import { z } from "zod";
 
 import type {
-  BlockEdit,
+  BlockChange,
   BlockType,
   ChatMessage,
   CritiqueNote,
   ContinuityFlag,
+  ManuscriptProposal,
   SculptChange,
   SculptProposal,
   SuggestResult,
 } from "@/lib/types";
 import { getModel } from "@/lib/ai/model";
+import { renderGrounding } from "@/lib/ai/grounding-render";
 import {
   BRAINSTORM_SYSTEM,
   CLEAN_TRANSCRIPT_SYSTEM,
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
   EDIT_SYSTEM,
+  REVISE_SYSTEM,
   SCULPT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
@@ -63,6 +66,8 @@ export interface AiContext {
 
 /** What the Edit tab hands `editBlocks`: the blocks it may revise + the request. */
 export interface EditRequest {
+  /** The chapter the blocks belong to (becomes ManuscriptProposal.chapterId). */
+  chapterId: string;
   chapterTitle?: string;
   characters?: { name: string; role?: string }[];
   /** Blocks the model may revise (already scoped + filtered to eligible types). */
@@ -71,6 +76,17 @@ export interface EditRequest {
   instruction: string;
   /** Pre-rendered STORY STRUCTURE block, or undefined. */
   structure?: string;
+}
+
+/** Options every AI op accepts; the agent threads its AbortSignal through. */
+export interface AiOpOptions {
+  signal?: AbortSignal;
+}
+
+/** AiContext plus the id-labeled blocks offered for anchoring findings. */
+export interface AnchoredContext extends AiContext {
+  /** Blocks offered for anchoring; rendered id-labeled in the grounding. */
+  blocks: { id: string; type: BlockType; text: string }[];
 }
 
 /**
@@ -82,57 +98,44 @@ export interface EditRequest {
  * instructions live in `system`.
  */
 function buildGrounding(ctx: AiContext): string {
-  const parts: string[] = [];
-
-  if (ctx.chapterTitle) {
-    parts.push(`CHAPTER: ${ctx.chapterTitle}`);
-  }
-
-  if (ctx.characters && ctx.characters.length > 0) {
-    const roster = ctx.characters
-      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
-      .join("\n");
-    parts.push(`KNOWN CAST:\n${roster}`);
-  }
-
-  if (ctx.cursorSummary) {
-    parts.push(`CURSOR: ${ctx.cursorSummary}`);
-  }
-
-  if (ctx.structure) {
-    parts.push(`STORY STRUCTURE:\n${ctx.structure}`);
-  }
-
-  // The scene itself goes before the request so the request is the last,
-  // freshest, most salient directive in the model's window.
-  parts.push(`SCENE PROSE:\n${ctx.blocksText}`);
-
-  if (ctx.instruction?.trim()) {
-    parts.push(`AUTHOR'S REQUEST (follow this):\n${ctx.instruction.trim()}`);
-  }
-
-  return parts.join("\n\n");
+  return renderGrounding({
+    chapterTitle: ctx.chapterTitle,
+    characters: ctx.characters,
+    cursorSummary: ctx.cursorSummary,
+    structure: ctx.structure,
+    prose: ctx.blocksText,
+    instruction:
+      ctx.instruction !== undefined
+        ? { label: "AUTHOR'S REQUEST (follow this)", text: ctx.instruction }
+        : undefined,
+  });
 }
 
 /** Grounding for editBlocks: list each editable block by id, then the request. */
 function buildEditGrounding(req: EditRequest): string {
-  const parts: string[] = [];
-  if (req.chapterTitle) parts.push(`CHAPTER: ${req.chapterTitle}`);
-  if (req.characters && req.characters.length > 0) {
-    const roster = req.characters
-      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
-      .join("\n");
-    parts.push(`KNOWN CAST:\n${roster}`);
-  }
-  if (req.structure) {
-    parts.push(`STORY STRUCTURE:\n${req.structure}`);
-  }
-  const blocks = req.blocks
-    .map((b) => `[${b.id}] (${b.type}): ${b.text}`)
-    .join("\n\n");
-  parts.push(`EDITABLE BLOCKS (revise only these, by id):\n${blocks}`);
-  parts.push(`AUTHOR'S REQUEST (apply to the blocks above):\n${req.instruction.trim()}`);
-  return parts.join("\n\n");
+  return renderGrounding({
+    chapterTitle: req.chapterTitle,
+    characters: req.characters,
+    structure: req.structure,
+    blocks: { label: "EDITABLE BLOCKS (revise only these, by id)", items: req.blocks },
+    instruction: { label: "AUTHOR'S REQUEST (apply to the blocks above)", text: req.instruction },
+  });
+}
+
+/** Grounding for the anchored review ops: id-labeled blocks instead of prose,
+ *  so the model can cite real block ids in its findings. */
+function buildAnchoredGrounding(ctx: AnchoredContext): string {
+  return renderGrounding({
+    chapterTitle: ctx.chapterTitle,
+    characters: ctx.characters,
+    cursorSummary: ctx.cursorSummary,
+    structure: ctx.structure,
+    blocks: { label: "SCENE BLOCKS (cite these ids in blockIds)", items: ctx.blocks },
+    instruction:
+      ctx.instruction !== undefined
+        ? { label: "AUTHOR'S REQUEST (follow this)", text: ctx.instruction }
+        : undefined,
+  });
 }
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
@@ -175,9 +178,14 @@ const critiqueNoteSchema = z.object({
   text: z
     .string()
     .describe("one or two sentences naming the specific moment and why"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe("ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene"),
 });
 
-const critiqueResultSchema = z.object({
+// Exported for the schema round-trip tests.
+export const critiqueResultSchema = z.object({
   notes: z
     .array(critiqueNoteSchema)
     .describe("a balanced handful of notes, leading with at least one strength"),
@@ -191,9 +199,14 @@ const continuityFlagSchema = z.object({
   text: z
     .string()
     .describe("one or two sentences describing the observation and where it appears"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe("ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene"),
 });
 
-const continuityResultSchema = z.object({
+// Exported for the schema round-trip tests.
+export const continuityResultSchema = z.object({
   flags: z
     .array(continuityFlagSchema)
     .describe("high-signal continuity observations grounded in the supplied text"),
@@ -227,6 +240,7 @@ const editResultSchema = z.object({
  */
 export async function suggestContinuation(
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<SuggestResult> {
   const model = await getModel();
   const { output } = await generateText({
@@ -234,6 +248,7 @@ export async function suggestContinuation(
     output: Output.object({ schema: suggestResultSchema }),
     system: SUGGEST_SYSTEM,
     prompt: buildGrounding(ctx),
+    abortSignal: opts?.signal,
   });
   // Normalize null -> undefined to match the domain type's optional fields.
   return {
@@ -247,70 +262,205 @@ export async function suggestContinuation(
   };
 }
 
+/** Drop finding blockIds that were not offered. Pure, exported for tests. */
+export function sanitizeFindingIds<T extends { blockIds: string[] }>(
+  findings: T[],
+  offeredIds: string[],
+): T[] {
+  const known = new Set(offeredIds);
+  return findings.map((f) => ({ ...f, blockIds: f.blockIds.filter((id) => known.has(id)) }));
+}
+
 /**
  * Read the scene and return craft notes (strengths / things to watch / ideas),
- * each pinned to a concrete moment in the prose.
+ * each pinned to a concrete moment and anchored to the block ids it cites.
  */
-export async function critique(ctx: AiContext): Promise<CritiqueNote[]> {
+export async function critique(ctx: AnchoredContext, opts?: AiOpOptions): Promise<CritiqueNote[]> {
   const model = await getModel();
   const { output } = await generateText({
     model,
     output: Output.object({ schema: critiqueResultSchema }),
     system: CRITIQUE_SYSTEM,
-    prompt: buildGrounding(ctx),
+    prompt: buildAnchoredGrounding(ctx),
+    abortSignal: opts?.signal,
   });
-  return output.notes;
+  return sanitizeFindingIds(
+    output.notes.map((n) => ({ ...n, blockIds: n.blockIds ?? [] })),
+    ctx.blocks.map((b) => b.id),
+  );
 }
 
 /**
  * Scan the scene for internal consistency and return continuity observations
- * (ok / warn / flag), grounded only on what the supplied text supports.
+ * (ok / warn / flag), anchored to the block ids each observation cites.
  */
 export async function continuityCheck(
-  ctx: AiContext,
+  ctx: AnchoredContext,
+  opts?: AiOpOptions,
 ): Promise<ContinuityFlag[]> {
   const model = await getModel();
   const { output } = await generateText({
     model,
     output: Output.object({ schema: continuityResultSchema }),
     system: CONTINUITY_SYSTEM,
-    prompt: buildGrounding(ctx),
+    prompt: buildAnchoredGrounding(ctx),
+    abortSignal: opts?.signal,
   });
-  return output.flags;
-}
-
-/**
- * Drop edits the UI can't safely apply: ones targeting a block that wasn't
- * offered, and no-ops where the revised text matches the current text (trimmed).
- */
-export function sanitizeEdits(
-  edits: BlockEdit[],
-  blocks: { id: string; text: string }[],
-): BlockEdit[] {
-  const textById = new Map(blocks.map((b) => [b.id, b.text]));
-  return edits.filter((e) => {
-    const current = textById.get(e.blockId);
-    return current !== undefined && e.newText.trim() !== current.trim();
-  });
+  return sanitizeFindingIds(
+    output.flags.map((f) => ({ ...f, blockIds: f.blockIds ?? [] })),
+    ctx.blocks.map((b) => b.id),
+  );
 }
 
 /**
  * Propose in-place revisions for the supplied blocks that satisfy the author's
- * instruction. Returns the full revised text per changed block, already
- * sanitized (unknown ids and no-ops removed).
+ * instruction. Rewrite-only: the result is a ManuscriptProposal whose changes
+ * are all rewrites, so every AI write path reviews through one envelope.
+ * Sanitized (unknown ids and no-ops removed).
  */
-export async function editBlocks(req: EditRequest): Promise<BlockEdit[]> {
+export async function editBlocks(
+  req: EditRequest,
+  opts?: AiOpOptions,
+): Promise<ManuscriptProposal> {
   // Nothing to act on without a direction or an eligible block: skip the model
   // call entirely (the UI also guards this, but defend the boundary too).
-  if (!req.instruction.trim() || req.blocks.length === 0) return [];
+  if (!req.instruction.trim() || req.blocks.length === 0) {
+    return { chapterId: req.chapterId, summary: "", changes: [] };
+  }
   const model = await getModel();
   const { output } = await generateText({
     model,
     output: Output.object({ schema: editResultSchema }),
     system: EDIT_SYSTEM,
     prompt: buildEditGrounding(req),
+    abortSignal: opts?.signal,
   });
-  return sanitizeEdits(output.edits, req.blocks);
+  // The edit schema stays rewrite-shaped; map it onto the shared envelope.
+  const changes: BlockChange[] = output.edits.map((e) => ({
+    kind: "rewrite",
+    blockId: e.blockId,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: e.newText,
+    toIndex: null,
+    reason: e.reason,
+  }));
+  return sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
+}
+
+// -- Revise (structural chapter write path) -----------------------------------
+// reviseChapter proposes structural changes to ONE chapter's block list. Unlike
+// editBlocks (rewrite-only), it may also insert/remove/move blocks. The proposal
+// is reviewed change by change in the Edit tab before any of it applies.
+
+const blockChangeSchema = z.object({
+  kind: z
+    .enum(["rewrite", "insert", "remove", "move"])
+    .describe(
+      "rewrite revises a block in place, insert adds a new block, remove deletes, move repositions",
+    ),
+  blockId: z
+    .string()
+    .nullable()
+    .describe(
+      "for rewrite/remove/move: an id copied exactly from EDITABLE BLOCKS; null for insert",
+    ),
+  afterId: z
+    .string()
+    .nullable()
+    .describe(
+      "for insert ONLY: the id of the block the new one follows, or null to append at the chapter end; null otherwise",
+    ),
+  type: z
+    .enum(["narration", "dialogue"])
+    .nullable()
+    .describe("for insert ONLY: the new block's kind; null otherwise"),
+  speaker: z
+    .string()
+    .nullable()
+    .describe("for an inserted dialogue block: the speaker's display name; null otherwise"),
+  newText: z
+    .string()
+    .nullable()
+    .describe("for rewrite/insert: the FULL cleaned text (no LaTeX); null otherwise"),
+  toIndex: z
+    .number()
+    .int()
+    .nullable()
+    .describe("for move ONLY: zero-based target index in the block list; null otherwise"),
+  reason: z.string().describe("short phrase: what changed and why"),
+});
+
+// Exported for schema round-trip tests.
+export const reviseResultSchema = z.object({
+  summary: z.string().describe("one sentence describing the overall revision"),
+  changes: z
+    .array(blockChangeSchema)
+    .describe("the smallest set of changes that delivers the request; empty if none needed"),
+});
+
+/**
+ * Drop changes the review UI can't safely apply. Rules: rewrite needs a known
+ * blockId + newText that differs trimmed from the current text; insert needs
+ * non-empty trimmed newText + a type + (afterId null or known); remove needs a
+ * known blockId; move needs a known blockId + a toIndex. Pure: returns a new
+ * proposal.
+ */
+export function sanitizeProposal(
+  proposal: ManuscriptProposal,
+  blocks: { id: string; text: string }[],
+): ManuscriptProposal {
+  const textById = new Map(blocks.map((b) => [b.id, b.text]));
+  const changes = proposal.changes.filter((c) => {
+    switch (c.kind) {
+      case "rewrite": {
+        if (c.blockId === null || c.newText === null) return false;
+        const current = textById.get(c.blockId);
+        return current !== undefined && c.newText.trim() !== current.trim();
+      }
+      case "insert":
+        return (
+          c.newText !== null &&
+          c.newText.trim() !== "" &&
+          c.type !== null &&
+          (c.afterId === null || textById.has(c.afterId))
+        );
+      case "remove":
+        return c.blockId !== null && textById.has(c.blockId);
+      case "move":
+        return c.blockId !== null && textById.has(c.blockId) && c.toIndex !== null;
+    }
+  });
+  return { ...proposal, changes };
+}
+
+/**
+ * Propose structural changes to the supplied blocks that satisfy the author's
+ * instruction. All change kinds allowed (rewrite/insert/remove/move); returns a
+ * sanitized ManuscriptProposal the Edit tab reviews change by change.
+ */
+export async function reviseChapter(
+  req: EditRequest,
+  opts?: AiOpOptions,
+): Promise<ManuscriptProposal> {
+  // Nothing to act on without a direction or an eligible block: skip the model
+  // call entirely (the UI also guards this, but defend the boundary too).
+  if (!req.instruction.trim() || req.blocks.length === 0) {
+    return { chapterId: req.chapterId, summary: "", changes: [] };
+  }
+  const model = await getModel();
+  const { output } = await generateText({
+    model,
+    output: Output.object({ schema: reviseResultSchema }),
+    system: REVISE_SYSTEM,
+    prompt: buildEditGrounding(req),
+    abortSignal: opts?.signal,
+  });
+  return sanitizeProposal(
+    { chapterId: req.chapterId, summary: output.summary, changes: output.changes },
+    req.blocks,
+  );
 }
 
 // ── Sculpt (chapter-level AI write path) ──────────────────────────────────────
@@ -416,7 +566,10 @@ export function sanitizeSculpt(proposal: SculptProposal, cardIds: string[]): Scu
  * proposal the board reviews behind its gate. A truly empty chapter (no spine,
  * no cards) has nothing to reshape, so we skip the call.
  */
-export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal> {
+export async function sculptChapter(
+  ctx: SculptContext,
+  opts?: AiOpOptions,
+): Promise<SculptProposal> {
   const empty =
     ctx.cards.length === 0 &&
     !ctx.premise.trim() &&
@@ -432,6 +585,7 @@ export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal>
     output: Output.object({ schema: sculptProposalSchema }),
     system: SCULPT_SYSTEM,
     prompt: buildSculptGrounding(ctx),
+    abortSignal: opts?.signal,
   });
   return sanitizeSculpt(
     { chapterId: ctx.chapterId, summary: output.summary, changes: output.changes },
@@ -460,6 +614,7 @@ export async function sculptChapter(ctx: SculptContext): Promise<SculptProposal>
 export async function brainstorm(
   messages: ChatMessage[],
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<ReturnType<typeof streamText>> {
   const model = await getModel();
   return streamText({
@@ -472,6 +627,7 @@ export async function brainstorm(
       },
       ...messages,
     ],
+    abortSignal: opts?.signal,
   });
 }
 
@@ -482,12 +638,14 @@ export async function brainstorm(
 export async function cleanTranscript(
   raw: string,
   ctx: AiContext,
+  opts?: AiOpOptions,
 ): Promise<string> {
   const model = await getModel();
   const { textStream } = streamText({
     model,
     system: CLEAN_TRANSCRIPT_SYSTEM,
     prompt: `${buildGrounding(ctx)}\n\nRAW DICTATION TO CLEAN:\n${raw}`,
+    abortSignal: opts?.signal,
   });
 
   // Drain the stream into the full corrected passage. We stream rather than use

@@ -39,5 +39,8 @@ export const useOutlineBoardStore = create<OutlineBoardState>()((set) => ({
   setSculptError: (e) => set({ sculptError: e }),
   setDecision: (index, d) => set((s) => ({ decisions: { ...s.decisions, [index]: d } })),
   rejectAll: () => set({ proposal: null, decisions: {}, sculptingChapterId: null }),
-  clearProposal: () => set({ proposal: null, decisions: {} }),
+  // Accepting a proposal ends the sculpt lifecycle like rejecting does: clear
+  // the chapter marker too, so the column's in-flight derivation (marker set,
+  // no proposal, no error) reads idle again instead of spinning forever.
+  clearProposal: () => set({ proposal: null, decisions: {}, sculptingChapterId: null }),
 }));

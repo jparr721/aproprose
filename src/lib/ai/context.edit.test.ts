@@ -27,9 +27,10 @@ const mk = (p: Partial<Block>): Block => ({
 
 beforeEach(() => {
   useProjectStore.setState({
-    project: null,
-    activeChapterId: null,
+    project: { chapters: [{ id: "ch1", title: "One" }] } as unknown as ProjectInfo,
+    activeChapterId: "ch1",
     selectedId: null,
+    selectedIds: [],
     blocks: [
       mk({ id: "n1", type: "narration", text: "Narr one" }),
       mk({ id: "d1", type: "dialogue", text: "Hi there" }),
@@ -161,5 +162,29 @@ describe("buildRefineRequest", () => {
     const req = buildRefineRequest({ id: "n1", type: "narration" }, "draft", "x");
     expect(req.structure).toContain("Act I");
     expect(req.structure).toContain("Goal: Introduce the protagonist");
+  });
+});
+
+describe("EditRequest.chapterId (required data, no fallback)", () => {
+  it("stamps the active chapter id onto buildEditRequest", () => {
+    useProjectStore.setState({ selectedId: "n1" });
+    expect(buildEditRequest("block", "x").chapterId).toBe("ch1");
+  });
+
+  it("stamps the active chapter id onto buildRefineRequest (same envelope)", () => {
+    const req = buildRefineRequest({ id: "n1", type: "narration" }, "draft", "x");
+    expect(req.chapterId).toBe("ch1");
+  });
+
+  it("buildEditRequest throws when no chapter is active", () => {
+    useProjectStore.setState({ project: null, activeChapterId: null, selectedId: "n1" });
+    expect(() => buildEditRequest("block", "x")).toThrow("No active chapter.");
+  });
+
+  it("buildRefineRequest throws when no chapter is active", () => {
+    useProjectStore.setState({ project: null, activeChapterId: null });
+    expect(() =>
+      buildRefineRequest({ id: "n1", type: "narration" }, "draft", "x"),
+    ).toThrow("No active chapter.");
   });
 });

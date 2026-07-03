@@ -1,7 +1,9 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { IconChevronRight, IconPlus, IconWand } from "@tabler/icons-react";
+import { IconChevronRight, IconPlus, IconRefresh, IconWand } from "@tabler/icons-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { BoardCard } from "@/components/app/outline/board-card";
 import { CharacterChip } from "@/components/app/outline/character-chip";
 import { PlotPointBadge } from "@/components/app/outline/plot-point-badge";
@@ -10,7 +12,7 @@ import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { buildSculptContext } from "@/lib/ai/sculpt-context";
 import { sculptChapter } from "@/lib/ai/operations";
-import { describeAiError } from "@/lib/ai/errors";
+import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
 import type { ChapterRef } from "@/lib/types";
@@ -24,12 +26,22 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
   const startSculpt = useOutlineBoardStore((s) => s.startSculpt);
   const setProposal = useOutlineBoardStore((s) => s.setProposal);
   const setSculptError = useOutlineBoardStore((s) => s.setSculptError);
+  const proposal = useOutlineBoardStore((s) => s.proposal);
+  const sculptingChapterId = useOutlineBoardStore((s) => s.sculptingChapterId);
+  const sculptError = useOutlineBoardStore((s) => s.sculptError);
   const { setNodeRef } = useDroppable({ id: cardColumnId(chapterRef.id) });
   const cast = beatCharacters(ch.characterIds, characters);
 
+  // The sculpt lifecycle is store-global with the target chapter marked, so only
+  // this column reacts: in flight = marked with no result yet; failed = marked
+  // with an error (a fresh startSculpt anywhere resets it).
+  const isSculptTarget = sculptingChapterId === chapterRef.id;
+  const sculpting = isSculptTarget && proposal === null && sculptError === null;
+  const sculptFailed = isSculptTarget && sculptError !== null;
+
   const runSculpt = () => {
     startSculpt(chapterRef.id);
-    sculptChapter(buildSculptContext(chapterRef.id))
+    withAiRetry(() => sculptChapter(buildSculptContext(chapterRef.id)))
       .then((p) => setProposal(p))
       .catch((e: unknown) => setSculptError(describeAiError(e)));
   };
@@ -48,10 +60,26 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
         </button>
         <div className="flex items-center gap-1.5">
           {ch.plotPoint ? <PlotPointBadge type={ch.plotPoint} /> : null}
-          <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs text-muted-foreground" onClick={runSculpt}>
-            <IconWand className="size-3.5" /> Sculpt
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-6 px-2 text-xs text-muted-foreground"
+            onClick={runSculpt}
+            disabled={sculpting}
+          >
+            {sculpting ? <Spinner className="size-3.5" /> : <IconWand className="size-3.5" />} Sculpt
           </Button>
         </div>
+        {sculptFailed ? (
+          <Alert variant="destructive">
+            <AlertDescription className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words">
+              {sculptError}
+            </AlertDescription>
+            <Button variant="outline" size="sm" className="w-fit" onClick={runSculpt}>
+              <IconRefresh className="size-3.5" /> Try again
+            </Button>
+          </Alert>
+        ) : null}
         {cast.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {cast.map((c) => (

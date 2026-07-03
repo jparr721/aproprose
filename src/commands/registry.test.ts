@@ -111,4 +111,11 @@ describe("command registry", () => {
     });
     expect(buildRootCommands().map((c) => c.id)).toContain("doc.build-errors");
   });
+
+  it("exposes every AI tab in the palette, including Edit", () => {
+    const ids = STATIC_COMMANDS.map((c) => c.id);
+    for (const tab of ["suggest", "edit", "critique", "brainstorm", "continuity", "muse"]) {
+      expect(ids).toContain(`ai.tab-${tab}`);
+    }
+  });
 });

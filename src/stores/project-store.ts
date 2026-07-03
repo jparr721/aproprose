@@ -21,10 +21,12 @@ import type {
   CompileError,
   ContinuityFlag,
   LoreEntry,
+  ManuscriptProposal,
   NovelMetadata,
   Outline,
   ProjectInfo,
   ProjectMeta,
+  ProposalApplyResult,
   RecentProject,
   SkeletonModel,
   SculptProposal,
@@ -56,6 +58,8 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import { canMerge } from "@/lib/blocks/keys";
+import { applyProposal } from "@/lib/blocks/proposal";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
@@ -167,10 +171,12 @@ interface ProjectState {
   editing: boolean;
   /**
    * One-shot caret request consumed by the editing block's textarea on mount:
-   * `"start"` places the caret at the beginning (used by `i` / new-block insert);
-   * `null` leaves the native caret (click-to-edit lands it at the click point).
+   * `"start"` places the caret at the beginning (`i` / new-block insert),
+   * `"end"` at the end (nav-mode Enter, delete-empty), a number at an exact
+   * offset (block merges land at the join point); `null` leaves the native
+   * caret (click-to-edit lands it at the click point).
    */
-  editCaret: "start" | null;
+  editCaret: "start" | "end" | number | null;
   chapterDirty: boolean;
   saving: boolean;
 
@@ -200,23 +206,37 @@ interface ProjectState {
    *  set, seeding it from the current single selection. Never enters edit mode. */
   toggleSelection: (id: string) => void;
   /** Enter edit mode on the selected block (no-op if nothing is selected). */
-  beginEdit: (caret?: "start") => void;
+  beginEdit: (caret?: "start" | "end") => void;
   /** Leave edit mode but keep the block highlighted (nav mode). */
   stopEdit: () => void;
   /** Clear the selection entirely. */
   deselect: () => void;
+  /** Replace the selection wholesale (nav mode, never edit). Empty = deselect;
+   *  a single id selects it plainly; multiple ids become the multi-selection
+   *  set with the last id active. */
+  setSelection: (ids: string[]) => void;
   /** Move the highlight to the prev/next block in nav mode, clamped at the ends. */
   moveSelection: (dir: -1 | 1) => void;
   updateBlockText: (id: string, text: string) => void;
   formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: BlockTextEdit[]) => void;
+  /** Apply the kept changes of a reviewed proposal as ONE undo step. Returns
+   *  counts so the caller can warn about skipped (vanished-target) changes. */
+  applyManuscriptProposal: (proposal: ManuscriptProposal, kept: number[]) => ProposalApplyResult;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
   insertAfter: (afterId: string | null, partial?: Partial<Block>) => string;
   splitBlock: (id: string, at: number) => void;
   convertSelection: (id: string, start: number, end: number, type: BlockType) => void;
+  /**
+   * Backspace at a block's start: join its text onto the end of the previous
+   * SAME-type block (mergeable types only — see MERGEABLE in lib/blocks/keys)
+   * and land the caret at the join point. One undo step. No-op when the pair
+   * isn't mergeable or the block carries a beat/title a merge would drop.
+   */
+  mergeWithPrevious: (id: string) => void;
   deleteBlock: (id: string) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
   /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
@@ -664,6 +684,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     deselect: () => set({ selectedId: null, selectedIds: [], editing: false, editCaret: null }),
 
+    // Wholesale selection replacement (AI intents / finding jumps). Mirrors
+    // select()'s nav-mode invariants; several ids form a multi-selection with
+    // the last id active (toggleSelection precedent).
+    setSelection: (ids) =>
+      set({
+        selectedId: ids.length > 0 ? ids[ids.length - 1] : null,
+        selectedIds: ids.length > 1 ? [...ids] : [],
+        editing: false,
+        editCaret: null,
+      }),
+
     moveSelection: (dir) =>
       set((s) => {
         if (!s.selectedId) return {};
@@ -722,6 +753,42 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: null,
         };
       }),
+
+    // Apply the author-kept changes of a reviewed ManuscriptProposal as ONE undo
+    // step. The pure fold lives in lib/blocks/proposal.ts; this wraps it with
+    // history, selection pruning, and the meta-backed speaker resolver.
+    applyManuscriptProposal: (proposal, kept) => {
+      if (kept.length === 0) return { applied: 0, skipped: 0 };
+      const s = get();
+      const resolveSpeakerId = (name: string): string | undefined =>
+        s.meta.characters.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id;
+      const changes = kept.map((i) => proposal.changes[i]).filter((c) => c !== undefined);
+      const outcome = applyProposal(s.blocks, changes, resolveSpeakerId);
+      // Nothing landed (every kept change targeted a vanished block): report the
+      // skips without burning an undo step on an identical snapshot.
+      if (outcome.applied === 0) return { applied: 0, skipped: outcome.skipped };
+      // Keep the selection in lockstep with the live list (deleteBlock precedent):
+      // prune removed ids; if the active block was removed, fall to the last
+      // surviving set member and drop out of edit mode.
+      const liveIds = new Set(outcome.blocks.map((b) => b.id));
+      const selectedIds = s.selectedIds.filter((id) => liveIds.has(id));
+      const selectionLost = s.selectedId !== null && !liveIds.has(s.selectedId);
+      const selectedId = selectionLost
+        ? selectedIds[selectedIds.length - 1] ?? null
+        : s.selectedId;
+      set({
+        blocks: outcome.blocks,
+        selectedId,
+        selectedIds,
+        editing: selectionLost ? false : s.editing,
+        editCaret: selectionLost ? null : s.editCaret,
+        chapterDirty: true,
+        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+        future: [],
+        lastTextEditId: null,
+      });
+      return { applied: outcome.applied, skipped: outcome.skipped };
+    },
 
     updateBlock: (id, patch) =>
       set((s) => {
@@ -807,11 +874,46 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return {
           blocks: next,
           selectedId: plan.focusId,
-          // Splitting happens mid-edit; stay in edit mode on the focused piece.
+          // Splitting happens mid-edit; stay in edit mode on the focused piece,
+          // caret at its start (the writer's caret was at the cut point).
           // Editing is single-block, so dismiss any multi-selection.
           selectedIds: [],
           editing: true,
-          editCaret: null,
+          editCaret: "start",
+          chapterDirty: true,
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    mergeWithPrevious: (id) =>
+      set((s) => {
+        const idx = s.blocks.findIndex((b) => b.id === id);
+        if (idx < 1) return {};
+        const prev = s.blocks[idx - 1];
+        const cur = s.blocks[idx];
+        // Same predicate as the key router (one rule, two enforcement points),
+        // so no caller can fold a speaker's line away or drop a beat/title.
+        if (!canMerge(prev.type, cur.type, Boolean(cur.beat) || Boolean(cur.title))) return {};
+        // Splits trim the whitespace at the cut, so the symmetric merge restores
+        // one space at a bare word boundary — otherwise Enter-then-Backspace
+        // would silently fuse words. The caret lands after the join; a second
+        // Backspace removes the restored space when fusion really is wanted.
+        const needsSpace =
+          prev.text.length > 0 &&
+          cur.text.length > 0 &&
+          !/\s$/.test(prev.text) &&
+          !/^\s/.test(cur.text);
+        const join = needsSpace ? " " : "";
+        const blocks = [...s.blocks];
+        blocks.splice(idx - 1, 2, { ...prev, text: prev.text + join + cur.text, dirty: true });
+        return {
+          blocks,
+          selectedId: prev.id,
+          selectedIds: [],
+          editing: true,
+          editCaret: prev.text.length + join.length,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],
@@ -968,32 +1070,26 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const reparsed = parseChapter(source);
         const wordCount = countWords(reparsed);
         set((s) => {
-          // parseChapter re-mints every block id, so map the selection onto the
-          // reparsed blocks by position to keep the user's place (and not strand
-          // the Edit scope on dead ids). Positional remap is only sound when the
-          // reparse preserved the block count; if a dirty block re-segments (e.g.
-          // a blank line splits a narration in two) the indices no longer denote
-          // the same blocks, so clear the selection rather than land it on a wrong
-          // or dead block.
+          // parseChapter re-mints every block id. When the reparse preserved the
+          // block count, adopt the OLD ids positionally so a plain save keeps ids
+          // stable - pending proposals, finding anchors, and the selection all
+          // stay pointed at the same blocks. When counts differ (a dirty block
+          // re-segmented, e.g. a blank line split a narration in two) positions
+          // no longer denote the same blocks, so fall back to fresh ids and a
+          // cleared selection rather than land it on a wrong or dead block.
           const sameCount = reparsed.length === s.blocks.length;
           if (import.meta.env.DEV && !sameCount) {
             console.warn(
-              `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional remap unreliable)`,
+              `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional id adoption unreliable)`,
             );
           }
-          const remap = (id: string): string | null => {
-            if (!sameCount) return null;
-            const i = s.blocks.findIndex((b) => b.id === id);
-            return i >= 0 ? reparsed[i].id : null;
-          };
-          const selectedId = s.selectedId ? remap(s.selectedId) : null;
-          const selectedIds = s.selectedIds
-            .map(remap)
-            .filter((id): id is string => id !== null);
+          const blocks = sameCount
+            ? reparsed.map((b, i) => ({ ...b, id: s.blocks[i].id }))
+            : reparsed;
           return {
-            blocks: reparsed,
-            selectedId,
-            selectedIds,
+            blocks,
+            selectedId: sameCount ? s.selectedId : null,
+            selectedIds: sameCount ? s.selectedIds : [],
             chapterDirty: false,
             saving: false,
             past: [],

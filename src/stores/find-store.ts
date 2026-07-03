@@ -54,9 +54,16 @@ function optionsOf(s: FindState): FindOptions {
 
 function scrollMatchIntoView(match: Match | undefined): void {
   if (!match) return;
-  document
-    .querySelector(`[data-block-id="${match.blockId}"]`)
-    ?.scrollIntoView({ block: "center" });
+  // The active <mark> renders on the frame after the index changes, so defer
+  // one frame and scroll the mark itself. "nearest" (not "center") keeps the
+  // viewport still when the match is already visible and moves it minimally
+  // otherwise - centering a block taller than the viewport could leave the
+  // match off-screen entirely.
+  requestAnimationFrame(() => {
+    const host = document.querySelector(`[data-block-id="${match.blockId}"]`);
+    if (!host) return;
+    (host.querySelector("mark") ?? host).scrollIntoView({ block: "nearest" });
+  });
 }
 
 export const useFindStore = create<FindState>((set, get) => {

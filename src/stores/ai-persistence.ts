@@ -16,7 +16,7 @@ import { useProjectStore } from "@/stores/project-store";
 import type { ChatMessage } from "@/lib/types";
 
 export interface PersistedAiState {
-  v: 1;
+  v: 2;
   entries: Record<string, AiCacheEntry>;
   threads: Record<string, ChatMessage[]>;
 }
@@ -44,18 +44,28 @@ export function toSnapshot(
       };
     }
   }
-  return { v: 1, entries: kept, threads };
+  return { v: 2, entries: kept, threads };
 }
 
 /** Inverse of toSnapshot. Tolerant of null / older / malformed blobs read from
- *  disk -- returns empty maps rather than throwing. */
+ *  disk -- returns empty maps rather than throwing. v1 blobs keep their chat
+ *  threads but drop cached entries: results are regenerable and their data
+ *  shapes changed when findings gained block anchors. */
 export function fromSnapshot(snapshot: PersistedAiState | null): {
   entries: Record<string, AiCacheEntry>;
   threads: Record<string, ChatMessage[]>;
 } {
-  if (!snapshot || snapshot.v !== 1) return { entries: {}, threads: {} };
+  if (!snapshot) return { entries: {}, threads: {} };
+  // Blobs on disk may predate the current shape; read the version loosely.
+  const raw = snapshot as {
+    v: number;
+    entries?: Record<string, AiCacheEntry>;
+    threads?: Record<string, ChatMessage[]>;
+  };
+  if (raw.v === 1) return { entries: {}, threads: raw.threads ?? {} };
+  if (raw.v !== 2) return { entries: {}, threads: {} };
   const entries: Record<string, AiCacheEntry> = {};
-  for (const [key, e] of Object.entries(snapshot.entries ?? {})) {
+  for (const [key, e] of Object.entries(raw.entries ?? {})) {
     entries[key] = {
       data: e.data,
       instruction: e.instruction,
@@ -64,7 +74,7 @@ export function fromSnapshot(snapshot: PersistedAiState | null): {
       error: null,
     };
   }
-  return { entries, threads: snapshot.threads ?? {} };
+  return { entries, threads: raw.threads ?? {} };
 }
 
 /** Clear the AI stores (project closed / switching before a load completes). */

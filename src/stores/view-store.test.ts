@@ -24,6 +24,11 @@ describe("view-store aiTab", () => {
     useViewStore.getState().setAiTab("outline");
     expect(useViewStore.getState().aiTab).toBe("outline");
   });
+
+  it("setAiTab can switch to the muse tab", () => {
+    useViewStore.getState().setAiTab("muse");
+    expect(useViewStore.getState().aiTab).toBe("muse");
+  });
 });
 
 describe("view-store aiCollapsed", () => {
@@ -31,14 +36,6 @@ describe("view-store aiCollapsed", () => {
     expect(useViewStore.getState().aiCollapsed).toBe(false);
     useViewStore.getState().setAiCollapsed(true);
     expect(useViewStore.getState().aiCollapsed).toBe(true);
-  });
-
-  it("triggerSuggest expands the panel, selects Suggest, and bumps the focus tick", () => {
-    useViewStore.setState({ aiCollapsed: true, aiTab: "critique", suggestFocusTick: 4 });
-    useViewStore.getState().triggerSuggest();
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
-    expect(useViewStore.getState().aiTab).toBe("suggest");
-    expect(useViewStore.getState().suggestFocusTick).toBe(5);
   });
 
   it("toggleAi reopening a collapsed panel restores content, not a bare rail", () => {

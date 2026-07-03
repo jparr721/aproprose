@@ -9,15 +9,17 @@ import { metaBlobSchema, type MetaBlob } from "@/lib/migration/schema";
 import type { ProjectMeta } from "@/lib/types";
 import { migrateV1 } from "@/lib/migration/v1/migrate";
 import { migrateV2 } from "@/lib/migration/v2/migrate";
+import { migrateV3 } from "@/lib/migration/v3/migrate";
 
 /** Bump whenever a migration is added. */
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 3;
 
 type Migration = (meta: MetaBlob) => ProjectMeta;
 
 const migrations: Record<number, Migration> = {
   1: migrateV1,
   2: migrateV2,
+  3: migrateV3,
 };
 
 export const EMPTY_META: ProjectMeta = {

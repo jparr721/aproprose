@@ -7,6 +7,8 @@
 // message, hiding whether a failure was auth (401), rate limit (429), a malformed
 // request (400), or a network drop — exactly the detail you need to act on.
 
+import { toast } from "sonner";
+
 export function describeAiError(e: unknown): string {
   if (typeof e === "string") return e;
 
@@ -46,5 +48,26 @@ export function describeAiError(e: unknown): string {
     return JSON.stringify(e);
   } catch {
     return String(e);
+  }
+}
+
+/** True for the abort shapes an in-flight AI call surfaces when its
+ *  AbortSignal fires (the SDK rethrows the DOMException named "AbortError"). */
+export function isAbortError(e: unknown): boolean {
+  return (e instanceof DOMException || e instanceof Error) && e.name === "AbortError";
+}
+
+/**
+ * Run an AI call with ONE retry. Aborts rethrow immediately - the author
+ * cancelled, so retrying would be hostile. On the first real failure, warn and
+ * try once more; a second failure rethrows to the caller's error surface.
+ */
+export async function withAiRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (first) {
+    if (isAbortError(first)) throw first;
+    toast.warning("AI request failed - retrying");
+    return await fn();
   }
 }

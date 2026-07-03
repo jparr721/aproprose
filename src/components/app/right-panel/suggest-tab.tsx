@@ -14,9 +14,10 @@ import {
 } from "@/components/ui/typography";
 import { scrollSelectedIntoView } from "@/components/app/editor";
 import { useProjectStore } from "@/stores/project-store";
-import { useViewStore } from "@/stores/view-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAi } from "@/hooks/use-ai";
+import { useAiIntent } from "@/hooks/use-ai-intent";
+import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildSuggestContext, type ReadScope } from "@/lib/ai/context";
 import { suggestContinuation } from "@/lib/ai/operations";
 import type { SuggestResult, Suggestion } from "@/lib/types";
@@ -32,7 +33,15 @@ import {
 } from "@/components/app/right-panel/shared";
 
 export function SuggestTab() {
-  const focusTick = useViewStore((s) => s.suggestFocusTick);
+  // Intent consumption: a suggest intent opens + focuses the direction box (and
+  // prefills it when the intent carries an instruction). Never runs the model.
+  const [focusKey, setFocusKey] = useState(0);
+  const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  useAiIntent("suggest", (intent) => {
+    setPrefill(intent.instruction);
+    setFocusKey((k) => k + 1);
+  });
+
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
@@ -42,9 +51,12 @@ export function SuggestTab() {
   const [scope, setScope] = useState<ReadScope>("cursor");
   // Cursor scope keys on the selection; chapter scope reads every block (but still
   // inserts after the caret), so it ignores the selection in the cache key.
-  const cacheKey = `suggest:${activeChapterId ?? ""}:${scope}:${
-    scope === "cursor" ? selectedId ?? "" : ""
-  }`;
+  const cacheKey = aiCacheKey(
+    "suggest",
+    activeChapterId,
+    scope,
+    scope === "cursor" ? selectedId ?? "" : "",
+  );
   const patch = useAiCacheStore((s) => s.patch);
   const { data, loading, error, instruction, run } = useAi<SuggestResult>(
     (ins) => suggestContinuation({ ...buildSuggestContext(scope), instruction: ins }),
@@ -174,7 +186,8 @@ export function SuggestTab() {
         loading={loading}
         onSubmit={(t) => generate(t || undefined)}
         allowEmpty
-        focusSignal={focusTick}
+        focusKey={focusKey}
+        prefill={prefill}
         anchorMode={scope === "cursor" ? "cursor" : "chapter-insert"}
         anchorId={anchorBlockId ?? undefined}
         toolbar={

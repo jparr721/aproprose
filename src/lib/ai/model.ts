@@ -69,3 +69,12 @@ export async function getModel(): Promise<LanguageModel> {
   const provider = await getProvider();
   return provider(aiModel);
 }
+
+/**
+ * Whether the active provider can run the multi-step tool loop (Muse). Only
+ * the OpenAI path speaks the SDK's tool protocol; the local CLI providers
+ * flatten prompts and drop tool messages, so tool use cannot work there.
+ */
+export function supportsTools(): boolean {
+  return useSettingsStore.getState().aiProvider === "openai";
+}

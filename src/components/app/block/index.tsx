@@ -17,15 +17,17 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { copyText, currentSelectionText } from "@/lib/clipboard";
 import { useProjectStore } from "@/stores/project-store";
 import { useFindStore } from "@/stores/find-store";
-import { blockClickAction } from "@/lib/blocks/click";
+import { blockClickAction, rangeSpan } from "@/lib/blocks/click";
 import type { Block as BlockT } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BlockBody } from "./block-body";
 import { BlockToolbar } from "./block-toolbar";
 import { BlockActionItems, useBlockActions, type BlockAction } from "./block-actions";
+import { CARD_TYPES } from "./constants";
 import { blockPlainText, findSpeaker } from "./block-text";
 
 // Memoized: editing one block re-serializes only that block's `raw`/identity, so
@@ -39,12 +41,19 @@ function BlockImpl({
 }) {
   const selected = useProjectStore((s) => s.selectedId === block.id);
   const inMultiSelection = useProjectStore((s) => s.selectedIds.includes(block.id));
-  const multiActive = useProjectStore((s) => s.selectedIds.length > 0);
-  const storeEditing = useProjectStore((s) => s.editing);
-  const editCaret = useProjectStore((s) => s.editCaret);
+  // Selection (highlight) and editing (caret in the textarea) are distinct: a block
+  // is only editing when it's the selected block AND the store's editing flag is
+  // set. Both derive per-block here so a global edit-mode flip re-renders only
+  // the block it affects, not the whole chapter.
+  const editing = useProjectStore((s) => s.editing && s.selectedId === block.id);
+  // The one-shot caret hint only applies to the block currently in edit mode.
+  const caret = useProjectStore((s) =>
+    s.editing && s.selectedId === block.id && s.editCaret != null ? s.editCaret : undefined,
+  );
   const characters = useProjectStore((s) => s.meta.characters);
   const select = useProjectStore((s) => s.select);
   const toggleSelection = useProjectStore((s) => s.toggleSelection);
+  const setSelection = useProjectStore((s) => s.setSelection);
   const beginEdit = useProjectStore((s) => s.beginEdit);
   // The active find match in this block, or null for every other block (a stable
   // null, so only the current-match block and the one it just left re-render).
@@ -59,24 +68,28 @@ function BlockImpl({
     setNodeRef,
     setActivatorNodeRef,
     transform,
+    transition,
     isDragging,
   } = useSortable({ id: block.id });
 
   // Text selected at right-click time — captured before Radix opens its menu and
   // moves focus, which would otherwise drop the selection (see onContextMenuCapture).
   const [selText, setSelText] = useState("");
+  // The floating toolbar (type chip, mic, AI, menus - several Radix roots) only
+  // mounts while the pointer is over the block or it is selected, so a long
+  // chapter doesn't pay for hundreds of dormant menu/tooltip trees, and hidden
+  // toolbars contribute no invisible tab stops.
+  const [chromeLive, setChromeLive] = useState(false);
   const speaker = findSpeaker(block, characters);
-  // Selection (highlight) and editing (caret in the textarea) are distinct: a block
-  // is only editing when it's the selected block AND the store's editing flag is set.
-  const editing = selected && storeEditing;
-  // The one-shot caret hint only applies to the block currently in edit mode.
-  const caret = editing && editCaret ? editCaret : undefined;
   // The active block plus every Cmd/Ctrl-clicked member of the multi-selection get
   // the selected highlight; only the active block (`selected`) shows the action row
   // and can enter edit mode.
   const highlighted = selected || inMultiSelection;
 
   const actions = useBlockActions(block);
+  // Tinted note cards own their surface; the row treats them specially (no
+  // hover wash, edge-only selection) so they never read as a box in a box.
+  const isCard = CARD_TYPES.has(block.type);
   // The whole block as plain text — copied verbatim and used to gate the item.
   const blockText = blockPlainText(block, characters);
 
@@ -111,40 +124,81 @@ function BlockImpl({
           // or swapping prose for textareas drops the highlight being copied.
           // The routing table is `blockClickAction` (unit-tested in isolation).
           onMouseDown={(e) => {
+            // Click-time reads: subscribing to selectedIds.length / editing here
+            // would re-render every block whenever any block's mode changes.
+            const st = useProjectStore.getState();
             const action = blockClickAction({
               button: e.button,
               modifier: e.metaKey || e.ctrlKey,
+              shift: e.shiftKey,
               selected,
-              multiActive,
-              editing: storeEditing,
+              multiActive: st.selectedIds.length > 0,
+              editing: st.editing,
             });
             if (action === "toggle") toggleSelection(block.id);
             else if (action === "select") select(block.id);
             else if (action === "edit") beginEdit();
+            else if (action === "range") {
+              // Suppress the browser's shift-extend text selection across
+              // blocks; the span keeps the clicked block active (it lands last).
+              e.preventDefault();
+              const span = rangeSpan(
+                st.blocks.map((b) => b.id),
+                st.selectedId,
+                block.id,
+              );
+              if (span) setSelection(span);
+              else select(block.id);
+            }
           }}
           onContextMenuCapture={() => setSelText(currentSelectionText())}
-          // dnd-kit drives the live drag offset; surface it as a CSS var (per the
-          // no-inline-style rule) consumed by the arbitrary transform utility.
-          style={{ "--dnd-transform": CSS.Transform.toString(transform) } as CSSProperties}
+          onMouseEnter={() => setChromeLive(true)}
+          onMouseLeave={(e) => {
+            // Keep the chrome mounted while one of its menus is open (the
+            // trigger inside the row carries data-state="open").
+            if (!e.currentTarget.querySelector('[data-state="open"]')) setChromeLive(false);
+          }}
+          // dnd-kit drives the live drag offset and the FLIP ease of displaced
+          // siblings; surface both as CSS vars (per the no-inline-style rule).
+          // While a drag is idle the transition var is unset and the fallback
+          // color transition applies.
+          style={
+            {
+              "--dnd-transform": CSS.Transform.toString(transform),
+              "--dnd-transition": transition,
+            } as CSSProperties
+          }
           className={cn(
-            "group relative flex gap-1.5 rounded-lg border border-transparent py-1.5 pl-1.5 pr-2 transition-colors [transform:var(--dnd-transform,none)]",
-            highlighted ? "border-select-edge bg-card" : "hover:bg-muted/50",
+            // The gutter hangs in the left margin (-ml-7 = pl-0 + w-6 + gap-1),
+            // so prose, chapter header, and add-row share one text axis.
+            "group relative -ml-7 flex gap-1 rounded-lg border border-transparent py-1.5 pl-0 pr-2",
+            "scroll-mt-12 scroll-mb-8 [transform:var(--dnd-transform,none)]",
+            "[transition:var(--dnd-transition,color_120ms,background-color_120ms,border-color_120ms)]",
+            // Tinted note cards draw their own surface; the row highlight would
+            // double-box them, so they take only the selection edge.
+            highlighted && "border-select-edge",
+            highlighted && !isCard && "bg-select-tint",
+            !highlighted && !isCard && "hover:bg-muted/50",
             isDragging && "z-10 opacity-90 shadow-lg",
           )}
         >
           {/* gutter — drag handle */}
-          <div className="flex w-5 shrink-0 justify-center pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <button
-              type="button"
-              ref={setActivatorNodeRef}
-              {...attributes}
-              {...listeners}
-              title="Drag to reorder"
-              aria-label="Drag to reorder block"
-              className="inline-flex cursor-grab touch-none border-0 bg-transparent p-0 text-faint active:cursor-grabbing"
-            >
-              <IconGripVertical className="size-3.5" />
-            </button>
+          <div className="flex w-6 shrink-0 justify-center pt-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  ref={setActivatorNodeRef}
+                  {...attributes}
+                  {...listeners}
+                  aria-label="Drag to reorder block"
+                  className="inline-flex h-fit cursor-grab touch-none rounded-sm border-0 bg-transparent p-1 text-faint transition-colors hover:bg-muted hover:text-muted-foreground active:cursor-grabbing"
+                >
+                  <IconGripVertical className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Drag to reorder</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* body */}
@@ -153,13 +207,15 @@ function BlockImpl({
           </div>
 
           {/* actions */}
-          <BlockToolbar
-            block={block}
-            characters={characters}
-            dictation={dictation}
-            selected={selected}
-            actions={actions}
-          />
+          {chromeLive || selected ? (
+            <BlockToolbar
+              block={block}
+              characters={characters}
+              dictation={dictation}
+              selected={selected}
+              actions={actions}
+            />
+          ) : null}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">

@@ -2,11 +2,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  TypographyForeground,
-  TypographyMutedSpan,
-  TypographySmall,
-} from "@/components/ui/typography";
+import { TypographyMutedSpan, TypographySmall } from "@/components/ui/typography";
 import { cellLevel, computeThresholds, localDateKey } from "@/lib/stats/stats";
 import type { WritingStats } from "@/lib/stats/schema";
 import { CELL_LEVEL_CLASSES, ContributionCell } from "./contribution-cell";
@@ -65,17 +61,19 @@ export function ContributionChart({ days }: { days: WritingStats["days"] }) {
                   <ContributionCell level={level} aria-label={formatLongDate(cell.key)} />
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  <TypographySmall className="block font-medium">
-                    {formatLongDate(cell.key)}
-                  </TypographySmall>
-                  {day && day.saves > 0 ? (
-                    <TypographyForeground className="block font-mono text-xs tabular-nums">
-                      {day.added} word{day.added === 1 ? "" : "s"} - {day.saves} save
-                      {day.saves === 1 ? "" : "s"}
-                    </TypographyForeground>
-                  ) : (
-                    <TypographyMutedSpan>No writing</TypographyMutedSpan>
-                  )}
+                  <div className="flex flex-col gap-0.5">
+                    <TypographySmall className="block font-medium">
+                      {formatLongDate(cell.key)}
+                    </TypographySmall>
+                    {day && day.saves > 0 ? (
+                      <span className="font-mono tabular-nums">
+                        {day.added} word{day.added === 1 ? "" : "s"} - {day.saves} save
+                        {day.saves === 1 ? "" : "s"}
+                      </span>
+                    ) : (
+                      <span className="text-background/70">No writing</span>
+                    )}
+                  </div>
                 </TooltipContent>
               </Tooltip>
             );

@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.10.0",
+    "date": "2026-07-02",
+    "summary": "A new Muse agent, structural AI edits, and smarter in-place block editing",
+    "highlights": [
+      "New Muse tab: give it a directive and it reads your chapter, gathers what it needs, and stages a reviewable set of changes in the Edit tab (nothing applies without your review; requires the OpenAI provider)",
+      "Pick up and go: a one-click helper that carries a stuck scene forward, available from the command palette, a block's menu, and the Muse tab",
+      "The Edit tab now proposes not just rewrites but inserts, removals, and reorders, reviewed and accepted change by change and applied as a single undo step",
+      "Press Enter to split a block or start a new one at the end, and Backspace at the start of a block to merge it into the one above",
+      "Shift-click to select a range of blocks",
+      "Critique and Continuity notes now link to the block they concern with Go to block, and can be handed off with Send to Edit",
+      "Brainstorm replies gain Draft this and Apply this actions that carry a reply into Suggest or Edit",
+      "Add or remove an optional action beat on dialogue blocks",
+      "The word count now updates live as you type instead of only on save",
+      "Failed AI requests retry once automatically with a brief warning, and Sculpt shows a spinner while running plus an inline Try again on errors",
+      "BUG FIX: Clicking a block to edit no longer jumps the page",
+      "BUG FIX: Tons of UI improvements overall and stability changes"
+    ]
+  },
+  {
     "version": "0.9.1",
     "date": "2026-06-30",
     "summary": "The What's New dialog now scrolls properly so you can read the full list of recent changes.",

@@ -323,7 +323,8 @@ export function EditTab() {
   const accept = (index: number) => {
     const cur = latest();
     if (!cur) return;
-    applyManuscriptProposal(cur, [index]);
+    const result = applyManuscriptProposal(cur, [index]);
+    if (result.skipped > 0) toast.warning("1 change skipped - its block changed since");
     removeFromCache(index);
   };
 
@@ -412,7 +413,7 @@ export function EditTab() {
                 if (item.kind === "rewrite") {
                   return (
                     <RewriteCard
-                      key={`rw-${item.block.id}`}
+                      key={`rw-${item.index}`}
                       block={item.block}
                       newText={item.newText}
                       reason={item.reason}
@@ -441,7 +442,7 @@ export function EditTab() {
                 if (item.kind === "remove") {
                   return (
                     <ChangeCard
-                      key={`rm-${item.block.id}`}
+                      key={`rm-${item.index}`}
                       label="Remove"
                       reason={item.reason}
                       onAccept={() => accept(item.index)}
@@ -455,7 +456,7 @@ export function EditTab() {
                 }
                 return (
                   <ChangeCard
-                    key={`mv-${item.block.id}`}
+                    key={`mv-${item.index}`}
                     label="Move"
                     reason={item.reason}
                     onAccept={() => accept(item.index)}

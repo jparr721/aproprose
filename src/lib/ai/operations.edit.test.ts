@@ -1,11 +1,23 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Stub the model layer so importing operations.ts does not pull the Tauri/model stack.
-vi.mock("@/lib/ai/model", () => ({ getModel: vi.fn() }));
+// Stub the model layer so importing operations.ts does not pull the Tauri/model
+// stack, and stub the SDK so editBlocks runs against a canned model output.
+vi.mock("@/lib/ai/model", () => ({ getModel: vi.fn().mockResolvedValue({}) }));
+vi.mock("ai", () => ({
+  generateText: vi.fn(),
+  streamText: vi.fn(),
+  Output: { object: vi.fn() },
+}));
 
+import { generateText } from "ai";
 import { editBlocks, reviseChapter, reviseResultSchema, sanitizeProposal } from "@/lib/ai/operations";
 import { getModel } from "@/lib/ai/model";
 import type { BlockChange, ManuscriptProposal } from "@/lib/types";
+
+beforeEach(() => {
+  vi.mocked(generateText).mockReset();
+  vi.mocked(getModel).mockClear();
+});
 
 const blocks = [
   { id: "b1", text: "the cat sat" },
@@ -48,6 +60,11 @@ describe("sanitizeProposal rewrite rules", () => {
 
   it("drops a whitespace-for-empty no-op (both trim to empty)", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "empty", newText: "   " })]);
+    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+  });
+
+  it("drops a rewrite that blanks a block (empty newText is a delete, not a revision)", () => {
+    const p = proposal([change({ kind: "rewrite", blockId: "b1", newText: "" })]);
     expect(sanitizeProposal(p, blocks).changes).toEqual([]);
   });
 
@@ -107,6 +124,52 @@ describe("sanitizeProposal insert/remove/move rules", () => {
     const p = proposal([change({ kind: "remove", blockId: "nope" })]);
     sanitizeProposal(p, blocks);
     expect(p.changes).toHaveLength(1);
+  });
+});
+
+describe("editBlocks keeps every edit local to its own block", () => {
+  const req = {
+    chapterId: "ch1",
+    blocks: [
+      { id: "b1", type: "narration" as const, text: "the cat sat" },
+      { id: "b2", type: "narration" as const, text: "hello world" },
+    ],
+    instruction: "make these two paragraphs relate more",
+  };
+
+  it("collapses two edits for the same block to one and drops a block-blanking edit", async () => {
+    // The model tries to relate the blocks: it edits b1 twice and empties b2 to
+    // fold its prose into b1. Locality: b1 gets one edit, b2 is left intact.
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        edits: [
+          { blockId: "b1", newText: "The cat sat quietly.", reason: "r1" },
+          { blockId: "b1", newText: "The cat sat, waiting.", reason: "dup" },
+          { blockId: "b2", newText: "", reason: "blank" },
+        ],
+      },
+    } as never);
+    const out = await editBlocks(req);
+    expect(out.changes).toEqual([
+      change({ kind: "rewrite", blockId: "b1", newText: "The cat sat quietly.", reason: "r1" }),
+    ]);
+  });
+
+  it("a leading no-op does not shadow a genuine later edit for the same block", async () => {
+    // The model emits a no-op for b1 (text unchanged) before its real revision.
+    // Dedup must run on genuine edits, so the real revision survives.
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        edits: [
+          { blockId: "b1", newText: "the cat sat", reason: "noop" },
+          { blockId: "b1", newText: "The cat sat, waiting.", reason: "real" },
+        ],
+      },
+    } as never);
+    const out = await editBlocks(req);
+    expect(out.changes).toEqual([
+      change({ kind: "rewrite", blockId: "b1", newText: "The cat sat, waiting.", reason: "real" }),
+    ]);
   });
 });
 

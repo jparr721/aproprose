@@ -215,10 +215,12 @@ export const continuityResultSchema = z.object({
 const blockEditSchema = z.object({
   blockId: z
     .string()
-    .describe("the id of a block to revise, copied exactly from EDITABLE BLOCKS"),
+    .describe("the id of a block to revise, copied exactly from EDITABLE BLOCKS; use each id at most once"),
   newText: z
     .string()
-    .describe("the FULL revised text for that block, cleaned prose (no LaTeX)"),
+    .describe(
+      "the FULL revised text for THIS block only - a self-contained revision of its own text; never fold in, borrow, or merge prose from another block, and never leave it empty. Cleaned prose (no LaTeX)",
+    ),
   reason: z.string().describe("short phrase: what changed and why"),
 });
 
@@ -346,7 +348,19 @@ export async function editBlocks(
     toIndex: null,
     reason: e.reason,
   }));
-  return sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
+  // Keep every edit local to one block: at most one rewrite per blockId, so the
+  // model cannot collapse several blocks' edits onto a single block even when it
+  // is trying to make them relate. Dedup runs on the SANITIZED survivors so a
+  // leading no-op or blank edit can't shadow a genuine revision of the same
+  // block; first genuine edit for a block wins, later ones drop.
+  const sanitized = sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
+  const seen = new Set<string>();
+  const deduped = sanitized.changes.filter((c) => {
+    if (c.blockId === null || seen.has(c.blockId)) return false;
+    seen.add(c.blockId);
+    return true;
+  });
+  return { ...sanitized, changes: deduped };
 }
 
 // -- Revise (structural chapter write path) -----------------------------------
@@ -417,7 +431,14 @@ export function sanitizeProposal(
       case "rewrite": {
         if (c.blockId === null || c.newText === null) return false;
         const current = textById.get(c.blockId);
-        return current !== undefined && c.newText.trim() !== current.trim();
+        // A rewrite is an in-place revision: a known target, genuinely changed
+        // text, and non-empty. Blanking a block is a delete, not a revision -
+        // dropping it keeps a merge attempt from leaving an empty block behind.
+        return (
+          current !== undefined &&
+          c.newText.trim() !== "" &&
+          c.newText.trim() !== current.trim()
+        );
       }
       case "insert":
         return (

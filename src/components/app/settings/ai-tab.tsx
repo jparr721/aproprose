@@ -27,6 +27,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -360,6 +361,37 @@ function CliStatusField({ kind }: { kind: CliKind }) {
   );
 }
 
+function PreferencesFields() {
+  const styleGuide = useSettingsStore((s) => s.styleGuide);
+  const editingRules = useSettingsStore((s) => s.editingRules);
+  const setStyleGuide = useSettingsStore((s) => s.setStyleGuide);
+  const setEditingRules = useSettingsStore((s) => s.setEditingRules);
+  return (
+    <>
+      <Field label="Writing voice" hint={`${styleGuide.length}/2000`}>
+        <Textarea
+          value={styleGuide}
+          onChange={(e) => setStyleGuide(e.currentTarget.value)}
+          maxLength={2000}
+          placeholder="Describe the voice the AI should write and edit in"
+          className="min-h-24"
+        />
+        <TypographyMuted className="text-xs">Shapes every AI response.</TypographyMuted>
+      </Field>
+      <Field label="Editing & Muse rules" hint={`${editingRules.length}/2000`}>
+        <Textarea
+          value={editingRules}
+          onChange={(e) => setEditingRules(e.currentTarget.value)}
+          maxLength={2000}
+          placeholder="Standing rules for revising - e.g. cut throat-clearing, no 'suddenly'"
+          className="min-h-24"
+        />
+        <TypographyMuted className="text-xs">Applies to Edit and Muse.</TypographyMuted>
+      </Field>
+    </>
+  );
+}
+
 export function AiTab() {
   const aiProvider = useSettingsStore((s) => s.aiProvider);
   const [keyConfigured, setKeyConfigured] = useState(false);
@@ -383,6 +415,7 @@ export function AiTab() {
       ) : (
         <CliStatusField kind={aiProvider} />
       )}
+      <PreferencesFields />
     </div>
   );
 }

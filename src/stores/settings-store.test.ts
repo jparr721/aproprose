@@ -15,6 +15,8 @@ beforeEach(() =>
   useSettingsStore.setState({
     aiModel: DEFAULT_SETTINGS.aiModel,
     aiProvider: DEFAULT_SETTINGS.aiProvider,
+    styleGuide: DEFAULT_SETTINGS.styleGuide,
+    editingRules: DEFAULT_SETTINGS.editingRules,
   }),
 );
 
@@ -45,5 +47,22 @@ describe("settings-store aiProvider", () => {
     expect(useSettingsStore.getState().aiProvider).toBe("codex");
     useSettingsStore.getState().setAiProvider("claude");
     expect(useSettingsStore.getState().aiProvider).toBe("claude");
+  });
+});
+
+describe("settings-store author preferences", () => {
+  it("styleGuide and editingRules default to empty strings", () => {
+    expect(useSettingsStore.getState().styleGuide).toBe("");
+    expect(useSettingsStore.getState().editingRules).toBe("");
+  });
+
+  it("setStyleGuide stores the voice text", () => {
+    useSettingsStore.getState().setStyleGuide("Terse, tech-noir.");
+    expect(useSettingsStore.getState().styleGuide).toBe("Terse, tech-noir.");
+  });
+
+  it("setEditingRules stores the editing text", () => {
+    useSettingsStore.getState().setEditingRules("No adverbs.");
+    expect(useSettingsStore.getState().editingRules).toBe("No adverbs.");
   });
 });

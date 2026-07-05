@@ -248,6 +248,10 @@ export interface Settings {
   aiProvider: AiProvider;
   /** Global tag list for lore entries. */
   loreTags: string[];
+  /** The author's standing writing voice, injected into every AI operation. */
+  styleGuide: string;
+  /** Standing mechanical editing rules, injected into Edit and Muse only. */
+  editingRules: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -257,6 +261,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: null,
   aiProvider: "openai",
   loreTags: [],
+  styleGuide: "",
+  editingRules: "",
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

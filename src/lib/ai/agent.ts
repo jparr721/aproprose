@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { CritiqueNote, ManuscriptProposal } from "@/lib/types";
 import { getModel } from "@/lib/ai/model";
 import { MUSE_SYSTEM } from "@/lib/ai/prompts";
+import { authorSystem } from "@/lib/ai/author-preferences";
 import { buildAnchoredContext } from "@/lib/ai/context";
 import { renderGrounding } from "@/lib/ai/grounding-render";
 import { critique, sanitizeProposal } from "@/lib/ai/operations";
@@ -204,7 +205,7 @@ export async function runAgent(
 
   await generateText({
     model,
-    system: MUSE_SYSTEM,
+    system: authorSystem(MUSE_SYSTEM, "voice+editing"),
     prompt: directive,
     tools,
     stopWhen: [stepCountIs(8), hasToolCall("stage_proposal")],

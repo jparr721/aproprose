@@ -69,6 +69,8 @@ Task: revise the EDITABLE BLOCKS to satisfy the AUTHOR'S REQUEST. Work block by 
 
 Hard rules:
 - Revise text IN PLACE only. Never add, delete, split, merge, or reorder blocks. Operate strictly on the blocks given.
+- Keep every edit LOCAL to its own block. Each block's "newText" revises ONLY that one block's own text. Never move, copy, borrow, or merge prose from one block into another, and never empty a block to fold its content elsewhere. The blocks stay one-to-one and separate.
+- Return at most one entry per block. Even when the author asks you to make two blocks relate, connect, or flow together, deliver it by revising each block's OWN wording independently - never by combining two blocks into one.
 - Return an entry ONLY for a block you are actually changing. If a block needs no change, leave it out. If nothing needs changing, return an empty list.
 - "blockId" must be copied exactly from EDITABLE BLOCKS. Never invent an id.
 - "newText" is the FULL revised text for that block (not a diff and not a fragment), in the manuscript's established voice, tense, and point of view. Use plain cleaned prose: "_italics_" for emphasis, straight quotes, real dashes. Do NOT emit LaTeX.

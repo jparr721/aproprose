@@ -154,6 +154,23 @@ describe("editBlocks keeps every edit local to its own block", () => {
       change({ kind: "rewrite", blockId: "b1", newText: "The cat sat quietly.", reason: "r1" }),
     ]);
   });
+
+  it("a leading no-op does not shadow a genuine later edit for the same block", async () => {
+    // The model emits a no-op for b1 (text unchanged) before its real revision.
+    // Dedup must run on genuine edits, so the real revision survives.
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        edits: [
+          { blockId: "b1", newText: "the cat sat", reason: "noop" },
+          { blockId: "b1", newText: "The cat sat, waiting.", reason: "real" },
+        ],
+      },
+    } as never);
+    const out = await editBlocks(req);
+    expect(out.changes).toEqual([
+      change({ kind: "rewrite", blockId: "b1", newText: "The cat sat, waiting.", reason: "real" }),
+    ]);
+  });
 });
 
 describe("guard shortcircuits (no model call)", () => {

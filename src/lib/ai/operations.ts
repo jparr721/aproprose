@@ -337,27 +337,30 @@ export async function editBlocks(
     prompt: buildEditGrounding(req),
     abortSignal: opts?.signal,
   });
+  // The edit schema stays rewrite-shaped; map it onto the shared envelope.
+  const changes: BlockChange[] = output.edits.map((e) => ({
+    kind: "rewrite",
+    blockId: e.blockId,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: e.newText,
+    toIndex: null,
+    reason: e.reason,
+  }));
   // Keep every edit local to one block: at most one rewrite per blockId, so the
   // model cannot collapse several blocks' edits onto a single block even when it
-  // is trying to make them relate. First edit for a block wins; later ones drop.
-  // The edit schema stays rewrite-shaped; map it onto the shared envelope.
+  // is trying to make them relate. Dedup runs on the SANITIZED survivors so a
+  // leading no-op or blank edit can't shadow a genuine revision of the same
+  // block; first genuine edit for a block wins, later ones drop.
+  const sanitized = sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
   const seen = new Set<string>();
-  const changes: BlockChange[] = [];
-  for (const e of output.edits) {
-    if (seen.has(e.blockId)) continue;
-    seen.add(e.blockId);
-    changes.push({
-      kind: "rewrite",
-      blockId: e.blockId,
-      afterId: null,
-      type: null,
-      speaker: null,
-      newText: e.newText,
-      toIndex: null,
-      reason: e.reason,
-    });
-  }
-  return sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
+  const deduped = sanitized.changes.filter((c) => {
+    if (c.blockId === null || seen.has(c.blockId)) return false;
+    seen.add(c.blockId);
+    return true;
+  });
+  return { ...sanitized, changes: deduped };
 }
 
 // -- Revise (structural chapter write path) -----------------------------------

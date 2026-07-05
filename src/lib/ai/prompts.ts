@@ -162,3 +162,26 @@ export function pickUpCursorSuffix(selectedId: string | null): string {
     ? "\n\nThe cursor block id is [" + selectedId + "]."
     : "\n\nNo cursor is set; continue from where the chapter's prose currently ends.";
 }
+
+/**
+ * Format the author's standing writing voice as a labeled block appended after a
+ * base system prompt. Additive: it refines the base, never overrides it. Returns
+ * "" for blank input so an unset preference contributes nothing. Trimmed and
+ * clamped to 2000 chars (the UI enforces the same cap).
+ */
+export function renderVoicePreference(style: string): string {
+  const text = style.trim().slice(0, 2000);
+  if (!text) return "";
+  return `AUTHOR VOICE (the author's standing style; honour it as you would the manuscript's own voice - it refines the guidance above, it does not override it):\n${text}`;
+}
+
+/**
+ * Format the author's standing editing/Muse rules as a labeled block. Additive:
+ * it adds constraints, it does not loosen any rule above. Same blank/trim/clamp
+ * behaviour as renderVoicePreference.
+ */
+export function renderEditingPreference(editing: string): string {
+  const text = editing.trim().slice(0, 2000);
+  if (!text) return "";
+  return `AUTHOR EDITING RULES (standing mechanical preferences to apply while revising; they add constraints, they do not loosen any rule above):\n${text}`;
+}

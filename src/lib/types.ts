@@ -248,6 +248,8 @@ export interface Settings {
   aiProvider: AiProvider;
   /** Global tag list for lore entries. */
   loreTags: string[];
+  /** Target words to write per day. Null until the user sets one - drives the sidebar goal bar. */
+  dailyWordGoal: number | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -257,6 +259,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: null,
   aiProvider: "openai",
   loreTags: [],
+  dailyWordGoal: null,
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

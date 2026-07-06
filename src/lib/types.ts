@@ -248,9 +248,19 @@ export interface Settings {
   aiProvider: AiProvider;
   /** Global tag list for lore entries. */
   loreTags: string[];
+  /** The author's standing writing voice, injected into every AI operation. */
+  styleGuide: string;
+  /** Standing mechanical editing rules, injected into Edit and Muse only. */
+  editingRules: string;
   /** Target words to write per day. Null until the user sets one - drives the sidebar goal bar. */
   dailyWordGoal: number | null;
 }
+
+/** Max length of an author-preference field (styleGuide/editingRules). The
+ *  Settings textareas, the store setters, and the prompt renderers all clamp to
+ *  this, so what the author sees, what is stored, and what reaches the model
+ *  never diverge. */
+export const PREFERENCE_MAX_CHARS = 2000;
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
@@ -259,6 +269,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: null,
   aiProvider: "openai",
   loreTags: [],
+  styleGuide: "",
+  editingRules: "",
   dailyWordGoal: null,
 };
 

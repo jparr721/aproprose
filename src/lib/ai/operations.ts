@@ -40,6 +40,7 @@ import {
   SCULPT_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
+import { authorSystem } from "@/lib/ai/author-preferences";
 
 // ── Grounding context ───────────────────────────────────────────────────────
 // The editor builds an `AiContext` describing what the writer is looking at, and
@@ -248,7 +249,7 @@ export async function suggestContinuation(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: suggestResultSchema }),
-    system: SUGGEST_SYSTEM,
+    system: authorSystem(SUGGEST_SYSTEM, "voice"),
     prompt: buildGrounding(ctx),
     abortSignal: opts?.signal,
   });
@@ -282,7 +283,7 @@ export async function critique(ctx: AnchoredContext, opts?: AiOpOptions): Promis
   const { output } = await generateText({
     model,
     output: Output.object({ schema: critiqueResultSchema }),
-    system: CRITIQUE_SYSTEM,
+    system: authorSystem(CRITIQUE_SYSTEM, "voice"),
     prompt: buildAnchoredGrounding(ctx),
     abortSignal: opts?.signal,
   });
@@ -304,7 +305,7 @@ export async function continuityCheck(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: continuityResultSchema }),
-    system: CONTINUITY_SYSTEM,
+    system: authorSystem(CONTINUITY_SYSTEM, "voice"),
     prompt: buildAnchoredGrounding(ctx),
     abortSignal: opts?.signal,
   });
@@ -333,7 +334,7 @@ export async function editBlocks(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: editResultSchema }),
-    system: EDIT_SYSTEM,
+    system: authorSystem(EDIT_SYSTEM, "voice+editing"),
     prompt: buildEditGrounding(req),
     abortSignal: opts?.signal,
   });
@@ -474,7 +475,9 @@ export async function reviseChapter(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: reviseResultSchema }),
-    system: REVISE_SYSTEM,
+    // Voice only, by design: the mechanical editing rules are scoped to Edit and
+    // Muse (as the "Editing & Muse rules" setting states), not chapter-wide Revise.
+    system: authorSystem(REVISE_SYSTEM, "voice"),
     prompt: buildEditGrounding(req),
     abortSignal: opts?.signal,
   });
@@ -604,7 +607,7 @@ export async function sculptChapter(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: sculptProposalSchema }),
-    system: SCULPT_SYSTEM,
+    system: authorSystem(SCULPT_SYSTEM, "voice"),
     prompt: buildSculptGrounding(ctx),
     abortSignal: opts?.signal,
   });
@@ -640,7 +643,7 @@ export async function brainstorm(
   const model = await getModel();
   return streamText({
     model,
-    system: BRAINSTORM_SYSTEM,
+    system: authorSystem(BRAINSTORM_SYSTEM, "voice"),
     messages: [
       {
         role: "user",
@@ -664,7 +667,7 @@ export async function cleanTranscript(
   const model = await getModel();
   const { textStream } = streamText({
     model,
-    system: CLEAN_TRANSCRIPT_SYSTEM,
+    system: authorSystem(CLEAN_TRANSCRIPT_SYSTEM, "voice"),
     prompt: `${buildGrounding(ctx)}\n\nRAW DICTATION TO CLEAN:\n${raw}`,
     abortSignal: opts?.signal,
   });

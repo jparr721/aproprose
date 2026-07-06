@@ -8,6 +8,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
+  PREFERENCE_MAX_CHARS,
   type AiProvider,
   type Settings,
   type Theme,
@@ -23,6 +24,8 @@ interface SettingsState extends Settings {
   setAiModel: (aiModel: string | null) => void;
   setAiProvider: (aiProvider: AiProvider) => void;
   setLoreTags: (loreTags: string[]) => void;
+  setStyleGuide: (styleGuide: string) => void;
+  setEditingRules: (editingRules: string) => void;
   setDailyWordGoal: (dailyWordGoal: number | null) => void;
   reset: () => void;
 }
@@ -39,6 +42,9 @@ export const useSettingsStore = create<SettingsState>()(
       setAiProvider: (aiProvider) => set({ aiProvider }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
+      setStyleGuide: (styleGuide) => set({ styleGuide: styleGuide.slice(0, PREFERENCE_MAX_CHARS) }),
+      setEditingRules: (editingRules) =>
+        set({ editingRules: editingRules.slice(0, PREFERENCE_MAX_CHARS) }),
       setDailyWordGoal: (dailyWordGoal) =>
         set({
           // A non-finite goal (NaN/Infinity) would slip past Math.max and persist,
@@ -53,19 +59,41 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, proseSize, pdfZoom, aiModel, aiProvider, loreTags, dailyWordGoal }) => ({
+      partialize: ({
         theme,
         proseSize,
         pdfZoom,
         aiModel,
         aiProvider,
         loreTags,
+        styleGuide,
+        editingRules,
+        dailyWordGoal,
+      }) => ({
+        theme,
+        proseSize,
+        pdfZoom,
+        aiModel,
+        aiProvider,
+        loreTags,
+        styleGuide,
+        editingRules,
         dailyWordGoal,
       }),
       onRehydrateStorage: () => (state) => {
-        // Mark hydrated once the async read resolves (or fails).
-        useSettingsStore.setState({ hydrated: true });
-        void state;
+        // Mark hydrated once the async read resolves (or fails). Clamp the
+        // preferences read from disk to the cap - a legacy or hand-edited
+        // settings file can exceed it, and the setters only clamp the live path -
+        // so the store never holds more than the UI and prompts use.
+        useSettingsStore.setState(
+          state
+            ? {
+                hydrated: true,
+                styleGuide: state.styleGuide.slice(0, PREFERENCE_MAX_CHARS),
+                editingRules: state.editingRules.slice(0, PREFERENCE_MAX_CHARS),
+              }
+            : { hydrated: true },
+        );
       },
     },
   ),

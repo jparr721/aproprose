@@ -45,6 +45,23 @@ export function wordsToday(days: WritingStats["days"], todayKey: string): number
   return day ? day.added : 0;
 }
 
+/** Progress toward a daily goal as a 0-100 percentage, clamped. Guards goal <= 0. */
+export function goalPercent(words: number, goal: number): number {
+  if (goal <= 0) return 0;
+  return Math.max(0, Math.min(100, (words / goal) * 100));
+}
+
+/** Writing days whose added words met or exceeded the goal (measured against the
+ *  current goal - we store one goal, not a per-day history). */
+export function daysGoalMet(days: WritingStats["days"], goal: number): number {
+  let count = 0;
+  for (const key in days) {
+    const day = days[key];
+    if (day.saves > 0 && day.added >= goal) count += 1;
+  }
+  return count;
+}
+
 /** Consecutive active days ending today; if today is blank, the run ending
  *  yesterday still counts (you can extend it before the day ends). */
 export function currentStreak(days: WritingStats["days"], todayKey: string): number {

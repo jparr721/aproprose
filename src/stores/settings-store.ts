@@ -23,6 +23,7 @@ interface SettingsState extends Settings {
   setAiModel: (aiModel: string | null) => void;
   setAiProvider: (aiProvider: AiProvider) => void;
   setLoreTags: (loreTags: string[]) => void;
+  setDailyWordGoal: (dailyWordGoal: number | null) => void;
   reset: () => void;
 }
 
@@ -38,18 +39,24 @@ export const useSettingsStore = create<SettingsState>()(
       setAiProvider: (aiProvider) => set({ aiProvider }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
+      setDailyWordGoal: (dailyWordGoal) =>
+        set({
+          dailyWordGoal:
+            dailyWordGoal === null ? null : Math.max(1, Math.floor(dailyWordGoal)),
+        }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
-      partialize: ({ theme, proseSize, pdfZoom, aiModel, aiProvider, loreTags }) => ({
+      partialize: ({ theme, proseSize, pdfZoom, aiModel, aiProvider, loreTags, dailyWordGoal }) => ({
         theme,
         proseSize,
         pdfZoom,
         aiModel,
         aiProvider,
         loreTags,
+        dailyWordGoal,
       }),
       onRehydrateStorage: () => (state) => {
         // Mark hydrated once the async read resolves (or fails).

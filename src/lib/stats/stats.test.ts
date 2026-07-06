@@ -4,6 +4,8 @@ import {
   totalWordsWritten,
   daysWritten,
   wordsToday,
+  goalPercent,
+  daysGoalMet,
   currentStreak,
   longestStreak,
   computeThresholds,
@@ -37,6 +39,42 @@ describe("totals", () => {
   it("wordsToday returns added for the key, 0 when missing", () => {
     expect(wordsToday(days, "2026-06-22")).toBe(30);
     expect(wordsToday(days, "2026-06-25")).toBe(0);
+  });
+});
+
+describe("goalPercent", () => {
+  it("is the clamped percentage of words over goal", () => {
+    expect(goalPercent(0, 500)).toBe(0);
+    expect(goalPercent(250, 500)).toBe(50);
+    expect(goalPercent(500, 500)).toBe(100);
+  });
+  it("clamps at 100 once the goal is exceeded", () => {
+    expect(goalPercent(900, 500)).toBe(100);
+  });
+  it("never goes negative", () => {
+    expect(goalPercent(-10, 500)).toBe(0);
+  });
+  it("returns 0 for a non-positive goal instead of dividing by zero", () => {
+    expect(goalPercent(100, 0)).toBe(0);
+    expect(goalPercent(100, -5)).toBe(0);
+  });
+});
+
+describe("daysGoalMet", () => {
+  const days: WritingStats["days"] = {
+    "2026-06-20": day(600, 0, 1), // over goal -> hit
+    "2026-06-21": day(500, 0, 2), // exactly goal -> hit
+    "2026-06-22": day(300, 0, 1), // under goal -> miss
+    "2026-06-23": day(0, 900, 3), // delete-only, added under goal -> miss
+  };
+  it("counts writing days whose added words met or exceeded the goal", () => {
+    expect(daysGoalMet(days, 500)).toBe(2);
+  });
+  it("a higher goal reflows past days downward", () => {
+    expect(daysGoalMet(days, 650)).toBe(0);
+  });
+  it("is 0 for an empty log", () => {
+    expect(daysGoalMet({}, 500)).toBe(0);
   });
 });
 

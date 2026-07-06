@@ -54,6 +54,7 @@ import { ColorDot } from "@/components/app/color-dot";
 import { AddCharacterDialog } from "@/components/app/add-character-dialog";
 import { ChapterList } from "@/components/app/chapter-list";
 import { ProjectSettingsDialog } from "@/components/app/project-settings-dialog";
+import { WritingGoal } from "@/components/app/writing-goal";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
@@ -266,6 +267,9 @@ export function AppSidebar() {
               <IconLayoutList />
               <span>Outline</span>
             </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <WritingGoal />
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton

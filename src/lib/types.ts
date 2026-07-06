@@ -252,6 +252,8 @@ export interface Settings {
   styleGuide: string;
   /** Standing mechanical editing rules, injected into Edit and Muse only. */
   editingRules: string;
+  /** Target words to write per day. Null until the user sets one - drives the sidebar goal bar. */
+  dailyWordGoal: number | null;
 }
 
 /** Max length of an author-preference field (styleGuide/editingRules). The
@@ -269,6 +271,7 @@ export const DEFAULT_SETTINGS: Settings = {
   loreTags: [],
   styleGuide: "",
   editingRules: "",
+  dailyWordGoal: null,
 };
 
 // ── Compilation ───────────────────────────────────────────────────────────────

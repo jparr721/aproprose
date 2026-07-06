@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/storage", () => ({
@@ -59,5 +59,36 @@ describe("WritingGoal", () => {
     });
     renderGoal();
     expect(screen.getByText("Goal reached")).toBeTruthy();
+  });
+
+  it("reaches the goal at exact equality (today === goal)", () => {
+    useSettingsStore.setState({ dailyWordGoal: 500 });
+    useStatsStore.setState({
+      days: { [todayKey]: { added: 500, removed: 0, saves: 1 } },
+      baselines: {},
+    });
+    renderGoal();
+    expect(screen.getByText("Goal reached")).toBeTruthy();
+  });
+
+  it("sets the goal from the onboarding popover", () => {
+    renderGoal();
+    fireEvent.click(screen.getByText("Set a writing goal"));
+    const input = screen.getByLabelText("Daily word goal") as HTMLInputElement;
+    expect(input.value).toBe("500");
+    fireEvent.click(screen.getByText("Set"));
+    expect(useSettingsStore.getState().dailyWordGoal).toBe(500);
+  });
+
+  it("removes the goal from the editor popover", () => {
+    useSettingsStore.setState({ dailyWordGoal: 500 });
+    useStatsStore.setState({
+      days: { [todayKey]: { added: 320, removed: 0, saves: 1 } },
+      baselines: {},
+    });
+    renderGoal();
+    fireEvent.click(screen.getByRole("button", { name: "Edit daily writing goal" }));
+    fireEvent.click(screen.getByText("Remove goal"));
+    expect(useSettingsStore.getState().dailyWordGoal).toBeNull();
   });
 });

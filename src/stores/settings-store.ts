@@ -41,8 +41,12 @@ export const useSettingsStore = create<SettingsState>()(
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
       setDailyWordGoal: (dailyWordGoal) =>
         set({
+          // A non-finite goal (NaN/Infinity) would slip past Math.max and persist,
+          // poisoning goalPercent - treat it as unset rather than storing garbage.
           dailyWordGoal:
-            dailyWordGoal === null ? null : Math.max(1, Math.floor(dailyWordGoal)),
+            dailyWordGoal === null || !Number.isFinite(dailyWordGoal)
+              ? null
+              : Math.max(1, Math.floor(dailyWordGoal)),
         }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),

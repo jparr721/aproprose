@@ -45,20 +45,27 @@ export function wordsToday(days: WritingStats["days"], todayKey: string): number
   return day ? day.added : 0;
 }
 
-/** Progress toward a daily goal as a 0-100 percentage, clamped. Guards goal <= 0. */
+/** Progress toward a daily goal as a 0-100 percentage, clamped. Returns 0 for a
+ *  non-positive goal rather than dividing by zero. */
 export function goalPercent(words: number, goal: number): number {
   if (goal <= 0) return 0;
   return Math.max(0, Math.min(100, (words / goal) * 100));
 }
 
-/** Writing days whose added words met or exceeded the goal (measured against the
- *  current goal - we store one goal, not a per-day history). */
+/** Whether one day's writing met the goal: a genuine writing day (a save) whose
+ *  added words reached the target. The single source of "met goal" shared by the
+ *  day count and the chart ring so the two can't drift. */
+export function dayMetGoal(day: DayActivity, goal: number): boolean {
+  return day.saves > 0 && day.added >= goal;
+}
+
+/** Writing days that met the goal, measured against the current goal - we store
+ *  one goal, not a per-day history, so raising it reflows past days downward.
+ *  Guards goal <= 0 like goalPercent: a non-positive goal counts nothing. */
 export function daysGoalMet(days: WritingStats["days"], goal: number): number {
+  if (goal <= 0) return 0;
   let count = 0;
-  for (const key in days) {
-    const day = days[key];
-    if (day.saves > 0 && day.added >= goal) count += 1;
-  }
+  for (const key in days) if (dayMetGoal(days[key], goal)) count += 1;
   return count;
 }
 

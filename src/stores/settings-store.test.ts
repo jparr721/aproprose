@@ -71,6 +71,14 @@ describe("settings-store dailyWordGoal", () => {
     expect(useSettingsStore.getState().dailyWordGoal).toBe(1);
   });
 
+  it("treats a non-finite goal as unset rather than persisting NaN/Infinity", () => {
+    useSettingsStore.getState().setDailyWordGoal(500);
+    useSettingsStore.getState().setDailyWordGoal(Number.NaN);
+    expect(useSettingsStore.getState().dailyWordGoal).toBeNull();
+    useSettingsStore.getState().setDailyWordGoal(Number.POSITIVE_INFINITY);
+    expect(useSettingsStore.getState().dailyWordGoal).toBeNull();
+  });
+
   it("setDailyWordGoal(null) clears the goal", () => {
     useSettingsStore.getState().setDailyWordGoal(500);
     useSettingsStore.getState().setDailyWordGoal(null);

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TypographyMutedSpan, TypographySmall } from "@/components/ui/typography";
-import { cellLevel, computeThresholds, localDateKey } from "@/lib/stats/stats";
+import { cellLevel, computeThresholds, dayMetGoal, localDateKey } from "@/lib/stats/stats";
 import type { WritingStats } from "@/lib/stats/schema";
 import { CELL_LEVEL_CLASSES, ContributionCell } from "./contribution-cell";
 
@@ -61,7 +61,7 @@ export function ContributionChart({
             if (cell.isFuture) return <div key={cell.key} className="size-3" />;
             const day = days[cell.key];
             const level = cellLevel(day, thresholds);
-            const metGoal = goal !== null && day !== undefined && day.added >= goal;
+            const metGoal = goal !== null && day !== undefined && dayMetGoal(day, goal);
             return (
               <Tooltip key={cell.key}>
                 <TooltipTrigger asChild>

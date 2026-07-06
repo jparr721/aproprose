@@ -5,6 +5,7 @@ import {
   daysWritten,
   wordsToday,
   goalPercent,
+  dayMetGoal,
   daysGoalMet,
   currentStreak,
   longestStreak,
@@ -60,6 +61,19 @@ describe("goalPercent", () => {
   });
 });
 
+describe("dayMetGoal", () => {
+  it("is true for a writing day whose added words reach the goal", () => {
+    expect(dayMetGoal(day(500, 0, 1), 500)).toBe(true); // exactly goal
+    expect(dayMetGoal(day(600, 0, 2), 500)).toBe(true); // over goal
+  });
+  it("is false when added words fall short", () => {
+    expect(dayMetGoal(day(300, 0, 1), 500)).toBe(false);
+  });
+  it("is false for a day with no save even if added somehow reaches the goal", () => {
+    expect(dayMetGoal(day(600, 0, 0), 500)).toBe(false);
+  });
+});
+
 describe("daysGoalMet", () => {
   const days: WritingStats["days"] = {
     "2026-06-20": day(600, 0, 1), // over goal -> hit
@@ -75,6 +89,10 @@ describe("daysGoalMet", () => {
   });
   it("is 0 for an empty log", () => {
     expect(daysGoalMet({}, 500)).toBe(0);
+  });
+  it("counts nothing for a non-positive goal (guarded like goalPercent)", () => {
+    expect(daysGoalMet(days, 0)).toBe(0);
+    expect(daysGoalMet(days, -100)).toBe(0);
   });
 });
 

@@ -121,6 +121,21 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
       - run: bun install --frozen-lockfile
+      - name: Build the updater changelog notes for this version
+        id: notes
+        # tauri-action defaults latest.json `notes` to a generic "See the assets..."
+        # string. The in-app updater surfaces `notes` as the upcoming version's changelog
+        # ("See changes"), so feed it the real entry via releaseBody - the same body
+        # release-body.ts builds for the GitHub release, which parseUpdateNotes inverts.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo 'body<<RELEASE_BODY_EOF'
+            bun run scripts/release-body.ts "$version"
+            echo
+            echo 'RELEASE_BODY_EOF'
+          } >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -128,6 +143,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           args: ${{ matrix.args }}
 
   publish-release:
@@ -157,4 +173,11 @@ jobs:
             fi
           done
           echo "latest.json contains darwin-aarch64 and linux-x86_64"
+          notes="$(jq -r '.notes' latest.json)"
+          if [ -z "$notes" ] || [ "$notes" = "null" ] || [ "$notes" = "See the assets to download this version and install." ]; then
+            echo "::error::latest.json notes is empty or the tauri-action default; the in-app updater would show no real changelog for this version"
+            cat latest.json
+            exit 1
+          fi
+          echo "latest.json carries real release notes"
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false -F prerelease=false

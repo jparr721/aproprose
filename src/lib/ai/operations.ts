@@ -454,6 +454,8 @@ export async function reviseChapter(
   const { output } = await generateText({
     model,
     output: Output.object({ schema: reviseResultSchema }),
+    // Voice only, by design: the mechanical editing rules are scoped to Edit and
+    // Muse (as the "Editing & Muse rules" setting states), not chapter-wide Revise.
     system: authorSystem(REVISE_SYSTEM, "voice"),
     prompt: buildEditGrounding(req),
     abortSignal: opts?.signal,

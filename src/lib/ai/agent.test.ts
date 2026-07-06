@@ -14,6 +14,13 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/lib/ai/model", () => ({ getModel: vi.fn() }));
+vi.mock("@/lib/storage", () => ({
+  tauriStateStorage: {
+    getItem: async () => null,
+    setItem: async () => {},
+    removeItem: async () => {},
+  },
+}));
 // Partial mock: critique is stubbed (its own tests cover it); sanitizeProposal
 // stays real so the staging tests exercise the genuine sanitize rules.
 vi.mock("@/lib/ai/operations", async (importOriginal) => {
@@ -26,6 +33,7 @@ import { getModel } from "@/lib/ai/model";
 import { critique } from "@/lib/ai/operations";
 import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type { Block, CritiqueNote } from "@/lib/types";
 
 const USAGE = {
@@ -87,6 +95,7 @@ beforeEach(() => {
     blocks: [mk("b1", "The rain fell."), mk("b2", "She waited.")],
   });
   useAiCacheStore.setState({ entries: {} });
+  useSettingsStore.setState({ styleGuide: "", editingRules: "" });
 });
 
 describe("runAgent tool loop", () => {
@@ -209,5 +218,18 @@ describe("runAgent get_critique", () => {
       error: null,
       instruction: "check pacing",
     });
+  });
+});
+
+describe("runAgent author preferences", () => {
+  it("injects the author voice and editing rules into the Muse system prompt", async () => {
+    useSettingsStore.setState({ styleGuide: "Gibson voice", editingRules: "No adverbs" });
+    const model = useModel([prose("no changes needed")]);
+    await runAgent("go", { signal: new AbortController().signal, onStep: () => {} });
+    const system = model.doGenerateCalls[0].prompt.find((m) => m.role === "system")?.content;
+    expect(system).toContain("AUTHOR VOICE");
+    expect(system).toContain("Gibson voice");
+    expect(system).toContain("AUTHOR EDITING RULES");
+    expect(system).toContain("No adverbs");
   });
 });

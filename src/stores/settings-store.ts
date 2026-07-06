@@ -8,6 +8,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
+  PREFERENCE_MAX_CHARS,
   type AiProvider,
   type Settings,
   type Theme,
@@ -40,8 +41,9 @@ export const useSettingsStore = create<SettingsState>()(
       setAiProvider: (aiProvider) => set({ aiProvider }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
-      setStyleGuide: (styleGuide) => set({ styleGuide }),
-      setEditingRules: (editingRules) => set({ editingRules }),
+      setStyleGuide: (styleGuide) => set({ styleGuide: styleGuide.slice(0, PREFERENCE_MAX_CHARS) }),
+      setEditingRules: (editingRules) =>
+        set({ editingRules: editingRules.slice(0, PREFERENCE_MAX_CHARS) }),
       reset: () => set({ ...DEFAULT_SETTINGS }),
     }),
     {
@@ -58,9 +60,19 @@ export const useSettingsStore = create<SettingsState>()(
         editingRules,
       }),
       onRehydrateStorage: () => (state) => {
-        // Mark hydrated once the async read resolves (or fails).
-        useSettingsStore.setState({ hydrated: true });
-        void state;
+        // Mark hydrated once the async read resolves (or fails). Clamp the
+        // preferences read from disk to the cap - a legacy or hand-edited
+        // settings file can exceed it, and the setters only clamp the live path -
+        // so the store never holds more than the UI and prompts use.
+        useSettingsStore.setState(
+          state
+            ? {
+                hydrated: true,
+                styleGuide: state.styleGuide.slice(0, PREFERENCE_MAX_CHARS),
+                editingRules: state.editingRules.slice(0, PREFERENCE_MAX_CHARS),
+              }
+            : { hydrated: true },
+        );
       },
     },
   ),

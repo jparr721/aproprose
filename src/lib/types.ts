@@ -254,6 +254,12 @@ export interface Settings {
   editingRules: string;
 }
 
+/** Max length of an author-preference field (styleGuide/editingRules). The
+ *  Settings textareas, the store setters, and the prompt renderers all clamp to
+ *  this, so what the author sees, what is stored, and what reaches the model
+ *  never diverge. */
+export const PREFERENCE_MAX_CHARS = 2000;
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
   proseSize: 17.5,

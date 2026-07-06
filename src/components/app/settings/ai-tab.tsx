@@ -52,7 +52,7 @@ import {
 import { resetAiProvider } from "@/lib/ai/model";
 import { listTextModels } from "@/lib/ai/models";
 import { describeAiError } from "@/lib/ai/errors";
-import type { AiProvider } from "@/lib/types";
+import { PREFERENCE_MAX_CHARS, type AiProvider } from "@/lib/types";
 
 function OpenAiKeyField({
   configured,
@@ -368,21 +368,21 @@ function PreferencesFields() {
   const setEditingRules = useSettingsStore((s) => s.setEditingRules);
   return (
     <>
-      <Field label="Writing voice" hint={`${styleGuide.length}/2000`}>
+      <Field label="Writing voice" hint={`${styleGuide.length}/${PREFERENCE_MAX_CHARS}`}>
         <Textarea
           value={styleGuide}
           onChange={(e) => setStyleGuide(e.currentTarget.value)}
-          maxLength={2000}
+          maxLength={PREFERENCE_MAX_CHARS}
           placeholder="Describe the voice the AI should write and edit in"
           className="min-h-24"
         />
         <TypographyMuted className="text-xs">Shapes every AI response.</TypographyMuted>
       </Field>
-      <Field label="Editing & Muse rules" hint={`${editingRules.length}/2000`}>
+      <Field label="Editing & Muse rules" hint={`${editingRules.length}/${PREFERENCE_MAX_CHARS}`}>
         <Textarea
           value={editingRules}
           onChange={(e) => setEditingRules(e.currentTarget.value)}
-          maxLength={2000}
+          maxLength={PREFERENCE_MAX_CHARS}
           placeholder="Standing rules for revising - e.g. cut throat-clearing, no 'suddenly'"
           className="min-h-24"
         />

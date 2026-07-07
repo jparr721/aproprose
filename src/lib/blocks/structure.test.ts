@@ -25,4 +25,32 @@ describe("structurePassage - paragraphs", () => {
     expect(blocks[0].text).toBe("Brian said.");
     expect(blocks[1].text).toBe("You were one bad thought away.");
   });
+
+  it("builds a chained dialogue block from quote-beat-quote", () => {
+    const [b] = structurePassage('"I\'m serious," Brian said. "You were one bad thought away."', noCast);
+    expect(b.type).toBe("dialogue");
+    expect(b.text).toBe("I'm serious,");
+    expect(b.tail).toEqual([
+      { kind: "beat", text: "Brian said." },
+      { kind: "quote", text: "You were one bad thought away." },
+    ]);
+  });
+
+  it("infers the speaker from a cast name in the beat", () => {
+    const cast = [{ id: "c-brian", name: "Brian", color: "#000", role: "" }];
+    const [b] = structurePassage('"All right," Brian said. "Start with this."', cast);
+    expect(b.speaker).toBe("c-brian");
+  });
+
+  it("infers the speaker from a leading tag that was split off", () => {
+    const cast = [{ id: "c-brian", name: "Brian", color: "#000", role: "" }];
+    const blocks = structurePassage('Brian said. "You were one bad thought away."', cast);
+    expect(blocks[1].speaker).toBe("c-brian");
+  });
+
+  it("leaves the speaker unset when no cast name matches", () => {
+    const cast = [{ id: "c-brian", name: "Brian", color: "#000", role: "" }];
+    const [b] = structurePassage('"He is not wrong."', cast);
+    expect(b.speaker).toBeUndefined();
+  });
 });

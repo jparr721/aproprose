@@ -58,6 +58,7 @@ export const PLACEHOLDERS = {
   narration: "Write",
   dialogue: "What do they say?",
   beat: "Action beat",
+  spokenLine: "What do they say next?",
   scene: "Scene heading",
   break: "* * *",
   lore: "Worldbuilding note",

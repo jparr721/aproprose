@@ -9,8 +9,7 @@
 
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { ColorDot } from "@/components/app/color-dot";
-// TEMP: restored in Task 1.4 (used by the commented-out beat row below).
-// import { renderInline } from "@/components/app/inline";
+import { renderInline } from "@/components/app/inline";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
 import { carriesTailContent } from "@/lib/blocks/dialogue";
@@ -19,8 +18,7 @@ import { scrollBlockIntoView } from "@/lib/dom";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
-  // TEMP: restored in Task 1.4 (used by the commented-out beat row below).
-  // DIALOGUE_BEAT,
+  DIALOGUE_BEAT,
   DIALOGUE_INDENT,
   DIALOGUE_QUOTE,
   LATEX_BODY,
@@ -142,7 +140,40 @@ export function BlockBody({
         </h2>
       );
 
-    case "dialogue":
+    case "dialogue": {
+      const tail = block.tail ?? [];
+      const setTailText = (i: number, value: string) => {
+        const next = tail.map((s, j) => (j === i ? { ...s, text: value } : s));
+        updateBlock(block.id, { tail: next });
+      };
+      const quoteRow = (key: string, value: string, onChange: (v: string) => void, placeholder: string) => (
+        <div key={key} className={cn(PROSE, DIALOGUE_INDENT)}>
+          <span aria-hidden className={DIALOGUE_QUOTE}>
+            {"\u201C"}
+          </span>
+          {editing ? (
+            <AutoGrowTextarea
+              value={value}
+              onChange={onChange}
+              autoFocus={key === "q0"}
+              caret={key === "q0" ? caret : undefined}
+              placeholder={placeholder}
+              onKeyDown={key === "q0" ? proseKeys(block) : undefined}
+              sizingSuffix={"\u201D"}
+              proseBody
+            />
+          ) : (
+            <p>
+              {value ? (
+                key === "q0" ? highlightInline(value, hit) : renderInline(value)
+              ) : (
+                <span className="text-faint">{placeholder}</span>
+              )}
+              <span className="text-faint">{"\u201D"}</span>
+            </p>
+          )}
+        </div>
+      );
       return (
         <div className="flex flex-col gap-1">
           {speaker ? (
@@ -151,55 +182,31 @@ export function BlockBody({
               {speaker.name}
             </TypographyEyebrow>
           ) : null}
-          {/* One wrapper for both modes: the hung open quote and the indent can
-              never drift between read and edit. */}
-          <div className={cn(PROSE, DIALOGUE_INDENT)}>
-            <span aria-hidden className={DIALOGUE_QUOTE}>
-              “
-            </span>
-            {editing ? (
-              <AutoGrowTextarea
-                value={block.text}
-                onChange={(v) => updateBlockText(block.id, v)}
-                autoFocus
-                caret={caret}
-                placeholder={PLACEHOLDERS.dialogue}
-                onKeyDown={proseKeys(block)}
-                sizingSuffix="”"
-                proseBody
-              />
-            ) : (
-              <p>
-                {block.text ? (
-                  highlightInline(block.text, hit)
+          {quoteRow("q0", block.text, (v) => updateBlockText(block.id, v), PLACEHOLDERS.dialogue)}
+          {tail.map((seg, i) =>
+            seg.kind === "quote"
+              ? quoteRow(`t${i}`, seg.text, (v) => setTailText(i, v), PLACEHOLDERS.spokenLine)
+              : editing ? (
+                  <AutoGrowTextarea
+                    key={`t${i}`}
+                    value={seg.text}
+                    onChange={(v) => setTailText(i, v)}
+                    placeholder={PLACEHOLDERS.beat}
+                    className={DIALOGUE_BEAT}
+                  />
+                ) : seg.text ? (
+                  <p key={`t${i}`} className={DIALOGUE_BEAT}>
+                    {renderInline(seg.text)}
+                  </p>
                 ) : (
-                  <span className="text-faint">{PLACEHOLDERS.dialogue}</span>
-                )}
-                <span className="text-faint">”</span>
-              </p>
-            )}
-          </div>
-          {/* TEMP: restored in Task 1.4 — the beat row mounts only when a beat
-              exists, in BOTH modes, so entering edit never grows the block.
-              "Add action beat" (and its inverse, once emptied) live in the
-              block's action menus.
-          {block.beat !== undefined ? (
-            editing ? (
-              <AutoGrowTextarea
-                value={block.beat}
-                onChange={(v) => updateBlock(block.id, { beat: v })}
-                placeholder={PLACEHOLDERS.beat}
-                className={DIALOGUE_BEAT}
-              />
-            ) : block.beat ? (
-              <p className={DIALOGUE_BEAT}>{renderInline(block.beat)}</p>
-            ) : (
-              <p className={cn(DIALOGUE_BEAT, "text-faint")}>{PLACEHOLDERS.beat}</p>
-            )
-          ) : null}
-          */}
+                  <p key={`t${i}`} className={cn(DIALOGUE_BEAT, "text-faint")}>
+                    {PLACEHOLDERS.beat}
+                  </p>
+                ),
+          )}
         </div>
       );
+    }
 
     case "lore":
     case "scratchpad": {

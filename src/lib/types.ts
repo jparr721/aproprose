@@ -387,6 +387,10 @@ export interface BlockChange {
   type: "narration" | "dialogue" | null;
   /** insert dialogue: speaker display name (resolved to an id at apply). */
   speaker: string | null;
+  /** insert dialogue: the chained tail segments (beat/quote after the opening
+   *  quote). Set only by the deterministic passage-structuring path; model
+   *  proposals omit it. */
+  segments?: DialogueSegment[];
   /** rewrite/insert: the FULL cleaned text. Null otherwise. */
   newText: string | null;
   /** move: zero-based target index in the chapter's block list. Null otherwise. */

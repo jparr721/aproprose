@@ -127,6 +127,30 @@ describe("applyProposal insert", () => {
     );
     expect(out.blocks[1].speaker).toBeUndefined();
   });
+
+  it("applies an insert that carries chained tail segments", () => {
+    const out = applyProposal(
+      [{ id: "a", type: "narration", text: "x", raw: "", dirty: false }],
+      [
+        {
+          kind: "insert", blockId: null, afterId: "a", type: "dialogue",
+          speaker: null, newText: "All right,", toIndex: null, reason: "r",
+          segments: [
+            { kind: "beat", text: "Brian said." },
+            { kind: "quote", text: "Start with this." },
+          ],
+        },
+      ],
+      () => undefined,
+    );
+    const inserted = out.blocks[1];
+    expect(inserted.type).toBe("dialogue");
+    expect(inserted.text).toBe("All right,");
+    expect(inserted.tail).toEqual([
+      { kind: "beat", text: "Brian said." },
+      { kind: "quote", text: "Start with this." },
+    ]);
+  });
 });
 
 describe("applyProposal remove and move", () => {

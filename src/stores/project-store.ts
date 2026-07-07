@@ -61,6 +61,7 @@ import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
+import { structurePassage } from "@/lib/blocks/structure";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
@@ -230,6 +231,9 @@ interface ProjectState {
   changeSpeaker: (id: string, speaker: string) => void;
   insertAfter: (afterId: string | null, partial?: Partial<Block>) => string;
   splitBlock: (id: string, at: number) => void;
+  /** Replace a block with the classified blocks its text yields (paragraphs,
+   *  dialogue, chained dialogue). No-op when the text yields one block. */
+  structureBlock: (id: string) => void;
   convertSelection: (id: string, start: number, end: number, type: BlockType) => void;
   /**
    * Backspace at a block's start: join its text onto the end of the previous
@@ -915,6 +919,27 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           selectedIds: [],
           editing: true,
           editCaret: prev.text.length + join.length,
+          chapterDirty: true,
+          past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
+          future: [],
+          lastTextEditId: null,
+        };
+      }),
+
+    structureBlock: (id) =>
+      set((s) => {
+        const idx = s.blocks.findIndex((b) => b.id === id);
+        if (idx < 0) return {};
+        const produced = structurePassage(s.blocks[idx].text, s.meta.characters);
+        if (produced.length <= 1) return {};
+        const next = [...s.blocks];
+        next.splice(idx, 1, ...produced);
+        return {
+          blocks: next,
+          selectedId: produced[0].id,
+          selectedIds: [],
+          editing: false,
+          editCaret: null,
           chapterDirty: true,
           past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
           future: [],

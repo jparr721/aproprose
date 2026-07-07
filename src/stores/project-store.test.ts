@@ -95,6 +95,18 @@ describe("splitBlock", () => {
   });
 });
 
+describe("structureBlock", () => {
+  it("structureBlock splits a dumped narration into classified blocks", () => {
+    useProjectStore.setState({
+      blocks: [{ id: "b1", type: "narration", text: 'Brian said. "You were close."\n\nDavid snorted.', raw: "", dirty: false }],
+      selectedId: "b1",
+      past: [],
+    });
+    useProjectStore.getState().structureBlock("b1");
+    expect(useProjectStore.getState().blocks.map((b) => b.type)).toEqual(["narration", "dialogue", "narration"]);
+  });
+});
+
 describe("mergeWithPrevious (Backspace at block start)", () => {
   it("joins same-type prose, keeps edit mode, and lands the caret at the join", () => {
     const a = mkBlock({ text: "First." });

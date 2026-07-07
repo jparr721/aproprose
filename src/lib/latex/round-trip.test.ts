@@ -32,13 +32,13 @@ test("a dialogue speaker survives alongside an action beat", () => {
   const block = dirty({
     type: "dialogue",
     text: "I was home.",
-    beat: "She looked away.",
+    tail: [{ kind: "beat", text: "She looked away." }],
     speaker: "c-suspect",
   });
   const [reparsed] = save([block]);
   expect(reparsed.speaker).toBe("c-suspect");
   expect(reparsed.text).toBe("I was home.");
-  expect(reparsed.beat).toBe("She looked away.");
+  expect(reparsed.tail).toEqual([{ kind: "beat", text: "She looked away." }]);
 });
 
 test("a speaker-less dialogue round-trips with no stray speaker", () => {

@@ -58,6 +58,7 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
+import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import {
@@ -895,7 +896,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const cur = s.blocks[idx];
         // Same predicate as the key router (one rule, two enforcement points),
         // so no caller can fold a speaker's line away or drop a beat/title.
-        if (!canMerge(prev.type, cur.type, Boolean(cur.beat) || Boolean(cur.title))) return {};
+        if (!canMerge(prev.type, cur.type, carriesTailContent(cur) || Boolean(cur.title))) return {};
         // Splits trim the whitespace at the cut, so the symmetric merge restores
         // one space at a bare word boundary — otherwise Enter-then-Backspace
         // would silently fuse words. The caret lands after the join; a second

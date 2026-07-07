@@ -27,7 +27,10 @@ function renderProse(upto: Block[], charById: Map<string, Character>): string {
       lines.push(b.level === "break" ? b.text.trim() || "* * *" : b.text.toUpperCase());
     } else if (b.type === "dialogue") {
       const sp = b.speaker ? charById.get(b.speaker)?.name : undefined;
-      lines.push(`${sp ? `${sp}: ` : ""}"${b.text}"${b.beat ? ` ${b.beat}` : ""}`);
+      const tail = (b.tail ?? [])
+        .map((s) => (s.kind === "quote" ? `"${s.text}"` : s.text))
+        .join(" ");
+      lines.push(`${sp ? `${sp}: ` : ""}"${b.text}"${tail ? ` ${tail}` : ""}`);
     }
   }
   return lines.join("\n\n");

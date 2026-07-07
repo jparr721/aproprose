@@ -92,7 +92,7 @@ export function planSplit(block: Block, at: number): CarvePlan {
     true,
   );
 
-  if (block.type === "dialogue" && block.beat !== undefined) after.beat = block.beat;
+  if (block.type === "dialogue" && block.tail !== undefined) after.tail = block.tail;
   if (block.type === "lore" && block.title !== undefined) before.title = block.title;
 
   return { blocks: [before, after], focusId: after.id };
@@ -124,9 +124,9 @@ export function planCarve(block: Block, start: number, end: number, newType: Blo
   if (afterText.length > 0) pieces.push(makePiece(block, afterText, block.type, true));
 
   // Redistribute the source's type-specific singletons to surviving same-type pieces.
-  if (block.type === "dialogue" && block.beat !== undefined) {
+  if (block.type === "dialogue" && block.tail !== undefined) {
     const lastDialogue = [...pieces].reverse().find((p) => p.type === "dialogue");
-    if (lastDialogue) lastDialogue.beat = block.beat;
+    if (lastDialogue) lastDialogue.tail = block.tail;
   }
   if (block.type === "lore" && block.title !== undefined) {
     const firstLore = pieces.find((p) => p.type === "lore");

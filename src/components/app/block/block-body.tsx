@@ -9,15 +9,18 @@
 
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { ColorDot } from "@/components/app/color-dot";
-import { renderInline } from "@/components/app/inline";
+// TEMP: restored in Task 1.4 (used by the commented-out beat row below).
+// import { renderInline } from "@/components/app/inline";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
+import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { proseKeyAction } from "@/lib/blocks/keys";
 import { scrollBlockIntoView } from "@/lib/dom";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
-  DIALOGUE_BEAT,
+  // TEMP: restored in Task 1.4 (used by the commented-out beat row below).
+  // DIALOGUE_BEAT,
   DIALOGUE_INDENT,
   DIALOGUE_QUOTE,
   LATEX_BODY,
@@ -53,7 +56,7 @@ function proseKeys(block: BlockT): (e: React.KeyboardEvent<HTMLTextAreaElement>)
       valueLength: el.value.length,
       blockType: block.type,
       blockEmpty: el.value.trim().length === 0,
-      carriesFields: Boolean(block.beat) || Boolean(block.title),
+      carriesFields: carriesTailContent(block) || Boolean(block.title),
       prevType: idx > 0 ? st.blocks[idx - 1].type : null,
     });
     if (action.kind === "none") return;
@@ -176,9 +179,10 @@ export function BlockBody({
               </p>
             )}
           </div>
-          {/* The beat row mounts only when a beat exists, in BOTH modes, so
-              entering edit never grows the block. "Add action beat" (and its
-              inverse, once emptied) live in the block's action menus. */}
+          {/* TEMP: restored in Task 1.4 — the beat row mounts only when a beat
+              exists, in BOTH modes, so entering edit never grows the block.
+              "Add action beat" (and its inverse, once emptied) live in the
+              block's action menus.
           {block.beat !== undefined ? (
             editing ? (
               <AutoGrowTextarea
@@ -193,6 +197,7 @@ export function BlockBody({
               <p className={cn(DIALOGUE_BEAT, "text-faint")}>{PLACEHOLDERS.beat}</p>
             )
           ) : null}
+          */}
         </div>
       );
 

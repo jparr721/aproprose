@@ -20,6 +20,13 @@ export type BlockType =
 /** A chapter sub-kind for `chapter` blocks. */
 export type ChapterLevel = "scene" | "break";
 
+/** A segment inside a chained dialogue block, after the opening quote. */
+export type DialogueSegmentKind = "beat" | "quote";
+export interface DialogueSegment {
+  kind: DialogueSegmentKind;
+  text: string;
+}
+
 export interface Block {
   id: string;
   type: BlockType;
@@ -50,8 +57,10 @@ export interface Block {
 
   /** dialogue: speaker character id (see {@link Character}). */
   speaker?: string;
-  /** dialogue: trailing action beat (rendered after the quote, e.g. "He nods."). */
-  beat?: string;
+  /** dialogue: ordered segments AFTER the opening quote (`text`). Alternates
+   *  starting with a beat, so the whole block reads quote-first:
+   *  `text, beat, quote, beat, quote, ...`. Absent for a plain single-quote line. */
+  tail?: DialogueSegment[];
   /** lore: optional short title. */
   title?: string;
   /** chapter: `scene` (centered label) or `break` (freeform centered separator). */

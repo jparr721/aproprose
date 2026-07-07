@@ -8,7 +8,8 @@ import {
   IconArrowDown,
   IconArrowUp,
   IconSquareRoundedPlus,
-  IconTextPlus,
+  // TEMP: restored in Task 1.5 (used by the commented-out beat menu items below).
+  // IconTextPlus,
   IconTrash,
   IconWand,
 } from "@tabler/icons-react";
@@ -35,11 +36,12 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const moveBlock = useProjectStore((s) => s.moveBlock);
   const deleteBlock = useProjectStore((s) => s.deleteBlock);
   const insertAfter = useProjectStore((s) => s.insertAfter);
-  const updateBlock = useProjectStore((s) => s.updateBlock);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const setSelection = useProjectStore((s) => s.setSelection);
-  const select = useProjectStore((s) => s.select);
-  const beginEdit = useProjectStore((s) => s.beginEdit);
+  // TEMP: restored in Task 1.5 (used by the commented-out beat menu items below).
+  // const updateBlock = useProjectStore((s) => s.updateBlock);
+  // const select = useProjectStore((s) => s.select);
+  // const beginEdit = useProjectStore((s) => s.beginEdit);
   const [cleaning, setCleaning] = useState(false);
 
   const insertAbove = () => {
@@ -90,32 +92,33 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     [
       { icon: IconSquareRoundedPlus, label: "Insert block above", onSelect: insertAbove },
       { icon: IconSquareRoundedPlus, label: "Insert block below", onSelect: () => insertAfter(block.id) },
-      // The beat row only renders once a beat exists (edit-mode layout parity),
-      // so giving a dialogue its first beat is an explicit action - and an
-      // emptied beat needs an explicit way back out, or its placeholder row
-      // would haunt the read view until a save-reload dropped it.
-      ...(block.type === "dialogue" && block.beat === undefined
-        ? [
-            {
-              icon: IconTextPlus,
-              label: "Add action beat",
-              onSelect: () => {
-                updateBlock(block.id, { beat: "" });
-                select(block.id);
-                beginEdit();
-              },
-            },
-          ]
-        : []),
-      ...(block.type === "dialogue" && block.beat === ""
-        ? [
-            {
-              icon: IconTextPlus,
-              label: "Remove action beat",
-              onSelect: () => updateBlock(block.id, { beat: undefined }),
-            },
-          ]
-        : []),
+      // TEMP: restored in Task 1.5 — the beat row only renders once a beat
+      // exists (edit-mode layout parity), so giving a dialogue its first beat
+      // is an explicit action - and an emptied beat needs an explicit way back
+      // out, or its placeholder row would haunt the read view until a
+      // save-reload dropped it.
+      // ...(block.type === "dialogue" && block.beat === undefined
+      //   ? [
+      //       {
+      //         icon: IconTextPlus,
+      //         label: "Add action beat",
+      //         onSelect: () => {
+      //           updateBlock(block.id, { beat: "" });
+      //           select(block.id);
+      //           beginEdit();
+      //         },
+      //       },
+      //     ]
+      //   : []),
+      // ...(block.type === "dialogue" && block.beat === ""
+      //   ? [
+      //       {
+      //         icon: IconTextPlus,
+      //         label: "Remove action beat",
+      //         onSelect: () => updateBlock(block.id, { beat: undefined }),
+      //       },
+      //     ]
+      //   : []),
     ],
     [
       {

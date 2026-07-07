@@ -11,7 +11,7 @@
 // the few other shapes we understand) falls back to `latex` and is edited
 // verbatim.
 
-import type { Block, BlockType, ChapterLevel } from "@/lib/types";
+import type { Block, BlockType, ChapterLevel, DialogueSegment } from "@/lib/types";
 import { uid } from "@/lib/id";
 import { cleanToText, latexToPlain } from "./inline";
 
@@ -260,7 +260,7 @@ function tryDialogue(trimmed: string, raw: string): Block | null {
   }
 
   return base("dialogue", cleanToText(quoteBody), raw, {
-    beat: after.length > 0 ? cleanToText(after) : undefined,
+    tail: after.length > 0 ? [{ kind: "beat", text: cleanToText(after) }] : undefined,
   });
 }
 
@@ -295,7 +295,7 @@ function base(
   type: BlockType,
   text: string,
   raw: string,
-  extra: { beat?: string; title?: string; level?: ChapterLevel } = {},
+  extra: { tail?: DialogueSegment[]; title?: string; level?: ChapterLevel } = {},
 ): Block {
   return {
     id: uid(),

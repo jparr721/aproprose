@@ -13,12 +13,16 @@ import {
   IconWand,
 } from "@tabler/icons-react";
 import { useProjectStore } from "@/stores/project-store";
+import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { buildAiContext } from "@/lib/ai/context";
-import { cleanTranscript } from "@/lib/ai/operations";
+import { aiCacheKey } from "@/lib/ai/cache-key";
+import { assignSpeakers, cleanTranscript } from "@/lib/ai/operations";
 import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import { nextSegmentKind } from "@/lib/blocks/dialogue";
+import { structurePassage } from "@/lib/blocks/structure";
+import { applyAssignments, buildStructureProposal } from "@/lib/blocks/structure-proposal";
 import type { Block as BlockT, DialogueSegment } from "@/lib/types";
 
 export type BlockAction = {
@@ -77,6 +81,36 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const structurable =
     (block.type === "narration" || block.type === "latex") &&
     (/\n[ \t]*\n/.test(block.text) || block.text.includes('"'));
+
+  const onStructureAi = async () => {
+    if (!structurable) return;
+    const st = useProjectStore.getState();
+    const chapterId = st.activeChapterId;
+    if (!chapterId) return;
+    const cast = st.meta.characters;
+    const seed = structurePassage(block.text, cast);
+    if (seed.length <= 1) {
+      toast.message("Nothing to structure here");
+      return;
+    }
+    const t = toast.loading("Structuring with AI");
+    try {
+      const grounding = buildAiContext(block.id).blocksText;
+      const assignments = await withAiRetry(() => assignSpeakers(seed, cast, grounding, undefined));
+      const refined = applyAssignments(seed, assignments, cast);
+      const proposal = buildStructureProposal(chapterId, block.id, refined, cast);
+      useAiCacheStore.getState().patch(aiCacheKey("edit", chapterId, "chapter", ""), {
+        data: proposal,
+        loading: false,
+        error: null,
+        instruction: "Structure with AI",
+      });
+      dispatchAiIntent({ tab: "edit", scope: "chapter" });
+      toast.success("Staged for review", { id: t });
+    } catch (e) {
+      toast.error("Couldn't reach the model", { id: t, description: describeAiError(e) });
+    }
+  };
 
   const onPickUp = () => {
     // Select the block so the author lands oriented when the panel opens. The
@@ -149,6 +183,9 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
       },
       ...(structurable
         ? [{ icon: IconTextPlus, label: "Structure into blocks", onSelect: () => structureBlock(block.id) }]
+        : []),
+      ...(structurable
+        ? [{ icon: IconWand, label: "Structure with AI", onSelect: () => void onStructureAi() }]
         : []),
     ],
     [{ icon: IconTrash, label: "Delete block", onSelect: () => deleteBlock(block.id), destructive: true }],

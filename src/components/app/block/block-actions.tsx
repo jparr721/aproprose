@@ -8,8 +8,7 @@ import {
   IconArrowDown,
   IconArrowUp,
   IconSquareRoundedPlus,
-  // TEMP: restored in Task 1.5 (used by the commented-out beat menu items below).
-  // IconTextPlus,
+  IconTextPlus,
   IconTrash,
   IconWand,
 } from "@tabler/icons-react";
@@ -19,7 +18,8 @@ import { buildAiContext } from "@/lib/ai/context";
 import { cleanTranscript } from "@/lib/ai/operations";
 import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
-import type { Block as BlockT } from "@/lib/types";
+import { nextSegmentKind } from "@/lib/blocks/dialogue";
+import type { Block as BlockT, DialogueSegment } from "@/lib/types";
 
 export type BlockAction = {
   icon: ComponentType<{ className?: string }>;
@@ -38,10 +38,9 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const setSelection = useProjectStore((s) => s.setSelection);
-  // TEMP: restored in Task 1.5 (used by the commented-out beat menu items below).
-  // const updateBlock = useProjectStore((s) => s.updateBlock);
-  // const select = useProjectStore((s) => s.select);
-  // const beginEdit = useProjectStore((s) => s.beginEdit);
+  const updateBlock = useProjectStore((s) => s.updateBlock);
+  const select = useProjectStore((s) => s.select);
+  const beginEdit = useProjectStore((s) => s.beginEdit);
   const [cleaning, setCleaning] = useState(false);
 
   const insertAbove = () => {
@@ -92,33 +91,41 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     [
       { icon: IconSquareRoundedPlus, label: "Insert block above", onSelect: insertAbove },
       { icon: IconSquareRoundedPlus, label: "Insert block below", onSelect: () => insertAfter(block.id) },
-      // TEMP: restored in Task 1.5 — the beat row only renders once a beat
-      // exists (edit-mode layout parity), so giving a dialogue its first beat
-      // is an explicit action - and an emptied beat needs an explicit way back
-      // out, or its placeholder row would haunt the read view until a
-      // save-reload dropped it.
-      // ...(block.type === "dialogue" && block.beat === undefined
-      //   ? [
-      //       {
-      //         icon: IconTextPlus,
-      //         label: "Add action beat",
-      //         onSelect: () => {
-      //           updateBlock(block.id, { beat: "" });
-      //           select(block.id);
-      //           beginEdit();
-      //         },
-      //       },
-      //     ]
-      //   : []),
-      // ...(block.type === "dialogue" && block.beat === ""
-      //   ? [
-      //       {
-      //         icon: IconTextPlus,
-      //         label: "Remove action beat",
-      //         onSelect: () => updateBlock(block.id, { beat: undefined }),
-      //       },
-      //     ]
-      //   : []),
+      // Strict alternation means the next segment's kind is always forced, so
+      // the label and appended kind both come from nextSegmentKind - giving a
+      // dialogue its first beat (or a beat its reply) is an explicit action.
+      ...(block.type === "dialogue"
+        ? [
+            {
+              icon: IconTextPlus,
+              label: nextSegmentKind(block) === "beat" ? "Add action beat" : "Add spoken line",
+              onSelect: () => {
+                const seg: DialogueSegment = { kind: nextSegmentKind(block), text: "" };
+                updateBlock(block.id, { tail: [...(block.tail ?? []), seg] });
+                select(block.id);
+                beginEdit();
+              },
+            },
+          ]
+        : []),
+      // Remove the trailing segment only when it is empty (nothing to lose), so a
+      // mis-added beat/line has an explicit way back out (parity with the old
+      // "Remove action beat").
+      ...(block.type === "dialogue" &&
+      block.tail &&
+      block.tail.length > 0 &&
+      block.tail[block.tail.length - 1].text.trim() === ""
+        ? [
+            {
+              icon: IconTextPlus,
+              label: "Remove last segment",
+              onSelect: () => {
+                const next = block.tail!.slice(0, -1);
+                updateBlock(block.id, { tail: next.length > 0 ? next : undefined });
+              },
+            },
+          ]
+        : []),
     ],
     [
       {

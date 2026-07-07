@@ -69,3 +69,20 @@ describe("Pick up from here block action", () => {
     expect(findAction(result.current, "Pick up from here").disabled).toBe(false);
   });
 });
+
+describe("Contextual segment actions", () => {
+  it("offers 'Add action beat' when the last segment is a quote", () => {
+    const { result } = renderHook(() => useBlockActions(block("B", "dialogue")));
+    const labels = result.current.flat().map((a) => a.label);
+    expect(labels).toContain("Add action beat");
+    expect(labels).not.toContain("Add spoken line");
+  });
+
+  it("offers 'Add spoken line' when the last segment is a beat", () => {
+    const withBeat: Block = { ...block("B", "dialogue"), tail: [{ kind: "beat", text: "he said." }] };
+    const { result } = renderHook(() => useBlockActions(withBeat));
+    const labels = result.current.flat().map((a) => a.label);
+    expect(labels).toContain("Add spoken line");
+    expect(labels).not.toContain("Add action beat");
+  });
+});

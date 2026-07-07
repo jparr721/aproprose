@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.12.0",
+    "date": "2026-07-07",
+    "summary": "Richer dialogue editing plus new tools to structure prose into blocks, with a smarter Muse",
+    "highlights": [
+      "Turn a pasted or dictated passage into properly classified narration and dialogue blocks with the new 'Structure into blocks' action, available in both block menus",
+      "Let AI restructure a passage and attribute each line to a speaker with 'Structure with AI', staged for your review before anything changes",
+      "Build back-and-forth dialogue in a single block: add alternating action beats and spoken lines that render as stacked rows, with contextual 'Add action beat' / 'Add spoken line' actions",
+      "Discard staged Muse changes with a new 'Discard changes' button so you can rerun Muse without applying the previous suggestion",
+      "BUG FIX: Muse 'Pick up and go' now only continues from your active edit cursor, no longer misreading a navigation highlight as where to resume",
+      "BUG FIX: Muse and Revise now return one block per paragraph, so generated passages come back as clean separate blocks instead of one merged clump"
+    ]
+  },
+  {
     "version": "0.11.1",
     "date": "2026-07-06",
     "summary": "Behind-the-scenes release tooling improvements with no changes to the app itself.",

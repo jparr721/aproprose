@@ -41,11 +41,13 @@ export const aiCommands: Command[] = [
     keywords: ["stuck", "writers block", "continue"],
     run: () => {
       // The agent's read_chapter grounding does not carry the selection, so
-      // the cursor rides in the directive itself.
-      const { selectedId } = useProjectStore.getState();
+      // the cursor rides in the directive itself. A nav-only highlight can be
+      // restored on chapter load, so only an active edit cursor counts here.
+      const { selectedId, editing } = useProjectStore.getState();
+      const cursorId = editing ? selectedId : null;
       dispatchAiIntent({
         tab: "muse",
-        instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(selectedId),
+        instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(cursorId),
         autoRun: true,
       });
     },

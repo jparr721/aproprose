@@ -40,11 +40,11 @@ describe("pickUpCursorSuffix", () => {
 describe("ai.pick-up command", () => {
   beforeEach(() => {
     useAiIntentStore.setState({ pending: null });
-    useProjectStore.setState({ selectedId: null });
+    useProjectStore.setState({ selectedId: null, editing: false });
   });
 
   it("parks an auto-running muse intent carrying the directive and the cursor line", () => {
-    useProjectStore.setState({ selectedId: "b7" });
+    useProjectStore.setState({ selectedId: "b7", editing: true });
     runPickUp();
 
     expect(useAiIntentStore.getState().pending).toEqual({
@@ -56,6 +56,17 @@ describe("ai.pick-up command", () => {
   });
 
   it("appends the no-cursor line when nothing is selected", () => {
+    runPickUp();
+
+    expect(useAiIntentStore.getState().pending).toEqual({
+      tab: "muse",
+      instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(null),
+      autoRun: true,
+    });
+  });
+
+  it("does not treat a nav-only highlight as the cursor", () => {
+    useProjectStore.setState({ selectedId: "b7", editing: false });
     runPickUp();
 
     expect(useAiIntentStore.getState().pending).toEqual({

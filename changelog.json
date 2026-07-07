@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.11.1",
+    "date": "2026-07-06",
+    "summary": "Behind-the-scenes release tooling improvements with no changes to the app itself.",
+    "highlights": [
+      "Internal release and build pipeline maintenance only; no user-facing features or fixes in this update."
+    ]
+  },
+  {
     "version": "0.11.0",
     "date": "2026-07-06",
     "summary": "Daily writing goals, custom AI voice and editing rules, steadier AI edits, and Windows support.",

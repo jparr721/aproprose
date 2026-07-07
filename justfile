@@ -28,11 +28,20 @@ build:
 bundle:
     bun run tauri build
 
-# Cut a release from main: full gate, bump all version files, commit, tag, push (X.Y.Z, must increase).
+# Cut a release from main: full gate, bump versions, changelog (reviewed in $EDITOR), confirm, tag, push (X.Y.Z, must increase).
 version VERSION:
+    @just _release "{{VERSION}}" interactive
+
+# Cut a release non-interactively (CI/agents): auto-accept the AI changelog and skip the confirm prompt.
+version-auto VERSION:
+    @just _release "{{VERSION}}" auto
+
+# Shared release pipeline behind `version` (MODE=interactive) and `version-auto` (MODE=auto). Not run directly.
+_release VERSION MODE:
     #!/usr/bin/env bash
     set -euo pipefail
     ver="{{VERSION}}"
+    mode="{{MODE}}"
     # Releases are cut only from a clean, up-to-date main.
     if [ -n "$(git status --porcelain)" ]; then
         echo "error: working tree is not clean - commit or stash first" >&2
@@ -69,20 +78,27 @@ version VERSION:
     # cheap, deterministic check fails before the expensive AI changelog step writes anything.
     echo "==> version"
     bun run scripts/set-version.ts "$ver"
-    # Generate the user-facing changelog entry (claude -p), reviewed in $EDITOR. Aborts the
-    # release if claude is missing/errors, $EDITOR is unset, or the entry is invalid.
+    # Generate the user-facing changelog entry (claude -p). Interactive mode reviews it in
+    # $EDITOR; auto mode (--yes) accepts the AI draft verbatim. Aborts if claude is
+    # missing/errors or the entry is invalid.
     echo "==> changelog"
-    bun run scripts/generate-changelog.ts "$ver" "$(date +%F)"
-    # Confirm before the irreversible push that triggers the release.
-    echo
-    echo "Release v$ver to origin/main:"
-    echo "  commit the version bump, tag v$ver, push main + tag (triggers the release build)"
-    reply=""
-    read -r -p "Proceed? [y/N] " reply || true
-    if [ "$reply" != "y" ] && [ "$reply" != "Y" ]; then
-        echo "aborted - reverting version bump"
-        revert
-        exit 1
+    if [ "$mode" = "auto" ]; then
+        bun run scripts/generate-changelog.ts "$ver" "$(date +%F)" --yes
+    else
+        bun run scripts/generate-changelog.ts "$ver" "$(date +%F)"
+    fi
+    # Confirm before the irreversible push that triggers the release (skipped in auto mode).
+    if [ "$mode" != "auto" ]; then
+        echo
+        echo "Release v$ver to origin/main:"
+        echo "  commit the version bump, tag v$ver, push main + tag (triggers the release build)"
+        reply=""
+        read -r -p "Proceed? [y/N] " reply || true
+        if [ "$reply" != "y" ] && [ "$reply" != "Y" ]; then
+            echo "aborted - reverting version bump"
+            revert
+            exit 1
+        fi
     fi
     trap - ERR INT
     git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock changelog.json

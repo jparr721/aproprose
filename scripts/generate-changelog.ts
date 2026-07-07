@@ -156,10 +156,15 @@ function reviewInEditor(draft: DraftEntry): DraftEntry {
 }
 
 function main(): void {
-  const version = process.argv[2];
-  const date = process.argv[3];
+  const args = process.argv.slice(2);
+  const autoAccept = args.includes("--yes");
+  const positional = args.filter((a) => !a.startsWith("-"));
+  const version = positional[0];
+  const date = positional[1];
   if (!version || !date) {
-    throw new Error("Usage: bun run scripts/generate-changelog.ts <X.Y.Z> <YYYY-MM-DD>");
+    throw new Error(
+      "Usage: bun run scripts/generate-changelog.ts <X.Y.Z> <YYYY-MM-DD> [--yes]",
+    );
   }
   if (!SEMVER.test(version)) {
     throw new Error(`Invalid version "${version}": expected X.Y.Z (e.g. 0.4.0)`);
@@ -177,7 +182,9 @@ function main(): void {
     collectDiff(diffRange(lastTag)),
   );
   const draft = parseEntry(runClaude(prompt));
-  const reviewed = reviewInEditor(draft);
+  // --yes accepts the AI draft verbatim (non-interactive release); otherwise the
+  // author reviews/edits it in $EDITOR before it is written.
+  const reviewed = autoAccept ? draft : reviewInEditor(draft);
 
   const entry: ChangelogEntry = {
     version,

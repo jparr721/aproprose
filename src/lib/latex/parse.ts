@@ -40,7 +40,7 @@ interface Segment {
  * whitespace-only. The boundary run is appended to the *preceding* segment's
  * `raw` so concatenation is lossless.
  *
- * A standalone `\begin{env}…\end{env}` paragraph is left as a single segment by
+ * A standalone `\begin{env}...\end{env}` paragraph is left as a single segment by
  * this pass (it has no internal blank lines in the real manuscripts); the
  * environment-as-its-own-block requirement is satisfied because such a paragraph
  * is already isolated by the blank lines around it.
@@ -177,8 +177,8 @@ function classify(content: string, raw: string): Block {
     }
   }
 
-  // 3. Dialogue: a paragraph that opens with ``…'' followed by alternating
-  //    beat-runs and further ``…'' quotes.
+  // 3. Dialogue: a paragraph that opens with ``...'' followed by alternating
+  //    beat-runs and further ``...'' quotes.
   const dialogue = tryDialogue(trimmed, raw);
   if (dialogue) return dialogue;
 
@@ -234,8 +234,8 @@ function sceneLabel(inner: string): string | null {
 }
 
 /**
- * Recognise a dialogue paragraph: it must *start* with a ``…'' quote, followed
- * by zero or more alternating beat-runs and further ``…'' quotes (an action
+ * Recognise a dialogue paragraph: it must *start* with a ``...'' quote, followed
+ * by zero or more alternating beat-runs and further ``...'' quotes (an action
  * beat interrupting a chain of utterances). The grammar is strict alternation,
  * quote-first: a quote may only follow a beat, so adjacent quotes (or a quote
  * with no preceding beat) disqualify the whole paragraph. We only accept a

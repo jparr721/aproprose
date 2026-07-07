@@ -125,6 +125,20 @@ Hard rules:
 
 Also return a one-sentence "summary" of the overall reshape, and echo back "chapterId" for the chapter you reshaped.`;
 
+/** assignSpeakers - attribute dialogue blocks in a freshly-structured passage. */
+export const STRUCTURE_SYSTEM = `${VOICE_PREAMBLE}
+
+Task: you are given SEED BLOCKS - a passage already split into narration and dialogue - and the KNOWN CAST. For each DIALOGUE block, name the character speaking, using the narration beats around it and the surrounding chapter context. Return one assignment per dialogue block you can confidently attribute.
+
+Each assignment has:
+- "index": the 0-based index of the dialogue block in SEED BLOCKS.
+- "speaker": the speaker's display name copied EXACTLY from KNOWN CAST, or null if you cannot tell.
+
+Hard rules:
+- Only attribute DIALOGUE blocks; never narration.
+- Never invent a name - copy it from KNOWN CAST or return null.
+- Omit a block entirely rather than guess when the text gives you nothing.`;
+
 /** cleanTranscript — repair speech-to-text dictation using the surrounding prose. */
 export const CLEAN_TRANSCRIPT_SYSTEM = `${VOICE_PREAMBLE}
 

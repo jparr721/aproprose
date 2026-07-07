@@ -18,9 +18,11 @@ import { generateText, Output, streamText } from "ai";
 import { z } from "zod";
 
 import type {
+  Block,
   BlockChange,
   BlockType,
   ChatMessage,
+  Character,
   CritiqueNote,
   ContinuityFlag,
   ManuscriptProposal,
@@ -28,6 +30,7 @@ import type {
   SculptProposal,
   SuggestResult,
 } from "@/lib/types";
+import type { SpeakerAssignment } from "@/lib/blocks/structure-proposal";
 import { getModel } from "@/lib/ai/model";
 import { renderGrounding } from "@/lib/ai/grounding-render";
 import {
@@ -38,6 +41,7 @@ import {
   EDIT_SYSTEM,
   REVISE_SYSTEM,
   SCULPT_SYSTEM,
+  STRUCTURE_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
 import { authorSystem } from "@/lib/ai/author-preferences";
@@ -487,6 +491,52 @@ export async function reviseChapter(
     { chapterId: req.chapterId, summary: output.summary, changes: output.changes },
     req.blocks,
   );
+}
+
+// -- Structure (dialogue speaker attribution) ---------------------------------
+
+const speakerAssignmentSchema = z.object({
+  assignments: z
+    .array(
+      z.object({
+        index: z.number().int().describe("0-based index into SEED BLOCKS"),
+        speaker: z
+          .string()
+          .nullable()
+          .describe("the speaker's display name from KNOWN CAST for a dialogue block; null if unknown"),
+      }),
+    )
+    .describe("one entry per dialogue block you can attribute"),
+});
+
+/** Attribute the dialogue blocks in a freshly-structured seed. Returns the
+ *  model's name assignments; the caller resolves names to ids and builds the
+ *  proposal (structure-proposal.ts). No model call when the seed has no dialogue. */
+export async function assignSpeakers(
+  seed: Block[],
+  cast: Character[],
+  grounding: string,
+  opts: AiOpOptions | undefined,
+): Promise<SpeakerAssignment[]> {
+  if (!seed.some((b) => b.type === "dialogue")) return [];
+  const model = await getModel();
+  const seedLines = seed
+    .map((b, i) => {
+      if (b.type !== "dialogue") return `[${i}] NARRATION: ${b.text}`;
+      const tail = (b.tail ?? []).map((s) => (s.kind === "quote" ? `"${s.text}"` : s.text)).join(" ");
+      return `[${i}] DIALOGUE: "${b.text}"${tail ? ` ${tail}` : ""}`;
+    })
+    .join("\n");
+  const castLines = cast.map((c) => `- ${c.name}`).join("\n");
+  const prompt = `SEED BLOCKS:\n${seedLines}\n\nKNOWN CAST:\n${castLines}\n\nSURROUNDING CONTEXT:\n${grounding}`;
+  const { output } = await generateText({
+    model,
+    output: Output.object({ schema: speakerAssignmentSchema }),
+    system: authorSystem(STRUCTURE_SYSTEM, "voice"),
+    prompt,
+    abortSignal: opts?.signal,
+  });
+  return output.assignments;
 }
 
 // ── Sculpt (chapter-level AI write path) ──────────────────────────────────────

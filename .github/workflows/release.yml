@@ -108,6 +108,12 @@ jobs:
             target: ""
             args: "--bundles nsis"
     runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        # The build matrix includes windows-latest, where the default shell is
+        # PowerShell. Force bash (Git Bash on Windows) so every run step's POSIX
+        # script - notably the updater-notes heredoc below - works on all platforms.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Install Tauri system deps (Linux)

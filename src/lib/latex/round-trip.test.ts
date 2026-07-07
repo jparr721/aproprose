@@ -32,13 +32,13 @@ test("a dialogue speaker survives alongside an action beat", () => {
   const block = dirty({
     type: "dialogue",
     text: "I was home.",
-    beat: "She looked away.",
+    tail: [{ kind: "beat", text: "She looked away." }],
     speaker: "c-suspect",
   });
   const [reparsed] = save([block]);
   expect(reparsed.speaker).toBe("c-suspect");
   expect(reparsed.text).toBe("I was home.");
-  expect(reparsed.beat).toBe("She looked away.");
+  expect(reparsed.tail).toEqual([{ kind: "beat", text: "She looked away." }]);
 });
 
 test("a speaker-less dialogue round-trips with no stray speaker", () => {
@@ -161,4 +161,16 @@ test("two adjacent \\textbf spans are a break, not a corrupted scene", () => {
   expect(reparsed.type).toBe("chapter");
   expect(reparsed.level).toBe("break");
   expect(serializeChapter([{ ...reparsed, dirty: true }])).toBe(src);
+});
+
+test("round-trips a three-quote chain when clean", () => {
+  const src =
+    "``All right,'' Brian said. ``Start with this.'' He leaned in. ``Nothing looks as bad.''\n\n";
+  expect(serializeChapter(parseChapter(src))).toBe(src);
+});
+
+test("re-serializes a dirtied chained block to the canonical form", () => {
+  const blocks = parseChapter("``A,'' he said. ``B.''\n\n");
+  blocks[0].dirty = true;
+  expect(serializeChapter(blocks)).toBe("``A,'' he said. ``B.''\n\n");
 });

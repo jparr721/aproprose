@@ -32,15 +32,20 @@ describe("planSplit", () => {
   });
 
   it("keeps the speaker on both halves and moves the beat to the trailing half", () => {
-    const b = mk({ type: "dialogue", text: "Hi there", speaker: "c1", beat: "She waved." });
+    const b = mk({
+      type: "dialogue",
+      text: "Hi there",
+      speaker: "c1",
+      tail: [{ kind: "beat", text: "She waved." }],
+    });
     const { blocks } = planSplit(b, 2);
     expect(blocks[0]).toMatchObject({ type: "dialogue", text: "Hi", speaker: "c1" });
-    expect(blocks[0].beat).toBeUndefined();
+    expect(blocks[0].tail).toBeUndefined();
     expect(blocks[1]).toMatchObject({
       type: "dialogue",
       text: "there",
       speaker: "c1",
-      beat: "She waved.",
+      tail: [{ kind: "beat", text: "She waved." }],
     });
   });
 
@@ -119,11 +124,16 @@ describe("planCarve", () => {
   });
 
   it("moves a dialogue beat to the trailing dialogue piece when carving a middle slice", () => {
-    const b = mk({ type: "dialogue", text: "Hello there friend", speaker: "c1", beat: "She waved." });
+    const b = mk({
+      type: "dialogue",
+      text: "Hello there friend",
+      speaker: "c1",
+      tail: [{ kind: "beat", text: "She waved." }],
+    });
     const { blocks } = planCarve(b, 6, 11, "lore");
     expect(blocks.map((p) => p.type)).toEqual(["dialogue", "lore", "dialogue"]);
-    expect(blocks[0].beat).toBeUndefined();
-    expect(blocks[2].beat).toBe("She waved.");
+    expect(blocks[0].tail).toBeUndefined();
+    expect(blocks[2].tail).toEqual([{ kind: "beat", text: "She waved." }]);
   });
 
   it("keeps a lore title on the first surviving lore piece when carving", () => {

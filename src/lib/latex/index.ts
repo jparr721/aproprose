@@ -34,7 +34,7 @@ export function countWords(blocks: Block[]): number {
         break;
       case "dialogue":
         total += wordsIn(block.text);
-        if (block.beat) total += wordsIn(block.beat);
+        for (const seg of block.tail ?? []) total += wordsIn(seg.text);
         break;
       case "chapter":
         if (block.level !== "break") total += wordsIn(block.text);

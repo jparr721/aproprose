@@ -11,7 +11,7 @@
 // the few other shapes we understand) falls back to `latex` and is edited
 // verbatim.
 
-import type { Block, BlockType, ChapterLevel } from "@/lib/types";
+import type { Block, BlockType, ChapterLevel, DialogueSegment } from "@/lib/types";
 import { uid } from "@/lib/id";
 import { cleanToText, latexToPlain } from "./inline";
 
@@ -40,7 +40,7 @@ interface Segment {
  * whitespace-only. The boundary run is appended to the *preceding* segment's
  * `raw` so concatenation is lossless.
  *
- * A standalone `\begin{env}…\end{env}` paragraph is left as a single segment by
+ * A standalone `\begin{env}...\end{env}` paragraph is left as a single segment by
  * this pass (it has no internal blank lines in the real manuscripts); the
  * environment-as-its-own-block requirement is satisfied because such a paragraph
  * is already isolated by the blank lines around it.
@@ -177,13 +177,16 @@ function classify(content: string, raw: string): Block {
     }
   }
 
-  // 3. Dialogue: a paragraph that is entirely one ``…'' utterance, optionally
-  //    followed by a short trailing sentence (an action beat).
+  // 3. Dialogue: a paragraph that opens with ``...'' followed by alternating
+  //    beat-runs and further ``...'' quotes.
   const dialogue = tryDialogue(trimmed, raw);
   if (dialogue) return dialogue;
 
-  // 4. Simple prose narration: only \emph and \textbf macros, no other LaTeX, no comments.
-  if (isSimpleProse(content)) {
+  // 4. Simple prose narration: only \emph and \textbf macros, no other LaTeX, no
+  //    comments. A paragraph that opens like dialogue (``) but was rejected by
+  //    tryDialogue (broken alternation) must not be silently reinterpreted as
+  //    narration containing literal quote marks - it stays opaque `latex`.
+  if (!trimmed.startsWith("``") && isSimpleProse(content)) {
     return base("narration", cleanToText(content), raw);
   }
 
@@ -231,36 +234,48 @@ function sceneLabel(inner: string): string | null {
 }
 
 /**
- * Recognise a dialogue paragraph: it must *start* with a ``…'' quote. If the
- * whole paragraph is the quote, `beat` is empty. If a short trailing sentence
- * follows the closing '', that becomes the beat. We only accept it as dialogue
- * when both the quote body and the beat are themselves simple prose (so the
- * round-trip through cleanToText/textToLatex is exact); otherwise we let it fall
- * through to `latex`.
+ * Recognise a dialogue paragraph: it must *start* with a ``...'' quote, followed
+ * by zero or more alternating beat-runs and further ``...'' quotes (an action
+ * beat interrupting a chain of utterances). The grammar is strict alternation,
+ * quote-first: a quote may only follow a beat, so adjacent quotes (or a quote
+ * with no preceding beat) disqualify the whole paragraph. We only accept a
+ * segment as dialogue when its text is itself simple prose (so the round-trip
+ * through cleanToText/textToLatex is exact); otherwise we let the whole
+ * paragraph fall through to `latex`.
  */
 function tryDialogue(trimmed: string, raw: string): Block | null {
   if (!trimmed.startsWith("``")) return null;
 
-  // Find the matching closing '' for the opening ``.
-  const close = trimmed.indexOf("''", 2);
-  if (close === -1) return null;
+  const firstClose = trimmed.indexOf("''", 2);
+  if (firstClose === -1) return null;
 
-  const quoteBody = trimmed.slice(2, close);
-  const after = trimmed.slice(close + 2).trim();
+  const head = trimmed.slice(2, firstClose);
+  if (head.includes("``") || head.includes("''") || !isSimpleProse(head)) return null;
 
-  // The quote body must not contain a *second* opening quote or a closing ''
-  // (we already took the first ''), and must be simple prose.
-  if (quoteBody.includes("``") || quoteBody.includes("''")) return null;
-  if (!isSimpleProse(quoteBody)) return null;
-
-  // Trailing beat (if any) must also be simple prose with no further quotes.
-  if (after.length > 0) {
-    if (after.includes("``") || after.includes("''")) return null;
-    if (!isSimpleProse(after)) return null;
+  // Walk the remainder as alternating beat-runs and ``...'' quotes. Strict
+  // alternation: a quote may only follow a beat, so adjacent quotes (or a quote
+  // with no preceding beat) disqualify the whole paragraph -> it falls to latex.
+  const tail: DialogueSegment[] = [];
+  let rest = trimmed.slice(firstClose + 2);
+  while (rest.length > 0) {
+    const nextOpen = rest.indexOf("``");
+    const beatSrc = (nextOpen === -1 ? rest : rest.slice(0, nextOpen)).trim();
+    if (beatSrc.length > 0) {
+      if (beatSrc.includes("''") || !isSimpleProse(beatSrc)) return null;
+      tail.push({ kind: "beat", text: cleanToText(beatSrc) });
+    }
+    if (nextOpen === -1) break;
+    const close = rest.indexOf("''", nextOpen + 2);
+    if (close === -1) return null;
+    const quoteSrc = rest.slice(nextOpen + 2, close);
+    if (quoteSrc.includes("``") || quoteSrc.includes("''") || !isSimpleProse(quoteSrc)) return null;
+    if (tail.length === 0 || tail[tail.length - 1].kind !== "beat") return null;
+    tail.push({ kind: "quote", text: cleanToText(quoteSrc) });
+    rest = rest.slice(close + 2);
   }
 
-  return base("dialogue", cleanToText(quoteBody), raw, {
-    beat: after.length > 0 ? cleanToText(after) : undefined,
+  return base("dialogue", cleanToText(head), raw, {
+    tail: tail.length > 0 ? tail : undefined,
   });
 }
 
@@ -295,7 +310,7 @@ function base(
   type: BlockType,
   text: string,
   raw: string,
-  extra: { beat?: string; title?: string; level?: ChapterLevel } = {},
+  extra: { tail?: DialogueSegment[]; title?: string; level?: ChapterLevel } = {},
 ): Block {
   return {
     id: uid(),

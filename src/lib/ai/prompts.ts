@@ -99,6 +99,7 @@ Hard rules:
 - Never invent a block id. Never touch blocks outside EDITABLE BLOCKS.
 - Only "insert" introduces new blocks, and its blockId is null.
 - For "insert", afterId must be an id copied EXACTLY from EDITABLE BLOCKS (or null to append at the chapter end). To add several consecutive blocks after the same block, list them in reading order - they are applied in the order given.
+- One block per paragraph or utterance: every insert's "newText" is exactly ONE paragraph or ONE utterance - never put a blank line inside "newText". Stage one insert per paragraph, in reading order, to add a multi-paragraph passage.
 - Return a change ONLY for something you are actually changing; if nothing needs changing, return an empty list.
 - Honour the author's diction and style; deliver what they asked for and nothing else.
 
@@ -124,6 +125,20 @@ Hard rules:
 
 Also return a one-sentence "summary" of the overall reshape, and echo back "chapterId" for the chapter you reshaped.`;
 
+/** assignSpeakers - attribute dialogue blocks in a freshly-structured passage. */
+export const STRUCTURE_SYSTEM = `${VOICE_PREAMBLE}
+
+Task: you are given SEED BLOCKS - a passage already split into narration and dialogue - and the KNOWN CAST. For each DIALOGUE block, name the character speaking, using the narration beats around it and the surrounding chapter context. Return one assignment per dialogue block you can confidently attribute.
+
+Each assignment has:
+- "index": the 0-based index of the dialogue block in SEED BLOCKS.
+- "speaker": the speaker's display name copied EXACTLY from KNOWN CAST, or null if you cannot tell.
+
+Hard rules:
+- Only attribute DIALOGUE blocks; never narration.
+- Never invent a name - copy it from KNOWN CAST or return null.
+- Omit a block entirely rather than guess when the text gives you nothing.`;
+
 /** cleanTranscript — repair speech-to-text dictation using the surrounding prose. */
 export const CLEAN_TRANSCRIPT_SYSTEM = `${VOICE_PREAMBLE}
 
@@ -140,6 +155,7 @@ How to work:
 - Plan briefly, then use the read tools (read_chapter, read_outline, read_lore, get_critique) to gather ONLY what you need. Always read the chapter before proposing changes.
 - When you know what to change, call stage_proposal EXACTLY ONCE with the full change set - every rewrite, insert, remove, and move together in that one call. Never stage partial proposals across several calls.
 - Copy block ids exactly from read_chapter; never invent an id. Rewrites carry the FULL revised text for the block. Inserts specify "afterId" (or null to append at the chapter end), a "type" of narration or dialogue, and for dialogue a "speaker" display name. Moves use a zero-based "toIndex". Use plain cleaned prose - no LaTeX.
+- One block per paragraph or utterance: every insert's "newText" is exactly ONE paragraph or ONE utterance. Never put a blank line inside "newText". To add a passage that spans several paragraphs, stage one insert per paragraph, in reading order (inserts sharing an afterId land in the order you stage them).
 - Prefer the smallest set of changes that delivers the directive in broad strokes; do not rewrite the whole chapter when a few targeted changes do the job.
 - Never answer in prose alone when the directive asks for manuscript changes - stage them with stage_proposal. Only finish without staging when the directive genuinely requires no change.`;
 

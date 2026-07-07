@@ -15,7 +15,11 @@ export function blockPlainText(block: BlockT, characters: Character[]): string {
       const sp = findSpeaker(block, characters);
       const quote = `"${block.text}"`;
       const head = sp ? `${sp.name}: ${quote}` : quote;
-      return block.beat ? `${head}\n${block.beat}` : head;
+      const tailText = (block.tail ?? [])
+        .map((s) => (s.kind === "quote" ? `"${s.text}"` : s.text))
+        .filter((t) => t.trim().length > 0)
+        .join("\n");
+      return tailText ? `${head}\n${tailText}` : head;
     }
     case "lore":
     case "scratchpad":

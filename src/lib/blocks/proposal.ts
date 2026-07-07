@@ -58,9 +58,12 @@ export function applyProposal(
           raw: "",
           dirty: true,
         };
-        if (c.type === "dialogue" && c.speaker !== null) {
-          const speakerId = resolveSpeakerId(c.speaker);
-          if (speakerId !== undefined) block.speaker = speakerId;
+        if (c.type === "dialogue") {
+          if (c.speaker !== null) {
+            const speakerId = resolveSpeakerId(c.speaker);
+            if (speakerId !== undefined) block.speaker = speakerId;
+          }
+          if (c.segments !== undefined && c.segments.length > 0) block.tail = c.segments;
         }
         // Consecutive inserts sharing an afterId apply in reading order: each
         // anchors after the block most recently inserted for that afterId, so

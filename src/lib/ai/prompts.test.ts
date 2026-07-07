@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { VOICE_PREAMBLE, renderVoicePreference, renderEditingPreference } from "@/lib/ai/prompts";
+import {
+  VOICE_PREAMBLE,
+  MUSE_SYSTEM,
+  REVISE_SYSTEM,
+  renderVoicePreference,
+  renderEditingPreference,
+} from "@/lib/ai/prompts";
 
 describe("VOICE_PREAMBLE italics contract", () => {
   it("tells the model that _italics_ and **bold** in the prose it reads are formatting, not errors", () => {
@@ -39,5 +45,15 @@ describe("renderEditingPreference", () => {
     const out = renderEditingPreference("No adverbs.");
     expect(out).toContain("AUTHOR EDITING RULES");
     expect(out).toContain("No adverbs.");
+  });
+});
+
+describe("manuscript-change prompts require one block per unit", () => {
+  it("MUSE_SYSTEM forbids blank lines inside newText", () => {
+    expect(MUSE_SYSTEM).toMatch(/one block per paragraph/i);
+    expect(MUSE_SYSTEM).toMatch(/never .*blank line/i);
+  });
+  it("REVISE_SYSTEM forbids blank lines inside newText", () => {
+    expect(REVISE_SYSTEM).toMatch(/one block per paragraph/i);
   });
 });

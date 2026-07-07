@@ -49,3 +49,20 @@ jobs:
       - name: Tests
         working-directory: src-tauri
         run: cargo test
+
+  windows-build:
+    name: windows bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - run: bun install --frozen-lockfile
+      - name: Build Windows installer
+        # Release builds sign updater artifacts with TAURI_SIGNING_PRIVATE_KEY. This CI
+        # smoke test only proves the Windows bundle still builds, so disable updater
+        # artifacts instead of requiring release secrets on pull requests.
+        run: bun run tauri build -- --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'

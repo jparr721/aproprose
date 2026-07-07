@@ -104,6 +104,9 @@ jobs:
           - platform: ubuntu-22.04
             target: ""
             args: "--bundles deb,appimage"
+          - platform: windows-latest
+            target: ""
+            args: "--bundles nsis"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -165,14 +168,14 @@ jobs:
             exit 1
           fi
           gh api "$asset_url" -H "Accept: application/octet-stream" > latest.json
-          for plat in darwin-aarch64 linux-x86_64; do
+          for plat in darwin-aarch64 linux-x86_64 windows-x86_64; do
             if ! jq -e --arg p "$plat" '.platforms[$p]' latest.json >/dev/null; then
               echo "::error::latest.json is missing platform $plat"
               cat latest.json
               exit 1
             fi
           done
-          echo "latest.json contains darwin-aarch64 and linux-x86_64"
+          echo "latest.json contains darwin-aarch64, linux-x86_64, and windows-x86_64"
           notes="$(jq -r '.notes' latest.json)"
           if [ -z "$notes" ] || [ "$notes" = "null" ] || [ "$notes" = "See the assets to download this version and install." ]; then
             echo "::error::latest.json notes is empty or the tauri-action default; the in-app updater would show no real changelog for this version"

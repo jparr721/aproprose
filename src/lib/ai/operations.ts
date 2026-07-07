@@ -398,7 +398,9 @@ const blockChangeSchema = z.object({
   newText: z
     .string()
     .nullable()
-    .describe("for rewrite/insert: the FULL cleaned text (no LaTeX); null otherwise"),
+    .describe(
+      "for rewrite/insert: the FULL cleaned text of ONE block - a single paragraph or utterance, no LaTeX and no blank lines; null otherwise",
+    ),
   toIndex: z
     .number()
     .int()

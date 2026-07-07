@@ -44,6 +44,13 @@ Download the latest installer from the [Releases page](https://github.com/jparr7
 The `.dmg` is not notarized (no Apple Developer account yet), so Gatekeeper blocks it
 on first launch. Open it once with either method:
 
+- Install with the shell helper, which copies the app to `/Applications` and clears
+  the download quarantine:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jparr721/aproprose/main/install-macos.sh | sh
+  ```
+
 - Right-click `aproprose.app` in Applications and choose **Open**, then confirm; or
 - Clear the download quarantine from a terminal:
 
@@ -51,7 +58,19 @@ on first launch. Open it once with either method:
   xattr -dr com.apple.quarantine /Applications/aproprose.app
   ```
 
-After the first open it launches normally. Intel Macs are not supported yet.
+After the first open it launches normally. A drag-copy `.dmg` cannot reliably clear
+quarantine for itself; the real fix is Developer ID signing and notarization. The
+shell helper works around it by doing the copy and `xattr` cleanup after download.
+Intel Macs are not supported yet.
+
+### Windows
+
+Download the Windows `setup.exe` from the Releases page and run it. The installer is
+not Authenticode-signed yet, so Microsoft Defender SmartScreen may show **Windows
+protected your PC** for early releases. Choose **More info** → **Run anyway** only if
+you downloaded it from `github.com/jparr721/aproprose`. Some managed/enterprise
+Windows machines block unsigned or unknown-reputation apps entirely; fixing that
+requires Windows code signing or Microsoft Store distribution.
 
 ### Linux
 
@@ -114,5 +133,6 @@ changes nothing.
 
 Pushing the tag triggers `.github/workflows/release.yml`: a guard re-verifies the tag
 matches `tauri.conf.json`, is newly created (not an overwrite), and is the newest
-version, then macOS and Linux installers build and attach to a **draft** GitHub
-Release. Review the draft and publish it.
+version, then macOS, Linux, and Windows installers build and attach to a **draft**
+GitHub Release. The workflow verifies `latest.json` covers every shipped updater
+platform and then publishes the release.

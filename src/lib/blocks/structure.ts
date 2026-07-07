@@ -51,7 +51,15 @@ function dialogueFrom(para: string, cast: Character[], leadHint: string | undefi
   while ((m = re.exec(para)) !== null) {
     const gap = para.slice(last, m.index).trim();
     if (gap.length > 0) segments.push({ kind: "beat", text: gap });
-    segments.push({ kind: "quote", text: m[1] });
+    const prev = segments[segments.length - 1];
+    if (prev !== undefined && prev.kind === "quote") {
+      // Two quotes with no beat between them can't be a strict-alternation tail
+      // (the parser rejects it -> the block degrades to `latex` on reload).
+      // Coalesce them into one quote so structurePassage output always round-trips.
+      prev.text = `${prev.text} ${m[1]}`;
+    } else {
+      segments.push({ kind: "quote", text: m[1] });
+    }
     last = m.index + m[0].length;
   }
   const trailing = para.slice(last).trim();

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Character } from "@/lib/types";
+import { parseChapter } from "@/lib/latex/parse";
+import { serializeChapter } from "@/lib/latex/serialize";
 import { structurePassage } from "./structure";
 
 const noCast: Character[] = [];
@@ -52,5 +54,49 @@ describe("structurePassage - paragraphs", () => {
     const cast = [{ id: "c-brian", name: "Brian", color: "#000", role: "" }];
     const [b] = structurePassage('"He is not wrong."', cast);
     expect(b.speaker).toBeUndefined();
+  });
+});
+
+describe("structurePassage - adjacent quotes with no beat between them", () => {
+  it("never emits a dialogue tail that starts with a quote", () => {
+    const blocks = structurePassage('Brian turned. "Stop," "Now."', noCast);
+    const b = blocks[1];
+    expect(b.type).toBe("dialogue");
+    if (b.tail !== undefined && b.tail.length > 0) {
+      expect(b.tail[0].kind).toBe("beat");
+    }
+  });
+
+  it("coalesces the two adjacent quote bodies into one quote, space-joined", () => {
+    const blocks = structurePassage('Brian turned. "Stop," "Now."', noCast);
+    const b = blocks[1];
+    expect(b.type).toBe("dialogue");
+    expect(b.text).toBe("Stop, Now.");
+    expect(b.tail).toBeUndefined();
+  });
+
+  it("round-trips as dialogue (not latex) through serialize/parse", () => {
+    const blocks = structurePassage('Brian turned. "Stop," "Now."', noCast).map((b) => ({
+      ...b,
+      dirty: true,
+    }));
+    const reparsed = parseChapter(serializeChapter(blocks));
+    expect(reparsed.map((b) => b.type)).toEqual(blocks.map((b) => b.type));
+    expect(reparsed.map((b) => b.type)).toContain("dialogue");
+    expect(reparsed.map((b) => b.type)).not.toContain("latex");
+  });
+
+  it("leaves a normal chained dialogue (beat between quotes) unaffected", () => {
+    const [b] = structurePassage('"I\'m serious," Brian said. "You were close."', noCast);
+    expect(b.type).toBe("dialogue");
+    expect(b.text).toBe("I'm serious,");
+    expect(b.tail).toEqual([
+      { kind: "beat", text: "Brian said." },
+      { kind: "quote", text: "You were close." },
+    ]);
+
+    const blocks = [{ ...b, dirty: true }];
+    const reparsed = parseChapter(serializeChapter(blocks));
+    expect(reparsed[0].type).toBe("dialogue");
   });
 });

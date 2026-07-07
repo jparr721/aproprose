@@ -39,6 +39,7 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   const updateBlockText = useProjectStore((s) => s.updateBlockText);
   const setSelection = useProjectStore((s) => s.setSelection);
   const updateBlock = useProjectStore((s) => s.updateBlock);
+  const structureBlock = useProjectStore((s) => s.structureBlock);
   const select = useProjectStore((s) => s.select);
   const beginEdit = useProjectStore((s) => s.beginEdit);
   const [cleaning, setCleaning] = useState(false);
@@ -70,6 +71,12 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
   // Continuing from a lore/scratchpad/latex block would ground the muse run
   // off-manuscript, so the handoff only offers itself on prose.
   const prose = block.type === "narration" || block.type === "dialogue";
+
+  // Worth offering only when the text would actually break into more than one
+  // block: a blank line (multiple paragraphs) or an embedded quote (dialogue).
+  const structurable =
+    (block.type === "narration" || block.type === "latex") &&
+    (/\n[ \t]*\n/.test(block.text) || block.text.includes('"'));
 
   const onPickUp = () => {
     // Select the block so the author lands oriented when the panel opens. The
@@ -140,6 +147,9 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
         onSelect: onPickUp,
         disabled: !prose,
       },
+      ...(structurable
+        ? [{ icon: IconTextPlus, label: "Structure into blocks", onSelect: () => structureBlock(block.id) }]
+        : []),
     ],
     [{ icon: IconTrash, label: "Delete block", onSelect: () => deleteBlock(block.id), destructive: true }],
   ];

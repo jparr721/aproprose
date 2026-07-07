@@ -86,3 +86,19 @@ describe("Contextual segment actions", () => {
     expect(labels).not.toContain("Add action beat");
   });
 });
+
+describe("Structure into blocks action", () => {
+  it("offers 'Structure into blocks' on a multi-paragraph narration", () => {
+    const multiParagraph: Block = { id: "b", type: "narration", text: "One.\n\nTwo.", raw: "", dirty: false };
+    const { result } = renderHook(() => useBlockActions(multiParagraph));
+    const labels = result.current.flat().map((a) => a.label);
+    expect(labels).toContain("Structure into blocks");
+  });
+
+  it("hides 'Structure into blocks' on a single plain paragraph", () => {
+    const singleLine: Block = { id: "b", type: "narration", text: "Just one line.", raw: "", dirty: false };
+    const { result } = renderHook(() => useBlockActions(singleLine));
+    const labels = result.current.flat().map((a) => a.label);
+    expect(labels).not.toContain("Structure into blocks");
+  });
+});

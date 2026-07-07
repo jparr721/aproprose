@@ -162,3 +162,15 @@ test("two adjacent \\textbf spans are a break, not a corrupted scene", () => {
   expect(reparsed.level).toBe("break");
   expect(serializeChapter([{ ...reparsed, dirty: true }])).toBe(src);
 });
+
+test("round-trips a three-quote chain when clean", () => {
+  const src =
+    "``All right,'' Brian said. ``Start with this.'' He leaned in. ``Nothing looks as bad.''\n\n";
+  expect(serializeChapter(parseChapter(src))).toBe(src);
+});
+
+test("re-serializes a dirtied chained block to the canonical form", () => {
+  const blocks = parseChapter("``A,'' he said. ``B.''\n\n");
+  blocks[0].dirty = true;
+  expect(serializeChapter(blocks)).toBe("``A,'' he said. ``B.''\n\n");
+});

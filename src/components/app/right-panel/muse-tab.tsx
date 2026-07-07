@@ -5,7 +5,7 @@
 // (muse-store); only the staged proposal persists, via ai-cache-store.
 
 import { useState } from "react";
-import { IconCheck, IconPencil, IconPlayerStop, IconWand } from "@tabler/icons-react";
+import { IconCheck, IconPencil, IconPlayerStop, IconTrash, IconWand } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
@@ -108,8 +108,20 @@ function MuseTabBody() {
   // the canned directive plus the cursor line the dispatch sites also append
   // (the agent's read_chapter grounding does not carry the selection).
   const onPickUpAndGo = () => {
-    const { selectedId } = useProjectStore.getState();
-    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(selectedId));
+    const { selectedId, editing } = useProjectStore.getState();
+    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(editing ? selectedId : null));
+  };
+
+  const discardStaged = () => {
+    const chapterId = useProjectStore.getState().activeChapterId;
+    if (chapterId) {
+      useAiCacheStore.getState().patch(aiCacheKey("edit", chapterId, "chapter", ""), {
+        data: null,
+        loading: false,
+        error: null,
+      });
+    }
+    useMuseStore.getState().reset();
   };
 
   // Prefill + focus on a parked intent; autoRun intents (Pick up and go)
@@ -210,6 +222,9 @@ function MuseTabBody() {
                     onClick={() => dispatchAiIntent({ tab: "edit", scope: "chapter" })}
                   >
                     <IconPencil /> Review in Edit
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={discardStaged}>
+                    <IconTrash /> Discard changes
                   </Button>
                 </CardContent>
               </Card>

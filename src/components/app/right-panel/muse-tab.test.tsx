@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.mocked(supportsTools).mockReturnValue(true);
   vi.mocked(runAgent).mockReset();
   useMuseStore.getState().reset();
-  useProjectStore.setState({ activeChapterId: "ch1", selectedId: null, blocks: [] });
+  useProjectStore.setState({ activeChapterId: "ch1", selectedId: null, editing: false, blocks: [] });
   useAiCacheStore.setState({ entries: {} });
   useAiActivityStore.setState({ status: {} });
   useAiIntentStore.setState({ pending: null });
@@ -176,7 +176,7 @@ describe("MuseTab", () => {
 
   it("offers Pick up and go in the idle state, which starts a cursor-anchored run", async () => {
     vi.mocked(runAgent).mockResolvedValue(null);
-    useProjectStore.setState({ selectedId: "b2" });
+    useProjectStore.setState({ selectedId: "b2", editing: true });
     render(<MuseTab />);
     fireEvent.click(screen.getByText("Pick up and go"));
     await waitFor(() =>
@@ -184,6 +184,37 @@ describe("MuseTab", () => {
         PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix("b2"),
         expect.anything(),
       ),
+    );
+  });
+
+  it("does not use a nav-only highlight for Pick up and go", async () => {
+    vi.mocked(runAgent).mockResolvedValue(null);
+    useProjectStore.setState({ selectedId: "b2", editing: false });
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("Pick up and go"));
+    await waitFor(() =>
+      expect(runAgent).toHaveBeenCalledWith(
+        PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(null),
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("can discard staged changes before running Muse again", async () => {
+    vi.mocked(runAgent).mockResolvedValue(PROPOSAL);
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => expect(screen.getByText("Review in Edit")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("Discard changes"));
+
+    expect(useMuseStore.getState().status).toBe("idle");
+    expect(useAiCacheStore.getState().entries["edit:ch1:chapter:"]?.data).toBeNull();
+    vi.mocked(runAgent).mockClear();
+
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() =>
+      expect(runAgent).toHaveBeenCalledWith("raise the stakes", expect.anything()),
     );
   });
 });

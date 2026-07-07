@@ -3,6 +3,7 @@
 // Everything here operates on raw `block.text` (markers included), which is the
 // exact string replace writes back, so search target == replace target. The
 // store + UI sit on top; this layer is stateless and unit-tested in isolation.
+// Note: dialogue block tail segments (beats, chained quotes) are not indexed by find/replace - only block.text.
 
 import type { Block, BlockTextEdit } from "@/lib/types";
 

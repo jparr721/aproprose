@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.11.0",
+    "date": "2026-07-06",
+    "summary": "Daily writing goals, custom AI voice and editing rules, steadier AI edits, and Windows support.",
+    "highlights": [
+      "Set a daily word goal and watch progress fill a new sidebar bar; the stats view shows how often you hit your goal and marks goal-met days on the activity calendar.",
+      "New Writing voice and Editing and Muse rules fields in the AI settings let you shape how the AI writes and edits across every tool.",
+      "The AI now keeps each edit inside its own paragraph instead of merging or emptying blocks when revising.",
+      "The AI now treats italics and bold in your prose as formatting to preserve, not errors to correct.",
+      "The Settings About section now shows the app version and full changelog inline, and update notices carry the real release notes.",
+      "Windows installer is now available, along with a macOS install script that clears the download quarantine on first launch."
+    ]
+  },
+  {
     "version": "0.10.0",
     "date": "2026-07-02",
     "summary": "A new Muse agent, structural AI edits, and smarter in-place block editing",

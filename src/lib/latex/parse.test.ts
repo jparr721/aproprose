@@ -28,3 +28,28 @@ it("falls through to latex when two quotes have no beat between them", () => {
   const [b] = parseChapter("``A'' ``B''\n");
   expect(b.type).toBe("latex");
 });
+
+it("keeps malformed dialogue with no closing quote as latex", () => {
+  const src = "``A\n\n";
+  const [b] = parseChapter(src);
+  expect(b.type).toBe("latex");
+  expect(b.text).toBe("``A");
+  expect(serializeChapter([b])).toBe(src);
+});
+
+it("preserves whitespace-only blank-line separators byte-for-byte", () => {
+  const src = "First paragraph.\n  \t\nSecond paragraph.\n";
+  const blocks = parseChapter(src);
+  expect(blocks.map((b) => b.text)).toEqual(["First paragraph.", "Second paragraph."]);
+  expect(blocks.map((b) => b.raw)).toEqual(["First paragraph.\n  \t\n", "Second paragraph.\n"]);
+  expect(serializeChapter(blocks)).toBe(src);
+});
+
+it("keeps leading blank lines attached to the first parsed segment", () => {
+  const src = "\n\nFirst paragraph.\n";
+  const blocks = parseChapter(src);
+  expect(blocks).toHaveLength(2);
+  expect(blocks[0].raw).toBe("\n\n");
+  expect(blocks[1].text).toBe("First paragraph.");
+  expect(serializeChapter(blocks)).toBe(src);
+});

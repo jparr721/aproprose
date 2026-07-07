@@ -100,3 +100,17 @@ describe("structurePassage - adjacent quotes with no beat between them", () => {
     expect(reparsed[0].type).toBe("dialogue");
   });
 });
+
+describe("structurePassage - malformed quotes", () => {
+  it("keeps quote-first text with no closing quote as narration", () => {
+    const [b] = structurePassage('"Wait for it', noCast);
+    expect(b.type).toBe("narration");
+    expect(b.text).toBe('"Wait for it');
+  });
+
+  it("keeps leading text with no closing quote together as narration", () => {
+    const [b] = structurePassage('Brian said, "Wait for it', noCast);
+    expect(b.type).toBe("narration");
+    expect(b.text).toBe('Brian said, "Wait for it');
+  });
+});

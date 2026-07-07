@@ -28,12 +28,15 @@ function classifyParagraph(para: string, cast: Character[]): Block[] {
   if (firstQuote > 0) {
     const lead = para.slice(0, firstQuote).trim();
     const rest = para.slice(firstQuote);
+    const dialogue = dialogueFrom(rest, cast, lead);
+    if (dialogue === null) return [narration(para)];
     const blocks: Block[] = [];
     if (lead.length > 0) blocks.push(narration(lead));
-    blocks.push(dialogueFrom(rest, cast, lead));
+    blocks.push(dialogue);
     return blocks;
   }
-  return [dialogueFrom(para, cast, undefined)];
+  const dialogue = dialogueFrom(para, cast, undefined);
+  return dialogue === null ? [narration(para)] : [dialogue];
 }
 
 function narration(text: string): Block {
@@ -43,7 +46,7 @@ function narration(text: string): Block {
 /** Build a (possibly chained) dialogue block from a paragraph that starts with a
  *  `"` quote. `leadHint` is any narration split off the front, used for speaker
  *  inference (a "Brian said." tag names the speaker of the quote that follows). */
-function dialogueFrom(para: string, cast: Character[], leadHint: string | undefined): Block {
+function dialogueFrom(para: string, cast: Character[], leadHint: string | undefined): Block | null {
   const segments: DialogueSegment[] = [];
   const re = /"([^"]*)"/g;
   let last = 0;
@@ -62,6 +65,7 @@ function dialogueFrom(para: string, cast: Character[], leadHint: string | undefi
     }
     last = m.index + m[0].length;
   }
+  if (segments.length === 0 || segments[0].kind !== "quote") return null;
   const trailing = para.slice(last).trim();
   if (trailing.length > 0) segments.push({ kind: "beat", text: trailing });
 

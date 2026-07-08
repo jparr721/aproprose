@@ -6,7 +6,7 @@ import {
   stripCodeFences,
   commitRange,
   diffRange,
-  openCodeArgs,
+  codexArgs,
   type ChangelogEntry,
 } from "./generate-changelog";
 
@@ -83,17 +83,8 @@ describe("generate-changelog", () => {
     expect(diffRange("v0.3.0")).toBe("v0.3.0..HEAD");
   });
 
-  it("openCodeArgs runs the Codex model through OpenCode", () => {
-    expect(openCodeArgs("/tmp/changelog-prompt.txt")).toEqual([
-      "run",
-      "--model",
-      "openai/gpt-5.5",
-      "--format",
-      "default",
-      "Use the attached changelog prompt file as your full instructions. Return only the JSON object.",
-      "-f",
-      "/tmp/changelog-prompt.txt",
-    ]);
+  it("codexArgs runs Codex directly without a model or default overrides", () => {
+    expect(codexArgs()).toEqual(["exec", "-"]);
   });
 
   it("prependEntry puts the new entry first", () => {

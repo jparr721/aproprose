@@ -22,7 +22,7 @@ export type DraftEntry = Pick<ChangelogEntry, "summary" | "highlights">;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const OPENCODE_MODEL = "openai/gpt-5.3-codex-spark";
+const OPENCODE_MODEL = "openai/gpt-5.5";
 const OPENCODE_MESSAGE =
   "Use the attached changelog prompt file as your full instructions. Return only the JSON object.";
 

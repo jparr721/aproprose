@@ -87,7 +87,7 @@ describe("generate-changelog", () => {
     expect(openCodeArgs("/tmp/changelog-prompt.txt")).toEqual([
       "run",
       "--model",
-      "openai/gpt-5.3-codex-spark",
+      "openai/gpt-5.5",
       "--format",
       "default",
       "Use the attached changelog prompt file as your full instructions. Return only the JSON object.",

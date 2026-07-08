@@ -6,6 +6,7 @@ import {
   stripCodeFences,
   commitRange,
   diffRange,
+  openCodeArgs,
   type ChangelogEntry,
 } from "./generate-changelog";
 
@@ -80,6 +81,19 @@ describe("generate-changelog", () => {
   it("diffRange diffs the empty tree with no prior tag, else the tag range", () => {
     expect(diffRange(null)).toBe("4b825dc642cb6eb9a060e54bf8d69288fbee4904..HEAD");
     expect(diffRange("v0.3.0")).toBe("v0.3.0..HEAD");
+  });
+
+  it("openCodeArgs runs the Codex model through OpenCode", () => {
+    expect(openCodeArgs("/tmp/changelog-prompt.txt")).toEqual([
+      "run",
+      "--model",
+      "openai/gpt-5.3-codex-spark",
+      "--format",
+      "default",
+      "Use the attached changelog prompt file as your full instructions. Return only the JSON object.",
+      "-f",
+      "/tmp/changelog-prompt.txt",
+    ]);
   });
 
   it("prependEntry puts the new entry first", () => {

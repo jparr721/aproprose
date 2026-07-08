@@ -78,8 +78,8 @@ _release VERSION MODE:
     # cheap, deterministic check fails before the expensive AI changelog step writes anything.
     echo "==> version"
     bun run scripts/set-version.ts "$ver"
-    # Generate the user-facing changelog entry (claude -p). Interactive mode reviews it in
-    # $EDITOR; auto mode (--yes) accepts the AI draft verbatim. Aborts if claude is
+    # Generate the user-facing changelog entry (OpenCode with Codex). Interactive mode reviews
+    # it in $EDITOR; auto mode (--yes) accepts the AI draft verbatim. Aborts if OpenCode is
     # missing/errors or the entry is invalid.
     echo "==> changelog"
     if [ "$mode" = "auto" ]; then

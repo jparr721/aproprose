@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.12.2",
+    "date": "2026-07-08",
+    "summary": "Aproprose now protects unsaved writing when closing or updating the app.",
+    "highlights": [
+      "BUG FIX: Unsaved chapter changes are saved automatically before the app closes.",
+      "BUG FIX: Updates are canceled if your work cannot be saved safely before relaunching."
+    ]
+  },
+  {
     "version": "0.12.1",
     "date": "2026-07-08",
     "summary": "The app now saves your draft before exit or update, so you are less likely to lose unsaved chapter changes.",

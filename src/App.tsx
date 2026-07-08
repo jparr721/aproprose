@@ -21,6 +21,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { toast } from "sonner";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
@@ -43,7 +46,8 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import { useAiPersistence } from "@/stores/ai-persistence";
 import { cn } from "@/lib/utils";
-import { useRef } from "react";
+import { saveBeforeExit } from "@/lib/exit-guard";
+import { useEffect, useRef } from "react";
 
 function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -140,6 +144,40 @@ function UnsavedGuard() {
   );
 }
 
+function ProcessExitGuard(): null {
+  const saving = useRef(false);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const appWindow = getCurrentWindow();
+    const unlisten = appWindow.onCloseRequested(async (event) => {
+      if (!useProjectStore.getState().chapterDirty) return;
+      event.preventDefault();
+      if (saving.current) return;
+      saving.current = true;
+      try {
+        const safeToExit = await saveBeforeExit({
+          hasUnsavedChanges: () => useProjectStore.getState().chapterDirty,
+          saveChanges: () => useProjectStore.getState().saveChapter(),
+        });
+        if (safeToExit) void appWindow.close();
+        else toast.error("Couldn't save changes", { description: "Close canceled." });
+      } catch (error) {
+        toast.error("Couldn't save changes", {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        saving.current = false;
+      }
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  return null;
+}
+
 function MigrationGuard() {
   const needsMigration = useProjectStore((s) => s.needsMigration);
   const migrate = useProjectStore((s) => s.migrateProject);
@@ -192,6 +230,7 @@ function App() {
       <UnsavedGuard />
       <MigrationGuard />
       <UpdateChecker />
+      <ProcessExitGuard />
       <WhatsNewDialog />
       <Toaster position="bottom-right" />
     </TooltipProvider>

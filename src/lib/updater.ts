@@ -15,6 +15,7 @@ export interface UpdateFlowDeps {
   readonly check: () => Promise<AvailableUpdate | null>;
   readonly install: (update: AvailableUpdate) => Promise<void>;
   readonly promptToInstall: (update: AvailableUpdate) => Promise<boolean>;
+  readonly prepareToExit: () => Promise<boolean>;
   readonly notifyChecking: () => void;
   readonly notifyUpToDate: () => void;
   readonly notifyError: (error: unknown) => void;
@@ -44,6 +45,11 @@ export async function runUpdateFlow(mode: UpdateMode, deps: UpdateFlowDeps): Pro
   if (!confirmed) return;
 
   try {
+    const safeToExit = await deps.prepareToExit();
+    if (!safeToExit) {
+      deps.notifyError(new Error("Save changes before updating"));
+      return;
+    }
     await deps.install(update);
   } catch (error) {
     deps.notifyError(error);

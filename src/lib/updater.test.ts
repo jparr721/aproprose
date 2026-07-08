@@ -9,6 +9,7 @@ function makeDeps(overrides: Partial<UpdateFlowDeps>): UpdateFlowDeps {
     check: vi.fn(async () => null),
     install: vi.fn(async () => {}),
     promptToInstall: vi.fn(async () => false),
+    prepareToExit: vi.fn(async () => true),
     notifyChecking: vi.fn(),
     notifyUpToDate: vi.fn(),
     notifyError: vi.fn(),
@@ -52,7 +53,18 @@ describe("runUpdateFlow", () => {
     });
     await runUpdateFlow("auto", deps);
     expect(deps.promptToInstall).toHaveBeenCalledWith(UPDATE);
+    expect(deps.prepareToExit).toHaveBeenCalledOnce();
     expect(deps.install).toHaveBeenCalledWith(UPDATE);
+  });
+
+  it("does not install when unsaved changes cannot be saved before relaunch", async () => {
+    const deps = makeDeps({
+      check: vi.fn(async () => UPDATE),
+      promptToInstall: vi.fn(async () => true),
+      prepareToExit: vi.fn(async () => false),
+    });
+    await runUpdateFlow("auto", deps);
+    expect(deps.install).not.toHaveBeenCalled();
   });
 
   it("does not install when the user dismisses the prompt", async () => {

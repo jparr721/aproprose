@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { parseUpdateNotes } from "@/lib/changelog";
 import { useChangelogStore } from "@/stores/changelog-store";
+import { saveBeforeExit } from "@/lib/exit-guard";
+import { useProjectStore } from "@/stores/project-store";
 
 const UPDATE_TOAST_ID = "app-update";
 
@@ -70,6 +72,11 @@ function buildDeps(): UpdateFlowDeps {
       await handle.downloadAndInstall();
       await relaunch();
     },
+    prepareToExit: () =>
+      saveBeforeExit({
+        hasUnsavedChanges: () => useProjectStore.getState().chapterDirty,
+        saveChanges: () => useProjectStore.getState().saveChapter(),
+      }),
     notifyChecking: () => {
       toast.loading("Checking for updates", { id: UPDATE_TOAST_ID });
     },

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.12.1",
+    "date": "2026-07-08",
+    "summary": "The app now saves your draft before exit or update, so you are less likely to lose unsaved chapter changes.",
+    "highlights": [
+      "Before closing the app, unsaved chapter changes are automatically saved first, and exit is blocked with an error if saving fails.",
+      "Update installs now pause and cancel if your work cannot be saved safely before relaunching."
+    ]
+  },
+  {
     "version": "0.12.0",
     "date": "2026-07-07",
     "summary": "Richer dialogue editing plus new tools to structure prose into blocks, with a smarter Muse",

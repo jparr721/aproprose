@@ -22,6 +22,9 @@ export type DraftEntry = Pick<ChangelogEntry, "summary" | "highlights">;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const OPENCODE_MODEL = "openai/gpt-5.3-codex-spark";
+const OPENCODE_MESSAGE =
+  "Use the attached changelog prompt file as your full instructions. Return only the JSON object.";
 
 export function buildPrompt(commitSubjects: string[], diff: string): string {
   const commits = commitSubjects.map((s) => `- ${s}`).join("\n");
@@ -52,10 +55,10 @@ export function parseEntry(stdout: string): DraftEntry {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`claude did not return valid JSON. Got:\n${stdout}`);
+    throw new Error(`OpenCode did not return valid JSON. Got:\n${stdout}`);
   }
   if (typeof parsed !== "object" || parsed === null) {
-    throw new Error(`Expected a JSON object from claude, got: ${text}`);
+    throw new Error(`Expected a JSON object from OpenCode, got: ${text}`);
   }
   const obj = parsed as Record<string, unknown>;
   const summary = obj.summary;
@@ -120,17 +123,34 @@ function collectDiff(range: string): string {
   });
 }
 
-function runClaude(prompt: string): string {
+export function openCodeArgs(promptFilePath: string): string[] {
+  return [
+    "run",
+    "--model",
+    OPENCODE_MODEL,
+    "--format",
+    "default",
+    OPENCODE_MESSAGE,
+    "-f",
+    promptFilePath,
+  ];
+}
+
+function runOpenCode(prompt: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "changelog-prompt-"));
+  const file = join(dir, "prompt.txt");
   try {
-    return execFileSync("claude", ["-p"], {
-      input: prompt,
+    writeFileSync(file, prompt);
+    return execFileSync("opencode", openCodeArgs(file), {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (e) {
     throw new Error(
-      `Failed to run "claude -p" (is the Claude CLI installed and on PATH?): ${String(e)}`,
+      `Failed to run "opencode run --model ${OPENCODE_MODEL}" (is OpenCode installed and authenticated?): ${String(e)}`,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -181,7 +201,7 @@ function main(): void {
     collectCommits(commitRange(lastTag)),
     collectDiff(diffRange(lastTag)),
   );
-  const draft = parseEntry(runClaude(prompt));
+  const draft = parseEntry(runOpenCode(prompt));
   // --yes accepts the AI draft verbatim (non-interactive release); otherwise the
   // author reviews/edits it in $EDITOR before it is written.
   const reviewed = autoAccept ? draft : reviewInEditor(draft);

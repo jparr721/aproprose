@@ -16,6 +16,14 @@ describe("DailyGoalInput", () => {
     expect((screen.getByLabelText("Daily word goal") as HTMLInputElement).value).toBe("750");
   });
 
+  it("uses the native number-only input with a lower bound", () => {
+    render(<DailyGoalInput value={750} submitLabel="Save" onSubmit={vi.fn()} />);
+    const input = screen.getByLabelText("Daily word goal") as HTMLInputElement;
+    expect(input.type).toBe("number");
+    expect(input.inputMode).toBe("numeric");
+    expect(input.min).toBe("1");
+  });
+
   it("submits the parsed integer goal", () => {
     const onSubmit = vi.fn();
     render(<DailyGoalInput value={null} submitLabel="Set" onSubmit={onSubmit} />);

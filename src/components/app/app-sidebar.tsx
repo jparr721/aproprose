@@ -130,7 +130,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="offcanvas">
       {/* On macOS the native traffic lights are pinned to the window's top-left
-          (x16/y16). When the sidebar is open that corner is the header, so we
+          (x24/y24). When the sidebar is open that corner is the header, so we
           reserve a top-bar-height band (pt-11 = h-11) to drop the project name
           clear of the lights instead of nudging the name itself. */}
       <SidebarHeader className={cn(IS_MAC && "pt-11")}>

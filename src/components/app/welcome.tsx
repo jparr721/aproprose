@@ -39,7 +39,7 @@ export function Welcome() {
         data-tauri-drag-region
         className={cn(
           "flex h-11 shrink-0 items-center justify-end px-3",
-          IS_MAC && "pl-20",
+          IS_MAC && "pl-24",
         )}
       >
         <WindowControls />

@@ -100,7 +100,7 @@ export function TopBar() {
 
   // On macOS the traffic lights only sit over the top bar when the sidebar is
   // collapsed; when it's open they're over the sidebar header (which reserves
-  // its own band), so the pl-20 inset would just be wasted space here.
+  // its own band), so the pl-24 inset would just be wasted space here.
   const sidebarState = useSidebar().state;
 
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -124,7 +124,7 @@ export function TopBar() {
       data-tauri-drag-region
       className={cn(
         "flex h-11 items-center gap-3 border-b border-border bg-background px-3",
-        IS_MAC && sidebarState === "collapsed" && "pl-20",
+        IS_MAC && sidebarState === "collapsed" && "pl-24",
       )}
     >
       {/* Left: sidebar toggle, document identity, build status. */}

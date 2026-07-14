@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.13.0",
+    "date": "2026-07-13",
+    "summary": "Improves macOS window polish, writing stats, and themed inputs.",
+    "highlights": [
+      "BUG FIX: macOS window controls now sit with better spacing in the title area.",
+      "BUG FIX: Writing goal hits now appear in their own chart instead of as outlines on activity cells.",
+      "BUG FIX: Number inputs now match the active light or dark theme.",
+      "BUG FIX: Save button arrows now display correctly."
+    ]
+  },
+  {
     "version": "0.12.2",
     "date": "2026-07-08",
     "summary": "Aproprose now protects unsaved writing when closing or updating the app.",

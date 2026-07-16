@@ -126,7 +126,7 @@ describe("sanitizeProposal insert/remove/move rules", () => {
     expect(p.changes).toHaveLength(1);
   });
 
-  it("keeps only selected structural changes", () => {
+  it("confines every change kind to the allowed target and drops end-appends", () => {
     const kept = sanitizeProposal(
       proposal([
         change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
@@ -143,7 +143,30 @@ describe("sanitizeProposal insert/remove/move rules", () => {
       ["b1"],
     ).changes;
 
-    expect(kept.map((item) => item.kind)).toEqual(["rewrite", "insert", "remove", "move"]);
+    // Only the b1-anchored changes survive: asserting the block/afterId (not
+    // just the kind) catches an inverted or mis-scoped allowlist that would keep
+    // the b2 variants while leaving the kinds identical.
+    expect(kept).toEqual([
+      change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
+      change({ kind: "insert", afterId: "b1", type: "narration", newText: "after b1" }),
+      change({ kind: "remove", blockId: "b1" }),
+      change({ kind: "move", blockId: "b1", toIndex: 1 }),
+    ]);
+  });
+
+  it("drops every change when the allowlist is empty (an empty selection permits nothing)", () => {
+    const kept = sanitizeProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
+        change({ kind: "insert", afterId: "b1", type: "narration", newText: "after b1" }),
+        change({ kind: "insert", afterId: null, type: "narration", newText: "at end" }),
+        change({ kind: "remove", blockId: "b2" }),
+      ]),
+      blocks,
+      [],
+    ).changes;
+
+    expect(kept).toEqual([]);
   });
 });
 

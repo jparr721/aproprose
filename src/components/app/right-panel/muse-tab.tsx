@@ -25,7 +25,7 @@ import { aiCacheKey } from "@/lib/ai/cache-key";
 import { buildEditRequest } from "@/lib/ai/context";
 import { editComposerState } from "@/lib/ai/edit-composer";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
-import { runAgent, type MuseScope } from "@/lib/ai/agent";
+import { runAgent, type MuseScopeKind } from "@/lib/ai/agent";
 import { supportsTools } from "@/lib/ai/model";
 import { describeAiError, isAbortError } from "@/lib/ai/errors";
 import { cn } from "@/lib/utils";
@@ -44,9 +44,9 @@ import {
 // survives remounts - starting a run replaces it, Stop aborts it.
 let activeController: AbortController | null = null;
 
-function museEditCacheKey(chapterId: string, scope: MuseScope, targetIds: string[]): string {
-  const selectionKey = scope === "block" ? targetIds.slice().sort().join(",") : "";
-  return aiCacheKey("edit", chapterId, scope, selectionKey);
+function museEditCacheKey(run: MuseRun): string {
+  const selectionKey = run.kind === "block" ? [...run.targetIds].sort().join(",") : "";
+  return aiCacheKey("edit", run.chapterId, run.kind, selectionKey);
 }
 
 function MuseTabBody() {
@@ -54,8 +54,9 @@ function MuseTabBody() {
   const steps = useMuseStore((s) => s.steps);
   const error = useMuseStore((s) => s.error);
   const staged = useMuseStore((s) => s.staged);
+  const outOfScope = useMuseStore((s) => s.outOfScope);
   const directive = useMuseStore((s) => s.directive);
-  const stagedScope = useMuseStore((s) => s.scope);
+  const stagedRun = useMuseStore((s) => s.run);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
   const selectedIds = useProjectStore((s) => s.selectedIds);
@@ -64,7 +65,7 @@ function MuseTabBody() {
   const aiProvider = useSettingsStore((s) => s.aiProvider);
   const composer = usePromptInputController();
   const [focusKey, setFocusKey] = useState(0);
-  const [scope, setScope] = useState<MuseScope>("chapter");
+  const [scope, setScope] = useState<MuseScopeKind>("chapter");
   const running = status === "running";
   const blockTargetIds = activeChapterId
     ? buildEditRequest("block", "").blocks.map((block) => block.id)
@@ -83,30 +84,30 @@ function MuseTabBody() {
   const blockLabel =
     blockTargetIds.length > 1 ? "These " + blockTargetIds.length + " blocks" : "This block";
 
-  const begin = (text: string, retryRun: MuseRun | null) => {
+  // Resolve the current toggle + selection into a runnable scope. Block scope
+  // needs a non-empty target set; without one there is no valid block run.
+  const resolveFreshRun = (): MuseRun | null => {
+    const chapterId = useProjectStore.getState().activeChapterId;
+    if (chapterId === null) return null;
+    if (scope === "chapter") return { chapterId, kind: "chapter" };
+    const [first, ...rest] = blockTargetIds;
+    if (first === undefined) return null;
+    return { chapterId, kind: "block", targetIds: [first, ...rest] };
+  };
+
+  const begin = (text: string, run: MuseRun) => {
     const trimmed = text.trim();
     if (!trimmed || useMuseStore.getState().status === "running") return;
     const chapterId = useProjectStore.getState().activeChapterId;
     if (chapterId === null) return;
-    if (retryRun !== null && retryRun.chapterId !== chapterId) {
+    // A run frozen against another chapter (a retry after switching away) can't
+    // run here: its block ids belong to a chapter that is no longer active.
+    if (run.chapterId !== chapterId) {
       useMuseStore
         .getState()
         .fail("Return to the chapter where this Muse run started before retrying.");
       return;
     }
-    const run: MuseRun =
-      retryRun === null
-        ? {
-            chapterId,
-            scope,
-            targetIds: scope === "block" ? [...blockTargetIds] : [],
-          }
-        : {
-            chapterId: retryRun.chapterId,
-            scope: retryRun.scope,
-            targetIds: [...retryRun.targetIds],
-          };
-    if (run.scope === "block" && run.targetIds.length === 0) return;
     const controller = new AbortController();
     activeController = controller;
     useMuseStore.getState().start(trimmed, run);
@@ -116,23 +117,22 @@ function MuseTabBody() {
         // Deliberately NOT withAiRetry: retrying an agent run re-executes its
         // tools (fresh reads, a second critique call); run once and surface
         // the error instead.
-        const proposal = await runAgent(trimmed, {
+        const { proposal, outOfScope } = await runAgent(trimmed, {
           signal: controller.signal,
           onStep: (step) => useMuseStore.getState().addStep(step),
-          scope: run.scope,
-          targetIds: run.targetIds,
+          scope: run,
         });
         if (proposal && proposal.changes.length > 0) {
-          useAiCacheStore
-            .getState()
-            .patch(museEditCacheKey(run.chapterId, run.scope, run.targetIds), {
-              data: proposal,
-              loading: false,
-              error: null,
-              instruction: trimmed,
-            });
+          useAiCacheStore.getState().patch(museEditCacheKey(run), {
+            data: proposal,
+            loading: false,
+            error: null,
+            instruction: trimmed,
+          });
           useAiActivityStore.getState().finish("edit", "done");
           useMuseStore.getState().finishStaged();
+        } else if (outOfScope) {
+          useMuseStore.getState().finishOutOfScope();
         } else {
           useMuseStore.getState().finishEmpty();
         }
@@ -156,16 +156,22 @@ function MuseTabBody() {
 
   // The one-click writer's-block helper: the same flow as an autoRun intent,
   // the canned directive plus the cursor line the dispatch sites also append
-  // (the agent's read_chapter grounding does not carry the selection).
+  // (the agent's read_chapter grounding does not carry the selection). Always
+  // chapter scope - continuing the scene appends past any selection, which a
+  // block scope would forbid.
   const onPickUpAndGo = () => {
-    const { selectedId, editing } = useProjectStore.getState();
-    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(editing ? selectedId : null), null);
+    const { selectedId, editing, activeChapterId } = useProjectStore.getState();
+    if (activeChapterId === null) return;
+    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(editing ? selectedId : null), {
+      chapterId: activeChapterId,
+      kind: "chapter",
+    });
   };
 
   const discardStaged = () => {
-    const { chapterId, scope, targetIds } = useMuseStore.getState();
-    if (chapterId !== null) {
-      useAiCacheStore.getState().patch(museEditCacheKey(chapterId, scope, targetIds), {
+    const { run } = useMuseStore.getState();
+    if (run !== null) {
+      useAiCacheStore.getState().patch(museEditCacheKey(run), {
         data: null,
         loading: false,
         error: null,
@@ -179,7 +185,10 @@ function MuseTabBody() {
   // controlled mode, so prefill needs no new AiComposer prop.
   useAiIntent("muse", (intent) => {
     if (intent.autoRun && supportsTools() && useMuseStore.getState().status !== "running") {
-      begin(intent.instruction ?? "", null);
+      // autoRun intents are continuations (Pick up and go), so they run chapter
+      // scope regardless of the toggle - see onPickUpAndGo.
+      const chapterId = useProjectStore.getState().activeChapterId;
+      if (chapterId !== null) begin(intent.instruction ?? "", { chapterId, kind: "chapter" });
       return;
     }
     if (intent.instruction) composer.textInput.setInput(intent.instruction);
@@ -257,9 +266,8 @@ function MuseTabBody() {
             <AiError
               error={error}
               onRetry={() => {
-                const { chapterId, scope, targetIds } = useMuseStore.getState();
-                if (chapterId === null) return;
-                begin(directive, { chapterId, scope, targetIds });
+                const { run } = useMuseStore.getState();
+                if (run !== null) begin(directive, run);
               }}
             />
           ) : null}
@@ -272,16 +280,17 @@ function MuseTabBody() {
                 <CardContent className="flex flex-col items-start gap-2">
                   <TypographyMuted className="text-xs">
                     Muse staged a set of changes for{" "}
-                    {stagedScope === "block" ? "these selected blocks" : "this chapter"}. Review and
-                    apply them change by change in the Edit tab.
+                    {stagedRun?.kind === "block" ? "these selected blocks" : "this chapter"}. Review
+                    and apply them change by change in the Edit tab.
                   </TypographyMuted>
                   <Button
                     size="sm"
                     onClick={() => {
-                      const { scope, targetIds } = useMuseStore.getState();
+                      const { run } = useMuseStore.getState();
+                      if (run === null) return;
                       dispatchAiIntent(
-                        scope === "block"
-                          ? { tab: "edit", scope: "block", blockIds: targetIds }
+                        run.kind === "block"
+                          ? { tab: "edit", scope: "block", blockIds: [...run.targetIds] }
                           : { tab: "edit", scope: "chapter" },
                       );
                     }}
@@ -293,6 +302,11 @@ function MuseTabBody() {
                   </Button>
                 </CardContent>
               </Card>
+            ) : outOfScope ? (
+              <PanelHint>
+                Muse proposed changes outside your selected blocks. Widen the
+                selection or switch to Whole chapter.
+              </PanelHint>
             ) : (
               <PanelHint>
                 Muse finished without staging changes. Try a more specific
@@ -305,7 +319,10 @@ function MuseTabBody() {
       <AiComposer
         placeholder={composerPlaceholder}
         loading={running}
-        onSubmit={(text) => begin(text, null)}
+        onSubmit={(text) => {
+          const run = resolveFreshRun();
+          if (run !== null) begin(text, run);
+        }}
         focusKey={focusKey}
         disabled={composerDisabled}
         anchorMode="chapter"

@@ -108,11 +108,10 @@ describe("runAgent tool loop", () => {
       }),
     ]);
     const steps: AgentStep[] = [];
-    const proposal = await runAgent("tighten the opening", {
+    const { proposal } = await runAgent("tighten the opening", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
-      scope: "chapter",
-      targetIds: [],
+      scope: { kind: "chapter" },
     });
     expect(proposal).toEqual({
       chapterId: "ch1",
@@ -127,11 +126,10 @@ describe("runAgent tool loop", () => {
   it("returns null when the model answers in prose without staging", async () => {
     useModel([prose("The chapter already delivers this; no changes needed.")]);
     const steps: AgentStep[] = [];
-    const proposal = await runAgent("check the pacing", {
+    const { proposal } = await runAgent("check the pacing", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
-      scope: "chapter",
-      targetIds: [],
+      scope: { kind: "chapter" },
     });
     expect(proposal).toBeNull();
     expect(steps).toEqual([]);
@@ -144,11 +142,10 @@ describe("runAgent tool loop", () => {
         changes: [rewrite("b1", "New."), rewrite("ghost", "X.")],
       }),
     ]);
-    const proposal = await runAgent("tighten", {
+    const { proposal } = await runAgent("tighten", {
       signal: new AbortController().signal,
       onStep: () => {},
-      scope: "chapter",
-      targetIds: [],
+      scope: { kind: "chapter" },
     });
     expect(proposal?.changes.map((c) => c.blockId)).toEqual(["b1"]);
   });
@@ -162,19 +159,57 @@ describe("runAgent tool loop", () => {
       }),
     ]);
 
-    const proposal = await runAgent("tighten this", {
+    const { proposal, outOfScope } = await runAgent("tighten this", {
       signal: new AbortController().signal,
       onStep: () => {},
-      scope: "block",
-      targetIds: ["b1"],
+      scope: { kind: "block", targetIds: ["b1"] },
     });
 
     expect(proposal?.changes.map((change) => change.blockId)).toEqual(["b1"]);
+    expect(outOfScope).toBe(false);
     expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("[b2] (narration): She waited.");
     expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("LOCAL CHANGE TARGETS");
     expect(model.doGenerateCalls[0].prompt.find((message) => message.role === "system")?.content).toContain(
       "LOCAL CHANGE BOUNDARY",
     );
+  });
+
+  it("flags a block run whose staged changes all fell outside the selection", async () => {
+    useModel([
+      toolCall("stage_proposal", {
+        summary: "Neighbor revision",
+        changes: [rewrite("b2", "Only the neighbor changes.")],
+      }),
+    ]);
+
+    const { proposal, outOfScope } = await runAgent("tighten b1", {
+      signal: new AbortController().signal,
+      onStep: () => {},
+      scope: { kind: "block", targetIds: ["b1"] },
+    });
+
+    expect(proposal?.changes).toEqual([]);
+    expect(outOfScope).toBe(true);
+  });
+
+  it("does not flag out-of-scope when the model simply had nothing to change", async () => {
+    // A no-op rewrite (newText equals the current block text) is dropped by the
+    // sanitizer with or without the allowlist, so this is empty, not out of scope.
+    useModel([
+      toolCall("stage_proposal", {
+        summary: "No change",
+        changes: [rewrite("b1", "The rain fell.")],
+      }),
+    ]);
+
+    const { proposal, outOfScope } = await runAgent("tighten b1", {
+      signal: new AbortController().signal,
+      onStep: () => {},
+      scope: { kind: "block", targetIds: ["b1"] },
+    });
+
+    expect(proposal?.changes).toEqual([]);
+    expect(outOfScope).toBe(false);
   });
 
   it("fails the run when the active chapter changes between steps", async () => {
@@ -198,8 +233,7 @@ describe("runAgent tool loop", () => {
       runAgent("tighten", {
         signal: new AbortController().signal,
         onStep: () => {},
-        scope: "chapter",
-        targetIds: [],
+        scope: { kind: "chapter" },
       }),
     ).rejects.toThrow("Chapter changed during the Muse run.");
   });
@@ -216,7 +250,7 @@ describe("runAgent tool loop", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      runAgent("go", { signal: controller.signal, onStep: () => {}, scope: "chapter", targetIds: [] }),
+      runAgent("go", { signal: controller.signal, onStep: () => {}, scope: { kind: "chapter" } }),
     ).rejects.toThrow();
   });
 });
@@ -232,11 +266,10 @@ describe("runAgent get_critique", () => {
     });
     useModel([toolCall("get_critique", {}), prose("no changes needed")]);
     const steps: AgentStep[] = [];
-    const proposal = await runAgent("check pacing", {
+    const { proposal } = await runAgent("check pacing", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
-      scope: "chapter",
-      targetIds: [],
+      scope: { kind: "chapter" },
     });
     expect(proposal).toBeNull();
     expect(critique).not.toHaveBeenCalled();
@@ -247,7 +280,7 @@ describe("runAgent get_critique", () => {
     vi.mocked(critique).mockResolvedValue(notes);
     useModel([toolCall("get_critique", {}), prose("no changes needed")]);
     const signal = new AbortController().signal;
-    await runAgent("check pacing", { signal, onStep: () => {}, scope: "chapter", targetIds: [] });
+    await runAgent("check pacing", { signal, onStep: () => {}, scope: { kind: "chapter" } });
     expect(vi.mocked(critique).mock.calls[0][1]).toEqual({ signal });
     expect(useAiCacheStore.getState().entries["critique:ch1:chapter:"]).toMatchObject({
       data: notes,
@@ -265,8 +298,7 @@ describe("runAgent author preferences", () => {
     await runAgent("go", {
       signal: new AbortController().signal,
       onStep: () => {},
-      scope: "chapter",
-      targetIds: [],
+      scope: { kind: "chapter" },
     });
     const system = model.doGenerateCalls[0].prompt.find((m) => m.role === "system")?.content;
     expect(system).toContain("AUTHOR VOICE");

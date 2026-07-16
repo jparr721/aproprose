@@ -429,8 +429,9 @@ export const reviseResultSchema = z.object({
  * Drop changes the review UI can't safely apply. Rules: rewrite needs a known
  * blockId + newText that differs trimmed from the current text; insert needs
  * non-empty trimmed newText + a type + (afterId null or known); remove needs a
- * known blockId; move needs a known blockId + a toIndex. An allowlist confines
- * structural changes to selected targets, with inserts anchored after a target.
+ * known blockId; move needs a known blockId + a toIndex. When an allowlist is
+ * supplied it confines every change to those targets (inserts must anchor after
+ * a target, never at the chapter end); null leaves the proposal unrestricted.
  * Pure: returns a new proposal.
  */
 export function sanitizeProposal(

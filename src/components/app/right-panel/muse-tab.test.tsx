@@ -75,7 +75,7 @@ vi.mock("@/components/app/right-panel/shared", () => ({
 }));
 
 import { MuseTab } from "@/components/app/right-panel/muse-tab";
-import { runAgent } from "@/lib/ai/agent";
+import { runAgent, type AgentResult } from "@/lib/ai/agent";
 import { supportsTools } from "@/lib/ai/model";
 import { useMuseStore } from "@/stores/muse-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -109,6 +109,11 @@ const BLOCKS: Block[] = [
   { id: "b3", type: "narration", text: "Three.", raw: "", dirty: false },
 ];
 
+const result = (proposal: ManuscriptProposal | null, outOfScope: boolean): AgentResult => ({
+  proposal,
+  outOfScope,
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -136,7 +141,7 @@ describe("MuseTab", () => {
     vi.mocked(runAgent).mockImplementation(async (_directive, { onStep }) => {
       onStep({ tool: "read_chapter", label: "Reading the chapter" });
       onStep({ tool: "stage_proposal", label: "Drafting changes" });
-      return PROPOSAL;
+      return result(PROPOSAL, false);
     });
 
     render(<MuseTab />);
@@ -163,7 +168,7 @@ describe("MuseTab", () => {
       selectedIds: ["b2", "b1"],
       blocks: BLOCKS,
     });
-    vi.mocked(runAgent).mockResolvedValue(PROPOSAL);
+    vi.mocked(runAgent).mockResolvedValue(result(PROPOSAL, false));
 
     render(<MuseTab />);
     fireEvent.click(screen.getByText("These 2 blocks"));
@@ -173,14 +178,13 @@ describe("MuseTab", () => {
       expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL),
     );
     expect(vi.mocked(runAgent).mock.calls[0][1]).toMatchObject({
-      scope: "block",
-      targetIds: ["b1", "b2"],
+      scope: { kind: "block", targetIds: ["b1", "b2"] },
     });
   });
 
   it("keeps a selected Muse run tied to its frozen selection", async () => {
-    let resolveRun: ((proposal: ManuscriptProposal | null) => void) | undefined;
-    const pendingRun = new Promise<ManuscriptProposal | null>((resolve) => {
+    let resolveRun: ((r: AgentResult) => void) | undefined;
+    const pendingRun = new Promise<AgentResult>((resolve) => {
       resolveRun = resolve;
     });
     vi.mocked(runAgent).mockReturnValue(pendingRun);
@@ -198,7 +202,7 @@ describe("MuseTab", () => {
 
     useProjectStore.setState({ selectedId: "b3", selectedIds: [], blocks: BLOCKS });
     if (resolveRun === undefined) throw new Error("Muse run did not start.");
-    resolveRun(PROPOSAL);
+    resolveRun(result(PROPOSAL, false));
 
     await waitFor(() => expect(screen.getByText("Review in Edit")).toBeTruthy());
     expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL);
@@ -215,7 +219,9 @@ describe("MuseTab", () => {
   });
 
   it("retries selected Muse with its frozen target ids", async () => {
-    vi.mocked(runAgent).mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(PROPOSAL);
+    vi.mocked(runAgent)
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce(result(PROPOSAL, false));
     useProjectStore.setState({
       activeChapterId: "ch1",
       selectedId: "b2",
@@ -233,8 +239,7 @@ describe("MuseTab", () => {
 
     await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
     expect(vi.mocked(runAgent).mock.calls[1][1]).toMatchObject({
-      scope: "block",
-      targetIds: ["b1", "b2"],
+      scope: { kind: "block", targetIds: ["b1", "b2"] },
     });
     await waitFor(() =>
       expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL),
@@ -271,7 +276,7 @@ describe("MuseTab", () => {
   });
 
   it("Review in Edit parks a chapter-scope intent for the Edit tab", async () => {
-    vi.mocked(runAgent).mockResolvedValue(PROPOSAL);
+    vi.mocked(runAgent).mockResolvedValue(result(PROPOSAL, false));
     render(<MuseTab />);
     fireEvent.click(screen.getByText("send"));
     await waitFor(() => expect(screen.getByText("Review in Edit")).toBeTruthy());
@@ -326,7 +331,7 @@ describe("MuseTab", () => {
   });
 
   it("an autoRun intent starts the run immediately", async () => {
-    vi.mocked(runAgent).mockResolvedValue(null);
+    vi.mocked(runAgent).mockResolvedValue(result(null, false));
     useAiIntentStore.setState({
       pending: { tab: "muse", instruction: "pick up the scene", autoRun: true },
     });
@@ -345,7 +350,7 @@ describe("MuseTab", () => {
   });
 
   it("offers Pick up and go in the idle state, which starts a cursor-anchored run", async () => {
-    vi.mocked(runAgent).mockResolvedValue(null);
+    vi.mocked(runAgent).mockResolvedValue(result(null, false));
     useProjectStore.setState({ selectedId: "b2", editing: true });
     render(<MuseTab />);
     fireEvent.click(screen.getByText("Pick up and go"));
@@ -358,7 +363,7 @@ describe("MuseTab", () => {
   });
 
   it("does not use a nav-only highlight for Pick up and go", async () => {
-    vi.mocked(runAgent).mockResolvedValue(null);
+    vi.mocked(runAgent).mockResolvedValue(result(null, false));
     useProjectStore.setState({ selectedId: "b2", editing: false });
     render(<MuseTab />);
     fireEvent.click(screen.getByText("Pick up and go"));
@@ -371,7 +376,7 @@ describe("MuseTab", () => {
   });
 
   it("can discard staged changes before running Muse again", async () => {
-    vi.mocked(runAgent).mockResolvedValue(PROPOSAL);
+    vi.mocked(runAgent).mockResolvedValue(result(PROPOSAL, false));
     render(<MuseTab />);
     fireEvent.click(screen.getByText("send"));
     await waitFor(() => expect(screen.getByText("Review in Edit")).toBeTruthy());
@@ -386,5 +391,57 @@ describe("MuseTab", () => {
     await waitFor(() =>
       expect(runAgent).toHaveBeenCalledWith("raise the stakes", expect.anything()),
     );
+  });
+
+  it("refuses a retry after switching chapters and does not re-run the agent", async () => {
+    vi.mocked(runAgent).mockRejectedValueOnce(new Error("boom"));
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "b2",
+      selectedIds: ["b2", "b1"],
+      blocks: BLOCKS,
+    });
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("These 2 blocks"));
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => expect(screen.getByText("err")).toBeTruthy());
+
+    // The run is frozen against ch1; after switching to ch2 its block ids are
+    // stale, so the retry must fail with guidance rather than run against ch2.
+    useProjectStore.setState({ activeChapterId: "ch2" });
+    fireEvent.click(screen.getByText("retry"));
+
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(useMuseStore.getState().status).toBe("failed");
+    expect(useMuseStore.getState().error).toBe(
+      "Return to the chapter where this Muse run started before retrying.",
+    );
+  });
+
+  it("reports an out-of-scope block run instead of a generic empty result", async () => {
+    vi.mocked(runAgent).mockResolvedValue(
+      result({ chapterId: "ch1", summary: "s", changes: [] }, true),
+    );
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "b2",
+      selectedIds: ["b2", "b1"],
+      blocks: BLOCKS,
+    });
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("These 2 blocks"));
+    fireEvent.click(screen.getByText("send"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Muse proposed changes outside your selected blocks. Widen the selection or switch to Whole chapter.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]).toBeUndefined();
+    expect(useMuseStore.getState().outOfScope).toBe(true);
   });
 });

@@ -18,7 +18,7 @@ export interface GroundingSections {
   /** Id-labeled blocks ("[id] (type): text") with a caller-supplied label. */
   blocks?: { label: string; items: { id: string; type: BlockType; text: string }[] };
   /** Block ids Muse may change while retaining all blocks as context. */
-  targetIds?: string[];
+  targetIds?: readonly string[];
   /** The author's request, always rendered LAST. */
   instruction?: { label: string; text: string };
 }

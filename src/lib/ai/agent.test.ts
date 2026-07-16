@@ -111,6 +111,8 @@ describe("runAgent tool loop", () => {
     const proposal = await runAgent("tighten the opening", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
+      scope: "chapter",
+      targetIds: [],
     });
     expect(proposal).toEqual({
       chapterId: "ch1",
@@ -128,6 +130,8 @@ describe("runAgent tool loop", () => {
     const proposal = await runAgent("check the pacing", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
+      scope: "chapter",
+      targetIds: [],
     });
     expect(proposal).toBeNull();
     expect(steps).toEqual([]);
@@ -143,8 +147,34 @@ describe("runAgent tool loop", () => {
     const proposal = await runAgent("tighten", {
       signal: new AbortController().signal,
       onStep: () => {},
+      scope: "chapter",
+      targetIds: [],
     });
     expect(proposal?.changes.map((c) => c.blockId)).toEqual(["b1"]);
+  });
+
+  it("keeps full chapter grounding but drops unselected Muse changes", async () => {
+    const model = useModel([
+      toolCall("read_chapter", {}),
+      toolCall("stage_proposal", {
+        summary: "Local revision",
+        changes: [rewrite("b1", "Allowed."), rewrite("b2", "Blocked.")],
+      }),
+    ]);
+
+    const proposal = await runAgent("tighten this", {
+      signal: new AbortController().signal,
+      onStep: () => {},
+      scope: "block",
+      targetIds: ["b1"],
+    });
+
+    expect(proposal?.changes.map((change) => change.blockId)).toEqual(["b1"]);
+    expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("[b2] (narration): She waited.");
+    expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("LOCAL CHANGE TARGETS");
+    expect(model.doGenerateCalls[0].prompt.find((message) => message.role === "system")?.content).toContain(
+      "LOCAL CHANGE BOUNDARY",
+    );
   });
 
   it("fails the run when the active chapter changes between steps", async () => {
@@ -165,7 +195,12 @@ describe("runAgent tool loop", () => {
     });
     vi.mocked(getModel).mockResolvedValue(model);
     await expect(
-      runAgent("tighten", { signal: new AbortController().signal, onStep: () => {} }),
+      runAgent("tighten", {
+        signal: new AbortController().signal,
+        onStep: () => {},
+        scope: "chapter",
+        targetIds: [],
+      }),
     ).rejects.toThrow("Chapter changed during the Muse run.");
   });
 
@@ -181,7 +216,7 @@ describe("runAgent tool loop", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      runAgent("go", { signal: controller.signal, onStep: () => {} }),
+      runAgent("go", { signal: controller.signal, onStep: () => {}, scope: "chapter", targetIds: [] }),
     ).rejects.toThrow();
   });
 });
@@ -200,6 +235,8 @@ describe("runAgent get_critique", () => {
     const proposal = await runAgent("check pacing", {
       signal: new AbortController().signal,
       onStep: (s) => steps.push(s),
+      scope: "chapter",
+      targetIds: [],
     });
     expect(proposal).toBeNull();
     expect(critique).not.toHaveBeenCalled();
@@ -210,7 +247,7 @@ describe("runAgent get_critique", () => {
     vi.mocked(critique).mockResolvedValue(notes);
     useModel([toolCall("get_critique", {}), prose("no changes needed")]);
     const signal = new AbortController().signal;
-    await runAgent("check pacing", { signal, onStep: () => {} });
+    await runAgent("check pacing", { signal, onStep: () => {}, scope: "chapter", targetIds: [] });
     expect(vi.mocked(critique).mock.calls[0][1]).toEqual({ signal });
     expect(useAiCacheStore.getState().entries["critique:ch1:chapter:"]).toMatchObject({
       data: notes,
@@ -225,7 +262,12 @@ describe("runAgent author preferences", () => {
   it("injects the author voice and editing rules into the Muse system prompt", async () => {
     useSettingsStore.setState({ styleGuide: "Gibson voice", editingRules: "No adverbs" });
     const model = useModel([prose("no changes needed")]);
-    await runAgent("go", { signal: new AbortController().signal, onStep: () => {} });
+    await runAgent("go", {
+      signal: new AbortController().signal,
+      onStep: () => {},
+      scope: "chapter",
+      targetIds: [],
+    });
     const system = model.doGenerateCalls[0].prompt.find((m) => m.role === "system")?.content;
     expect(system).toContain("AUTHOR VOICE");
     expect(system).toContain("Gibson voice");

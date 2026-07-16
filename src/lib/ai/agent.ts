@@ -31,10 +31,21 @@ export interface AgentStep {
   label: string;
 }
 
+export type MuseScope = "block" | "chapter";
+
 export interface AgentRunOptions {
   signal: AbortSignal;
   onStep: (step: AgentStep) => void;
+  scope: MuseScope;
+  targetIds: string[];
 }
+
+const LOCAL_CHANGE_BOUNDARY = `
+
+LOCAL CHANGE BOUNDARY:
+- You may rewrite, remove, or move only a block listed under LOCAL CHANGE TARGETS.
+- You may insert only after a block listed under LOCAL CHANGE TARGETS. Do not use a null afterId.
+- Read every chapter block as context, but do not stage a change outside the local boundary.`;
 
 // stage_proposal's input mirrors the BlockChange domain type. Nullable (not
 // optional) fields follow the OpenAI strict-mode convention used across the
@@ -118,6 +129,7 @@ export async function runAgent(
             label: "CHAPTER BLOCKS (copy these ids exactly into stage_proposal changes)",
             items: ctx.blocks,
           },
+          targetIds: opts.scope === "block" ? opts.targetIds : undefined,
         });
       },
     }),
@@ -199,7 +211,7 @@ export async function runAgent(
         staged = sanitizeProposal(
           { chapterId, summary, changes },
           blocks.map((b) => ({ id: b.id, text: b.text })),
-          null,
+          opts.scope === "block" ? opts.targetIds : null,
         );
         return "Proposal staged for review.";
       },
@@ -208,7 +220,10 @@ export async function runAgent(
 
   await generateText({
     model,
-    system: authorSystem(MUSE_SYSTEM, "voice+editing"),
+    system: authorSystem(
+      opts.scope === "block" ? MUSE_SYSTEM + LOCAL_CHANGE_BOUNDARY : MUSE_SYSTEM,
+      "voice+editing",
+    ),
     prompt: directive,
     tools,
     stopWhen: [stepCountIs(8), hasToolCall("stage_proposal")],

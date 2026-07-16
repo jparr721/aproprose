@@ -71,6 +71,8 @@ function MuseTabBody() {
         const proposal = await runAgent(trimmed, {
           signal: controller.signal,
           onStep: (step) => useMuseStore.getState().addStep(step),
+          scope: "chapter",
+          targetIds: [],
         });
         if (proposal && proposal.changes.length > 0) {
           useAiCacheStore

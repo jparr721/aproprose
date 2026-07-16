@@ -358,7 +358,11 @@ export async function editBlocks(
   // is trying to make them relate. Dedup runs on the SANITIZED survivors so a
   // leading no-op or blank edit can't shadow a genuine revision of the same
   // block; first genuine edit for a block wins, later ones drop.
-  const sanitized = sanitizeProposal({ chapterId: req.chapterId, summary: "", changes }, req.blocks);
+  const sanitized = sanitizeProposal(
+    { chapterId: req.chapterId, summary: "", changes },
+    req.blocks,
+    null,
+  );
   const seen = new Set<string>();
   const deduped = sanitized.changes.filter((c) => {
     if (c.blockId === null || seen.has(c.blockId)) return false;
@@ -425,18 +429,23 @@ export const reviseResultSchema = z.object({
  * Drop changes the review UI can't safely apply. Rules: rewrite needs a known
  * blockId + newText that differs trimmed from the current text; insert needs
  * non-empty trimmed newText + a type + (afterId null or known); remove needs a
- * known blockId; move needs a known blockId + a toIndex. Pure: returns a new
- * proposal.
+ * known blockId; move needs a known blockId + a toIndex. An allowlist confines
+ * structural changes to selected targets, with inserts anchored after a target.
+ * Pure: returns a new proposal.
  */
 export function sanitizeProposal(
   proposal: ManuscriptProposal,
   blocks: { id: string; text: string }[],
+  allowedTargetIds: readonly string[] | null,
 ): ManuscriptProposal {
   const textById = new Map(blocks.map((b) => [b.id, b.text]));
+  const allowed = allowedTargetIds === null ? null : new Set(allowedTargetIds);
+  const permits = (id: string | null): boolean =>
+    allowed === null || (id !== null && allowed.has(id));
   const changes = proposal.changes.filter((c) => {
     switch (c.kind) {
       case "rewrite": {
-        if (c.blockId === null || c.newText === null) return false;
+        if (c.blockId === null || c.newText === null || !permits(c.blockId)) return false;
         const current = textById.get(c.blockId);
         // A rewrite is an in-place revision: a known target, genuinely changed
         // text, and non-empty. Blanking a block is a delete, not a revision -
@@ -452,12 +461,13 @@ export function sanitizeProposal(
           c.newText !== null &&
           c.newText.trim() !== "" &&
           c.type !== null &&
-          (c.afterId === null || textById.has(c.afterId))
+          ((c.afterId !== null && textById.has(c.afterId) && permits(c.afterId)) ||
+            (c.afterId === null && allowed === null))
         );
       case "remove":
-        return c.blockId !== null && textById.has(c.blockId);
+        return c.blockId !== null && textById.has(c.blockId) && permits(c.blockId);
       case "move":
-        return c.blockId !== null && textById.has(c.blockId) && c.toIndex !== null;
+        return c.blockId !== null && textById.has(c.blockId) && c.toIndex !== null && permits(c.blockId);
     }
   });
   return { ...proposal, changes };
@@ -490,6 +500,7 @@ export async function reviseChapter(
   return sanitizeProposal(
     { chapterId: req.chapterId, summary: output.summary, changes: output.changes },
     req.blocks,
+    null,
   );
 }
 

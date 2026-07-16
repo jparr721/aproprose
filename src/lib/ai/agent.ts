@@ -199,6 +199,7 @@ export async function runAgent(
         staged = sanitizeProposal(
           { chapterId, summary, changes },
           blocks.map((b) => ({ id: b.id, text: b.text })),
+          null,
         );
         return "Proposal staged for review.";
       },

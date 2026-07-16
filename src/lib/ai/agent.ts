@@ -31,10 +31,35 @@ export interface AgentStep {
   label: string;
 }
 
+// A Muse run's scope. The block variant always carries a non-empty target set,
+// so an empty block scope is unrepresentable - callers resolve targets into a
+// run before it can start.
+export type MuseScope =
+  | { kind: "chapter" }
+  | { kind: "block"; targetIds: readonly [string, ...string[]] };
+
+/** The two-way scope selector value, before targets are resolved into a run. */
+export type MuseScopeKind = MuseScope["kind"];
+
 export interface AgentRunOptions {
   signal: AbortSignal;
   onStep: (step: AgentStep) => void;
+  scope: MuseScope;
 }
+
+/** One agent run's outcome: the staged proposal (null when nothing was staged)
+ *  and whether a block run staged only changes that fell outside the selection. */
+export interface AgentResult {
+  proposal: ManuscriptProposal | null;
+  outOfScope: boolean;
+}
+
+const LOCAL_CHANGE_BOUNDARY = `
+
+LOCAL CHANGE BOUNDARY:
+- You may rewrite, remove, or move only a block listed under LOCAL CHANGE TARGETS.
+- You may insert only after a block listed under LOCAL CHANGE TARGETS. Do not use a null afterId.
+- Read every chapter block as context, but do not stage a change outside the local boundary.`;
 
 // stage_proposal's input mirrors the BlockChange domain type. Nullable (not
 // optional) fields follow the OpenAI strict-mode convention used across the
@@ -75,13 +100,14 @@ const changeSchema = z.object({
 });
 
 /**
- * Tool-loop agent over the active chapter. Resolves with the staged
- * (sanitized) proposal, or null when the model finished without staging.
+ * Tool-loop agent over the active chapter. Resolves with the staged (sanitized)
+ * proposal (null when the model finished without staging) plus whether a
+ * block-scoped run staged only changes that fell outside the selected targets.
  */
 export async function runAgent(
   directive: string,
   opts: AgentRunOptions,
-): Promise<ManuscriptProposal | null> {
+): Promise<AgentResult> {
   const { activeChapterId } = useProjectStore.getState();
   if (!activeChapterId) throw new Error("No active chapter.");
   const chapterId = activeChapterId;
@@ -99,6 +125,7 @@ export async function runAgent(
 
   const model = await getModel();
   let staged: ManuscriptProposal | null = null;
+  let outOfScope = false;
   const step = (toolName: string, label: string) => opts.onStep({ tool: toolName, label });
 
   const tools = {
@@ -118,6 +145,7 @@ export async function runAgent(
             label: "CHAPTER BLOCKS (copy these ids exactly into stage_proposal changes)",
             items: ctx.blocks,
           },
+          targetIds: opts.scope.kind === "block" ? opts.scope.targetIds : undefined,
         });
       },
     }),
@@ -196,10 +224,20 @@ export async function runAgent(
         step("stage_proposal", "Drafting changes");
         assertSameChapter();
         const { blocks } = useProjectStore.getState();
-        staged = sanitizeProposal(
-          { chapterId, summary, changes },
-          blocks.map((b) => ({ id: b.id, text: b.text })),
-        );
+        const blockText = blocks.map((b) => ({ id: b.id, text: b.text }));
+        const raw = { chapterId, summary, changes };
+        if (opts.scope.kind === "block") {
+          staged = sanitizeProposal(raw, blockText, opts.scope.targetIds);
+          // An empty result after scoping can mean two things: the model had
+          // nothing to change, or it staged real changes that all landed
+          // outside the selection. Re-sanitize without the allowlist to tell
+          // them apart so the tab can name the actual cause.
+          if (staged.changes.length === 0) {
+            outOfScope = sanitizeProposal(raw, blockText, null).changes.length > 0;
+          }
+        } else {
+          staged = sanitizeProposal(raw, blockText, null);
+        }
         return "Proposal staged for review.";
       },
     }),
@@ -207,7 +245,10 @@ export async function runAgent(
 
   await generateText({
     model,
-    system: authorSystem(MUSE_SYSTEM, "voice+editing"),
+    system: authorSystem(
+      opts.scope.kind === "block" ? MUSE_SYSTEM + LOCAL_CHANGE_BOUNDARY : MUSE_SYSTEM,
+      "voice+editing",
+    ),
     prompt: directive,
     tools,
     stopWhen: [stepCountIs(8), hasToolCall("stage_proposal")],
@@ -215,5 +256,5 @@ export async function runAgent(
   });
 
   assertSameChapter();
-  return staged;
+  return { proposal: staged, outOfScope };
 }

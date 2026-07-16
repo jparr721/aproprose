@@ -45,57 +45,57 @@ const proposal = (changes: BlockChange[]): ManuscriptProposal => ({
 describe("sanitizeProposal rewrite rules", () => {
   it("drops a rewrite whose blockId is unknown", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "nope", newText: "x" })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops a rewrite with no newText", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "b1" })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops a no-op rewrite (newText equals current text, trimmed)", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "b1", newText: "  the cat sat  " })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops a whitespace-for-empty no-op (both trim to empty)", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "empty", newText: "   " })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops a rewrite that blanks a block (empty newText is a delete, not a revision)", () => {
     const p = proposal([change({ kind: "rewrite", blockId: "b1", newText: "" })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("keeps a genuine rewrite", () => {
     const c = change({ kind: "rewrite", blockId: "b2", newText: "hello there" });
-    expect(sanitizeProposal(proposal([c]), blocks).changes).toEqual([c]);
+    expect(sanitizeProposal(proposal([c]), blocks, null).changes).toEqual([c]);
   });
 });
 
 describe("sanitizeProposal insert/remove/move rules", () => {
   it("drops an insert with empty (trimmed) newText", () => {
     const p = proposal([change({ kind: "insert", type: "narration", newText: "  " })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops an insert without a type", () => {
     const p = proposal([change({ kind: "insert", newText: "fresh" })]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("drops an insert whose afterId is unknown", () => {
     const p = proposal([
       change({ kind: "insert", type: "narration", newText: "fresh", afterId: "nope" }),
     ]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("keeps an insert anchored to a known block or to the chapter end", () => {
     const anchored = change({ kind: "insert", type: "dialogue", newText: "hi", afterId: "b1" });
     const atEnd = change({ kind: "insert", type: "narration", newText: "coda", afterId: null });
-    expect(sanitizeProposal(proposal([anchored, atEnd]), blocks).changes).toEqual([
+    expect(sanitizeProposal(proposal([anchored, atEnd]), blocks, null).changes).toEqual([
       anchored,
       atEnd,
     ]);
@@ -104,7 +104,7 @@ describe("sanitizeProposal insert/remove/move rules", () => {
   it("drops a remove whose blockId is unknown and keeps a known one", () => {
     const keep = change({ kind: "remove", blockId: "b1" });
     const p = proposal([change({ kind: "remove", blockId: "nope" }), keep]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([keep]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([keep]);
   });
 
   it("drops a move without a toIndex or with an unknown blockId", () => {
@@ -112,18 +112,61 @@ describe("sanitizeProposal insert/remove/move rules", () => {
       change({ kind: "move", blockId: "b1" }),
       change({ kind: "move", blockId: "nope", toIndex: 0 }),
     ]);
-    expect(sanitizeProposal(p, blocks).changes).toEqual([]);
+    expect(sanitizeProposal(p, blocks, null).changes).toEqual([]);
   });
 
   it("keeps a well-formed move", () => {
     const c = change({ kind: "move", blockId: "b2", toIndex: 0 });
-    expect(sanitizeProposal(proposal([c]), blocks).changes).toEqual([c]);
+    expect(sanitizeProposal(proposal([c]), blocks, null).changes).toEqual([c]);
   });
 
   it("does not mutate the input proposal", () => {
     const p = proposal([change({ kind: "remove", blockId: "nope" })]);
-    sanitizeProposal(p, blocks);
+    sanitizeProposal(p, blocks, null);
     expect(p.changes).toHaveLength(1);
+  });
+
+  it("confines every change kind to the allowed target and drops end-appends", () => {
+    const kept = sanitizeProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
+        change({ kind: "rewrite", blockId: "b2", newText: "new b2" }),
+        change({ kind: "insert", afterId: "b1", type: "narration", newText: "after b1" }),
+        change({ kind: "insert", afterId: "b2", type: "narration", newText: "after b2" }),
+        change({ kind: "insert", afterId: null, type: "narration", newText: "at end" }),
+        change({ kind: "remove", blockId: "b1" }),
+        change({ kind: "remove", blockId: "b2" }),
+        change({ kind: "move", blockId: "b1", toIndex: 1 }),
+        change({ kind: "move", blockId: "b2", toIndex: 0 }),
+      ]),
+      blocks,
+      ["b1"],
+    ).changes;
+
+    // Only the b1-anchored changes survive: asserting the block/afterId (not
+    // just the kind) catches an inverted or mis-scoped allowlist that would keep
+    // the b2 variants while leaving the kinds identical.
+    expect(kept).toEqual([
+      change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
+      change({ kind: "insert", afterId: "b1", type: "narration", newText: "after b1" }),
+      change({ kind: "remove", blockId: "b1" }),
+      change({ kind: "move", blockId: "b1", toIndex: 1 }),
+    ]);
+  });
+
+  it("drops every change when the allowlist is empty (an empty selection permits nothing)", () => {
+    const kept = sanitizeProposal(
+      proposal([
+        change({ kind: "rewrite", blockId: "b1", newText: "new b1" }),
+        change({ kind: "insert", afterId: "b1", type: "narration", newText: "after b1" }),
+        change({ kind: "insert", afterId: null, type: "narration", newText: "at end" }),
+        change({ kind: "remove", blockId: "b2" }),
+      ]),
+      blocks,
+      [],
+    ).changes;
+
+    expect(kept).toEqual([]);
   });
 });
 

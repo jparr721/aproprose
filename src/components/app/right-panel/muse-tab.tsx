@@ -1,7 +1,7 @@
 // muse-tab.tsx -- the Muse agent tab: a directive composer over a tool-loop
 // agent run (runAgent). Muse never edits the manuscript itself: a finished run
-// stages its ManuscriptProposal into the Edit tab's chapter-scope cache entry,
-// where the author reviews and applies it change by change. Runs are ephemeral
+// stages its ManuscriptProposal into the matching Edit cache entry, where the
+// author reviews and applies it change by change. Runs are ephemeral
 // (muse-store); only the staged proposal persists, via ai-cache-store.
 
 import { useState } from "react";
@@ -14,16 +14,18 @@ import {
   PromptInputProvider,
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input";
-import { useProjectStore } from "@/stores/project-store";
+import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useMuseStore } from "@/stores/muse-store";
+import { useMuseStore, type MuseRun } from "@/stores/muse-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { useAiIntent } from "@/hooks/use-ai-intent";
 import { aiCacheKey } from "@/lib/ai/cache-key";
+import { buildEditRequest } from "@/lib/ai/context";
+import { editComposerState } from "@/lib/ai/edit-composer";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
-import { runAgent } from "@/lib/ai/agent";
+import { runAgent, type MuseScopeKind } from "@/lib/ai/agent";
 import { supportsTools } from "@/lib/ai/model";
 import { describeAiError, isAbortError } from "@/lib/ai/errors";
 import { cn } from "@/lib/utils";
@@ -33,6 +35,7 @@ import {
   AskedCaption,
   PanelEmpty,
   PanelHint,
+  ScopeToggle,
 } from "@/components/app/right-panel/shared";
 
 // The run's abort controller lives at module scope, not in a component ref:
@@ -41,48 +44,95 @@ import {
 // survives remounts - starting a run replaces it, Stop aborts it.
 let activeController: AbortController | null = null;
 
+function museEditCacheKey(run: MuseRun): string {
+  const selectionKey = run.kind === "block" ? [...run.targetIds].sort().join(",") : "";
+  return aiCacheKey("edit", run.chapterId, run.kind, selectionKey);
+}
+
 function MuseTabBody() {
   const status = useMuseStore((s) => s.status);
   const steps = useMuseStore((s) => s.steps);
   const error = useMuseStore((s) => s.error);
   const staged = useMuseStore((s) => s.staged);
+  const outOfScope = useMuseStore((s) => s.outOfScope);
   const directive = useMuseStore((s) => s.directive);
+  const stagedRun = useMuseStore((s) => s.run);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const selectedId = useProjectStore((s) => s.selectedId);
+  const selectedIds = useProjectStore((s) => s.selectedIds);
   // Subscribed so the gate re-evaluates live when the provider changes in
   // Settings; the copy below also names the provider that can't run tools.
   const aiProvider = useSettingsStore((s) => s.aiProvider);
   const composer = usePromptInputController();
   const [focusKey, setFocusKey] = useState(0);
+  const [scope, setScope] = useState<MuseScopeKind>("chapter");
   const running = status === "running";
+  const blockTargetIds = activeChapterId
+    ? buildEditRequest("block", "").blocks.map((block) => block.id)
+    : [];
+  const blockComposer = editComposerState({
+    scope: "block",
+    targetCount: blockTargetIds.length,
+    hasBlockSelection: selectionTargetIds(selectedIds, selectedId).length > 0,
+  });
+  const composerDisabled = !activeChapterId || (scope === "block" && blockComposer.disabled);
+  const composerPlaceholder = !activeChapterId
+    ? "Open a chapter to direct Muse"
+    : scope === "block"
+      ? blockComposer.placeholder
+      : "e.g. raise the tension across this scene";
+  const blockLabel =
+    blockTargetIds.length > 1 ? "These " + blockTargetIds.length + " blocks" : "This block";
 
-  const begin = (text: string) => {
+  // Resolve the current toggle + selection into a runnable scope. Block scope
+  // needs a non-empty target set; without one there is no valid block run.
+  const resolveFreshRun = (): MuseRun | null => {
+    const chapterId = useProjectStore.getState().activeChapterId;
+    if (chapterId === null) return null;
+    if (scope === "chapter") return { chapterId, kind: "chapter" };
+    const [first, ...rest] = blockTargetIds;
+    if (first === undefined) return null;
+    return { chapterId, kind: "block", targetIds: [first, ...rest] };
+  };
+
+  const begin = (text: string, run: MuseRun) => {
     const trimmed = text.trim();
     if (!trimmed || useMuseStore.getState().status === "running") return;
-    if (!useProjectStore.getState().activeChapterId) return;
+    const chapterId = useProjectStore.getState().activeChapterId;
+    if (chapterId === null) return;
+    // A run frozen against another chapter (a retry after switching away) can't
+    // run here: its block ids belong to a chapter that is no longer active.
+    if (run.chapterId !== chapterId) {
+      useMuseStore
+        .getState()
+        .fail("Return to the chapter where this Muse run started before retrying.");
+      return;
+    }
     const controller = new AbortController();
     activeController = controller;
-    useMuseStore.getState().start(trimmed);
+    useMuseStore.getState().start(trimmed, run);
     useAiActivityStore.getState().start("muse");
     void (async () => {
       try {
         // Deliberately NOT withAiRetry: retrying an agent run re-executes its
         // tools (fresh reads, a second critique call); run once and surface
         // the error instead.
-        const proposal = await runAgent(trimmed, {
+        const { proposal, outOfScope } = await runAgent(trimmed, {
           signal: controller.signal,
           onStep: (step) => useMuseStore.getState().addStep(step),
+          scope: run,
         });
         if (proposal && proposal.changes.length > 0) {
-          useAiCacheStore
-            .getState()
-            .patch(aiCacheKey("edit", proposal.chapterId, "chapter", ""), {
-              data: proposal,
-              loading: false,
-              error: null,
-              instruction: trimmed,
-            });
+          useAiCacheStore.getState().patch(museEditCacheKey(run), {
+            data: proposal,
+            loading: false,
+            error: null,
+            instruction: trimmed,
+          });
           useAiActivityStore.getState().finish("edit", "done");
           useMuseStore.getState().finishStaged();
+        } else if (outOfScope) {
+          useMuseStore.getState().finishOutOfScope();
         } else {
           useMuseStore.getState().finishEmpty();
         }
@@ -106,16 +156,22 @@ function MuseTabBody() {
 
   // The one-click writer's-block helper: the same flow as an autoRun intent,
   // the canned directive plus the cursor line the dispatch sites also append
-  // (the agent's read_chapter grounding does not carry the selection).
+  // (the agent's read_chapter grounding does not carry the selection). Always
+  // chapter scope - continuing the scene appends past any selection, which a
+  // block scope would forbid.
   const onPickUpAndGo = () => {
-    const { selectedId, editing } = useProjectStore.getState();
-    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(editing ? selectedId : null));
+    const { selectedId, editing, activeChapterId } = useProjectStore.getState();
+    if (activeChapterId === null) return;
+    begin(PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(editing ? selectedId : null), {
+      chapterId: activeChapterId,
+      kind: "chapter",
+    });
   };
 
   const discardStaged = () => {
-    const chapterId = useProjectStore.getState().activeChapterId;
-    if (chapterId) {
-      useAiCacheStore.getState().patch(aiCacheKey("edit", chapterId, "chapter", ""), {
+    const { run } = useMuseStore.getState();
+    if (run !== null) {
+      useAiCacheStore.getState().patch(museEditCacheKey(run), {
         data: null,
         loading: false,
         error: null,
@@ -129,7 +185,10 @@ function MuseTabBody() {
   // controlled mode, so prefill needs no new AiComposer prop.
   useAiIntent("muse", (intent) => {
     if (intent.autoRun && supportsTools() && useMuseStore.getState().status !== "running") {
-      begin(intent.instruction ?? "");
+      // autoRun intents are continuations (Pick up and go), so they run chapter
+      // scope regardless of the toggle - see onPickUpAndGo.
+      const chapterId = useProjectStore.getState().activeChapterId;
+      if (chapterId !== null) begin(intent.instruction ?? "", { chapterId, kind: "chapter" });
       return;
     }
     if (intent.instruction) composer.textInput.setInput(intent.instruction);
@@ -204,7 +263,13 @@ function MuseTabBody() {
             </div>
           ) : null}
           {status === "failed" && error ? (
-            <AiError error={error} onRetry={() => begin(directive)} />
+            <AiError
+              error={error}
+              onRetry={() => {
+                const { run } = useMuseStore.getState();
+                if (run !== null) begin(directive, run);
+              }}
+            />
           ) : null}
           {status === "done" ? (
             staged ? (
@@ -214,12 +279,21 @@ function MuseTabBody() {
                 </CardHeader>
                 <CardContent className="flex flex-col items-start gap-2">
                   <TypographyMuted className="text-xs">
-                    Muse staged a set of changes for this chapter. Review and
-                    apply them change by change in the Edit tab.
+                    Muse staged a set of changes for{" "}
+                    {stagedRun?.kind === "block" ? "these selected blocks" : "this chapter"}. Review
+                    and apply them change by change in the Edit tab.
                   </TypographyMuted>
                   <Button
                     size="sm"
-                    onClick={() => dispatchAiIntent({ tab: "edit", scope: "chapter" })}
+                    onClick={() => {
+                      const { run } = useMuseStore.getState();
+                      if (run === null) return;
+                      dispatchAiIntent(
+                        run.kind === "block"
+                          ? { tab: "edit", scope: "block", blockIds: [...run.targetIds] }
+                          : { tab: "edit", scope: "chapter" },
+                      );
+                    }}
                   >
                     <IconPencil /> Review in Edit
                   </Button>
@@ -228,6 +302,11 @@ function MuseTabBody() {
                   </Button>
                 </CardContent>
               </Card>
+            ) : outOfScope ? (
+              <PanelHint>
+                Muse proposed changes outside your selected blocks. Widen the
+                selection or switch to Whole chapter.
+              </PanelHint>
             ) : (
               <PanelHint>
                 Muse finished without staging changes. Try a more specific
@@ -238,16 +317,26 @@ function MuseTabBody() {
         </div>
       </div>
       <AiComposer
-        placeholder={
-          activeChapterId
-            ? "e.g. raise the tension across this scene"
-            : "Open a chapter to direct Muse"
-        }
+        placeholder={composerPlaceholder}
         loading={running}
-        onSubmit={begin}
+        onSubmit={(text) => {
+          const run = resolveFreshRun();
+          if (run !== null) begin(text, run);
+        }}
         focusKey={focusKey}
-        disabled={!activeChapterId}
+        disabled={composerDisabled}
         anchorMode="chapter"
+        toolbar={
+          <ScopeToggle
+            value={scope}
+            options={[
+              { id: "block", label: blockLabel },
+              { id: "chapter", label: "Whole chapter" },
+            ]}
+            onChange={setScope}
+            disabled={running}
+          />
+        }
       />
     </div>
   );

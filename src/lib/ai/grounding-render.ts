@@ -17,6 +17,8 @@ export interface GroundingSections {
   prose?: string;
   /** Id-labeled blocks ("[id] (type): text") with a caller-supplied label. */
   blocks?: { label: string; items: { id: string; type: BlockType; text: string }[] };
+  /** Block ids Muse may change while retaining all blocks as context. */
+  targetIds?: readonly string[];
   /** The author's request, always rendered LAST. */
   instruction?: { label: string; text: string };
 }
@@ -44,6 +46,12 @@ export function renderGrounding(sections: GroundingSections): string {
       .map((b) => `[${b.id}] (${b.type}): ${b.text}`)
       .join("\n\n");
     parts.push(`${sections.blocks.label}:\n${lines}`);
+  }
+  if (sections.targetIds && sections.targetIds.length > 0) {
+    parts.push(
+      "LOCAL CHANGE TARGETS (you may change only these ids):\n" +
+        sections.targetIds.map((id) => `- [${id}]`).join("\n"),
+    );
   }
   const ask = sections.instruction?.text.trim();
   if (sections.instruction && ask) parts.push(`${sections.instruction.label}:\n${ask}`);

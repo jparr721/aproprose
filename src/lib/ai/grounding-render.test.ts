@@ -38,6 +38,32 @@ describe("renderGrounding", () => {
     );
   });
 
+  it("renders local targets after the full chapter blocks", () => {
+    expect(
+      renderGrounding({
+        blocks: {
+          label: "CHAPTER BLOCKS",
+          items: [{ id: "b1", type: "narration", text: "One." }],
+        },
+        targetIds: ["b1"],
+      }),
+    ).toBe(
+      "CHAPTER BLOCKS:\n[b1] (narration): One.\n\nLOCAL CHANGE TARGETS (you may change only these ids):\n- [b1]",
+    );
+  });
+
+  it("skips the local targets section when the target list is empty", () => {
+    expect(
+      renderGrounding({
+        blocks: {
+          label: "CHAPTER BLOCKS",
+          items: [{ id: "b1", type: "narration", text: "One." }],
+        },
+        targetIds: [],
+      }),
+    ).toBe("CHAPTER BLOCKS:\n[b1] (narration): One.");
+  });
+
   it("skips absent sections, empty casts, and blank instructions but keeps empty prose", () => {
     expect(renderGrounding({ prose: "" })).toBe("SCENE PROSE:\n");
     expect(renderGrounding({ prose: "P", instruction: { label: "L", text: "   " } })).toBe("SCENE PROSE:\nP");

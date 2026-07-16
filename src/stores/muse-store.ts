@@ -6,19 +6,29 @@
 // serializable state, one owner).
 
 import { create } from "zustand";
-import type { AgentStep } from "@/lib/ai/agent";
+import type { AgentStep, MuseScope } from "@/lib/ai/agent";
 
 export type MuseStatus = "idle" | "running" | "done" | "failed";
 
+export interface MuseRun {
+  chapterId: string;
+  scope: MuseScope;
+  targetIds: string[];
+}
+
 interface MuseState {
   status: MuseStatus;
+  /** Chapter, scope, and targets frozen when the current run starts. */
+  chapterId: string | null;
+  scope: MuseScope;
+  targetIds: string[];
   /** Directive of the current/last run ("" when idle-fresh). */
   directive: string;
   steps: AgentStep[];
   error: string | null;
   /** True when the finished run staged a proposal to the Edit tab. */
   staged: boolean;
-  start: (directive: string) => void;
+  start: (directive: string, run: MuseRun) => void;
   addStep: (step: AgentStep) => void;
   finishStaged: () => void;
   finishEmpty: () => void;
@@ -28,16 +38,37 @@ interface MuseState {
 
 export const useMuseStore = create<MuseState>((set) => ({
   status: "idle",
+  chapterId: null,
+  scope: "chapter",
+  targetIds: [],
   directive: "",
   steps: [],
   error: null,
   staged: false,
-  start: (directive) =>
-    set({ status: "running", directive, steps: [], error: null, staged: false }),
+  start: (directive, run) =>
+    set({
+      status: "running",
+      chapterId: run.chapterId,
+      scope: run.scope,
+      targetIds: [...run.targetIds],
+      directive,
+      steps: [],
+      error: null,
+      staged: false,
+    }),
   addStep: (step) => set((s) => ({ steps: [...s.steps, step] })),
   finishStaged: () => set({ status: "done", staged: true }),
   finishEmpty: () => set({ status: "done", staged: false }),
   fail: (error) => set({ status: "failed", error }),
   reset: () =>
-    set({ status: "idle", directive: "", steps: [], error: null, staged: false }),
+    set({
+      status: "idle",
+      chapterId: null,
+      scope: "chapter",
+      targetIds: [],
+      directive: "",
+      steps: [],
+      error: null,
+      staged: false,
+    }),
 }));

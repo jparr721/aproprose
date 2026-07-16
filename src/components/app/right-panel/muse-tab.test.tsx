@@ -16,10 +16,30 @@ vi.mock("@/components/ai-elements/prompt-input", () => ({
   }),
 }));
 vi.mock("@/components/app/right-panel/shared", () => ({
-  AiComposer: ({ onSubmit }: { onSubmit: (t: string) => void }) => (
-    <button onClick={() => onSubmit("raise the stakes")}>send</button>
+  AiComposer: ({
+    onSubmit,
+    toolbar,
+    disabled,
+    placeholder,
+  }: {
+    onSubmit: (text: string) => void;
+    toolbar?: React.ReactNode;
+    disabled?: boolean;
+    placeholder: string;
+  }) => (
+    <div data-testid="composer" data-placeholder={placeholder}>
+      {toolbar}
+      <button disabled={disabled} onClick={() => onSubmit("raise the stakes")}>
+        send
+      </button>
+    </div>
   ),
-  AiError: () => <div>err</div>,
+  AiError: ({ onRetry }: { onRetry: () => void }) => (
+    <div>
+      <div>err</div>
+      <button onClick={onRetry}>retry</button>
+    </div>
+  ),
   AskedCaption: () => <div />,
   PanelEmpty: ({ title, children }: { title: string; children: React.ReactNode }) => (
     <div>
@@ -28,6 +48,30 @@ vi.mock("@/components/app/right-panel/shared", () => ({
     </div>
   ),
   PanelHint: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ScopeToggle: ({
+    value,
+    options,
+    onChange,
+    disabled,
+  }: {
+    value: string;
+    options: { id: string; label: string }[];
+    onChange: (value: string) => void;
+    disabled: boolean;
+  }) => (
+    <div>
+      {options.map((option) => (
+        <button
+          key={option.id}
+          data-selected={String(value === option.id)}
+          disabled={disabled}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 import { MuseTab } from "@/components/app/right-panel/muse-tab";
@@ -40,7 +84,7 @@ import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useAiIntentStore } from "@/stores/ai-intent-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
-import type { ManuscriptProposal } from "@/lib/types";
+import type { Block, ManuscriptProposal } from "@/lib/types";
 
 const PROPOSAL: ManuscriptProposal = {
   chapterId: "ch1",
@@ -59,6 +103,12 @@ const PROPOSAL: ManuscriptProposal = {
   ],
 };
 
+const BLOCKS: Block[] = [
+  { id: "b1", type: "narration", text: "One.", raw: "", dirty: false },
+  { id: "b2", type: "narration", text: "Two.", raw: "", dirty: false },
+  { id: "b3", type: "narration", text: "Three.", raw: "", dirty: false },
+];
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -68,7 +118,13 @@ beforeEach(() => {
   vi.mocked(supportsTools).mockReturnValue(true);
   vi.mocked(runAgent).mockReset();
   useMuseStore.getState().reset();
-  useProjectStore.setState({ activeChapterId: "ch1", selectedId: null, editing: false, blocks: [] });
+  useProjectStore.setState({
+    activeChapterId: "ch1",
+    selectedId: null,
+    selectedIds: [],
+    editing: false,
+    blocks: [],
+  });
   useAiCacheStore.setState({ entries: {} });
   useAiActivityStore.setState({ status: {} });
   useAiIntentStore.setState({ pending: null });
@@ -98,6 +154,120 @@ describe("MuseTab", () => {
     expect(useMuseStore.getState().status).toBe("done");
     expect(useMuseStore.getState().staged).toBe(true);
     expect(useAiActivityStore.getState().status.edit).toBe("done");
+  });
+
+  it("stages a selected-block Muse proposal under Edit's block key", async () => {
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "b2",
+      selectedIds: ["b2", "b1"],
+      blocks: BLOCKS,
+    });
+    vi.mocked(runAgent).mockResolvedValue(PROPOSAL);
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("These 2 blocks"));
+    fireEvent.click(screen.getByText("send"));
+
+    await waitFor(() =>
+      expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL),
+    );
+    expect(vi.mocked(runAgent).mock.calls[0][1]).toMatchObject({
+      scope: "block",
+      targetIds: ["b1", "b2"],
+    });
+  });
+
+  it("keeps a selected Muse run tied to its frozen selection", async () => {
+    let resolveRun: ((proposal: ManuscriptProposal | null) => void) | undefined;
+    const pendingRun = new Promise<ManuscriptProposal | null>((resolve) => {
+      resolveRun = resolve;
+    });
+    vi.mocked(runAgent).mockReturnValue(pendingRun);
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "b2",
+      selectedIds: ["b2", "b1"],
+      blocks: BLOCKS,
+    });
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("These 2 blocks"));
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
+
+    useProjectStore.setState({ selectedId: "b3", selectedIds: [], blocks: BLOCKS });
+    if (resolveRun === undefined) throw new Error("Muse run did not start.");
+    resolveRun(PROPOSAL);
+
+    await waitFor(() => expect(screen.getByText("Review in Edit")).toBeTruthy());
+    expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL);
+
+    fireEvent.click(screen.getByText("Review in Edit"));
+    expect(useAiIntentStore.getState().pending).toEqual({
+      tab: "edit",
+      scope: "block",
+      blockIds: ["b1", "b2"],
+    });
+
+    fireEvent.click(screen.getByText("Discard changes"));
+    expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toBeNull();
+  });
+
+  it("retries selected Muse with its frozen target ids", async () => {
+    vi.mocked(runAgent).mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(PROPOSAL);
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "b2",
+      selectedIds: ["b2", "b1"],
+      blocks: BLOCKS,
+    });
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("These 2 blocks"));
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => expect(screen.getByText("err")).toBeTruthy());
+
+    useProjectStore.setState({ selectedId: "b3", selectedIds: [], blocks: BLOCKS });
+    fireEvent.click(screen.getByText("retry"));
+
+    await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runAgent).mock.calls[1][1]).toMatchObject({
+      scope: "block",
+      targetIds: ["b1", "b2"],
+    });
+    await waitFor(() =>
+      expect(useAiCacheStore.getState().entries["edit:ch1:block:b1,b2"]?.data).toEqual(PROPOSAL),
+    );
+  });
+
+  it("disables empty selected scope while keeping whole chapter available", () => {
+    useProjectStore.setState({
+      activeChapterId: "ch1",
+      selectedId: "break",
+      selectedIds: [],
+      blocks: [
+        {
+          id: "break",
+          type: "chapter",
+          level: "break",
+          text: "* * *",
+          raw: "",
+          dirty: false,
+        },
+        { id: "b1", type: "narration", text: "One.", raw: "", dirty: false },
+      ],
+    });
+
+    render(<MuseTab />);
+    fireEvent.click(screen.getByText("This block"));
+    expect((screen.getByText("send") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("composer").getAttribute("data-placeholder")).toBe(
+      "Select an editable block (prose or a heading)",
+    );
+
+    fireEvent.click(screen.getByText("Whole chapter"));
+    expect((screen.getByText("send") as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("Review in Edit parks a chapter-scope intent for the Edit tab", async () => {

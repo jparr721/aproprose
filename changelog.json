@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.14.0",
+    "date": "2026-07-17",
+    "summary": "Muse can now focus revisions on selected blocks or the whole chapter.",
+    "highlights": [
+      "Choose selected blocks or the whole chapter before directing Muse.",
+      "Selected-block proposals stay within your selection while using the full chapter for context.",
+      "Muse explains when suggested changes fall outside the selected blocks and lets you widen the scope.",
+      "Review and discard selected-block proposals in Edit without losing their original scope."
+    ]
+  },
+  {
     "version": "0.13.0",
     "date": "2026-07-13",
     "summary": "Improves macOS window polish, writing stats, and themed inputs.",

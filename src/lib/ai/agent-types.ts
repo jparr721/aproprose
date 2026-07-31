@@ -78,6 +78,8 @@ export interface AgentRun {
   startedAt: string;
 }
 
+export type AgentRunStatus = "idle" | "submitted" | "streaming";
+
 export type AgentIntent =
   | { kind: "add-context"; refs: DraftContextRef[] }
   | {
@@ -212,6 +214,12 @@ export type AgentErrorCode =
 
 export interface AgentRunError {
   code: AgentErrorCode;
+  message: string;
+}
+
+export interface AgentPersistenceIssue {
+  kind: "corrupt" | "load" | "save";
+  projectRoot: string;
   message: string;
 }
 

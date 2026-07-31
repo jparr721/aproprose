@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { renderHook } from "@testing-library/react";
+import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentMessageMetadata,
@@ -197,6 +197,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -328,19 +329,38 @@ describe("agent persistence", () => {
     });
 
     const snapshot = await toAgentSnapshot();
-    const restored = await fromAgentSnapshot("/books/one", snapshot);
+    const restored = await fromAgentSnapshot("/books/reopened", snapshot);
 
-    expect(restored).toEqual(snapshot);
     expect(restored).toMatchObject({
       v: 3,
       mode: "edit",
       messages,
       draftText: "Ask about the ending",
       draftContextRefs: expect.arrayContaining([blockRef]),
-      pendingProposal: proposal,
+      pendingProposal: {
+        ...proposal,
+        projectRoot: "/books/reopened",
+      },
     });
+    expect(snapshot.pendingProposal).not.toHaveProperty("projectRoot");
+    expect(JSON.stringify(snapshot)).not.toContain("/books/one");
     expect(JSON.stringify(snapshot)).not.toContain("Live source text must not persist");
     expect(snapshot).not.toHaveProperty("draftContextSources");
+  });
+
+  it("rejects a persisted proposal that claims its own project root", async () => {
+    const unsafeProposal = {
+      ...proposal,
+      projectRoot: "/books/forged",
+    };
+    const raw = {
+      ...emptyPersistedAgentState(),
+      pendingProposal: unsafeProposal,
+    };
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: "/books/one" },
+    });
   });
 
   it("replaces runtime tool values with safe summaries before saving", async () => {
@@ -445,6 +465,61 @@ describe("agent persistence", () => {
     expect(snapshot).not.toHaveProperty("runStatus");
   });
 
+  it("writes interrupted messages with only settled text and completed tool summaries", async () => {
+    const interrupted = [
+      {
+        id: "assistant-interrupted",
+        role: "assistant",
+        metadata: { ...metadata, state: "stopped" },
+        parts: [
+          { type: "text", text: "Retained partial answer", state: "streaming" },
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "call-incomplete",
+            state: "input-streaming",
+            input: { chapterId: "chapter-1", raw: "Transient tool input" },
+          },
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "call-complete",
+            state: "output-available",
+            input: { chapterId: "chapter-1" },
+            output: {
+              kind: "runtime",
+              summary: {
+                label: "Read chapter",
+                target: "Chapter 1",
+                detail: "1 block",
+                itemCount: 1,
+              },
+              value: { exactText: "Private runtime tool value" },
+            },
+          },
+        ],
+      },
+    ] as unknown as AgentUIMessage[];
+    useAgentConsoleStore.setState({ messages: interrupted });
+
+    await saveAgentState("/books/one", await toAgentSnapshot());
+
+    const written = tauri.writeAppData.mock.calls[0][1] as PersistedAgentState;
+    const serialized = JSON.stringify(written);
+    expect(written.messages[0].parts).toHaveLength(2);
+    expect(written.messages[0].parts[0]).toMatchObject({
+      type: "text",
+      state: "done",
+    });
+    expect(written.messages[0].parts[1]).toMatchObject({
+      state: "output-available",
+      output: { kind: "summary" },
+    });
+    expect(serialized).not.toContain("input-streaming");
+    expect(serialized).not.toContain("Transient tool input");
+    expect(serialized).not.toContain("Private runtime tool value");
+  });
+
   it("migrates v1 and v2 blobs to an empty v3 conversation", async () => {
     const legacyThreads = {
       chapter: [{ role: "user", content: "Do not merge this thread" }],
@@ -495,6 +570,39 @@ describe("agent persistence", () => {
       issue: { kind: "save", projectRoot: "/books/one" },
     });
     expect(tauri.writeAppData).not.toHaveBeenCalled();
+  });
+
+  it("rejects a preliminary tool result in a persisted blob", async () => {
+    const raw = persistedState("", [
+      {
+        id: "assistant-preliminary",
+        role: "assistant",
+        metadata: { ...metadata, state: "stopped" },
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "call-preliminary",
+            state: "output-available",
+            input: { chapterId: "chapter-1" },
+            output: {
+              kind: "summary",
+              summary: {
+                label: "Read chapter",
+                target: "Chapter 1",
+                detail: "Partial result",
+                itemCount: 1,
+              },
+            },
+            preliminary: true,
+          },
+        ],
+      },
+    ] as unknown as AgentUIMessage[]);
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: "/books/one" },
+    });
   });
 
   it("keeps live state and exposes Retry after a write failure", async () => {
@@ -656,6 +764,147 @@ describe("agent persistence", () => {
       expect.objectContaining({ draftText: "Captured old draft" }),
     );
     expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+  });
+
+  it("keeps old-root failures independent from new-root flushes and retries", async () => {
+    useProjectStore.setState({ project: project("/books/old") });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/old",
+      ),
+    );
+    useAgentConsoleStore.getState().setDraftText("Captured old draft");
+    tauri.writeAppData.mockRejectedValueOnce(new Error("old root unavailable"));
+
+    useProjectStore.setState({ project: project("/books/new") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: "/books/new",
+        persistenceIssue: {
+          kind: "save",
+          projectRoot: "/books/old",
+        },
+      }),
+    );
+    tauri.writeAppData.mockClear();
+    useAgentConsoleStore.getState().setDraftText("New root hidden draft");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(1));
+
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey("/books/new"),
+      expect.objectContaining({ draftText: "New root hidden draft" }),
+    );
+    expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
+      kind: "save",
+      projectRoot: "/books/old",
+    });
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    vi.useFakeTimers();
+    tauri.writeAppData.mockClear();
+    useAgentConsoleStore.getState().setDraftText("New root latest draft");
+    await retryAgentPersistence();
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+
+    expect(tauri.writeAppData.mock.calls[0]).toEqual([
+      agentStateKey("/books/old"),
+      expect.objectContaining({ draftText: "Captured old draft" }),
+    ]);
+    expect(tauri.writeAppData.mock.calls[1]).toEqual([
+      agentStateKey("/books/new"),
+      expect.objectContaining({ draftText: "New root latest draft" }),
+    ]);
+    expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+    vi.useRealTimers();
+    persistence.unmount();
+  });
+
+  it("retains an unsavable old-root snapshot and issue across a switch", async () => {
+    await transitionAgentProject("/books/old");
+    useAgentConsoleStore.setState({
+      draftText: "Recoverable old draft",
+      messages: [
+        {
+          id: "assistant-unknown",
+          role: "assistant",
+          metadata,
+          parts: [{ type: "provider-private", value: "Unsafe payload" }],
+        },
+      ] as unknown as AgentUIMessage[],
+    });
+
+    await transitionAgentProject("/books/new");
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: "/books/new",
+      persistenceIssue: {
+        kind: "save",
+        projectRoot: "/books/old",
+        message: expect.stringContaining(
+          "Unknown agent message part cannot be persisted",
+        ),
+      },
+    });
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    await expect(retryAgentPersistence()).rejects.toMatchObject({
+      issue: {
+        kind: "save",
+        projectRoot: "/books/old",
+        message: expect.stringContaining(
+          "Unknown agent message part cannot be persisted",
+        ),
+      },
+    });
+
+    await saveAgentState("/books/old", emptyPersistedAgentState());
+    expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+  });
+
+  it("keeps a failed close save retryable with no active project", async () => {
+    useProjectStore.setState({ project: project("/books/closing") });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/closing",
+      ),
+    );
+    useAgentConsoleStore.getState().setDraftText("Draft before close");
+    tauri.writeAppData.mockRejectedValueOnce(new Error("close write failed"));
+
+    useProjectStore.setState({ project: null });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: null,
+        persistenceIssue: {
+          kind: "save",
+          projectRoot: "/books/closing",
+        },
+      }),
+    );
+    tauri.writeAppData.mockClear();
+
+    window.dispatchEvent(new Event("pagehide"));
+    await Promise.resolve();
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+
+    await retryAgentPersistence();
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey("/books/closing"),
+      expect.objectContaining({ draftText: "Draft before close" }),
+    );
+    expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+    persistence.unmount();
   });
 
   it("rejects a persisted system prompt without overwriting the blob", async () => {

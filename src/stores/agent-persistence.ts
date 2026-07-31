@@ -7,7 +7,10 @@ import {
 } from "@/lib/ai/agent-messages";
 import type {
   AgentPersistenceIssue,
+  PendingProposal,
+  PersistedAgentSnapshot,
   PersistedAgentState,
+  PersistedPendingProposal,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import { pathHash } from "@/lib/path-hash";
@@ -198,7 +201,6 @@ const outlinePreconditionSchema = z.discriminatedUnion("kind", [
 
 const pendingProposalBase = {
   id: z.string(),
-  projectRoot: z.string(),
   chapterId: z.string(),
   summary: z.string(),
   createdAt: z.string(),
@@ -450,19 +452,46 @@ const persistedAgentStateSchema = z
   })
   .strict();
 
-interface FailedAgentSave {
+type AgentSnapshotSource = Pick<
+  ReturnType<typeof useAgentConsoleStore.getState>,
+  | "mode"
+  | "messages"
+  | "summary"
+  | "draftText"
+  | "draftContextRefs"
+  | "draftSourceLocators"
+  | "pendingProposal"
+  | "lastUsage"
+  | "interruptedRun"
+>;
+
+interface FailedWriteSave {
+  kind: "write";
   root: string;
-  snapshot: PersistedAgentState;
+  snapshot: PersistedAgentSnapshot;
+  issue: AgentPersistenceIssue;
+  revision: number | null;
 }
+
+interface FailedSnapshotSave {
+  kind: "snapshot";
+  root: string;
+  source: AgentSnapshotSource;
+  issue: AgentPersistenceIssue;
+}
+
+type FailedAgentSave = FailedWriteSave | FailedSnapshotSave;
 
 const SAVE_DEBOUNCE_MS = 400;
 
 let activeRoot: string | null = null;
 let writableRoot: string | null = null;
 let requestedRoot: string | null = null;
-let failedSave: FailedAgentSave | null = null;
+const failedSaves = new Map<string, FailedAgentSave>();
 let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let activeRevision = 0;
+let persistedRevision = 0;
 
 export class AgentPersistenceError extends Error {
   readonly issue: AgentPersistenceIssue;
@@ -518,10 +547,19 @@ function validatePersistedParts(messages: Array<{ parts: unknown[] }>): void {
         dataPartSchema.parse(part);
       }
       if (
-        (part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
+        part.type === "text" &&
         "state" in part &&
-        part.state === "output-available"
+        part.state !== "done"
       ) {
+        throw new Error("Persisted agent text must be settled.");
+      }
+      if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+        if (!("state" in part) || part.state !== "output-available") {
+          throw new Error("Incomplete agent tool calls cannot be persisted.");
+        }
+        if ("preliminary" in part && part.preliminary === true) {
+          throw new Error("Preliminary agent tool results cannot be persisted.");
+        }
         if (!("output" in part)) {
           throw new Error("Completed agent tool output is missing.");
         }
@@ -581,12 +619,29 @@ function saveIssue(root: string, error: unknown): AgentPersistenceError {
   return failure;
 }
 
-function failedSaveIssue(root: string): AgentPersistenceIssue {
-  return {
-    kind: "save",
-    projectRoot: root,
-    message: `Failed to save agent conversation for ${root}. Retry to preserve the captured conversation.`,
-  };
+function firstFailedSave(): FailedAgentSave | null {
+  const first = failedSaves.values().next();
+  return first.done ? null : first.value;
+}
+
+function recordFailedSave(failure: FailedAgentSave): void {
+  failedSaves.set(failure.root, failure);
+  useAgentConsoleStore.getState().setPersistenceIssue(failure.issue);
+}
+
+function clearRecoveredFailure(root: string): void {
+  failedSaves.delete(root);
+  const currentIssue = useAgentConsoleStore.getState().persistenceIssue;
+  if (currentIssue === null || currentIssue.projectRoot !== root) return;
+  useAgentConsoleStore
+    .getState()
+    .setPersistenceIssue(firstFailedSave()?.issue ?? null);
+}
+
+function restoreFailedSaveIssue(): void {
+  const failure = firstFailedSave();
+  if (failure === null) return;
+  useAgentConsoleStore.getState().setPersistenceIssue(failure.issue);
 }
 
 function logPersistenceFailure(root: string, error: unknown): void {
@@ -614,7 +669,8 @@ export function agentStateKey(root: string): string {
   return `ai-${pathHash(root)}`;
 }
 
-export function emptyPersistedAgentState(): PersistedAgentState {
+export function emptyPersistedAgentState(): PersistedAgentSnapshot &
+  PersistedAgentState {
   return {
     v: 3,
     mode: "writing",
@@ -629,12 +685,11 @@ export function emptyPersistedAgentState(): PersistedAgentState {
   };
 }
 
-export async function toAgentSnapshot(): Promise<PersistedAgentState> {
+function captureAgentSnapshotSource(): AgentSnapshotSource {
   const state = useAgentConsoleStore.getState();
-  const snapshot: PersistedAgentState = {
-    v: 3,
+  return {
     mode: state.mode,
-    messages: sanitizeAgentMessages(state.messages),
+    messages: state.messages,
     summary: state.summary,
     draftText: state.draftText,
     draftContextRefs: state.draftContextRefs,
@@ -643,7 +698,87 @@ export async function toAgentSnapshot(): Promise<PersistedAgentState> {
     lastUsage: state.lastUsage,
     interruptedRun: state.interruptedRun,
   };
+}
+
+function toPersistedPendingProposal(
+  proposal: PendingProposal | null,
+): PersistedPendingProposal | null {
+  if (proposal === null) return null;
+  const base = {
+    id: proposal.id,
+    chapterId: proposal.chapterId,
+    summary: proposal.summary,
+    createdAt: proposal.createdAt,
+    originatingMessageId: proposal.originatingMessageId,
+  };
+  if (proposal.kind === "manuscript") {
+    return { ...base, kind: proposal.kind, changes: proposal.changes };
+  }
+  return { ...base, kind: proposal.kind, changes: proposal.changes };
+}
+
+function restorePendingProposal(
+  root: string,
+  proposal: PersistedPendingProposal | null,
+): PendingProposal | null {
+  if (proposal === null) return null;
+  if (proposal.kind === "manuscript") {
+    return { ...proposal, projectRoot: root };
+  }
+  return { ...proposal, projectRoot: root };
+}
+
+async function snapshotFromSource(
+  source: AgentSnapshotSource,
+): Promise<PersistedAgentSnapshot> {
+  const snapshot: PersistedAgentSnapshot = {
+    v: 3,
+    mode: source.mode,
+    messages: sanitizeAgentMessages(source.messages),
+    summary: source.summary,
+    draftText: source.draftText,
+    draftContextRefs: source.draftContextRefs,
+    draftSourceLocators: source.draftSourceLocators,
+    pendingProposal: toPersistedPendingProposal(source.pendingProposal),
+    lastUsage: source.lastUsage,
+    interruptedRun: source.interruptedRun,
+  };
   return structuredClone(snapshot);
+}
+
+export function toAgentSnapshot(): Promise<PersistedAgentSnapshot> {
+  return snapshotFromSource(captureAgentSnapshotSource());
+}
+
+async function parseAgentSnapshot(
+  raw: unknown,
+): Promise<PersistedAgentSnapshot> {
+  const parsed = persistedAgentStateSchema.parse(raw);
+  const normalizedMessages = parsed.messages.map((message) => ({
+    ...message,
+    metadata: {
+      ...message.metadata,
+      usage:
+        message.metadata.usage === null
+          ? null
+          : normalizedUsage(message.metadata.usage),
+    },
+  }));
+  validatePersistedParts(normalizedMessages);
+  const messages = await validateAgentMessages(normalizedMessages);
+  return {
+    v: 3,
+    mode: parsed.mode,
+    messages,
+    summary: parsed.summary,
+    draftText: parsed.draftText,
+    draftContextRefs: parsed.draftContextRefs,
+    draftSourceLocators: parsed.draftSourceLocators,
+    pendingProposal: parsed.pendingProposal,
+    lastUsage:
+      parsed.lastUsage === null ? null : normalizedUsage(parsed.lastUsage),
+    interruptedRun: parsed.interruptedRun,
+  };
 }
 
 export async function fromAgentSnapshot(
@@ -655,30 +790,17 @@ export async function fromAgentSnapshot(
     return emptyPersistedAgentState();
   }
   try {
-    const parsed = persistedAgentStateSchema.parse(raw);
-    const normalizedMessages = parsed.messages.map((message) => ({
-      ...message,
-      metadata: {
-        ...message.metadata,
-        usage:
-          message.metadata.usage === null
-            ? null
-            : normalizedUsage(message.metadata.usage),
-      },
-    }));
-    validatePersistedParts(normalizedMessages);
-    const messages = await validateAgentMessages(normalizedMessages);
+    const parsed = await parseAgentSnapshot(raw);
     return {
       v: 3,
       mode: parsed.mode,
-      messages,
+      messages: parsed.messages,
       summary: parsed.summary,
       draftText: parsed.draftText,
       draftContextRefs: parsed.draftContextRefs,
       draftSourceLocators: parsed.draftSourceLocators,
-      pendingProposal: parsed.pendingProposal,
-      lastUsage:
-        parsed.lastUsage === null ? null : normalizedUsage(parsed.lastUsage),
+      pendingProposal: restorePendingProposal(root, parsed.pendingProposal),
+      lastUsage: parsed.lastUsage,
       interruptedRun: parsed.interruptedRun,
     };
   } catch (error) {
@@ -700,37 +822,87 @@ export async function loadAgentState(
 
 export async function saveAgentState(
   root: string,
-  snapshot: PersistedAgentState,
+  snapshot: PersistedAgentSnapshot,
 ): Promise<void> {
-  const captured = structuredClone(snapshot);
-  let safeSnapshot: PersistedAgentState;
+  let safeSnapshot: PersistedAgentSnapshot;
   try {
-    safeSnapshot = await fromAgentSnapshot(root, captured);
+    safeSnapshot = await parseAgentSnapshot(structuredClone(snapshot));
   } catch (error) {
     throw saveIssue(root, error);
   }
+  await writeAgentSnapshot(root, safeSnapshot, null);
+}
+
+function markRevisionPersisted(root: string, revision: number | null): void {
+  if (
+    revision === null ||
+    root !== activeRoot ||
+    revision !== activeRevision
+  ) {
+    return;
+  }
+  persistedRevision = revision;
+}
+
+async function writeAgentSnapshot(
+  root: string,
+  snapshot: PersistedAgentSnapshot,
+  revision: number | null,
+): Promise<void> {
   try {
-    await writeAppData(agentStateKey(root), safeSnapshot);
-    if (failedSave?.root === root) failedSave = null;
+    await writeAppData(agentStateKey(root), snapshot);
+    clearRecoveredFailure(root);
     if (activeRoot === root && requestedRoot === root) writableRoot = root;
-    const currentIssue = useAgentConsoleStore.getState().persistenceIssue;
-    if (currentIssue !== null && currentIssue.projectRoot === root) {
-      useAgentConsoleStore.getState().setPersistenceIssue(null);
-    }
+    markRevisionPersisted(root, revision);
   } catch (error) {
     const failure = saveIssue(root, error);
-    if (failedSave === null || failedSave.root === root) {
-      failedSave = { root, snapshot: captured };
-    }
+    recordFailedSave({
+      kind: "write",
+      root,
+      snapshot: structuredClone(snapshot),
+      issue: failure.issue,
+      revision,
+    });
     throw failure;
   }
 }
 
+function recordSnapshotFailure(
+  root: string,
+  source: AgentSnapshotSource,
+  error: unknown,
+): AgentPersistenceError {
+  const failure = saveIssue(root, error);
+  recordFailedSave({
+    kind: "snapshot",
+    root,
+    source,
+    issue: failure.issue,
+  });
+  return failure;
+}
+
+async function persistSnapshotSource(
+  root: string,
+  source: AgentSnapshotSource,
+  revision: number | null,
+): Promise<void> {
+  let snapshot: PersistedAgentSnapshot;
+  try {
+    snapshot = await snapshotFromSource(source);
+    snapshot = await parseAgentSnapshot(snapshot);
+  } catch (error) {
+    throw recordSnapshotFailure(root, source, error);
+  }
+  await writeAgentSnapshot(root, snapshot, revision);
+}
+
 function captureActiveSnapshot(root: string): Promise<void> {
-  const snapshot = toAgentSnapshot();
+  const source = captureAgentSnapshotSource();
+  const revision = activeRoot === root ? activeRevision : null;
   return appendTransition(async () => {
     try {
-      await saveAgentState(root, await snapshot);
+      await persistSnapshotSource(root, source, revision);
     } catch (error) {
       logPersistenceFailure(root, error);
     }
@@ -743,8 +915,7 @@ function flushActiveSnapshot(): void {
   if (
     root === null ||
     writableRoot !== root ||
-    requestedRoot !== root ||
-    failedSave !== null
+    requestedRoot !== root
   ) {
     return;
   }
@@ -757,8 +928,7 @@ function scheduleAgentSave(): void {
   if (
     root === null ||
     writableRoot !== root ||
-    requestedRoot !== root ||
-    failedSave !== null
+    requestedRoot !== root
   ) {
     return;
   }
@@ -767,8 +937,7 @@ function scheduleAgentSave(): void {
     if (
       activeRoot !== root ||
       writableRoot !== root ||
-      requestedRoot !== root ||
-      failedSave !== null
+      requestedRoot !== root
     ) {
       return;
     }
@@ -788,9 +957,10 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     }
 
     if (oldRoot !== null && oldRootWasWritable) {
+      const source = captureAgentSnapshotSource();
+      const revision = activeRevision;
       try {
-        const snapshot = await toAgentSnapshot();
-        await saveAgentState(oldRoot, snapshot);
+        await persistSnapshotSource(oldRoot, source, revision);
       } catch (error) {
         logPersistenceFailure(oldRoot, error);
       }
@@ -798,7 +968,12 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
 
     useAgentConsoleStore.getState().resetProject();
     activeRoot = nextRoot;
-    if (nextRoot === null) return;
+    activeRevision = 0;
+    persistedRevision = 0;
+    if (nextRoot === null) {
+      restoreFailedSaveIssue();
+      return;
+    }
 
     let loaded: PersistedAgentState;
     try {
@@ -817,19 +992,24 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
 
     useAgentConsoleStore.getState().hydrate(nextRoot, loaded);
     writableRoot = nextRoot;
-    if (failedSave !== null) {
-      useAgentConsoleStore
-        .getState()
-        .setPersistenceIssue(failedSaveIssue(failedSave.root));
-    }
+    restoreFailedSaveIssue();
   });
 }
 
 export function retryAgentPersistence(): Promise<void> {
   return appendTransition(async () => {
-    if (failedSave !== null) {
-      const retry = failedSave;
-      await saveAgentState(retry.root, retry.snapshot);
+    const retry = firstFailedSave();
+    if (retry !== null) {
+      if (retry.kind === "write") {
+        await writeAgentSnapshot(
+          retry.root,
+          retry.snapshot,
+          retry.revision,
+        );
+      } else {
+        await persistSnapshotSource(retry.root, retry.source, null);
+      }
+      if (activeRevision !== persistedRevision) scheduleAgentSave();
       return;
     }
     const root = activeRoot;
@@ -840,7 +1020,12 @@ export function retryAgentPersistence(): Promise<void> {
     ) {
       return;
     }
-    await saveAgentState(root, await toAgentSnapshot());
+    const revision = activeRevision;
+    await persistSnapshotSource(
+      root,
+      captureAgentSnapshotSource(),
+      revision,
+    );
   });
 }
 
@@ -861,7 +1046,15 @@ export function useAgentPersistence(): void {
     });
     const unsubscribeConsole = useAgentConsoleStore.subscribe(
       (state, previous) => {
-        if (persistedFieldsChanged(state, previous)) scheduleAgentSave();
+        if (!persistedFieldsChanged(state, previous)) return;
+        if (
+          activeRoot !== null &&
+          writableRoot === activeRoot &&
+          requestedRoot === activeRoot
+        ) {
+          activeRevision += 1;
+        }
+        scheduleAgentSave();
       },
     );
     const onVisibilityChange = (): void => {

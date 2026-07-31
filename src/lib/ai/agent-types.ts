@@ -163,6 +163,10 @@ export type PendingProposal =
   | ManuscriptPendingProposal
   | OutlinePendingProposal;
 
+export type PersistedPendingProposal =
+  | Omit<ManuscriptPendingProposal, "projectRoot">
+  | Omit<OutlinePendingProposal, "projectRoot">;
+
 export type AgentProposalApplyResult =
   | { status: "applied"; appliedChangeIds: string[] }
   | { status: "stale"; staleChangeIds: string[] };
@@ -371,7 +375,7 @@ export interface ConversationSummary {
   throughMessageId: string;
 }
 
-export interface PersistedAgentState {
+interface AgentPersistenceState<Proposal> {
   v: 3;
   mode: AgentMode;
   messages: AgentUIMessage[];
@@ -379,10 +383,15 @@ export interface PersistedAgentState {
   draftText: string;
   draftContextRefs: DraftContextRef[];
   draftSourceLocators: Record<string, DraftSourceLocator>;
-  pendingProposal: PendingProposal | null;
+  pendingProposal: Proposal | null;
   lastUsage: PersistedUsage | null;
   interruptedRun: InterruptedRun | null;
 }
+
+export type PersistedAgentState = AgentPersistenceState<PendingProposal>;
+
+export type PersistedAgentSnapshot =
+  AgentPersistenceState<PersistedPendingProposal>;
 
 export interface ContextSourceResolver {
   resolveBlock: (

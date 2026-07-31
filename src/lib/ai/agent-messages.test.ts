@@ -123,6 +123,66 @@ describe("sanitizeAgentMessages", () => {
     expect(sanitizeAgentMessages(messages)).toEqual([]);
   });
 
+  it("settles retained text and removes incomplete tool calls from interrupted messages", () => {
+    const messages = [
+      {
+        id: "assistant-interrupted",
+        role: "assistant",
+        metadata: { ...metadata, state: "stopped" },
+        parts: [
+          { type: "text", text: "Retained partial answer", state: "streaming" },
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "call-streaming",
+            state: "input-streaming",
+            input: { chapterId: "ch1", raw: "Transient tool input" },
+          },
+          {
+            type: "tool-read_outline",
+            toolCallId: "call-ready",
+            state: "input-available",
+            input: { chapterId: "ch1", raw: "Unexecuted tool input" },
+          },
+          {
+            ...dynamicToolPart({
+              kind: "runtime",
+              summary: toolSummary,
+              value: { exactText: "Preliminary runtime tool value" },
+            }),
+            toolCallId: "call-preliminary",
+            preliminary: true,
+          },
+          dynamicToolPart({
+            kind: "runtime",
+            summary: toolSummary,
+            value: { exactText: "Private runtime tool value" },
+          }),
+        ],
+      },
+    ] as unknown as AgentUIMessage[];
+
+    const sanitized = sanitizeAgentMessages(messages);
+    const serialized = JSON.stringify(sanitized);
+
+    expect(sanitized[0].parts).toHaveLength(2);
+    expect(sanitized[0].parts[0]).toEqual({
+      type: "text",
+      text: "Retained partial answer",
+      state: "done",
+    });
+    expect(sanitized[0].parts[1]).toMatchObject({
+      state: "output-available",
+      output: { kind: "summary", summary: toolSummary },
+    });
+    expect(serialized).not.toContain("input-streaming");
+    expect(serialized).not.toContain("input-available");
+    expect(serialized).not.toContain("Transient tool input");
+    expect(serialized).not.toContain("Unexecuted tool input");
+    expect(serialized).not.toContain("Preliminary runtime tool value");
+    expect(serialized).not.toContain("Private runtime tool value");
+  });
+
   it("rejects summary outputs with unexpected top-level fields", () => {
     const messages = [
       assistantWithOutput("assistant-extra", {

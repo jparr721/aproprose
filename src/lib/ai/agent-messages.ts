@@ -221,7 +221,16 @@ export function sanitizeAgentMessages(
         ) {
           throw new Error("Unknown agent message part cannot be persisted.");
         }
-        if (isToolOrDynamicToolUIPart(part) && part.state === "output-available") {
+        if (part.type === "text") {
+          return [{ ...part, state: "done" }];
+        }
+        if (isToolOrDynamicToolUIPart(part)) {
+          if (
+            part.state !== "output-available" ||
+            part.preliminary === true
+          ) {
+            return [];
+          }
           return [
             { ...part, output: summaryOnly(part.output) } as AgentUIMessage["parts"][number],
           ];

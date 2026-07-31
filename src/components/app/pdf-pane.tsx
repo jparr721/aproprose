@@ -10,6 +10,7 @@ import {
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
+import { PdfFindBar } from "@/components/app/pdf-find-bar";
 import {
   Alert,
   AlertDescription,
@@ -18,6 +19,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { TypographyMuted } from "@/components/ui/typography";
 import { copyText } from "@/lib/clipboard";
 import {
@@ -27,8 +33,10 @@ import {
   type PdfViewerFailure,
 } from "@/lib/pdf/viewer-adapter";
 import { pdfPath as resolvePdfPath } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { usePdfFindStore } from "@/stores/pdf-find-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 
@@ -64,6 +72,15 @@ export function PdfPane() {
   const closePdf = useViewStore((state) => state.togglePdf);
   const scale = useSettingsStore((state) => state.pdfZoom);
   const setPdfZoom = useSettingsStore((state) => state.setPdfZoom);
+  const activeSurface = useSearchSurfaceStore((state) => state.activeSurface);
+  const openSurface = useSearchSurfaceStore((state) => state.openSurface);
+  const activateSearchSurface = useSearchSurfaceStore(
+    (state) => state.activate,
+  );
+  const query = usePdfFindStore((state) => state.query);
+  const caseSensitive = usePdfFindStore((state) => state.caseSensitive);
+  const wholeWord = usePdfFindStore((state) => state.wholeWord);
+  const pdfActive = activeSurface === "pdf";
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -156,6 +173,7 @@ export function PdfPane() {
 
     const targetPage = hasDocumentRef.current ? currentRef.current : 1;
     hasDocumentRef.current = false;
+    usePdfFindStore.getState().resetMatches();
 
     void (async () => {
       try {
@@ -179,6 +197,23 @@ export function PdfPane() {
       cancelled = true;
     };
   }, [adapterRevision, pdfBase64]);
+
+  useEffect(() => {
+    const adapter = adapterRef.current;
+    if (!adapter) return;
+    if (openSurface !== "pdf") {
+      adapter.closeSearch();
+      return;
+    }
+    adapter.search({ query, caseSensitive, wholeWord });
+  }, [
+    adapterRevision,
+    documentRevision,
+    openSurface,
+    query,
+    caseSensitive,
+    wholeWord,
+  ]);
 
   const [zoomText, setZoomText] = useState(() =>
     String(Math.round(scale * 100)),
@@ -254,6 +289,7 @@ export function PdfPane() {
   }, [root, mainFile]);
 
   const [copied, setCopied] = useState(false);
+  const copyLabel = copied ? "Copied PDF path" : "Copy PDF path";
   const copyPath = async (): Promise<void> => {
     if (!pdfPath) return;
     if (!(await copyText(pdfPath))) {
@@ -265,22 +301,42 @@ export function PdfPane() {
   };
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-muted">
+    <aside
+      aria-label={
+        pdfActive ? "PDF preview, active search surface" : "PDF preview"
+      }
+      data-search-surface="pdf"
+      onPointerDownCapture={() => activateSearchSurface("pdf")}
+      onFocusCapture={() => activateSearchSurface("pdf")}
+      className="flex h-full min-h-0 flex-col bg-muted"
+    >
       <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
         <div className="flex items-center gap-2.5">
           <span className="flex items-center gap-0.5">
-            <span className="font-mono text-xs text-muted-foreground">
+            <span
+              className={cn(
+                "font-mono text-xs",
+                pdfActive
+                  ? "font-medium text-accent-ink"
+                  : "text-muted-foreground",
+              )}
+            >
               preview.pdf
             </span>
             {pdfPath ? (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                title={copied ? "Copied" : `Copy path: ${pdfPath}`}
-                onClick={() => void copyPath()}
-              >
-                {copied ? <IconCheck /> : <IconCopy />}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={copyLabel}
+                    onClick={() => void copyPath()}
+                  >
+                    {copied ? <IconCheck /> : <IconCopy />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{copyLabel}</TooltipContent>
+              </Tooltip>
             ) : null}
           </span>
           <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -380,6 +436,10 @@ export function PdfPane() {
       </div>
 
       <div className="relative min-h-0 flex-1">
+        <PdfFindBar
+          onNext={() => adapterRef.current?.nextMatch()}
+          onPrevious={() => adapterRef.current?.previousMatch()}
+        />
         <div
           ref={containerRef}
           className="absolute inset-0 overflow-auto bg-muted"

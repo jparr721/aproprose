@@ -2,6 +2,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -11,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProjectInfo } from "@/lib/types";
+import { usePdfFindStore } from "@/stores/pdf-find-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const adapter = vi.hoisted(() => ({
@@ -51,6 +54,10 @@ vi.mock("@/lib/tauri", () => ({
   pdfPath: vi.fn().mockResolvedValue("/books/preview.pdf"),
 }));
 
+vi.mock("@/lib/clipboard", () => ({
+  copyText: vi.fn().mockResolvedValue(true),
+}));
+
 function renderPane(): RenderResult {
   return render(
     <TooltipProvider>
@@ -83,6 +90,12 @@ beforeEach(() => {
   adapter.loadDocument.mockResolvedValue(undefined);
   adapter.clearDocument.mockResolvedValue(undefined);
   adapter.dispose.mockResolvedValue(undefined);
+  usePdfFindStore.getState().reset();
+  useSearchSurfaceStore.setState({
+    activeSurface: "editor",
+    openSurface: null,
+    focusRevision: 0,
+  });
   useSettingsStore.setState({ pdfZoom: 1.1 });
   useProjectStore.setState({
     project,
@@ -144,5 +157,60 @@ describe("PdfPane viewer lifecycle", () => {
     await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
     view.unmount();
     await waitFor(() => expect(adapter.dispose).toHaveBeenCalledTimes(1));
+  });
+
+  it("activates PDF search and styles the filename on pointer interaction", async () => {
+    renderPane();
+    const pane = screen.getByLabelText("PDF preview");
+    fireEvent.pointerDown(pane);
+    expect(useSearchSurfaceStore.getState().activeSurface).toBe("pdf");
+    expect(screen.getByText("preview.pdf").className).toContain(
+      "text-accent-ink",
+    );
+    expect(screen.getByText("preview.pdf").className).toContain("font-medium");
+  });
+
+  it("searches with the retained PDF query while PDF find is open", async () => {
+    renderPane();
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    usePdfFindStore.setState({
+      query: "Chapter Nine",
+      caseSensitive: false,
+      wholeWord: true,
+    });
+    useSearchSurfaceStore.setState({
+      activeSurface: "pdf",
+      openSurface: "pdf",
+      focusRevision: 1,
+    });
+    await waitFor(() =>
+      expect(adapter.search).toHaveBeenCalledWith({
+        query: "Chapter Nine",
+        caseSensitive: false,
+        wholeWord: true,
+      }),
+    );
+  });
+
+  it("closes PDF.js search when another find surface opens", async () => {
+    renderPane();
+    useSearchSurfaceStore.setState({ openSurface: "pdf" });
+    useSearchSurfaceStore.setState({ openSurface: "editor" });
+    await waitFor(() => expect(adapter.closeSearch).toHaveBeenCalled());
+  });
+
+  it("shows a copy-path tooltip and copied accessible label", async () => {
+    renderPane();
+    const copy = await screen.findByRole("button", {
+      name: "Copy PDF path",
+    });
+    fireEvent.pointerMove(copy);
+    expect(
+      await screen.findByRole("tooltip", { name: "Copy PDF path" }),
+    ).toBeTruthy();
+    fireEvent.click(copy);
+    expect(
+      await screen.findByRole("button", { name: "Copied PDF path" }),
+    ).toBeTruthy();
   });
 });

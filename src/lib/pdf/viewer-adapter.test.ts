@@ -271,9 +271,14 @@ describe("PDF viewer adapter", () => {
     runtime.loadViewerModule.mockResolvedValue(harness.module);
     runtime.getDocument.mockReturnValue(harness.loadingTask);
     const onFindResult = vi.fn();
-    await createPdfViewerAdapter(
+    const adapter = await createPdfViewerAdapter(
       createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), onFindResult, vi.fn()),
     );
+    adapter.search({
+      query: "chapter",
+      caseSensitive: false,
+      wholeWord: false,
+    });
     harness.eventBus.emit("updatefindcontrolstate", {
       state: harness.module.FindState.PENDING,
       matchesCount: { current: 0, total: 0 },
@@ -308,7 +313,7 @@ describe("PDF viewer adapter", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     try {
-      await createPdfViewerAdapter(
+      const adapter = await createPdfViewerAdapter(
         createAdapterOptions(
           vi.fn(),
           vi.fn(),
@@ -317,6 +322,11 @@ describe("PDF viewer adapter", () => {
           vi.fn(),
         ),
       );
+      adapter.search({
+        query: "chapter",
+        caseSensitive: false,
+        wholeWord: false,
+      });
       harness.eventBus.emit("updatefindcontrolstate", {
         state: 99,
         matchesCount: { current: 0, total: 0 },
@@ -353,6 +363,35 @@ describe("PDF viewer adapter", () => {
       expect.any(Object),
     );
     expect(onFindResult).toHaveBeenCalledWith({
+      status: "idle",
+      current: 0,
+      total: 0,
+      error: null,
+    });
+  });
+
+  it("ignores find events after an empty query closes search", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onFindResult = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), onFindResult, vi.fn()),
+    );
+    adapter.search({
+      query: "",
+      caseSensitive: false,
+      wholeWord: false,
+    });
+    harness.eventBus.emit("updatefindcontrolstate", {
+      state: harness.module.FindState.FOUND,
+      matchesCount: { current: 1, total: 2 },
+    });
+    harness.eventBus.emit("updatefindmatchescount", {
+      matchesCount: { current: 2, total: 2 },
+    });
+    expect(onFindResult).toHaveBeenCalledTimes(1);
+    expect(onFindResult).toHaveBeenLastCalledWith({
       status: "idle",
       current: 0,
       total: 0,
@@ -432,15 +471,18 @@ describe("PDF viewer adapter", () => {
   it("reports and rethrows listener cleanup failures", async () => {
     const harness = createFakePdfRuntime({ pages: 2 });
     const error = new Error("Listener cleanup failed");
+    const taskError = new Error("Loading task cleanup failed");
     runtime.loadViewerModule.mockResolvedValue(harness.module);
     runtime.getDocument.mockReturnValue(harness.loadingTask);
     const onError = vi.fn();
     const adapter = await createPdfViewerAdapter(
       createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), onError),
     );
+    await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
     harness.eventBus.off.mockImplementationOnce(() => {
       throw error;
     });
+    harness.loadingTask.destroy.mockRejectedValueOnce(taskError);
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -453,8 +495,96 @@ describe("PDF viewer adapter", () => {
         message: "Listener cleanup failed",
         error,
       });
+      expect(harness.eventBus.off).toHaveBeenCalledTimes(5);
+      expect(harness.viewer.setDocument).toHaveBeenLastCalledWith(null);
+      expect(harness.linkService.setDocument).toHaveBeenLastCalledWith(
+        null,
+        null,
+      );
+      expect(harness.loadingTask.destroy).toHaveBeenCalledTimes(1);
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("continues document cleanup after viewer detachment fails", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    const error = new Error("Viewer detachment failed");
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), onError),
+    );
+    await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
+    harness.viewer.setDocument.mockImplementationOnce(() => {
+      throw error;
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await expect(adapter.dispose()).rejects.toThrow(
+        "Viewer detachment failed",
+      );
+      expect(harness.eventBus.off).toHaveBeenCalledTimes(5);
+      expect(harness.linkService.setDocument).toHaveBeenLastCalledWith(
+        null,
+        null,
+      );
+      expect(harness.loadingTask.destroy).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith({
+        phase: "cleanup",
+        message: "Viewer detachment failed",
+        error,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("destroys the loading task after link detachment fails", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    const error = new Error("Link detachment failed");
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), onError),
+    );
+    await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
+    harness.linkService.setDocument.mockImplementationOnce(() => {
+      throw error;
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await expect(adapter.dispose()).rejects.toThrow(
+        "Link detachment failed",
+      );
+      expect(harness.viewer.setDocument).toHaveBeenLastCalledWith(null);
+      expect(harness.loadingTask.destroy).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith({
+        phase: "cleanup",
+        message: "Link detachment failed",
+        error,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("rejects document loads after disposal", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn()),
+    );
+    await adapter.dispose();
+    await expect(
+      adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 }),
+    ).rejects.toThrow("PDF viewer adapter has been disposed");
+    expect(runtime.getDocument).not.toHaveBeenCalled();
   });
 });

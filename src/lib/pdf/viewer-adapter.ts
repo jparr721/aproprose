@@ -97,6 +97,20 @@ function reportFailure(
   options.onError(failure);
 }
 
+function runCleanupOperations(
+  operations: ReadonlyArray<() => void>,
+): unknown[] {
+  const errors: unknown[] = [];
+  for (const operation of operations) {
+    try {
+      operation();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  return errors;
+}
+
 function findStatus(
   module: PdfViewerModule,
   state: number,
@@ -192,6 +206,7 @@ export async function createPdfViewerAdapter(
     };
 
     const handleFindControlState = (event: FindControlStateEvent): void => {
+      if (latestQuery.query.length === 0) return;
       try {
         publishFindResult(
           findStatus(module, event.state),
@@ -206,6 +221,7 @@ export async function createPdfViewerAdapter(
     };
 
     const handleFindMatchesCount = (event: FindMatchesCountEvent): void => {
+      if (latestQuery.query.length === 0) return;
       publishFindResult(
         latestFindResult.status,
         event.matchesCount,
@@ -220,12 +236,32 @@ export async function createPdfViewerAdapter(
     eventBus.on("updatefindmatchescount", handleFindMatchesCount);
 
     const detachDocument = (): Promise<void> | null => {
-      pdfViewer.setDocument(null);
-      linkService.setDocument(null, null);
-      pendingView = null;
       const loadingTask = activeLoadingTask;
       activeLoadingTask = null;
-      return loadingTask ? loadingTask.destroy() : null;
+      pendingView = null;
+      const cleanupErrors = runCleanupOperations([
+        () => pdfViewer.setDocument(null),
+        () => linkService.setDocument(null, null),
+      ]);
+      if (!loadingTask) {
+        return cleanupErrors.length > 0
+          ? Promise.reject(cleanupErrors[0])
+          : null;
+      }
+      try {
+        return loadingTask.destroy().then(
+          () => {
+            if (cleanupErrors.length > 0) throw cleanupErrors[0];
+          },
+          (error: unknown) => {
+            cleanupErrors.push(error);
+            throw cleanupErrors[0];
+          },
+        );
+      } catch (error) {
+        cleanupErrors.push(error);
+        return Promise.reject(cleanupErrors[0]);
+      }
     };
 
     const clearDocument = async (): Promise<void> => {
@@ -243,6 +279,7 @@ export async function createPdfViewerAdapter(
       data: Uint8Array,
       view: Pick<PdfViewState, "page" | "scale">,
     ): Promise<void> => {
+      if (disposed) throw new Error("PDF viewer adapter has been disposed");
       const revision = loadRevision + 1;
       loadRevision = revision;
 
@@ -344,15 +381,23 @@ export async function createPdfViewerAdapter(
         if (disposed) return;
         disposed = true;
         loadRevision += 1;
+        const cleanupErrors = runCleanupOperations([
+          () => eventBus.off("pagesinit", handlePagesInit),
+          () => eventBus.off("pagechanging", handlePageChanging),
+          () => eventBus.off("scalechanging", handleScaleChanging),
+          () =>
+            eventBus.off("updatefindcontrolstate", handleFindControlState),
+          () =>
+            eventBus.off("updatefindmatchescount", handleFindMatchesCount),
+        ]);
         try {
-          eventBus.off("pagesinit", handlePagesInit);
-          eventBus.off("pagechanging", handlePageChanging);
-          eventBus.off("scalechanging", handleScaleChanging);
-          eventBus.off("updatefindcontrolstate", handleFindControlState);
-          eventBus.off("updatefindmatchescount", handleFindMatchesCount);
           const cleanup = detachDocument();
           if (cleanup) await cleanup;
         } catch (error) {
+          cleanupErrors.push(error);
+        }
+        if (cleanupErrors.length > 0) {
+          const error = cleanupErrors[0];
           reportFailure(options, "cleanup", error);
           throw error;
         }

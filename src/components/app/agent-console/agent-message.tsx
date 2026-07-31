@@ -2,6 +2,16 @@ import type { ReactNode } from "react";
 import { isStaticToolUIPart } from "ai";
 import { SentContextAttachments } from "@/components/app/agent-console/context-attachments";
 import {
+  Context,
+  ContextContent,
+  ContextContentBody,
+  ContextContentFooter,
+  ContextContentHeader,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextTrigger,
+} from "@/components/ai-elements/context";
+import {
   Message,
   MessageActions,
   MessageContent,
@@ -24,12 +34,17 @@ import {
   TypographyMuted,
   TypographySmall,
 } from "@/components/ui/typography";
+import {
+  flattenMessageFindings,
+  type FlattenedMessageFinding,
+} from "@/lib/ai/agent-context";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import type {
-  AgentDataParts,
+  AgentErrorCode,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
+  PersistedUsage,
 } from "@/lib/ai/agent-types";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 
@@ -75,12 +90,61 @@ function toolTitle(type: string): string {
   }
 }
 
+function toolTargetFallback(type: StaticAgentToolPart["type"]): string {
+  switch (type) {
+    case "tool-read_chapter":
+    case "tool-run_critique":
+    case "tool-run_continuity":
+      return "Chapter";
+    case "tool-read_outline":
+      return "Outline";
+    case "tool-read_lore":
+      return "Lore";
+    case "tool-read_conversation_context":
+      return "Conversation";
+    case "tool-read_pending_proposal":
+      return "Proposal";
+    case "tool-stage_manuscript_proposal":
+      return "Manuscript proposal";
+    case "tool-stage_outline_proposal":
+      return "Outline proposal";
+  }
+}
+
+function toolItemName(type: StaticAgentToolPart["type"]): string {
+  switch (type) {
+    case "tool-read_chapter":
+      return "block";
+    case "tool-read_outline":
+      return "card";
+    case "tool-read_lore":
+      return "entry";
+    case "tool-run_critique":
+    case "tool-run_continuity":
+      return "finding";
+    case "tool-read_conversation_context":
+      return "message";
+    case "tool-read_pending_proposal":
+    case "tool-stage_manuscript_proposal":
+    case "tool-stage_outline_proposal":
+      return "change";
+  }
+}
+
+function toolCountDetail(
+  type: StaticAgentToolPart["type"],
+  count: number,
+): string {
+  const itemName = toolItemName(type);
+  return `${count} ${itemName}${count === 1 ? "" : "s"}`;
+}
+
 function safeTargetValue(value: unknown, unavailableLabel: string): string {
   if (typeof value !== "string") return unavailableLabel;
   const isAbsolutePath =
-    value.startsWith("/") ||
-    value.startsWith("\\\\") ||
-    /^[A-Za-z]:[\\/]/.test(value);
+    /(^|[\s("'=])\/(?!\/)\S+/.test(value) ||
+    /(^|[\s("'=])[A-Za-z]:[\\/]\S+/.test(value) ||
+    /(^|[\s("'=])\\\\[^\\\s]+\\/.test(value);
   return isAbsolutePath ? unavailableLabel : value;
 }
 
@@ -124,9 +188,9 @@ function safeToolView(part: AgentMessagePart): SafeToolView | null {
   if (part.state === "output-available") {
     const summary = part.output.summary;
     return {
-      title: summary.label,
-      target: safeTargetValue(summary.target, title),
-      detail: summary.detail,
+      title,
+      target: safeTargetValue(summary.target, toolTargetFallback(part.type)),
+      detail: toolCountDetail(part.type, summary.itemCount),
       itemCount: summary.itemCount,
     };
   }
@@ -134,7 +198,7 @@ function safeToolView(part: AgentMessagePart): SafeToolView | null {
     return {
       title,
       target: targetId(part),
-      detail: part.errorText,
+      detail: `${title} could not be completed. Retry the request.`,
       itemCount: 0,
     };
   }
@@ -212,25 +276,17 @@ function ToolPart({
     );
   } catch (error) {
     if (import.meta.env.DEV) throw error;
-    const message =
-      error instanceof Error ? error.message : `Agent tool projection failed: ${part.type}`;
-    return <InlineMessageError message={message} />;
+    return <InlineMessageError message="Tool activity could not be displayed." />;
   }
 }
 
-function Findings({
-  data,
-  messageId,
-}: {
-  data: AgentDataParts["findings"];
-  messageId: string;
-}) {
-  return data.items.map((finding, index) => {
-    const findingId = `${messageId}:${index}`;
+function Findings({ entries }: { entries: FlattenedMessageFinding[] }) {
+  return entries.map((entry) => {
+    const finding = entry.finding;
     return (
       <Card
         aria-label={`${finding.tag} finding`}
-        key={findingId}
+        key={entry.id}
         role="group"
         size="sm"
       >
@@ -244,8 +300,8 @@ function Findings({
                   refs: [
                     {
                       kind: "finding",
-                      chapterId: data.chapterId,
-                      findingId,
+                      chapterId: entry.chapterId,
+                      findingId: entry.id,
                     },
                   ],
                 });
@@ -271,6 +327,7 @@ function renderPart(
   index: number,
   message: AgentUIMessage,
   messageMetadata: AgentMessageMetadata,
+  findings: FlattenedMessageFinding[],
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>,
 ): ReactNode {
   const key = `${message.id}:part:${index}`;
@@ -302,7 +359,12 @@ function renderPart(
         />
       );
     case "data-findings":
-      return <Findings data={part.data} key={key} messageId={message.id} />;
+      return (
+        <Findings
+          entries={findings.filter((entry) => entry.partIndex === index)}
+          key={key}
+        />
+      );
     case "data-proposal-event":
       return <TypographyMuted key={key}>{part.data.text}</TypographyMuted>;
     case "data-compaction":
@@ -316,6 +378,47 @@ function renderPart(
     case "file":
       return unsupportedPart(part, key);
   }
+}
+
+const runErrorText: Record<AgentErrorCode, string> = {
+  configuration: "AI is not configured. Open AI Settings to continue.",
+  transport:
+    "The AI request could not be completed. Check your connection and retry.",
+  tool: "A project action could not be completed. Retry the request.",
+  compaction:
+    "Older conversation context could not be prepared. Retry the request.",
+  unknown: "The AI request could not be completed. Retry the request.",
+};
+
+function safeRunErrorText(errorCode: AgentErrorCode | null): string {
+  return runErrorText[errorCode ?? "unknown"];
+}
+
+function MessageUsage({ usage }: { usage: PersistedUsage }) {
+  const displayUsage = {
+    ...usage.raw,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+  };
+  return (
+    <Context
+      maxTokens={usage.contextWindow}
+      modelId={usage.modelId}
+      usage={displayUsage}
+      usedTokens={usage.totalTokens}
+    >
+      <ContextTrigger />
+      <ContextContent>
+        <ContextContentHeader />
+        <ContextContentBody className="space-y-2">
+          <ContextInputUsage />
+          <ContextOutputUsage />
+        </ContextContentBody>
+        <ContextContentFooter>{`Model: ${usage.modelId}`}</ContextContentFooter>
+      </ContextContent>
+    </Context>
+  );
 }
 
 function retryUserMessageId(message: AgentUIMessage): string {
@@ -348,8 +451,11 @@ export function AgentMessage({
   if (messageMetadata === undefined) {
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
   }
+  const findings = flattenMessageFindings(message);
   const error =
-    messageMetadata.state === "error" ? messageMetadata.error : null;
+    messageMetadata.state === "error"
+      ? safeRunErrorText(messageMetadata.errorCode)
+      : null;
   return (
     <Message from={message.role}>
       <MessageContent>
@@ -359,6 +465,7 @@ export function AgentMessage({
             index,
             message,
             messageMetadata,
+            findings,
             onNavigateSnapshot,
           ),
         )}
@@ -367,17 +474,22 @@ export function AgentMessage({
         ) : null}
         {error === null ? null : <InlineMessageError message={error} />}
       </MessageContent>
-      {error === null ? null : (
+      {error === null && messageMetadata.usage === null ? null : (
         <MessageActions>
-          <Button
-            onClick={() => void onRetry(retryUserMessageId(message))}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Retry
-          </Button>
-          {messageMetadata.errorCode === "configuration" ? (
+          {messageMetadata.usage === null ? null : (
+            <MessageUsage usage={messageMetadata.usage} />
+          )}
+          {error === null ? null : (
+            <Button
+              onClick={() => void onRetry(retryUserMessageId(message))}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Retry
+            </Button>
+          )}
+          {error !== null && messageMetadata.errorCode === "configuration" ? (
             <Button
               onClick={onOpenSettings}
               size="sm"

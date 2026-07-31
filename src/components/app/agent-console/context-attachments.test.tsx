@@ -147,6 +147,24 @@ describe("DraftContextAttachments", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps the draft remove action visible to keyboard focus", () => {
+    render(
+      <DraftContextAttachments
+        refs={[narrationRef]}
+        sources={sources}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    const remove = screen.getByRole("button", {
+      name: "Remove Narration block",
+    });
+    remove.focus();
+
+    expect(document.activeElement).toBe(remove);
+    expect(remove.className.split(" ")).toContain("focus-visible:opacity-100");
+  });
+
   it("keeps an unavailable draft source visible, previewable, and removable", async () => {
     const onRemove = vi.fn();
     const unavailable: DraftContextSource = {

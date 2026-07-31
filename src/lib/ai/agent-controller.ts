@@ -13,6 +13,7 @@ import {
   draftContextRefKey,
   findBridgeSuccessor,
   findingFingerprint,
+  flattenMessageFindings,
   resolveDraftSnapshots,
 } from "@/lib/ai/agent-context";
 import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
@@ -300,20 +301,13 @@ function settledFindings(
   }> = [];
   for (const message of messages) {
     if (message.metadata?.state === "streaming") continue;
-    for (const part of message.parts) {
-      if (
-        part.type !== "data-findings" ||
-        part.data.chapterId !== chapterId
-      ) {
-        continue;
-      }
-      for (const [itemIndex, finding] of part.data.items.entries()) {
-        findings.push({
-          id: `${message.id}:${itemIndex}`,
-          order: findings.length,
-          finding,
-        });
-      }
+    for (const entry of flattenMessageFindings(message)) {
+      if (entry.chapterId !== chapterId) continue;
+      findings.push({
+        id: entry.id,
+        order: findings.length,
+        finding: entry.finding,
+      });
     }
   }
   return findings;

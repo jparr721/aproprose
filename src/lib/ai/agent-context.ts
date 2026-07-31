@@ -1,5 +1,6 @@
 import type { SourceDocumentUIPart } from "ai";
 import type {
+  AgentUIMessage,
   ContextSnapshot,
   ContextSourceResolver,
   DraftContextRef,
@@ -14,6 +15,13 @@ import type {
   ContinuityFlag,
   ProjectMeta,
 } from "@/lib/types";
+
+export interface FlattenedMessageFinding {
+  id: string;
+  partIndex: number;
+  chapterId: string;
+  finding: CritiqueNote | ContinuityFlag;
+}
 
 function fnv1a(value: string): string {
   let hash = 0x811c9dc5;
@@ -67,6 +75,24 @@ export function findingFingerprint(
   finding: CritiqueNote | ContinuityFlag,
 ): string {
   return fnv1a(JSON.stringify(finding));
+}
+
+export function flattenMessageFindings(
+  message: AgentUIMessage,
+): FlattenedMessageFinding[] {
+  const findings: FlattenedMessageFinding[] = [];
+  for (const [partIndex, part] of message.parts.entries()) {
+    if (part.type !== "data-findings") continue;
+    for (const finding of part.data.items) {
+      findings.push({
+        id: `${message.id}:${findings.length}`,
+        partIndex,
+        chapterId: part.data.chapterId,
+        finding,
+      });
+    }
+  }
+  return findings;
 }
 
 function isProseBlock(block: Block): boolean {

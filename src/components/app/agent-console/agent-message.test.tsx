@@ -8,6 +8,7 @@ import type {
   AgentUIMessage,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
+import { EMPTY_META } from "@/lib/migration";
 import { EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 
@@ -71,6 +72,7 @@ const snapshot: ContextSnapshot = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 beforeEach(() => {
@@ -81,7 +83,7 @@ beforeEach(() => {
     draftContextSources: {},
     draftSourceLocators: {},
   });
-  useProjectStore.setState({ project: null });
+  useProjectStore.setState({ project: null, meta: EMPTY_META });
 });
 
 describe("AgentMessage content", () => {
@@ -95,6 +97,46 @@ describe("AgentMessage content", () => {
     );
 
     expect(screen.getByText("quiet answer").dataset.streamdown).toBe("strong");
+  });
+
+  it("renders non-null model usage through the stock context view", async () => {
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-usage",
+        [{ type: "text", text: "Measured answer." }],
+        metadata({
+          usage: {
+            modelId: "gpt-4.1",
+            inputTokens: 1_000,
+            outputTokens: 500,
+            totalTokens: 1_500,
+            contextWindow: 10_000,
+            raw: {
+              inputTokens: 1_000,
+              inputTokenDetails: {
+                noCacheTokens: 1_000,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+              outputTokens: 500,
+              outputTokenDetails: { textTokens: 500, reasoningTokens: 0 },
+              totalTokens: 1_500,
+            },
+          },
+        }),
+      ),
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /Model context usage/,
+    });
+    expect(trigger.textContent).toContain("15%");
+    fireEvent.pointerEnter(trigger);
+
+    expect(await screen.findByText("1.5K / 10K")).toBeTruthy();
+    expect(screen.getByText("Model: gpt-4.1")).toBeTruthy();
+    expect(screen.getByText("Input")).toBeTruthy();
+    expect(screen.getByText("Output")).toBeTruthy();
   });
 
   it("never renders model reasoning from a malformed message", () => {
@@ -174,6 +216,87 @@ describe("AgentMessage content", () => {
       ]),
     );
     expect(useAgentConsoleStore.getState().messages).toEqual([message]);
+  });
+
+  it("uses one finding index across every findings part in a message", async () => {
+    useProjectStore.setState({
+      project: {
+        root: "/book",
+        name: "Book",
+        mainFile: "main.tex",
+        title: "Book",
+        author: "Author",
+        metadata: {
+          title: "Book",
+          subtitle: "",
+          author: "Author",
+          publisher: "",
+          isbn: "",
+        },
+        chapters: [],
+      },
+    });
+    const message = assistantMessage(
+      "assistant-split-findings",
+      [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The middle stalls.",
+                blockIds: ["block-2"],
+              },
+            ],
+          },
+        },
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
+              {
+                kind: "strength",
+                tag: "Voice",
+                text: "The restraint lands.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+      metadata({}),
+    );
+    useAgentConsoleStore.setState({ messages: [message] });
+
+    renderAgentMessage(message);
+    fireEvent.click(screen.getAllByRole("button", { name: "Add to Chat" })[1]);
+
+    await waitFor(() =>
+      expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
+        {
+          kind: "finding",
+          chapterId: "ch1",
+          findingId: "assistant-split-findings:1",
+        },
+      ]),
+    );
+    await waitFor(() =>
+      expect(
+        useAgentConsoleStore.getState().draftContextSources[
+          "finding:ch1:assistant-split-findings:1"
+        ],
+      ).toMatchObject({
+        available: true,
+        label: "Voice",
+        preview: "The restraint lands.",
+      }),
+    );
   });
 
   it("renders proposal and compaction data as compact status rows", () => {
@@ -310,7 +433,43 @@ describe("AgentMessage safe tool activity", () => {
     expect(document.body.textContent).not.toContain("fingerprint-1");
   });
 
-  it("shows a tool error without exposing its input", () => {
+  it("reconstructs completed tool copy without raw errors or absolute paths", () => {
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-unsafe-summary",
+        [
+          {
+            type: "tool-read_chapter",
+            toolCallId: "call-unsafe-summary",
+            state: "output-available",
+            input: { chapterId: "chapter-1" },
+            output: {
+              kind: "summary",
+              summary: {
+                label: "APICallError C:\\Users\\author\\private\\chapter.tex",
+                target: "Result at /Users/author/private/chapter.tex",
+                detail: "ENOENT /private/book/chapter.tex",
+                itemCount: 1,
+              },
+            },
+          },
+        ],
+        metadata({}),
+      ),
+    );
+
+    expect(screen.getByText("Read chapter")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
+    expect(screen.getByText("Chapter")).toBeTruthy();
+    expect(screen.getByText("1 block")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("APICallError");
+    expect(document.body.textContent).not.toContain("/Users/author");
+    expect(document.body.textContent).not.toContain("C:\\Users\\author");
+  });
+
+  it("shows safe tool error copy without exposing raw Unix or Windows paths", () => {
+    const rawError =
+      "ENOENT at /Users/author/private/chapter.tex from C:\\Users\\author\\private\\chapter.tex";
     renderAgentMessage(
       assistantMessage(
         "assistant-tool-error",
@@ -320,7 +479,7 @@ describe("AgentMessage safe tool activity", () => {
             toolCallId: "call-error",
             state: "output-error",
             input: { chapterId: "chapter-1" },
-            errorText: "The chapter could not be read.",
+            errorText: rawError,
           },
         ],
         metadata({ state: "error", errorCode: "tool" }),
@@ -329,7 +488,46 @@ describe("AgentMessage safe tool activity", () => {
 
     expect(screen.getByText("Error")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-    expect(screen.getByText("The chapter could not be read.")).toBeTruthy();
+    expect(
+      screen.getByText("Read chapter could not be completed. Retry the request."),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain(rawError);
+    expect(document.body.textContent).not.toContain("/Users/author");
+    expect(document.body.textContent).not.toContain("C:\\Users\\author");
+  });
+
+  it("uses safe copy when a production tool projection throws", () => {
+    vi.stubEnv("DEV", false);
+    const rawError = "ENOENT /Users/author/private/chapter.tex";
+    const output = {} as {
+      kind: "summary";
+      summary: never;
+    };
+    Object.defineProperty(output, "summary", {
+      get: () => {
+        throw new Error(rawError);
+      },
+    });
+    const malformedPart = {
+      type: "tool-read_chapter",
+      toolCallId: "call-malformed",
+      state: "output-available",
+      input: { chapterId: "chapter-1" },
+      output,
+    } as AgentUIMessage["parts"][number];
+
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-malformed-tool",
+        [malformedPart],
+        metadata({}),
+      ),
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Tool activity could not be displayed.",
+    );
+    expect(document.body.textContent).not.toContain(rawError);
   });
 
   it("marks a stopped unfinished tool without inventing a result", () => {
@@ -355,7 +553,7 @@ describe("AgentMessage safe tool activity", () => {
 });
 
 describe("AgentMessage errors", () => {
-  it("renders a failed run inline and retries the original user message", async () => {
+  it("renders safe run error copy and retries the original user message", async () => {
     const runMetadata = metadata({ runId: "failed-run" });
     const user: AgentUIMessage = {
       id: "original-user",
@@ -369,14 +567,21 @@ describe("AgentMessage errors", () => {
       metadata({
         runId: "failed-run",
         state: "error",
-        error: "The request lost its connection.",
+        error:
+          "APICallError at /Users/author/.config/key from C:\\Users\\author\\.config\\key",
         errorCode: "transport",
       }),
     );
     useAgentConsoleStore.setState({ messages: [user, failed] });
     const { onRetry } = renderAgentMessage(failed);
 
-    expect(screen.getByText("The request lost its connection.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The AI request could not be completed. Check your connection and retry.",
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("/Users/author");
+    expect(document.body.textContent).not.toContain("C:\\Users\\author");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(onRetry).toHaveBeenCalledWith("original-user"));
@@ -394,6 +599,9 @@ describe("AgentMessage errors", () => {
     );
     const { onOpenSettings } = renderAgentMessage(configuration);
 
+    expect(
+      screen.getByText("AI is not configured. Open AI Settings to continue."),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open AI Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
 

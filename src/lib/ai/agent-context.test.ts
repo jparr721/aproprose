@@ -5,10 +5,12 @@ import {
   cardFingerprint,
   contextSnapshotToSourcePart,
   findBridgeSuccessor,
+  flattenMessageFindings,
   resolveDraftSnapshots,
   resolveSnapshotBlock,
 } from "@/lib/ai/agent-context";
 import type {
+  AgentUIMessage,
   ContextSourceResolver,
   DraftContextRef,
 } from "@/lib/ai/agent-types";
@@ -52,6 +54,93 @@ describe("agent source fingerprints", () => {
     expect(blockOrderFingerprint([prose("a", "A"), prose("b", "B")])).not.toBe(
       blockOrderFingerprint([prose("b", "B"), prose("a", "A")]),
     );
+  });
+});
+
+describe("flattenMessageFindings", () => {
+  it("assigns message-wide IDs across multiple findings parts", () => {
+    const message: AgentUIMessage = {
+      id: "assistant-findings",
+      role: "assistant",
+      metadata: {
+        runId: "run-1",
+        mode: "writing",
+        task: { kind: "conversation", targetChapterId: "ch1" },
+        state: "complete",
+        createdAt: "2026-07-30T00:00:00.000Z",
+        error: null,
+        errorCode: null,
+        retryOf: null,
+        usage: null,
+      },
+      parts: [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The middle stalls.",
+                blockIds: ["b2"],
+              },
+            ],
+          },
+        },
+        { type: "text", text: "A short note." },
+        {
+          type: "data-findings",
+          data: {
+            kind: "continuity",
+            chapterId: "ch2",
+            items: [
+              {
+                severity: "warning",
+                tag: "Timeline",
+                text: "The hour changed.",
+                blockIds: ["b8"],
+              },
+              {
+                severity: "info",
+                tag: "Setting",
+                text: "The door remains locked.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(
+      flattenMessageFindings(message).map((entry) => ({
+        id: entry.id,
+        partIndex: entry.partIndex,
+        chapterId: entry.chapterId,
+        tag: entry.finding.tag,
+      })),
+    ).toEqual([
+      {
+        id: "assistant-findings:0",
+        partIndex: 0,
+        chapterId: "ch1",
+        tag: "Pacing",
+      },
+      {
+        id: "assistant-findings:1",
+        partIndex: 2,
+        chapterId: "ch2",
+        tag: "Timeline",
+      },
+      {
+        id: "assistant-findings:2",
+        partIndex: 2,
+        chapterId: "ch2",
+        tag: "Setting",
+      },
+    ]);
   });
 });
 

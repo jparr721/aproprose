@@ -87,7 +87,10 @@ export function DraftContextAttachments({
                 {source.available ? null : (
                   <TypographyMuted>Unavailable</TypographyMuted>
                 )}
-                <AttachmentRemove label={`Remove ${source.label}`} />
+                <AttachmentRemove
+                  className="focus-visible:opacity-100 group-focus-within:opacity-100"
+                  label={`Remove ${source.label}`}
+                />
               </Attachment>
             </AttachmentHoverCardTrigger>
             <AttachmentHoverCardContent>

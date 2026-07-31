@@ -411,7 +411,7 @@ describe("dispatchAgentIntent", () => {
     });
   });
 
-  it("resolves a message-index finding reference to its live finding", async () => {
+  it("resolves a message-wide finding index across multiple findings parts", async () => {
     const run: AgentRun = {
       id: "findings-run",
       projectRoot: "/book",
@@ -438,6 +438,15 @@ describe("dispatchAgentIntent", () => {
                 text: "The middle stalls.",
                 blockIds: ["b2"],
               },
+            ],
+          },
+        },
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
               {
                 kind: "strength",
                 tag: "Voice",

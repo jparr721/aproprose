@@ -386,6 +386,58 @@ describe("agent console store", () => {
     });
   });
 
+  it("collapses a rebase collision at the earliest attachment position", () => {
+    const previous = blockRef("old-id");
+    const current = blockRef("new-id");
+    const leading: DraftContextRef = {
+      kind: "outline-card",
+      chapterId: "ch1",
+      cardId: "card-1",
+    };
+    const middle = blockRef("middle-id");
+    const trailing: DraftContextRef = {
+      kind: "finding",
+      chapterId: "ch1",
+      findingId: "finding-1",
+    };
+    const leadingSource = source(leading, "card-1", 0, "fp-leading");
+    const staleCurrentSource = source(current, "new-id", 2, "fp-stale");
+    const livePreviousSource = source(previous, "new-id", 6, "fp-live");
+    const store = useAgentConsoleStore.getState();
+    store.addDraftContextRefs([
+      leading,
+      current,
+      middle,
+      previous,
+      trailing,
+    ]);
+    store.setDraftContextSources([
+      leadingSource,
+      staleCurrentSource,
+      livePreviousSource,
+    ]);
+
+    store.rebaseDraftContextRef(previous, current);
+
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
+      leading,
+      current,
+      middle,
+      trailing,
+    ]);
+    expect(useAgentConsoleStore.getState().draftContextSources).toEqual({
+      "outline-card:ch1:card-1": leadingSource,
+      "block:ch1:new-id": { ...livePreviousSource, ref: current },
+    });
+    expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({
+      "outline-card:ch1:card-1": {
+        order: 0,
+        sourceFingerprint: "fp-leading",
+      },
+      "block:ch1:new-id": { order: 6, sourceFingerprint: "fp-live" },
+    });
+  });
+
   it("locks preflight without changing the draft or transcript", () => {
     const store = useAgentConsoleStore.getState();
     store.setDraftText("Keep this request");

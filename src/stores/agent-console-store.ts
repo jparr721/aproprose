@@ -185,9 +185,22 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
         };
       }
 
+      const draftContextRefs: DraftContextRef[] = [];
+      let hasRebasedRef = false;
+      for (const ref of state.draftContextRefs) {
+        const key = draftContextRefKey(ref);
+        if (key !== previousKey && key !== currentKey) {
+          draftContextRefs.push(ref);
+        } else if (!hasRebasedRef) {
+          draftContextRefs.push(current);
+          hasRebasedRef = true;
+        }
+      }
+
       const draftContextSources = { ...state.draftContextSources };
       const previousSource = draftContextSources[previousKey];
       delete draftContextSources[previousKey];
+      delete draftContextSources[currentKey];
       if (previousSource !== undefined) {
         draftContextSources[currentKey] = { ...previousSource, ref: current };
       }
@@ -195,14 +208,13 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
       const draftSourceLocators = { ...state.draftSourceLocators };
       const previousLocator = draftSourceLocators[previousKey];
       delete draftSourceLocators[previousKey];
+      delete draftSourceLocators[currentKey];
       if (previousLocator !== undefined) {
         draftSourceLocators[currentKey] = previousLocator;
       }
 
       return {
-        draftContextRefs: state.draftContextRefs.map((ref) =>
-          draftContextRefKey(ref) === previousKey ? current : ref,
-        ),
+        draftContextRefs,
         draftContextSources,
         draftSourceLocators,
       };

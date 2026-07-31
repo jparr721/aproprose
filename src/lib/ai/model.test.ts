@@ -47,6 +47,26 @@ describe("getModel", () => {
     expect(mocks.provider).toHaveBeenCalledWith("gpt-4.1-mini");
   });
 
+  it("ignores a legacy provider value when resolving the selected OpenAI model", async () => {
+    const expected = { provider: "openai", modelId: "gpt-4.1-mini" };
+    mocks.provider.mockReturnValue(expected);
+    const current = useSettingsStore.getState();
+    const legacyState = {
+      ...current,
+      aiModel: "gpt-4.1-mini",
+      aiProvider: "codex" as const,
+    };
+    useSettingsStore.setState(legacyState);
+
+    const model = await getModel().finally(() => {
+      useSettingsStore.setState(current, true);
+    });
+
+    expect(model).toBe(expected);
+    expect(mocks.getAiConfig).toHaveBeenCalledOnce();
+    expect(mocks.provider).toHaveBeenCalledWith("gpt-4.1-mini");
+  });
+
   it("reuses the provider until resetAiProvider is called", async () => {
     useSettingsStore.setState({ aiModel: "gpt-4.1-mini" });
 

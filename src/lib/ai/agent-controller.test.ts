@@ -411,6 +411,69 @@ describe("dispatchAgentIntent", () => {
     });
   });
 
+  it("resolves a message-index finding reference to its live finding", async () => {
+    const run: AgentRun = {
+      id: "findings-run",
+      projectRoot: "/book",
+      mode: "writing",
+      task: { kind: "chapter-analysis", chapterId: "ch1", analysis: "critique" },
+      userMessageId: "findings-user",
+      attachments: [],
+      startedAt: "2026-07-30T12:00:00.000Z",
+    };
+    const findingsMessage: AgentUIMessage = {
+      id: "assistant-findings",
+      role: "assistant",
+      metadata: metadata(run, "complete", null),
+      parts: [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The middle stalls.",
+                blockIds: ["b2"],
+              },
+              {
+                kind: "strength",
+                tag: "Voice",
+                text: "The restraint lands.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+    useAgentConsoleStore.setState({ messages: [findingsMessage] });
+    const controller = createAgentController(makeDependencies(null));
+
+    await controller.dispatchAgentIntent({
+      kind: "add-context",
+      refs: [
+        {
+          kind: "finding",
+          chapterId: "ch1",
+          findingId: "assistant-findings:1",
+        },
+      ],
+    });
+
+    expect(
+      useAgentConsoleStore.getState().draftContextSources[
+        "finding:ch1:assistant-findings:1"
+      ],
+    ).toMatchObject({
+      available: true,
+      label: "Voice",
+      preview: "The restraint lands.",
+    });
+  });
+
   it("prefills or focuses without submitting", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);

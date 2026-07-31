@@ -288,8 +288,13 @@ function snapshotForFinding(
 function settledFindings(
   messages: AgentUIMessage[],
   chapterId: string,
-): Array<{ order: number; finding: CritiqueNote | ContinuityFlag }> {
+): Array<{
+  id: string;
+  order: number;
+  finding: CritiqueNote | ContinuityFlag;
+}> {
   const findings: Array<{
+    id: string;
     order: number;
     finding: CritiqueNote | ContinuityFlag;
   }> = [];
@@ -302,8 +307,12 @@ function settledFindings(
       ) {
         continue;
       }
-      for (const finding of part.data.items) {
-        findings.push({ order: findings.length, finding });
+      for (const [itemIndex, finding] of part.data.items.entries()) {
+        findings.push({
+          id: `${message.id}:${itemIndex}`,
+          order: findings.length,
+          finding,
+        });
       }
     }
   }
@@ -396,7 +405,7 @@ async function resolveDraftContext(args: {
 
     const findings = settledFindings(args.messages, originalRef.chapterId);
     const exact = findings.find(
-      ({ finding }) => findingFingerprint(finding) === originalRef.findingId,
+      ({ id }) => id === originalRef.findingId,
     );
     const relocated =
       exact ??

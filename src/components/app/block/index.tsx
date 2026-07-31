@@ -58,7 +58,7 @@ function BlockImpl({
   // The active find match in this block, or null for every other block (a stable
   // null, so only the current-match block and the one it just left re-render).
   const hit = useFindStore((s) =>
-    s.open && s.currentIndex >= 0 && s.matches[s.currentIndex]?.blockId === block.id
+    s.currentIndex >= 0 && s.matches[s.currentIndex]?.blockId === block.id
       ? s.matches[s.currentIndex]
       : null,
   );

@@ -45,7 +45,7 @@ import {
   TypographyMutedSpan,
 } from "@/components/ui/typography";
 import { useProjectStore } from "@/stores/project-store";
-import { useFindStore } from "@/stores/find-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { dispatchAiIntent } from "@/stores/ai-intent-store";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
@@ -140,6 +140,7 @@ export function Editor() {
   const editing = useProjectStore((s) => s.editing);
   const select = useProjectStore((s) => s.select);
   const reorderBlock = useProjectStore((s) => s.reorderBlock);
+  const activateSearchSurface = useSearchSurfaceStore((state) => state.activate);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
@@ -222,10 +223,6 @@ export function Editor() {
   };
   useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_BOLD, () => applyFormat("**"), EDITOR_HISTORY_OPTIONS);
   useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_ITALIC, () => applyFormat("_"), EDITOR_HISTORY_OPTIONS);
-
-  // Find & replace across the chapter's blocks. Cmd+F opens the widget (and
-  // re-selects the query on repeat); the widget owns its own Enter/Esc keys.
-  useKeybinding(KEYBINDING_IDS.OPEN_FIND, () => useFindStore.getState().openFind());
 
   // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
   // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders
@@ -337,7 +334,12 @@ export function Editor() {
 
   if (!chapter) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground"
+        onPointerDownCapture={() => activateSearchSurface("editor")}
+        onFocusCapture={() => activateSearchSurface("editor")}
+        data-search-surface="editor"
+      >
         <IconWriting className="size-8 text-faint" />
         <TypographyMuted>Select a chapter to begin.</TypographyMuted>
       </div>
@@ -346,7 +348,12 @@ export function Editor() {
 
   if (conflictedFiles.includes(chapter.file)) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 bg-background px-8 text-center"
+        onPointerDownCapture={() => activateSearchSurface("editor")}
+        onFocusCapture={() => activateSearchSurface("editor")}
+        data-search-surface="editor"
+      >
         <IconGitMerge className="size-8 text-destructive" />
         <TypographyLarge>This chapter has a merge conflict</TypographyLarge>
         <TypographyMuted className="max-w-sm text-sm">
@@ -358,7 +365,12 @@ export function Editor() {
   }
 
   return (
-    <div className="relative h-full min-h-0">
+    <div
+      className="relative h-full min-h-0"
+      onPointerDownCapture={() => activateSearchSurface("editor")}
+      onFocusCapture={() => activateSearchSurface("editor")}
+      data-search-surface="editor"
+    >
       <FindBar />
       <AlertDialog
         open={pendingDeleteId !== null}

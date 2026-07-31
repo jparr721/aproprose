@@ -123,7 +123,7 @@ export const KEYBINDINGS = {
     id: "open-find",
     key: "f",
     modifiers: { ctrl: true },
-    description: "Find and replace in the chapter",
+    description: "Find in the active pane",
     category: "editor",
     label: "Find",
   },

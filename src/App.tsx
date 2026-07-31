@@ -36,6 +36,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { Editor } from "@/components/app/editor";
+import { SearchCoordinator } from "@/components/app/search-coordinator";
 import { OutlinePane } from "@/components/app/outline/outline-pane";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { RightPanelContent, RightPanelRail } from "@/components/app/right-panel";
@@ -89,35 +90,38 @@ function Workspace() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <ResizablePanelGroup
-        orientation="horizontal"
-        className="min-w-0 flex-1"
-        onLayoutChanged={() => setRightPanelWidth(Math.round(liveWidth.current))}
-      >
-        <ResizablePanel id="main" minSize={360}>
-          {main}
-        </ResizablePanel>
-        {showContent ? (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              id="right"
-              defaultSize={rightPanelWidth}
-              minSize={320}
-              maxSize={640}
-              groupResizeBehavior="preserve-pixel-size"
-              onResize={(size) => {
-                liveWidth.current = size.inPixels;
-              }}
-            >
-              <RightPanelContent />
-            </ResizablePanel>
-          </>
-        ) : null}
-      </ResizablePanelGroup>
-      {showAi ? <RightPanelRail /> : null}
-    </div>
+    <>
+      <SearchCoordinator pdfAvailable={showPdf} />
+      <div className="flex min-h-0 flex-1">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="min-w-0 flex-1"
+          onLayoutChanged={() => setRightPanelWidth(Math.round(liveWidth.current))}
+        >
+          <ResizablePanel id="main" minSize={360}>
+            {main}
+          </ResizablePanel>
+          {showContent ? (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="right"
+                defaultSize={rightPanelWidth}
+                minSize={320}
+                maxSize={640}
+                groupResizeBehavior="preserve-pixel-size"
+                onResize={(size) => {
+                  liveWidth.current = size.inPixels;
+                }}
+              >
+                <RightPanelContent />
+              </ResizablePanel>
+            </>
+          ) : null}
+        </ResizablePanelGroup>
+        {showAi ? <RightPanelRail /> : null}
+      </div>
+    </>
   );
 }
 

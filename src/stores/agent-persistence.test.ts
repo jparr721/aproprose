@@ -830,7 +830,108 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
-  it("retains an unsavable old-root snapshot and issue across a switch", async () => {
+  it("reconciles a retained save before reopening its root", async () => {
+    const staleOldState = persistedState("Stale disk draft", [
+      textMessage("stale-old", "user", "Stale disk message", "complete"),
+    ]);
+    tauri.readAppData.mockImplementation((key: string) => {
+      if (key === agentStateKey("/books/old")) {
+        return Promise.resolve(staleOldState);
+      }
+      if (key === agentStateKey("/books/new")) {
+        return Promise.resolve(persistedState("New root draft", []));
+      }
+      throw new Error(`Unexpected persistence key: ${key}`);
+    });
+    useProjectStore.setState({ project: project("/books/old") });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/old",
+      ),
+    );
+    const staleWrite = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(staleWrite.promise);
+    const staleSaving = saveAgentState(
+      "/books/old",
+      persistedState("Stale in-flight write", []),
+    );
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(1));
+    useAgentConsoleStore.getState().setDraftText("Captured old draft");
+    tauri.writeAppData.mockRejectedValueOnce(new Error("old root unavailable"));
+
+    useProjectStore.setState({ project: project("/books/new") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: "/books/new",
+        persistenceIssue: {
+          kind: "save",
+          projectRoot: "/books/old",
+        },
+      }),
+    );
+    staleWrite.resolve(undefined);
+    await staleSaving;
+    expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
+      kind: "save",
+      projectRoot: "/books/old",
+    });
+    tauri.readAppData.mockClear();
+
+    useProjectStore.setState({ project: project("/books/old") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: "/books/old",
+        draftText: "Captured old draft",
+        persistenceIssue: {
+          kind: "save",
+          projectRoot: "/books/old",
+        },
+      }),
+    );
+    expect(tauri.readAppData).not.toHaveBeenCalled();
+
+    tauri.writeAppData.mockClear();
+    vi.useFakeTimers();
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Edited while recovery was pending");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+
+    await retryAgentPersistence();
+    expect(tauri.writeAppData).toHaveBeenCalledTimes(1);
+    expect(tauri.writeAppData.mock.calls[0]).toEqual([
+      agentStateKey("/books/old"),
+      expect.objectContaining({ draftText: "Captured old draft" }),
+    ]);
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    expect(tauri.writeAppData.mock.calls[1]).toEqual([
+      agentStateKey("/books/old"),
+      expect.objectContaining({
+        draftText: "Edited while recovery was pending",
+      }),
+    ]);
+
+    useAgentConsoleStore.getState().setDraftText("Post-recovery edit");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(3));
+    expect(tauri.writeAppData.mock.calls[2]).toEqual([
+      agentStateKey("/books/old"),
+      expect.objectContaining({ draftText: "Post-recovery edit" }),
+    ]);
+    expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+    vi.useRealTimers();
+    persistence.unmount();
+  });
+
+  it("restores an unsavable old-root source when reopened", async () => {
     await transitionAgentProject("/books/old");
     useAgentConsoleStore.setState({
       draftText: "Recoverable old draft",
@@ -857,6 +958,28 @@ describe("agent persistence", () => {
       },
     });
     expect(tauri.writeAppData).not.toHaveBeenCalled();
+    tauri.readAppData.mockClear();
+
+    await transitionAgentProject("/books/old");
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: "/books/old",
+      draftText: "Recoverable old draft",
+      messages: [
+        expect.objectContaining({
+          id: "assistant-unknown",
+          parts: [{ type: "provider-private", value: "Unsafe payload" }],
+        }),
+      ],
+      persistenceIssue: {
+        kind: "save",
+        projectRoot: "/books/old",
+        message: expect.stringContaining(
+          "Unknown agent message part cannot be persisted",
+        ),
+      },
+    });
+    expect(tauri.readAppData).not.toHaveBeenCalled();
     await expect(retryAgentPersistence()).rejects.toMatchObject({
       issue: {
         kind: "save",
@@ -868,7 +991,12 @@ describe("agent persistence", () => {
     });
 
     await saveAgentState("/books/old", emptyPersistedAgentState());
-    expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: "/books/old",
+      draftText: "",
+      messages: [],
+      persistenceIssue: null,
+    });
   });
 
   it("keeps a failed close save retryable with no active project", async () => {

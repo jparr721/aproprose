@@ -209,6 +209,13 @@ type DraftContextRef =
     };
 ```
 
+Parsed manuscript block IDs are process-local and may be reminted when a chapter
+is read again. The console therefore persists an order and semantic-fingerprint
+locator beside each draft ref. The ID is tried first; the locator is used only
+to relocate the same live source, after which the ref is rebased to the new ID.
+The locator never supplies sent text. Submission always snapshots newly resolved
+live text.
+
 Their labels and previews resolve against current project state while the draft is
 unsent. A deleted source remains as an explicit unavailable chip until the author
 removes it.
@@ -574,6 +581,13 @@ interface PersistedAgentState {
   } | null;
   draftText: string;
   draftContextRefs: DraftContextRef[];
+  draftSourceLocators: Record<
+    string,
+    {
+      order: number;
+      sourceFingerprint: string;
+    }
+  >;
   pendingProposal: PendingProposal | null;
   lastUsage: PersistedUsage | null;
   interruptedRun: InterruptedRun | null;
@@ -749,6 +763,7 @@ has moved.
 - Switching modes during a run affects only the next run.
 - Proposal tools enforce every frozen task boundary.
 - Draft context stays live and sent context freezes exact text, order, and type.
+- Draft block refs relocate safely when chapter parsing remints block IDs.
 - Sent attachments retain snapshots when live sources change or disappear.
 - "Pick Up From Here" reads the full chapter.
 - A middle anchor stages insertion before the existing successor.

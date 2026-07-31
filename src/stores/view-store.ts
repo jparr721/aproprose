@@ -10,7 +10,7 @@
 // `aiTab`, the right-panel width, and the PDF / Outline open flags are persisted
 // (to the app config dir, via the Tauri-backed storage adapter) so a relaunch
 // reopens the same layout the author left; the rest of the state is ephemeral and
-// the `pending` callback is not serializable.
+// the pending guarded action is not serializable.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -27,6 +27,15 @@ export type AiTab =
   | "continuity"
   | "muse";
 
+export type GuardedActionResult<Result> =
+  | { status: "ran"; value: Result }
+  | { status: "canceled" };
+
+interface PendingGuardedAction {
+  run: () => void;
+  cancel: () => void;
+}
+
 interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
@@ -37,7 +46,7 @@ interface ViewState {
    *  the failure toast, and the command palette can all open the same viewer. */
   buildErrorsOpen: boolean;
   /** A pending state-wiping action awaiting confirmation, or null. */
-  pending: (() => void) | null;
+  pending: PendingGuardedAction | null;
 
   /** Active AI panel tab. */
   aiTab: AiTab;
@@ -59,7 +68,9 @@ interface ViewState {
   openAiTab: (tab: AiTab) => void;
 
   /** Run `action` now, or stage it behind the confirm dialog if edits are unsaved. */
-  requestGuarded: (action: () => void) => void;
+  requestGuarded: <Result>(
+    action: () => Result | Promise<Result>,
+  ) => Promise<GuardedActionResult<Awaited<Result>>>;
   confirmPending: () => void;
   cancelPending: () => void;
 }
@@ -102,15 +113,42 @@ export const useViewStore = create<ViewState>()(
         set({ aiOpen: true, focus: false, aiTab: tab, aiCollapsed: false }),
 
       requestGuarded: (action) => {
-        if (useProjectStore.getState().chapterDirty) set({ pending: () => action() });
-        else action();
+        get().pending?.cancel();
+        const request = new Promise<
+          GuardedActionResult<Awaited<ReturnType<typeof action>>>
+        >((resolve, reject) => {
+          const pending: PendingGuardedAction = {
+            run: () => {
+              try {
+                void Promise.resolve(action()).then(
+                  (value) => resolve({ status: "ran", value }),
+                  reject,
+                );
+              } catch (error) {
+                reject(error);
+              }
+            },
+            cancel: () => resolve({ status: "canceled" }),
+          };
+          if (useProjectStore.getState().chapterDirty) {
+            set({ pending });
+          } else {
+            set({ pending: null });
+            pending.run();
+          }
+        });
+        return request;
       },
       confirmPending: () => {
         const { pending } = get();
-        pending?.();
         set({ pending: null });
+        pending?.run();
       },
-      cancelPending: () => set({ pending: null }),
+      cancelPending: () => {
+        const { pending } = get();
+        set({ pending: null });
+        pending?.cancel();
+      },
     }),
     {
       name: "view",

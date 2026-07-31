@@ -554,21 +554,26 @@ describe("ReviewTray rejection and navigation", () => {
       '[data-slot="scroll-area-viewport"]',
     );
     const conversation = screen.getByRole("log");
+    const conversationViewport = screen.getByRole("region", {
+      name: "Conversation messages",
+    });
     if (!(tray instanceof HTMLElement)) throw new Error("Missing review tray.");
     if (!(reviewViewport instanceof HTMLElement)) {
       throw new Error("Missing review viewport.");
     }
-    Object.defineProperty(conversation, "scrollHeight", {
+    expect(conversation.contains(conversationViewport)).toBe(true);
+    expect(conversationViewport).not.toBe(conversation);
+    Object.defineProperty(conversationViewport, "scrollHeight", {
       configurable: true,
       value: 300,
     });
-    Object.defineProperty(conversation, "clientHeight", {
+    Object.defineProperty(conversationViewport, "clientHeight", {
       configurable: true,
       value: 100,
     });
-    conversation.scrollTop = 41;
+    conversationViewport.scrollTop = 41;
     reviewViewport.scrollTop = 17;
-    fireEvent.scroll(conversation);
+    fireEvent.scroll(conversationViewport);
     fireEvent.scroll(reviewViewport);
 
     act(() => {
@@ -590,6 +595,9 @@ describe("ReviewTray rejection and navigation", () => {
     ).toBe(reviewViewport);
     expect(reviewViewport.scrollTop).toBe(17);
     expect(screen.getByRole("log")).toBe(conversation);
-    expect(conversation.scrollTop).toBe(41);
+    expect(
+      screen.getByRole("region", { name: "Conversation messages" }),
+    ).toBe(conversationViewport);
+    expect(conversationViewport.scrollTop).toBe(41);
   });
 });

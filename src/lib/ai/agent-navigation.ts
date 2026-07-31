@@ -63,14 +63,10 @@ async function navigateToBlock(
     return block === null ? false : selectBlock(block);
   }
 
-  return new Promise<boolean>((resolveResult, rejectResult) => {
-    useViewStore.getState().requestGuarded(() => {
-      void selectChapterBlock(chapterId, resolve).then(
-        resolveResult,
-        rejectResult,
-      );
-    });
-  });
+  const result = await useViewStore
+    .getState()
+    .requestGuarded(() => selectChapterBlock(chapterId, resolve));
+  return result.status === "ran" ? result.value : false;
 }
 
 function resolveBlockLocator(

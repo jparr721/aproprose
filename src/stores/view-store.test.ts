@@ -9,10 +9,17 @@ vi.mock("@/lib/storage", () => ({
 }));
 
 import { useViewStore } from "@/stores/view-store";
+import { useProjectStore } from "@/stores/project-store";
 
-beforeEach(() =>
-  useViewStore.setState({ aiTab: "suggest", aiCollapsed: false, buildErrorsOpen: false }),
-);
+beforeEach(() => {
+  useViewStore.setState({
+    aiTab: "suggest",
+    aiCollapsed: false,
+    buildErrorsOpen: false,
+    pending: null,
+  });
+  useProjectStore.setState({ chapterDirty: false });
+});
 
 describe("view-store aiTab", () => {
   it("setAiTab switches the active tab, including the new 'edit' tab", () => {
@@ -95,5 +102,43 @@ describe("view-store layout persistence", () => {
       ? opts.partialize(useViewStore.getState())
       : {};
     expect(persisted).toMatchObject({ pdfOpen: true, outlineOpen: true });
+  });
+});
+
+describe("view-store guarded action outcomes", () => {
+  it("settles a canceled request without running its action", async () => {
+    const action = vi.fn();
+    useProjectStore.setState({ chapterDirty: true });
+
+    const outcome = useViewStore.getState().requestGuarded(action);
+
+    useViewStore.getState().cancelPending();
+
+    await expect(outcome).resolves.toEqual({ status: "canceled" });
+    expect(action).not.toHaveBeenCalled();
+    expect(useViewStore.getState().pending).toBeNull();
+  });
+
+  it("cancels a replaced request and runs only the confirmed replacement", async () => {
+    const firstAction = vi.fn();
+    const replacementAction = vi.fn();
+    useProjectStore.setState({ chapterDirty: true });
+
+    const firstOutcome = useViewStore.getState().requestGuarded(firstAction);
+    const replacementOutcome = useViewStore
+      .getState()
+      .requestGuarded(replacementAction);
+
+    await expect(firstOutcome).resolves.toEqual({ status: "canceled" });
+    expect(firstAction).not.toHaveBeenCalled();
+    expect(replacementAction).not.toHaveBeenCalled();
+
+    useViewStore.getState().confirmPending();
+
+    await expect(replacementOutcome).resolves.toEqual({
+      status: "ran",
+      value: undefined,
+    });
+    expect(replacementAction).toHaveBeenCalledOnce();
   });
 });

@@ -115,11 +115,9 @@ describe("AgentConversation", () => {
       [textMessage("assistant-long", "assistant", "A long transcript")],
       null,
     );
-    const conversation = screen.getByRole("log");
-    const scrollRegion = conversation.firstElementChild;
-    if (!(scrollRegion instanceof HTMLElement)) {
-      throw new Error("Conversation scroll region is missing");
-    }
+    const scrollRegion = screen.getByRole("region", {
+      name: "Conversation messages",
+    });
     Object.defineProperty(scrollRegion, "scrollHeight", { value: 300 });
     Object.defineProperty(scrollRegion, "clientHeight", { value: 100 });
 
@@ -159,10 +157,10 @@ describe("AgentConversation", () => {
     );
     const sibling = screen.getByRole("complementary", { name: "Review tray" });
     const conversation = screen.getByRole("log");
-    const scrollRegion = conversation.firstElementChild;
-    if (!(scrollRegion instanceof HTMLElement)) {
-      throw new Error("Conversation scroll region is missing");
-    }
+    const scrollRegion = screen.getByRole("region", {
+      name: "Conversation messages",
+    });
+    expect(conversation.contains(scrollRegion)).toBe(true);
     Object.defineProperty(scrollRegion, "scrollHeight", { value: 300 });
     Object.defineProperty(scrollRegion, "clientHeight", { value: 100 });
     scrollRegion.scrollTop = 40;

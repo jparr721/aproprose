@@ -519,4 +519,54 @@ describe("navigateToProposalChange", () => {
       );
     });
   });
+
+  it("settles false when guarded inactive navigation is canceled", async () => {
+    const source = "Canceled chapter prose.";
+    const frozen = parseChapter(source)[0];
+    vi.mocked(readTextFile).mockResolvedValue(source);
+    useProjectStore.setState({ chapterDirty: true });
+
+    const navigation = navigateToContextSnapshot(
+      snapshotFixture(frozen, 0, "ch2"),
+    );
+    let result: boolean | null = null;
+    void navigation.then((didNavigate) => {
+      result = didNavigate;
+    });
+
+    useViewStore.getState().cancelPending();
+
+    await waitFor(() => expect(result).toBe(false));
+    expect(useViewStore.getState().pending).toBeNull();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
+  it("settles false when another guarded action replaces navigation", async () => {
+    const source = "Replaced chapter prose.";
+    const frozen = parseChapter(source)[0];
+    const replacement = vi.fn();
+    vi.mocked(readTextFile).mockResolvedValue(source);
+    useProjectStore.setState({ chapterDirty: true });
+
+    const navigation = navigateToContextSnapshot(
+      snapshotFixture(frozen, 0, "ch2"),
+    );
+    let result: boolean | null = null;
+    void navigation.then((didNavigate) => {
+      result = didNavigate;
+    });
+
+    void useViewStore.getState().requestGuarded(replacement);
+
+    await waitFor(() => expect(result).toBe(false));
+    expect(replacement).not.toHaveBeenCalled();
+    expect(useViewStore.getState().pending).not.toBeNull();
+
+    useViewStore.getState().confirmPending();
+
+    expect(replacement).toHaveBeenCalledOnce();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
 });

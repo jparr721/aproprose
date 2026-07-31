@@ -36,9 +36,48 @@ const locator = (
   sourceId: source.id,
   order,
   fingerprint: blockFingerprint(source),
-  sourceType: "narration",
-  label: "narration block",
+  sourceType: source.type,
+  label: `${source.type} block`,
   exactText: source.text,
+});
+
+const rewriteChange = (
+  source: Block,
+  order: number,
+  id: string,
+  newText: string,
+): ManuscriptPendingChange => ({
+  id,
+  change: {
+    kind: "rewrite",
+    blockId: source.id,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText,
+    toIndex: null,
+    reason: "Tighten the line",
+  },
+  precondition: { kind: "target", target: locator(source, order) },
+});
+
+const removeChange = (
+  source: Block,
+  order: number,
+  id: string,
+): ManuscriptPendingChange => ({
+  id,
+  change: {
+    kind: "remove",
+    blockId: source.id,
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: null,
+    toIndex: null,
+    reason: "Remove the source",
+  },
+  precondition: { kind: "target", target: locator(source, order) },
 });
 
 const changes: ManuscriptPendingChange[] = [
@@ -310,5 +349,101 @@ describe("ManuscriptReview", () => {
     expect(within(rewrite).getByText("Narration block 3")).toBeTruthy();
     expect(within(moveCard).getByText("Before Narration block 2")).toBeTruthy();
     expect(within(moveCard).getByText("The lantern went dark.")).toBeTruthy();
+  });
+
+  it("diffs only mutable dialogue text while full previews retain tail segments", () => {
+    const dialogue: Block = {
+      id: "dialogue-1",
+      type: "dialogue",
+      text: "The bell rang hard.",
+      raw: "The bell rang hard.\n",
+      dirty: false,
+      tail: [
+        { kind: "beat", text: "She gripped the rope." },
+        { kind: "quote", text: "We leave now." },
+      ],
+    };
+    useProjectStore.setState({ blocks: [dialogue] });
+
+    const { container } = render(
+      <ManuscriptReview
+        proposal={{
+          ...proposal,
+          changes: [
+            rewriteChange(dialogue, 0, "dialogue-rewrite", "The bell rang softly."),
+            removeChange(dialogue, 0, "dialogue-remove"),
+          ],
+        }}
+        staleChangeIds={new Set<string>()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const rewriteCard = container.querySelector(
+      '[data-agent-change-id="dialogue-rewrite"]',
+    );
+    const removeCard = container.querySelector(
+      '[data-agent-change-id="dialogue-remove"]',
+    );
+    if (
+      !(rewriteCard instanceof HTMLElement) ||
+      !(removeCard instanceof HTMLElement)
+    ) {
+      throw new Error("Missing dialogue review cards.");
+    }
+
+    expect(within(rewriteCard).getByText("hard.").tagName).toBe("DEL");
+    expect(within(rewriteCard).getByText("softly.").tagName).toBe("INS");
+    expect(rewriteCard.textContent).not.toContain("She gripped the rope.");
+    expect(rewriteCard.textContent).not.toContain("We leave now.");
+    expect(removeCard.textContent).toContain("She gripped the rope.");
+    expect(removeCard.textContent).toContain("We leave now.");
+  });
+
+  it("diffs only mutable lore text while full previews retain the title", () => {
+    const lore: Block = {
+      id: "lore-1",
+      type: "lore",
+      title: "Harbor law",
+      text: "The tide was mild.",
+      raw: "% lore\n",
+      dirty: false,
+    };
+    useProjectStore.setState({ blocks: [lore] });
+
+    const { container } = render(
+      <ManuscriptReview
+        proposal={{
+          ...proposal,
+          changes: [
+            rewriteChange(lore, 0, "lore-rewrite", "The tide was wild."),
+            removeChange(lore, 0, "lore-remove"),
+          ],
+        }}
+        staleChangeIds={new Set<string>()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const rewriteCard = container.querySelector(
+      '[data-agent-change-id="lore-rewrite"]',
+    );
+    const removeCard = container.querySelector(
+      '[data-agent-change-id="lore-remove"]',
+    );
+    if (
+      !(rewriteCard instanceof HTMLElement) ||
+      !(removeCard instanceof HTMLElement)
+    ) {
+      throw new Error("Missing lore review cards.");
+    }
+
+    expect(within(rewriteCard).getByText("mild.").tagName).toBe("DEL");
+    expect(within(rewriteCard).getByText("wild.").tagName).toBe("INS");
+    expect(rewriteCard.textContent).not.toContain("Harbor law");
+    expect(removeCard.textContent).toContain("Harbor law");
+    expect(removeCard.textContent).toContain("The tide was mild.");
   });
 });

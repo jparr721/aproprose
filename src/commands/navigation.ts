@@ -10,7 +10,9 @@ import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Command } from "./types";
 
-const guard = (action: () => void) => useViewStore.getState().requestGuarded(action);
+const guard = (action: () => void): void => {
+  void useViewStore.getState().requestGuarded(action);
+};
 
 export const navigationCommands: Command[] = [
   {

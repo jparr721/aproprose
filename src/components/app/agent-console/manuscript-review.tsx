@@ -48,6 +48,7 @@ interface BlockDisplay {
   sourceId: string;
   label: string;
   exactText: string;
+  mutableText: string;
 }
 
 type ResolveBlockDisplay = (locator: SourceLocator) => BlockDisplay;
@@ -67,6 +68,7 @@ function frozenBlockDisplay(locator: SourceLocator): BlockDisplay {
     sourceId: locator.sourceId,
     label: locator.label,
     exactText: locator.exactText,
+    mutableText: locator.exactText,
   };
 }
 
@@ -92,6 +94,7 @@ function displayLiveBlock(block: Block, blocks: Block[]): BlockDisplay {
     sourceId: block.id,
     label: `${typeLabel} block ${order + 1}`,
     exactText: blockSnapshotText(block),
+    mutableText: block.text,
   };
 }
 
@@ -166,7 +169,7 @@ function ManuscriptPreview(props: {
     return (
       <DiffPreview
         after={requiredText(proposalChange.newText, "rewrite text")}
-        before={source.exactText}
+        before={source.mutableText}
       />
     );
   }

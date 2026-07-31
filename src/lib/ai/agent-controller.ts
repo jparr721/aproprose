@@ -1,5 +1,6 @@
 import { generateText, type LanguageModel } from "ai";
 import {
+  COMPACTION_SYSTEM,
   compactionTokenTarget,
   compactConversation,
   messagesForNextRequest,
@@ -1449,11 +1450,70 @@ export function createAgentController(
     projectRoot: string,
     reason: "project-switch" | "app-exit",
   ): void => {
+    invalidateDraftSourceRefreshes();
     const active = activeController;
     if (active === null || active.projectRoot !== projectRoot) return;
     interruptVisibleRun(active, reason);
     active.controller.abort();
     activeController = null;
+  };
+
+  const resolveAgentDraftContext = async (): Promise<void> => {
+    const state = useAgentConsoleStore.getState();
+    const projectState = useProjectStore.getState();
+    const project = projectState.project;
+    if (project === null) {
+      throw new Error("Open a project before adding agent context.");
+    }
+    const ownsContextProject = (): boolean => {
+      const currentProject = useProjectStore.getState().project;
+      const hydratedRoot = useAgentConsoleStore.getState().hydratedProjectRoot;
+      return (
+        currentProject !== null &&
+        currentProject.root === project.root &&
+        (hydratedRoot === null || hydratedRoot === project.root)
+      );
+    };
+    let resolved: ResolvedDraftContext;
+    try {
+      resolved = await resolveDraftContext({
+        projectRoot: project.root,
+        refs: state.draftContextRefs,
+        locators: state.draftSourceLocators,
+        meta: structuredClone(projectState.meta),
+        messages: structuredClone(state.messages),
+        makeId: dependencies.id,
+        rebase: (previous, current) => {
+          if (!ownsContextProject()) return;
+          useAgentConsoleStore
+            .getState()
+            .rebaseDraftContextRef(previous, current);
+        },
+      });
+    } catch (error) {
+      if (!ownsContextProject()) return;
+      throw error;
+    }
+    if (ownsContextProject()) {
+      useAgentConsoleStore
+        .getState()
+        .setDraftContextSources(resolved.sources);
+    }
+  };
+
+  const addAgentContext = async (refs: DraftContextRef[]): Promise<void> => {
+    useAgentConsoleStore.getState().addDraftContextRefs(refs);
+    await resolveAgentDraftContext();
+  };
+
+  const prefillAgentDraft = async (
+    intent: Extract<AgentIntent, { kind: "prefill" }>,
+  ): Promise<void> => {
+    const store = useAgentConsoleStore.getState();
+    store.setMode(intent.mode);
+    store.setDraftText(intent.text);
+    store.setDraftContextRefs(intent.refs);
+    await resolveAgentDraftContext();
   };
 
   const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
@@ -1464,57 +1524,11 @@ export function createAgentController(
         return;
       }
       if (intent.kind === "add-context") {
-        const store = useAgentConsoleStore.getState();
-        store.addDraftContextRefs(intent.refs);
-        const state = useAgentConsoleStore.getState();
-        const projectState = useProjectStore.getState();
-        const project = projectState.project;
-        if (project === null) {
-          throw new Error("Open a project before adding agent context.");
-        }
-        const ownsContextProject = (): boolean => {
-          const currentProject = useProjectStore.getState().project;
-          const hydratedRoot =
-            useAgentConsoleStore.getState().hydratedProjectRoot;
-          return (
-            currentProject !== null &&
-            currentProject.root === project.root &&
-            (hydratedRoot === null || hydratedRoot === project.root)
-          );
-        };
-        let resolved: ResolvedDraftContext;
-        try {
-          resolved = await resolveDraftContext({
-            projectRoot: project.root,
-            refs: state.draftContextRefs,
-            locators: state.draftSourceLocators,
-            meta: structuredClone(projectState.meta),
-            messages: structuredClone(state.messages),
-            makeId: dependencies.id,
-            rebase: (previous, current) => {
-              if (!ownsContextProject()) return;
-              useAgentConsoleStore
-                .getState()
-                .rebaseDraftContextRef(previous, current);
-            },
-          });
-        } catch (error) {
-          if (!ownsContextProject()) return;
-          throw error;
-        }
-        if (ownsContextProject()) {
-          useAgentConsoleStore
-            .getState()
-            .setDraftContextSources(resolved.sources);
-        }
+        await addAgentContext(intent.refs);
         return;
       }
       if (intent.kind === "prefill") {
-        const store = useAgentConsoleStore.getState();
-        store.setMode(intent.mode);
-        store.setDraftText(intent.text);
-        store.addDraftContextRefs(intent.refs);
-        await dispatchAgentIntent({ kind: "add-context", refs: [] });
+        await prefillAgentDraft(intent);
         return;
       }
       useAgentConsoleStore.getState().setMode(intent.mode);
@@ -1540,6 +1554,30 @@ export function createAgentController(
 
 let draftSourceRefreshSequence = 0;
 
+interface DraftSourceRefreshOwnership {
+  sequence: number;
+  projectRoot: string;
+  hydratedProjectRoot: string;
+}
+
+function invalidateDraftSourceRefreshes(): void {
+  draftSourceRefreshSequence += 1;
+}
+
+function ownsDraftSourceRefresh(
+  ownership: DraftSourceRefreshOwnership,
+): boolean {
+  const project = useProjectStore.getState().project;
+  const consoleState = useAgentConsoleStore.getState();
+  return (
+    ownership.sequence === draftSourceRefreshSequence &&
+    project !== null &&
+    project.root === ownership.projectRoot &&
+    consoleState.hydratedProjectRoot === ownership.hydratedProjectRoot &&
+    consoleState.runStatus === "idle"
+  );
+}
+
 async function refreshAttachedDraftSources(): Promise<void> {
   const sequence = ++draftSourceRefreshSequence;
   const projectState = useProjectStore.getState();
@@ -1549,37 +1587,36 @@ async function refreshAttachedDraftSources(): Promise<void> {
     project === null ||
     consoleState.runStatus !== "idle" ||
     consoleState.draftContextRefs.length === 0 ||
-    (consoleState.hydratedProjectRoot !== null &&
-      consoleState.hydratedProjectRoot !== project.root)
+    consoleState.hydratedProjectRoot !== project.root
   ) {
     return;
   }
-  const expectedRoot = project.root;
+  const ownership: DraftSourceRefreshOwnership = {
+    sequence,
+    projectRoot: project.root,
+    hydratedProjectRoot: consoleState.hydratedProjectRoot,
+  };
   const expectedRefs = consoleState.draftContextRefs.map(draftContextRefKey);
   try {
     const resolved = await resolveDraftContext({
-      projectRoot: expectedRoot,
+      projectRoot: ownership.projectRoot,
       refs: structuredClone(consoleState.draftContextRefs),
       locators: structuredClone(consoleState.draftSourceLocators),
       meta: structuredClone(projectState.meta),
       messages: structuredClone(consoleState.messages),
       makeId: () => uid("agent-source"),
       rebase: (previous, current) => {
-        if (sequence !== draftSourceRefreshSequence) return;
+        if (!ownsDraftSourceRefresh(ownership)) return;
         useAgentConsoleStore
           .getState()
           .rebaseDraftContextRef(previous, current);
       },
     });
-    const currentProject = useProjectStore.getState().project;
     const currentConsole = useAgentConsoleStore.getState();
     const currentRefs = currentConsole.draftContextRefs.map(draftContextRefKey);
     const resolvedRefs = resolved.refs.map(draftContextRefKey);
     if (
-      sequence !== draftSourceRefreshSequence ||
-      currentProject === null ||
-      currentProject.root !== expectedRoot ||
-      currentConsole.runStatus !== "idle" ||
+      !ownsDraftSourceRefresh(ownership) ||
       (currentRefs.join("\n") !== expectedRefs.join("\n") &&
         currentRefs.join("\n") !== resolvedRefs.join("\n"))
     ) {
@@ -1587,12 +1624,20 @@ async function refreshAttachedDraftSources(): Promise<void> {
     }
     currentConsole.setDraftContextSources(resolved.sources);
   } catch (error) {
+    if (!ownsDraftSourceRefresh(ownership)) return;
     console.error("Agent draft context refresh failed", {
-      projectRoot: expectedRoot,
+      projectRoot: ownership.projectRoot,
       error,
     });
   }
 }
+
+useAgentConsoleStore.subscribe((state, previous) => {
+  if (state.hydratedProjectRoot !== previous.hydratedProjectRoot) {
+    invalidateDraftSourceRefreshes();
+    void refreshAttachedDraftSources();
+  }
+});
 
 useProjectStore.subscribe((state, previous) => {
   if (
@@ -1612,6 +1657,7 @@ const productionController = createAgentController({
   summarize: async (model, source, signal) => {
     const result = await generateText({
       model,
+      system: COMPACTION_SYSTEM,
       prompt: source,
       abortSignal: signal,
     });

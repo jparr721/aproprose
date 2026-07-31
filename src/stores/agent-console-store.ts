@@ -42,6 +42,7 @@ export interface AgentConsoleState extends AgentConsoleData {
   resetProject: () => void;
   setMode: (mode: AgentMode) => void;
   setDraftText: (text: string) => void;
+  setDraftContextRefs: (refs: DraftContextRef[]) => void;
   addDraftContextRefs: (refs: DraftContextRef[]) => void;
   removeDraftContextRef: (ref: DraftContextRef) => void;
   rebaseDraftContextRef: (
@@ -143,6 +144,29 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
     })),
   setMode: (mode) => set(() => ({ mode })),
   setDraftText: (draftText) => set(() => ({ draftText })),
+  setDraftContextRefs: (refs) =>
+    set((state) => {
+      const keys = new Set<string>();
+      const draftContextRefs = refs.filter((ref) => {
+        const key = draftContextRefKey(ref);
+        if (keys.has(key)) return false;
+        keys.add(key);
+        return true;
+      });
+      const draftContextSources: Record<string, DraftContextSource> = {};
+      const draftSourceLocators: Record<string, DraftSourceLocator> = {};
+      for (const key of keys) {
+        const source = state.draftContextSources[key];
+        if (source !== undefined) draftContextSources[key] = source;
+        const locator = state.draftSourceLocators[key];
+        if (locator !== undefined) draftSourceLocators[key] = locator;
+      }
+      return {
+        draftContextRefs,
+        draftContextSources,
+        draftSourceLocators,
+      };
+    }),
   addDraftContextRefs: (refs) =>
     set((state) => {
       const keys = new Set(state.draftContextRefs.map(draftContextRefKey));

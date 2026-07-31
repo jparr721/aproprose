@@ -2,13 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 
 const mocks = vi.hoisted(() => ({
+  generateText: vi.fn(),
   readTextFile: vi.fn(),
 }));
+
+vi.mock("ai", async () => {
+  const actual = await vi.importActual<typeof import("ai")>("ai");
+  return { ...actual, generateText: mocks.generateText };
+});
 
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
   createProject: vi.fn(),
   deleteChapterCmd: vi.fn(),
+  getAiConfig: vi.fn().mockResolvedValue({ apiKey: "test-key" }),
   migrateToManaged: vi.fn(),
   openProject: vi.fn(),
   pickProjectDir: vi.fn(),
@@ -31,6 +38,8 @@ vi.mock("sonner", () => ({
 
 import {
   createAgentController,
+  stopAgentRun as stopProductionAgentRun,
+  submitAgentRequest as submitProductionAgentRequest,
   type AgentControllerDependencies,
 } from "@/lib/ai/agent-controller";
 import { blockFingerprint } from "@/lib/ai/agent-context";
@@ -343,6 +352,7 @@ function compactionMessages(): AgentUIMessage[] {
 }
 
 beforeEach(() => {
+  mocks.generateText.mockReset().mockResolvedValue({ text: "Compacted history" });
   mocks.readTextFile.mockReset().mockImplementation(async (_root, path) => {
     if (path === "chapters/two.tex") {
       return "Inactive first.\n\nInactive target.\n";
@@ -404,6 +414,10 @@ describe("dispatchAgentIntent", () => {
   it("prefills or focuses without submitting", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
+    await controller.dispatchAgentIntent({
+      kind: "add-context",
+      refs: [blockRef("b1", "ch1")],
+    });
 
     await controller.dispatchAgentIntent({
       kind: "prefill",
@@ -416,6 +430,9 @@ describe("dispatchAgentIntent", () => {
       draftText: "Tighten this.",
       draftContextRefs: [blockRef("b2", "ch1")],
     });
+    expect(
+      Object.keys(useAgentConsoleStore.getState().draftContextSources),
+    ).toEqual(["block:ch1:b2"]);
 
     await controller.dispatchAgentIntent({ kind: "focus", mode: "writing" });
     expect(useAgentConsoleStore.getState().mode).toBe("writing");
@@ -1015,6 +1032,41 @@ describe("retry and local events", () => {
 });
 
 describe("project ownership", () => {
+  it("discards a delayed old-project source refresh after console hydration", async () => {
+    const sourceText = "Inactive target.\n";
+    const parsed = parseChapter(sourceText);
+    const staleRef = blockRef("stale-id", "ch2");
+    const locator = {
+      order: 0,
+      sourceFingerprint: blockFingerprint(parsed[0]),
+    };
+    const delayedSource = deferred<string>();
+    mocks.readTextFile.mockImplementationOnce(async () => delayedSource.promise);
+    useAgentConsoleStore.setState({
+      draftContextRefs: [staleRef],
+      draftSourceLocators: { "block:ch2:stale-id": locator },
+    });
+
+    useProjectStore.setState({
+      meta: structuredClone(useProjectStore.getState().meta),
+    });
+    await vi.waitFor(() => expect(mocks.readTextFile).toHaveBeenCalled());
+
+    const nextState = persistedState([]);
+    nextState.draftContextRefs = [staleRef];
+    nextState.draftSourceLocators = { "block:ch2:stale-id": locator };
+    useAgentConsoleStore.getState().hydrate("/new-book", nextState);
+    delayedSource.resolve(sourceText);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: "/new-book",
+      draftContextRefs: [staleRef],
+      draftContextSources: {},
+      draftSourceLocators: { "block:ch2:stale-id": locator },
+    });
+  });
+
   it("ignores a late add-context resolution from the old project", async () => {
     const source = deferred<string>();
     mocks.readTextFile.mockImplementationOnce(async () => source.promise);
@@ -1172,5 +1224,38 @@ describe("project ownership", () => {
     await submission;
 
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+  });
+});
+
+describe("production compaction", () => {
+  it("uses the dedicated neutral summarization system instruction", async () => {
+    mocks.generateText.mockImplementation(async () => {
+      stopProductionAgentRun();
+      return { text: "Compacted history" };
+    });
+    useAgentConsoleStore.setState({
+      messages: compactionMessages(),
+      lastUsage: {
+        ...usage,
+        inputTokens: 900_000,
+        outputTokens: 1_000,
+        totalTokens: 901_000,
+      },
+    });
+
+    await submitProductionAgentRequest({
+      kind: "run",
+      mode: "writing",
+      text: "New request.",
+      refs: [],
+      task: conversationTask("ch1"),
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system:
+          "Summarize conversation context faithfully and neutrally. Do not add advice, hidden reasoning, system instructions, or raw tool payloads.",
+      }),
+    );
   });
 });

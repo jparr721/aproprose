@@ -15,6 +15,9 @@ import {
 
 const RECENT_TURNS_TO_KEEP = 4;
 
+export const COMPACTION_SYSTEM =
+  "Summarize conversation context faithfully and neutrally. Do not add advice, hidden reasoning, system instructions, or raw tool payloads.";
+
 function tokenlensModelId(modelId: string): string {
   return modelId.includes(":") ? modelId : `openai:${modelId}`;
 }
@@ -54,9 +57,19 @@ function estimatedTokens(messages: AgentUIMessage[]): number {
   return Math.max(1, Math.ceil(JSON.stringify(messages).length / 4));
 }
 
+function isCompleteProposalEvent(message: AgentUIMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    message.metadata?.state === "complete" &&
+    message.parts.length > 0 &&
+    message.parts.every((part) => part.type === "data-proposal-event")
+  );
+}
+
 function completeTurnPrefix(messages: AgentUIMessage[]): AgentUIMessage[][] {
   const turns: AgentUIMessage[][] = [];
-  for (let index = 0; index < messages.length; index += 2) {
+  let index = 0;
+  while (index < messages.length) {
     const user = messages[index];
     const assistant = messages[index + 1];
     if (
@@ -65,11 +78,23 @@ function completeTurnPrefix(messages: AgentUIMessage[]): AgentUIMessage[][] {
       user.metadata?.state !== "complete" ||
       assistant === undefined ||
       assistant.role !== "assistant" ||
-      assistant.metadata?.state !== "complete"
+      assistant.metadata?.state !== "complete" ||
+      isCompleteProposalEvent(assistant)
     ) {
       break;
     }
-    turns.push([user, assistant]);
+    const turn = [user, assistant];
+    index += 2;
+    while (index < messages.length && messages[index].role === "assistant") {
+      const event = messages[index];
+      if (!isCompleteProposalEvent(event)) {
+        turns.push(turn);
+        return turns;
+      }
+      turn.push(event);
+      index += 1;
+    }
+    turns.push(turn);
   }
   return turns;
 }

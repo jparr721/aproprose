@@ -100,6 +100,31 @@ function interruptedPair(
   ];
 }
 
+function proposalEvent(
+  id: string,
+  state: AgentMessageMetadata["state"],
+): AgentUIMessage {
+  return {
+    id,
+    role: "assistant",
+    metadata: {
+      ...meta(state),
+      task: { kind: "proposal-follow-up", proposalId: "proposal-1" },
+    },
+    parts: [
+      {
+        type: "data-proposal-event",
+        data: {
+          proposalId: "proposal-1",
+          action: "accepted",
+          changeCount: 1,
+          text: "Accepted proposal 1",
+        },
+      },
+    ],
+  };
+}
+
 describe("selectCompactionTurns", () => {
   it("selects oldest complete turns while retaining the latest four", () => {
     const messages = Array.from({ length: 7 }, (_, index) => pair(index)).flat();
@@ -127,6 +152,42 @@ describe("selectCompactionTurns", () => {
     expect(selectCompactionTurns(messages, 10_000).map((message) => message.id))
       .toEqual([]);
   });
+
+  it("includes complete proposal events with their preceding turn", () => {
+    const messages = [
+      ...pair(0),
+      proposalEvent("event-0", "complete"),
+      ...Array.from({ length: 7 }, (_, index) => pair(index + 1)).flat(),
+    ];
+
+    expect(selectCompactionTurns(messages, 1).map((message) => message.id))
+      .toEqual(["u0", "a0", "event-0"]);
+  });
+
+  it("does not treat a proposal event as the missing assistant response", () => {
+    const messages = [
+      pair(0)[0],
+      proposalEvent("event-0", "complete"),
+      ...Array.from({ length: 7 }, (_, index) => pair(index + 1)).flat(),
+    ];
+
+    expect(selectCompactionTurns(messages, 1)).toEqual([]);
+  });
+
+  it.each(["streaming", "stopped", "error"] as const)(
+    "stops before a %s proposal-event gap",
+    (state) => {
+      const messages = [
+        ...Array.from({ length: 5 }, (_, index) => pair(index)).flat(),
+        proposalEvent("event-gap", state),
+        ...Array.from({ length: 5 }, (_, index) => pair(index + 5)).flat(),
+      ];
+
+      expect(
+        selectCompactionTurns(messages, 100_000).map((message) => message.id),
+      ).toEqual(["u0", "a0"]);
+    },
+  );
 });
 
 describe("compaction threshold", () => {
@@ -245,6 +306,41 @@ describe("compactConversation", () => {
     });
     expect(summarize.mock.calls[0][0]).not.toContain("Question 0");
     expect(summarize.mock.calls[0][0]).toContain("Question 1");
+  });
+
+  it("advances through proposal events so later turns remain compactable", async () => {
+    const messages = [
+      ...pair(0),
+      proposalEvent("event-0", "complete"),
+      ...Array.from({ length: 7 }, (_, index) => pair(index + 1)).flat(),
+    ];
+    const firstSources: string[] = [];
+    const first = await compactConversation({
+      messages,
+      currentSummary: null,
+      tokenTarget: 1,
+      summarize: async (source) => {
+        firstSources.push(source);
+        return "First summary.";
+      },
+    });
+
+    expect(first.summary?.throughMessageId).toBe("event-0");
+    expect(firstSources[0]).toContain("Accepted proposal 1");
+    const secondSources: string[] = [];
+    const second = await compactConversation({
+      messages,
+      currentSummary: first.summary,
+      tokenTarget: 1,
+      summarize: async (source) => {
+        secondSources.push(source);
+        return "Second summary.";
+      },
+    });
+
+    expect(second.summary?.throughMessageId).toBe("a1");
+    expect(secondSources[0]).toContain("Question 1");
+    expect(secondSources[0]).not.toContain("Question 0");
   });
 
   it.each(["stopped", "error"] as const)(

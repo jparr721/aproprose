@@ -120,4 +120,88 @@ describe("resolveDraftSnapshots", () => {
       "new-id",
     );
   });
+
+  it("freezes every dialogue segment in authored order", () => {
+    const dialogue: Block = {
+      id: "dialogue-1",
+      type: "dialogue",
+      text: "You came back.",
+      raw: "ignored dialogue source",
+      dirty: false,
+      speaker: "mara",
+      tail: [
+        { kind: "beat", text: "She closed the door." },
+        { kind: "quote", text: "I had to." },
+      ],
+    };
+    const resolver: ContextSourceResolver = {
+      resolveBlock: () => ({ chapterId: "ch1", order: 0, block: dialogue }),
+      resolveOutlineCard: () => null,
+      resolveFinding: () => null,
+    };
+
+    const [snapshot] = resolveDraftSnapshots(
+      [{ kind: "block", chapterId: "ch1", blockId: "dialogue-1" }],
+      {},
+      resolver,
+      () => "snapshot-dialogue",
+    );
+
+    expect(snapshot.exactText).toBe(
+      "You came back.\nShe closed the door.\nI had to.",
+    );
+  });
+
+  it("freezes a titled block with its title before its body", () => {
+    const lore: Block = {
+      id: "lore-1",
+      type: "lore",
+      title: "The sealed door",
+      text: "No one has opened it.",
+      raw: "ignored lore source",
+      dirty: false,
+    };
+    const resolver: ContextSourceResolver = {
+      resolveBlock: () => ({ chapterId: "ch1", order: 1, block: lore }),
+      resolveOutlineCard: () => null,
+      resolveFinding: () => null,
+    };
+
+    const [snapshot] = resolveDraftSnapshots(
+      [{ kind: "block", chapterId: "ch1", blockId: "lore-1" }],
+      {},
+      resolver,
+      () => "snapshot-lore",
+    );
+
+    expect(snapshot.exactText).toBe(
+      "The sealed door\nNo one has opened it.",
+    );
+  });
+
+  it("freezes outline title and intention without normalizing boundary whitespace", () => {
+    const spacedCard: Card = {
+      ...card,
+      title: "  Door opens ",
+      intention: " Force the choice  ",
+    };
+    const resolver: ContextSourceResolver = {
+      resolveBlock: () => null,
+      resolveOutlineCard: () => ({
+        chapterId: "ch1",
+        order: 0,
+        card: spacedCard,
+      }),
+      resolveFinding: () => null,
+    };
+
+    const [snapshot] = resolveDraftSnapshots(
+      [{ kind: "outline-card", chapterId: "ch1", cardId: "card-1" }],
+      {},
+      resolver,
+      () => "snapshot-outline",
+    );
+
+    expect(snapshot.exactText).toBe("  Door opens \n Force the choice  ");
+  });
 });

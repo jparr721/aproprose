@@ -6,6 +6,7 @@ import type {
   DraftContextSource,
   DraftSourceLocator,
 } from "@/lib/ai/agent-types";
+import { dialogueSegments } from "@/lib/blocks/dialogue";
 import type { Block, Card, CritiqueNote, ContinuityFlag } from "@/lib/types";
 
 function fnv1a(value: string): string {
@@ -62,6 +63,16 @@ function isProseBlock(block: Block): boolean {
   return block.type === "narration" || block.type === "dialogue";
 }
 
+function blockSourceText(block: Block): string {
+  const body =
+    block.type === "dialogue"
+      ? dialogueSegments(block)
+          .map((segment) => segment.text)
+          .join("\n")
+      : block.text;
+  return block.title === undefined ? body : `${block.title}\n${body}`;
+}
+
 export function draftContextRefKey(ref: DraftContextRef): string {
   if (ref.kind === "block") {
     return `block:${ref.chapterId}:${ref.blockId}`;
@@ -113,7 +124,7 @@ function blockSnapshot(
     order: resolved.order,
     sourceType: resolved.block.type,
     label,
-    exactText: resolved.block.text,
+    exactText: blockSourceText(resolved.block),
     sourceFingerprint: blockFingerprint(resolved.block),
   };
 }
@@ -142,7 +153,7 @@ function outlineSnapshot(
     order: resolved.order,
     sourceType: "outline-card",
     label: resolved.card.title,
-    exactText: `${resolved.card.title}\n${resolved.card.intention}`.trim(),
+    exactText: `${resolved.card.title}\n${resolved.card.intention}`,
     sourceFingerprint: cardFingerprint(resolved.card),
   };
 }

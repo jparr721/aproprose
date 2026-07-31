@@ -1,13 +1,32 @@
-// author-preferences.ts - composes a base system prompt with the author's global
-// preferences read from settings. Kept out of prompts.ts so that module stays
-// pure: the render helpers there do the formatting, this reads live state (the
-// same getState() pattern model.ts uses to read the provider/model).
+// author-preferences.ts - renders and applies the author's global preferences.
 
+import { PREFERENCE_MAX_CHARS } from "@/lib/types";
 import { useSettingsStore } from "@/stores/settings-store";
-import { renderVoicePreference, renderEditingPreference } from "@/lib/ai/prompts";
 
-/** Voice reaches every op; editing rules additionally reach Edit and Muse. */
+/** Voice reaches every operation; editing rules reach Writing and Edit. */
 export type PreferenceScope = "voice" | "voice+editing";
+
+function renderLabeledPreference(label: string, value: string): string {
+  const text = value.trim().slice(0, PREFERENCE_MAX_CHARS);
+  if (!text) return "";
+  return `${label}:\n${text}`;
+}
+
+/** Render the author's standing writing voice as an additive labeled block. */
+export function renderVoicePreference(style: string): string {
+  return renderLabeledPreference(
+    "AUTHOR VOICE (the author's standing style; honour it as you would the manuscript's own voice - it refines the guidance above, it does not override it)",
+    style,
+  );
+}
+
+/** Render the author's standing Writing/Edit rules as an additive labeled block. */
+export function renderEditingPreference(editing: string): string {
+  return renderLabeledPreference(
+    "AUTHOR EDITING RULES (standing mechanical preferences to apply while revising; they add constraints, they do not loosen any rule above)",
+    editing,
+  );
+}
 
 /**
  * Append the author's preference block(s) after `base`. Voice is always added

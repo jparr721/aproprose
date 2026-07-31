@@ -1,54 +1,61 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/ai/cli-provider", () => ({
-  createCliModel: vi.fn((kind: string) => ({ provider: kind, modelId: `${kind}-cli` })),
+const mocks = vi.hoisted(() => ({
+  createOpenAI: vi.fn(),
+  provider: vi.fn(),
+  getAiConfig: vi.fn(),
 }));
-vi.mock("@/lib/tauri", () => ({ getAiConfig: vi.fn() }));
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
-import { getModel, supportsTools } from "@/lib/ai/model";
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: mocks.createOpenAI,
+}));
+
+vi.mock("@/lib/tauri", () => ({
+  getAiConfig: mocks.getAiConfig,
+}));
+
+vi.mock("@tauri-apps/plugin-http", () => ({
+  fetch: vi.fn(),
+}));
+
+import { getModel, resetAiProvider } from "@/lib/ai/model";
 import { useSettingsStore } from "@/stores/settings-store";
-import { createCliModel } from "@/lib/ai/cli-provider";
-
-const mockCreateCliModel = createCliModel as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  mockCreateCliModel.mockClear();
-  useSettingsStore.setState({ aiProvider: "openai", aiModel: null });
+  resetAiProvider();
+  mocks.provider.mockReset();
+  mocks.createOpenAI.mockReset().mockReturnValue(mocks.provider);
+  mocks.getAiConfig.mockReset().mockResolvedValue({ apiKey: "test-key" });
+  useSettingsStore.setState({ aiModel: null });
 });
 
-describe("getModel provider routing", () => {
-  it("returns the codex CLI model when aiProvider is codex", async () => {
-    useSettingsStore.setState({ aiProvider: "codex" });
-    const model = await getModel();
-    expect(mockCreateCliModel).toHaveBeenCalledWith("codex");
-    expect((model as { provider: string }).provider).toBe("codex");
+describe("getModel", () => {
+  it("throws when no OpenAI model is selected", async () => {
+    await expect(getModel()).rejects.toThrow(
+      "Select an AI model in Settings before using AI features.",
+    );
+    expect(mocks.getAiConfig).not.toHaveBeenCalled();
   });
 
-  it("returns the claude CLI model when aiProvider is claude", async () => {
-    useSettingsStore.setState({ aiProvider: "claude" });
-    const model = await getModel();
-    expect(mockCreateCliModel).toHaveBeenCalledWith("claude");
-    expect((model as { provider: string }).provider).toBe("claude");
+  it("builds the selected OpenAI model through the configured provider", async () => {
+    const expected = { provider: "openai", modelId: "gpt-4.1-mini" };
+    mocks.provider.mockReturnValue(expected);
+    useSettingsStore.setState({ aiModel: "gpt-4.1-mini" });
+
+    await expect(getModel()).resolves.toBe(expected);
+    expect(mocks.getAiConfig).toHaveBeenCalledOnce();
+    expect(mocks.provider).toHaveBeenCalledWith("gpt-4.1-mini");
   });
 
-  it("throws on openai without a selected model", async () => {
-    useSettingsStore.setState({ aiProvider: "openai", aiModel: null });
-    await expect(getModel()).rejects.toThrow(/Select an AI model/);
-    expect(mockCreateCliModel).not.toHaveBeenCalled();
-  });
-});
+  it("reuses the provider until resetAiProvider is called", async () => {
+    useSettingsStore.setState({ aiModel: "gpt-4.1-mini" });
 
-describe("supportsTools", () => {
-  it("is true for the OpenAI provider", () => {
-    useSettingsStore.setState({ aiProvider: "openai" });
-    expect(supportsTools()).toBe(true);
-  });
+    await getModel();
+    await getModel();
+    expect(mocks.createOpenAI).toHaveBeenCalledOnce();
 
-  it("is false for the CLI providers, which drop tool messages", () => {
-    useSettingsStore.setState({ aiProvider: "codex" });
-    expect(supportsTools()).toBe(false);
-    useSettingsStore.setState({ aiProvider: "claude" });
-    expect(supportsTools()).toBe(false);
+    resetAiProvider();
+    await getModel();
+    expect(mocks.createOpenAI).toHaveBeenCalledTimes(2);
   });
 });

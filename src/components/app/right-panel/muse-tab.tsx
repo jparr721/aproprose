@@ -15,7 +15,6 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input";
 import { selectionTargetIds, useProjectStore } from "@/stores/project-store";
-import { useSettingsStore } from "@/stores/settings-store";
 import { useMuseStore, type MuseRun } from "@/stores/muse-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
@@ -26,7 +25,6 @@ import { buildEditRequest } from "@/lib/ai/context";
 import { editComposerState } from "@/lib/ai/edit-composer";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import { runAgent, type MuseScopeKind } from "@/lib/ai/agent";
-import { supportsTools } from "@/lib/ai/model";
 import { describeAiError, isAbortError } from "@/lib/ai/errors";
 import { cn } from "@/lib/utils";
 import {
@@ -60,9 +58,6 @@ function MuseTabBody() {
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectedId = useProjectStore((s) => s.selectedId);
   const selectedIds = useProjectStore((s) => s.selectedIds);
-  // Subscribed so the gate re-evaluates live when the provider changes in
-  // Settings; the copy below also names the provider that can't run tools.
-  const aiProvider = useSettingsStore((s) => s.aiProvider);
   const composer = usePromptInputController();
   const [focusKey, setFocusKey] = useState(0);
   const [scope, setScope] = useState<MuseScopeKind>("chapter");
@@ -184,7 +179,7 @@ function MuseTabBody() {
   // start the run immediately. PromptInputProvider is prompt-input's own
   // controlled mode, so prefill needs no new AiComposer prop.
   useAiIntent("muse", (intent) => {
-    if (intent.autoRun && supportsTools() && useMuseStore.getState().status !== "running") {
+    if (intent.autoRun && useMuseStore.getState().status !== "running") {
       // autoRun intents are continuations (Pick up and go), so they run chapter
       // scope regardless of the toggle - see onPickUpAndGo.
       const chapterId = useProjectStore.getState().activeChapterId;
@@ -194,18 +189,6 @@ function MuseTabBody() {
     if (intent.instruction) composer.textInput.setInput(intent.instruction);
     setFocusKey((k) => k + 1);
   });
-
-  if (!supportsTools()) {
-    return (
-      <div className="flex h-full flex-col">
-        <PanelEmpty icon={IconWand} title="Muse needs the OpenAI provider">
-          Muse works in steps with tools, and the {aiProvider} provider runs a
-          local CLI that cannot exchange tool messages. Switch the AI provider
-          to OpenAI in Settings to use Muse.
-        </PanelEmpty>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full flex-col">

@@ -242,9 +242,6 @@ export interface RecentProject {
 
 export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
-export type AiProvider = "openai" | "codex" | "claude";
-/** The subscription CLI providers - exactly the non-OpenAI members of AiProvider. */
-export type CliKind = Exclude<AiProvider, "openai">;
 export interface Settings {
   theme: Theme;
   /** Editor prose font-size in px. */
@@ -253,13 +250,11 @@ export interface Settings {
   pdfZoom: number;
   /** OpenAI model id chosen in Settings. Null until the user picks one - no default. */
   aiModel: string | null;
-  /** Active AI provider. OpenAI uses an API key; codex/claude use the local CLI subscription. */
-  aiProvider: AiProvider;
   /** Global tag list for lore entries. */
   loreTags: string[];
   /** The author's standing writing voice, injected into every AI operation. */
   styleGuide: string;
-  /** Standing mechanical editing rules, injected into Edit and Muse only. */
+  /** Standing writing and editing instructions, injected into both agent modes. */
   editingRules: string;
   /** Target words to write per day. Null until the user sets one - drives the sidebar goal bar. */
   dailyWordGoal: number | null;
@@ -276,7 +271,6 @@ export const DEFAULT_SETTINGS: Settings = {
   proseSize: 17.5,
   pdfZoom: 1.1,
   aiModel: null,
-  aiProvider: "openai",
   loreTags: [],
   styleGuide: "",
   editingRules: "",

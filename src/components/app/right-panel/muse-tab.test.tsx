@@ -8,7 +8,6 @@ vi.mock("@/lib/tauri", () => ({
   writeAppData: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/ai/agent", () => ({ runAgent: vi.fn() }));
-vi.mock("@/lib/ai/model", () => ({ supportsTools: vi.fn(() => true) }));
 vi.mock("@/components/ai-elements/prompt-input", () => ({
   PromptInputProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   usePromptInputController: () => ({
@@ -76,13 +75,11 @@ vi.mock("@/components/app/right-panel/shared", () => ({
 
 import { MuseTab } from "@/components/app/right-panel/muse-tab";
 import { runAgent, type AgentResult } from "@/lib/ai/agent";
-import { supportsTools } from "@/lib/ai/model";
 import { useMuseStore } from "@/stores/muse-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useAiIntentStore } from "@/stores/ai-intent-store";
-import { useSettingsStore } from "@/stores/settings-store";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import type { Block, ManuscriptProposal } from "@/lib/types";
 
@@ -120,7 +117,6 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  vi.mocked(supportsTools).mockReturnValue(true);
   vi.mocked(runAgent).mockReset();
   useMuseStore.getState().reset();
   useProjectStore.setState({
@@ -133,7 +129,6 @@ beforeEach(() => {
   useAiCacheStore.setState({ entries: {} });
   useAiActivityStore.setState({ status: {} });
   useAiIntentStore.setState({ pending: null });
-  useSettingsStore.setState({ aiProvider: "openai" });
 });
 
 describe("MuseTab", () => {
@@ -339,14 +334,6 @@ describe("MuseTab", () => {
     await waitFor(() =>
       expect(runAgent).toHaveBeenCalledWith("pick up the scene", expect.anything()),
     );
-  });
-
-  it("renders the disabled explanation instead of the composer when tools are unsupported", () => {
-    vi.mocked(supportsTools).mockReturnValue(false);
-    useSettingsStore.setState({ aiProvider: "claude" });
-    render(<MuseTab />);
-    expect(screen.getByText("Muse needs the OpenAI provider")).toBeTruthy();
-    expect(screen.queryByText("send")).toBeNull();
   });
 
   it("offers Pick up and go in the idle state, which starts a cursor-anchored run", async () => {

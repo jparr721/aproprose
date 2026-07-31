@@ -1,4 +1,4 @@
-// settings-store.ts - user preferences: appearance and AI provider/model.
+// settings-store.ts - user preferences: appearance and AI model.
 //
 // One store, one concern (per CLAUDE.md). Persisted to the app config dir via the
 // Tauri-backed storage adapter. The ThemeController subscribes to apply the theme
@@ -9,25 +9,37 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
   PREFERENCE_MAX_CHARS,
-  type AiProvider,
   type Settings,
   type Theme,
 } from "@/lib/types";
 import { tauriStateStorage } from "@/lib/storage";
 
-interface SettingsState extends Settings {
+export interface SettingsState extends Settings {
   /** Whether persisted settings have been read back from disk yet. */
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
   setAiModel: (aiModel: string | null) => void;
-  setAiProvider: (aiProvider: AiProvider) => void;
   setLoreTags: (loreTags: string[]) => void;
   setStyleGuide: (styleGuide: string) => void;
   setEditingRules: (editingRules: string) => void;
   setDailyWordGoal: (dailyWordGoal: number | null) => void;
   reset: () => void;
+}
+
+export function mergePersistedSettings(
+  persistedState: unknown,
+  currentState: SettingsState,
+): SettingsState {
+  if (persistedState === null || typeof persistedState !== "object") {
+    return currentState;
+  }
+  const migrated = {
+    ...(persistedState as Partial<Settings> & { aiProvider?: unknown }),
+  };
+  delete migrated.aiProvider;
+  return { ...currentState, ...migrated };
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -39,7 +51,6 @@ export const useSettingsStore = create<SettingsState>()(
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
       setAiModel: (aiModel) => set({ aiModel }),
-      setAiProvider: (aiProvider) => set({ aiProvider }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
       setStyleGuide: (styleGuide) => set({ styleGuide: styleGuide.slice(0, PREFERENCE_MAX_CHARS) }),
@@ -59,12 +70,12 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
+      merge: mergePersistedSettings,
       partialize: ({
         theme,
         proseSize,
         pdfZoom,
         aiModel,
-        aiProvider,
         loreTags,
         styleGuide,
         editingRules,
@@ -74,7 +85,6 @@ export const useSettingsStore = create<SettingsState>()(
         proseSize,
         pdfZoom,
         aiModel,
-        aiProvider,
         loreTags,
         styleGuide,
         editingRules,

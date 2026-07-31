@@ -14,7 +14,6 @@ import { DEFAULT_SETTINGS, PREFERENCE_MAX_CHARS } from "@/lib/types";
 beforeEach(() =>
   useSettingsStore.setState({
     aiModel: DEFAULT_SETTINGS.aiModel,
-    aiProvider: DEFAULT_SETTINGS.aiProvider,
     styleGuide: DEFAULT_SETTINGS.styleGuide,
     editingRules: DEFAULT_SETTINGS.editingRules,
     dailyWordGoal: DEFAULT_SETTINGS.dailyWordGoal,
@@ -38,16 +37,32 @@ describe("settings-store aiModel", () => {
   });
 });
 
-describe("settings-store aiProvider", () => {
-  it("defaults to openai", () => {
-    expect(useSettingsStore.getState().aiProvider).toBe("openai");
+describe("settings-store provider migration", () => {
+  it("does not expose an in-app provider choice", () => {
+    expect(useSettingsStore.getState()).not.toHaveProperty("aiProvider");
+    expect(useSettingsStore.getState()).not.toHaveProperty("setAiProvider");
   });
 
-  it("setAiProvider switches the active provider", () => {
-    useSettingsStore.getState().setAiProvider("codex");
-    expect(useSettingsStore.getState().aiProvider).toBe("codex");
-    useSettingsStore.getState().setAiProvider("claude");
-    expect(useSettingsStore.getState().aiProvider).toBe("claude");
+  it("does not persist a provider field", () => {
+    const options = useSettingsStore.persist.getOptions();
+    const persisted = options.partialize
+      ? options.partialize(useSettingsStore.getState())
+      : {};
+    expect(persisted).not.toHaveProperty("aiProvider");
+  });
+
+  it("drops a legacy provider value while merging persisted settings", () => {
+    const options = useSettingsStore.persist.getOptions();
+    if (!options.merge) {
+      throw new Error("settings persistence must define a merge function");
+    }
+    const current = useSettingsStore.getState();
+    const merged = options.merge(
+      { aiProvider: "claude", aiModel: "gpt-4.1-mini" },
+      current,
+    );
+    expect(merged).not.toHaveProperty("aiProvider");
+    expect(merged.aiModel).toBe("gpt-4.1-mini");
   });
 });
 

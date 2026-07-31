@@ -1,0 +1,462 @@
+import type {
+  AgentRun,
+  ManuscriptPendingChange,
+  ManuscriptPendingProposal,
+  OutlinePendingChange,
+  OutlinePendingProposal,
+  PendingProposal,
+  PendingProposalToolValue,
+  SourceLocator,
+} from "@/lib/ai/agent-types";
+import {
+  blockFingerprint,
+  blockOrderFingerprint,
+  cardFingerprint,
+  outlineOrderFingerprint,
+} from "@/lib/ai/agent-context";
+import { sanitizeProposal, sanitizeSculpt } from "@/lib/ai/operations";
+import type {
+  Block,
+  BlockChange,
+  Card,
+  ManuscriptProposal,
+  SculptChange,
+  SculptProposal,
+} from "@/lib/types";
+
+export class AgentProposalError extends Error {
+  readonly code:
+    | "task-boundary"
+    | "source-missing"
+    | "proposal-mismatch"
+    | "wrong-chapter";
+
+  constructor(
+    code: AgentProposalError["code"],
+    message: string,
+  ) {
+    super(message);
+    this.name = "AgentProposalError";
+    this.code = code;
+  }
+}
+
+function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
+  const order = blocks.findIndex((block) => block.id === sourceId);
+  if (order < 0) {
+    throw new AgentProposalError("source-missing", `Block not found: ${sourceId}`);
+  }
+  return {
+    sourceId,
+    order,
+    fingerprint: blockFingerprint(blocks[order]),
+    sourceType: blocks[order].type,
+    label: `${blocks[order].type} block`,
+    exactText: blocks[order].text,
+  };
+}
+
+function cardLocator(cards: Card[], sourceId: string): SourceLocator {
+  const order = cards.findIndex((card) => card.id === sourceId);
+  if (order < 0) {
+    throw new AgentProposalError("source-missing", `Outline card not found: ${sourceId}`);
+  }
+  return {
+    sourceId,
+    order,
+    fingerprint: cardFingerprint(cards[order]),
+    sourceType: "outline-card",
+    label: cards[order].title,
+    exactText: `${cards[order].title}\n${cards[order].intention}`.trim(),
+  };
+}
+
+function targetChapter(run: AgentRun): string | null {
+  if (run.task.kind === "conversation") return run.task.targetChapterId;
+  if (run.task.kind === "proposal-follow-up") return null;
+  return run.task.chapterId;
+}
+
+function assertFollowUpMatches(
+  run: AgentRun,
+  currentPending: PendingProposal | null,
+  expectedKind: PendingProposal["kind"],
+): void {
+  if (run.task.kind !== "proposal-follow-up") return;
+  if (
+    currentPending === null ||
+    currentPending.id !== run.task.proposalId ||
+    currentPending.kind !== expectedKind
+  ) {
+    throw new AgentProposalError(
+      "proposal-mismatch",
+      "The pending proposal does not match this follow-up run.",
+    );
+  }
+}
+
+function assertManuscriptTask(
+  run: AgentRun,
+  change: BlockChange,
+  currentPending: PendingProposal | null,
+): void {
+  if (run.task.kind === "chapter-analysis" || run.task.kind === "outline-sculpt") {
+    throw new AgentProposalError("task-boundary", "This task is read-only for manuscript changes.");
+  }
+  if (run.task.kind === "proposal-follow-up") {
+    assertFollowUpMatches(run, currentPending, "manuscript");
+    return;
+  }
+  if (run.task.kind === "bridge") {
+    if (change.kind !== "insert" || change.afterId !== run.task.anchorBlockId) {
+      throw new AgentProposalError(
+        "task-boundary",
+        "A bridge may insert only after its frozen anchor.",
+      );
+    }
+    return;
+  }
+  if (run.task.kind === "selected-block-edit") {
+    const target =
+      change.kind === "insert" ? change.afterId : change.blockId;
+    if (target === null || !run.task.blockIds.includes(target)) {
+      throw new AgentProposalError(
+        "task-boundary",
+        "The change is outside the frozen block selection.",
+      );
+    }
+  }
+}
+
+function assertOutlineTask(
+  run: AgentRun,
+  currentPending: PendingProposal | null,
+): void {
+  if (run.task.kind === "proposal-follow-up") {
+    assertFollowUpMatches(run, currentPending, "outline");
+    return;
+  }
+  if (run.task.kind !== "outline-sculpt") {
+    throw new AgentProposalError(
+      "task-boundary",
+      "Only an outline-sculpt task may stage outline changes.",
+    );
+  }
+}
+
+function manuscriptPrecondition(
+  change: BlockChange,
+  blocks: Block[],
+): ManuscriptPendingChange["precondition"] {
+  if (change.kind === "insert") {
+    const anchor =
+      change.afterId === null ? null : blockLocator(blocks, change.afterId);
+    const anchorOrder = anchor === null ? blocks.length - 1 : anchor.order;
+    const nextBlock = blocks[anchorOrder + 1];
+    return {
+      kind: "insert",
+      anchor,
+      expectedNext:
+        nextBlock === undefined ? null : blockLocator(blocks, nextBlock.id),
+    };
+  }
+  if (change.blockId === null) {
+    throw new AgentProposalError(
+      "source-missing",
+      `${change.kind} requires a block id.`,
+    );
+  }
+  const target = blockLocator(blocks, change.blockId);
+  return change.kind === "move"
+    ? {
+        kind: "move",
+        target,
+        orderFingerprint: blockOrderFingerprint(blocks),
+      }
+    : { kind: "target", target };
+}
+
+function outlinePrecondition(
+  change: SculptChange,
+  cards: Card[],
+): OutlinePendingChange["precondition"] {
+  const orderFingerprint = outlineOrderFingerprint(cards);
+  if (change.kind === "add") {
+    return { kind: "outline-order", orderFingerprint };
+  }
+  if (change.cardId === null) {
+    throw new AgentProposalError(
+      "source-missing",
+      `${change.kind} requires a card id.`,
+    );
+  }
+  const target = cardLocator(cards, change.cardId);
+  if (change.kind === "move") {
+    return { kind: "outline-move", target, orderFingerprint };
+  }
+  return { kind: "card", target };
+}
+
+export function buildManuscriptPendingProposal(args: {
+  run: AgentRun;
+  raw: ManuscriptProposal;
+  blocks: Block[];
+  currentPending: PendingProposal | null;
+  originatingMessageId: string;
+  makeId: () => string;
+  now: string;
+}): ManuscriptPendingProposal {
+  const task = args.run.task;
+  const chapterId =
+    task.kind === "proposal-follow-up" && args.currentPending !== null
+      ? args.currentPending.chapterId
+      : targetChapter(args.run);
+  if (chapterId === null || chapterId !== args.raw.chapterId) {
+    throw new AgentProposalError(
+      "wrong-chapter",
+      "A manuscript proposal must target the frozen chapter.",
+    );
+  }
+  const sanitized = sanitizeProposal(
+    args.raw,
+    args.blocks.map((block) => ({ id: block.id, text: block.text })),
+    null,
+  );
+  for (const change of sanitized.changes) {
+    assertManuscriptTask(args.run, change, args.currentPending);
+  }
+  if (
+    task.kind === "bridge" &&
+    task.successorBlockId !== null &&
+    !args.blocks.some((block) => block.id === task.successorBlockId)
+  ) {
+    throw new AgentProposalError(
+      "source-missing",
+      "The frozen bridge successor is no longer present.",
+    );
+  }
+  return {
+    id: args.makeId(),
+    kind: "manuscript",
+    projectRoot: args.run.projectRoot,
+    chapterId,
+    summary: sanitized.summary,
+    createdAt: args.now,
+    originatingMessageId: args.originatingMessageId,
+    changes: sanitized.changes.map((change) => ({
+      id: args.makeId(),
+      change,
+      precondition: manuscriptPrecondition(change, args.blocks),
+    })),
+  };
+}
+
+export function buildOutlinePendingProposal(args: {
+  run: AgentRun;
+  raw: SculptProposal;
+  cards: Card[];
+  currentPending: PendingProposal | null;
+  originatingMessageId: string;
+  makeId: () => string;
+  now: string;
+}): OutlinePendingProposal {
+  assertOutlineTask(args.run, args.currentPending);
+  const chapterId =
+    args.run.task.kind === "proposal-follow-up" && args.currentPending !== null
+      ? args.currentPending.chapterId
+      : targetChapter(args.run);
+  if (chapterId === null || chapterId !== args.raw.chapterId) {
+    throw new AgentProposalError(
+      "wrong-chapter",
+      "An outline proposal must target the frozen chapter.",
+    );
+  }
+  const sanitized = sanitizeSculpt(
+    args.raw,
+    args.cards.map((card) => card.id),
+  );
+  return {
+    id: args.makeId(),
+    kind: "outline",
+    projectRoot: args.run.projectRoot,
+    chapterId,
+    summary: sanitized.summary,
+    createdAt: args.now,
+    originatingMessageId: args.originatingMessageId,
+    changes: sanitized.changes.map((change) => ({
+      id: args.makeId(),
+      change,
+      precondition: outlinePrecondition(change, args.cards),
+    })),
+  };
+}
+
+export type ProposalStaleReason =
+  | "target-changed"
+  | "target-missing"
+  | "anchor-changed"
+  | "successor-changed"
+  | "order-changed"
+  | "outline-order-changed";
+
+export interface StaleProposalChange {
+  changeId: string;
+  reason: ProposalStaleReason;
+}
+
+function resolveBlockLocator(
+  locator: SourceLocator,
+  blocks: Block[],
+): Block | null {
+  const byId = blocks.find((block) => block.id === locator.sourceId);
+  if (byId !== undefined && blockFingerprint(byId) === locator.fingerprint) {
+    return byId;
+  }
+  const byOrder = blocks[locator.order];
+  return byOrder !== undefined &&
+    blockFingerprint(byOrder) === locator.fingerprint
+    ? byOrder
+    : null;
+}
+
+function resolveCardLocator(
+  locator: SourceLocator,
+  cards: Card[],
+): Card | null {
+  const byId = cards.find((card) => card.id === locator.sourceId);
+  if (byId !== undefined && cardFingerprint(byId) === locator.fingerprint) {
+    return byId;
+  }
+  const byOrder = cards[locator.order];
+  return byOrder !== undefined &&
+    cardFingerprint(byOrder) === locator.fingerprint
+    ? byOrder
+    : null;
+}
+
+function validateManuscriptChange(
+  item: ManuscriptPendingChange,
+  blocks: Block[],
+): ProposalStaleReason | null {
+  const precondition = item.precondition;
+  if (precondition.kind === "target") {
+    return resolveBlockLocator(precondition.target, blocks) === null
+      ? blocks.some((block) => block.id === precondition.target.sourceId)
+        ? "target-changed"
+        : "target-missing"
+      : null;
+  }
+  if (precondition.kind === "move") {
+    if (resolveBlockLocator(precondition.target, blocks) === null) {
+      return "target-changed";
+    }
+    return blockOrderFingerprint(blocks) === precondition.orderFingerprint
+      ? null
+      : "order-changed";
+  }
+  const anchor =
+    precondition.anchor === null
+      ? null
+      : resolveBlockLocator(precondition.anchor, blocks);
+  if (precondition.anchor !== null && anchor === null) return "anchor-changed";
+  const anchorOrder =
+    anchor === null ? blocks.length - 1 : blocks.findIndex((block) => block.id === anchor.id);
+  const next = blocks[anchorOrder + 1];
+  if (precondition.expectedNext === null) {
+    return next === undefined ? null : "successor-changed";
+  }
+  return next !== undefined &&
+    blockFingerprint(next) === precondition.expectedNext.fingerprint
+    ? null
+    : "successor-changed";
+}
+
+export function validateManuscriptChanges(
+  proposal: ManuscriptPendingProposal,
+  blocks: Block[],
+): StaleProposalChange[] {
+  return proposal.changes.flatMap((item) => {
+    const reason = validateManuscriptChange(item, blocks);
+    return reason === null ? [] : [{ changeId: item.id, reason }];
+  });
+}
+
+export function validateOutlineChanges(
+  proposal: OutlinePendingProposal,
+  cards: Card[],
+): StaleProposalChange[] {
+  const order = outlineOrderFingerprint(cards);
+  return proposal.changes.flatMap((item): StaleProposalChange[] => {
+    const precondition = item.precondition;
+    if (
+      precondition.kind === "outline-order" ||
+      precondition.kind === "outline-move"
+    ) {
+      if (order !== precondition.orderFingerprint) {
+        return [{ changeId: item.id, reason: "outline-order-changed" as const }];
+      }
+    }
+    if (precondition.kind === "outline-order") return [];
+    return resolveCardLocator(precondition.target, cards) !== null
+      ? []
+      : [{ changeId: item.id, reason: "target-changed" as const }];
+  });
+}
+
+export function materializeManuscriptChanges(
+  proposal: ManuscriptPendingProposal,
+  changeIds: string[],
+  blocks: Block[],
+): BlockChange[] {
+  const selected = new Set(changeIds);
+  const stale = validateManuscriptChanges(
+    { ...proposal, changes: proposal.changes.filter((item) => selected.has(item.id)) },
+    blocks,
+  );
+  if (stale.length > 0) {
+    throw new AgentProposalError(
+      "source-missing",
+      `Proposal preconditions failed: ${stale.map((item) => item.changeId).join(", ")}`,
+    );
+  }
+  return proposal.changes
+    .filter((item) => selected.has(item.id))
+    .map((item) => {
+      const precondition = item.precondition;
+      if (item.change.kind === "insert") {
+        const anchor =
+          precondition.kind === "insert" && precondition.anchor !== null
+            ? resolveBlockLocator(precondition.anchor, blocks)
+            : null;
+        return { ...item.change, afterId: anchor?.id ?? null };
+      }
+      const locator =
+        precondition.kind === "target" || precondition.kind === "move"
+          ? precondition.target
+          : null;
+      if (locator === null) {
+        throw new AgentProposalError("source-missing", "A target locator is required.");
+      }
+      const target = resolveBlockLocator(locator, blocks);
+      if (target === null) {
+        throw new AgentProposalError("source-missing", "The proposal target changed.");
+      }
+      return { ...item.change, blockId: target.id };
+    });
+}
+
+export function pendingProposalForModel(
+  proposal: PendingProposal,
+): PendingProposalToolValue {
+  return {
+    id: proposal.id,
+    kind: proposal.kind,
+    chapterId: proposal.chapterId,
+    summary: proposal.summary,
+    changes: proposal.changes.map((item) => ({
+      id: item.id,
+      change: item.change,
+      precondition: item.precondition,
+    })),
+  };
+}

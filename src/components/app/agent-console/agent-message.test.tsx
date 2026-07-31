@@ -135,8 +135,16 @@ describe("AgentMessage content", () => {
 
     expect(await screen.findByText("1.5K / 10K")).toBeTruthy();
     expect(screen.getByText("Model: gpt-4.1")).toBeTruthy();
-    expect(screen.getByText("Input")).toBeTruthy();
-    expect(screen.getByText("Output")).toBeTruthy();
+    const inputUsage = screen.getByText("Input").parentElement;
+    const outputUsage = screen.getByText("Output").parentElement;
+    if (inputUsage === null || outputUsage === null) {
+      throw new Error("Rendered token usage rows are missing.");
+    }
+    expect(inputUsage.textContent).toContain("1K - ");
+    expect(outputUsage.textContent).toContain("500 - ");
+    expect(`${inputUsage.textContent}${outputUsage.textContent}`).not.toMatch(
+      /[^\x00-\x7F]/,
+    );
   });
 
   it("never renders model reasoning from a malformed message", () => {

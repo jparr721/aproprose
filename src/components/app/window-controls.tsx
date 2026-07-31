@@ -4,6 +4,7 @@
 // non-Tauri browser preview (`just dev`) doesn't throw unhandled rejections.
 
 import { useEffect, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconCopy, IconMinus, IconSquare, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
@@ -11,9 +12,10 @@ import { IS_MAC } from "@/lib/platform";
 
 export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
+  const nativeControls = !IS_MAC && isTauri();
 
   useEffect(() => {
-    if (IS_MAC) return;
+    if (!nativeControls) return;
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
     void win.isMaximized().then(setMaximized).catch(() => {});
@@ -26,9 +28,9 @@ export function WindowControls() {
       })
       .catch(() => {});
     return () => unlisten?.();
-  }, []);
+  }, [nativeControls]);
 
-  if (IS_MAC) return null;
+  if (!nativeControls) return null;
 
   return (
     <div className="flex items-center gap-0.5">

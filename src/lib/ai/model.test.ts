@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createOpenAI: vi.fn(),
   provider: vi.fn(),
   getAiConfig: vi.fn(),
+  tauriFetch: vi.fn(),
 }));
 
 vi.mock("@ai-sdk/openai", () => ({
@@ -15,7 +16,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: vi.fn(),
+  fetch: mocks.tauriFetch,
 }));
 
 import { getModel, resetAiProvider } from "@/lib/ai/model";
@@ -26,6 +27,7 @@ beforeEach(() => {
   mocks.provider.mockReset();
   mocks.createOpenAI.mockReset().mockReturnValue(mocks.provider);
   mocks.getAiConfig.mockReset().mockResolvedValue({ apiKey: "test-key" });
+  mocks.tauriFetch.mockReset();
   useSettingsStore.setState({ aiModel: null });
 });
 
@@ -44,6 +46,10 @@ describe("getModel", () => {
 
     await expect(getModel()).resolves.toBe(expected);
     expect(mocks.getAiConfig).toHaveBeenCalledOnce();
+    expect(mocks.createOpenAI).toHaveBeenCalledWith({
+      apiKey: "test-key",
+      fetch: mocks.tauriFetch,
+    });
     expect(mocks.provider).toHaveBeenCalledWith("gpt-4.1-mini");
   });
 

@@ -465,12 +465,18 @@ type AgentSnapshotSource = Pick<
   | "interruptedRun"
 >;
 
+interface FailedRecoveryState {
+  source: AgentSnapshotSource;
+  revision: number;
+}
+
 interface FailedWriteSave {
   kind: "write";
   root: string;
   snapshot: PersistedAgentSnapshot;
   issue: AgentPersistenceIssue;
-  revision: number | null;
+  revision: number;
+  recovery: FailedRecoveryState | null;
 }
 
 interface FailedSnapshotSave {
@@ -478,6 +484,8 @@ interface FailedSnapshotSave {
   root: string;
   source: AgentSnapshotSource;
   issue: AgentPersistenceIssue;
+  revision: number;
+  recovery: FailedRecoveryState | null;
 }
 
 type FailedAgentSave = FailedWriteSave | FailedSnapshotSave;
@@ -493,6 +501,7 @@ let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let activeRevision = 0;
 let persistedRevision = 0;
+let revisionSequence = 0;
 
 export class AgentPersistenceError extends Error {
   readonly issue: AgentPersistenceIssue;
@@ -637,17 +646,64 @@ function failedSaveForRetry(): FailedAgentSave | null {
   return firstFailedSave();
 }
 
+function nextRevision(): number {
+  revisionSequence += 1;
+  return revisionSequence;
+}
+
+function failedSaveRevision(failure: FailedAgentSave): number {
+  if (failure.recovery === null) return failure.revision;
+  return Math.max(failure.revision, failure.recovery.revision);
+}
+
 function recordFailedSave(failure: FailedAgentSave): void {
+  const retainedFailure = failedSaveForRoot(failure.root);
+  if (
+    retainedFailure !== null &&
+    failedSaveRevision(retainedFailure) > failedSaveRevision(failure)
+  ) {
+    useAgentConsoleStore
+      .getState()
+      .setPersistenceIssue(retainedFailure.issue);
+    return;
+  }
   failedSaves.set(failure.root, failure);
   useAgentConsoleStore.getState().setPersistenceIssue(failure.issue);
 }
 
+function recordRecoveryState(
+  root: string,
+  source: AgentSnapshotSource,
+  revision: number,
+): void {
+  const failure = failedSaveForRoot(root);
+  if (failure === null) {
+    throw new Error(`Agent recovery state is missing for ${root}.`);
+  }
+  if (
+    failure.recovery !== null &&
+    failure.recovery.revision > revision
+  ) {
+    return;
+  }
+  failedSaves.set(root, {
+    ...failure,
+    recovery: { source, revision },
+  });
+}
+
 function clearRecoveredFailure(
   root: string,
-  expectedFailure: FailedAgentSave | null,
+  savedRevision: number,
 ): void {
-  if (failedSaveForRoot(root) !== expectedFailure) return;
-  if (expectedFailure !== null) failedSaves.delete(root);
+  const failure = failedSaveForRoot(root);
+  if (
+    failure !== null &&
+    failedSaveRevision(failure) > savedRevision
+  ) {
+    return;
+  }
+  if (failure !== null) failedSaves.delete(root);
   const currentIssue = useAgentConsoleStore.getState().persistenceIssue;
   if (currentIssue === null || currentIssue.projectRoot !== root) return;
   useAgentConsoleStore
@@ -831,6 +887,24 @@ function stateFromFailedSave(
   root: string,
   failure: FailedAgentSave,
 ): PersistedAgentState {
+  if (failure.recovery !== null) {
+    const source = failure.recovery.source;
+    return {
+      v: 3,
+      mode: source.mode,
+      messages: source.messages,
+      summary: source.summary,
+      draftText: source.draftText,
+      draftContextRefs: source.draftContextRefs,
+      draftSourceLocators: source.draftSourceLocators,
+      pendingProposal: restorePendingProposal(
+        root,
+        toPersistedPendingProposal(source.pendingProposal),
+      ),
+      lastUsage: source.lastUsage,
+      interruptedRun: source.interruptedRun,
+    };
+  }
   if (failure.kind === "write") {
     return restoreAgentSnapshot(root, failure.snapshot);
   }
@@ -868,7 +942,7 @@ export async function saveAgentState(
   root: string,
   snapshot: PersistedAgentSnapshot,
 ): Promise<void> {
-  const expectedFailure = failedSaveForRoot(root);
+  const revision = nextRevision();
   const resetsActiveRecovery =
     recoveryRoot === root &&
     activeRoot === root &&
@@ -879,15 +953,15 @@ export async function saveAgentState(
   } catch (error) {
     throw saveIssue(root, error);
   }
-  await writeAgentSnapshot(root, safeSnapshot, null, expectedFailure);
+  await writeAgentSnapshot(root, safeSnapshot, revision);
   if (resetsActiveRecovery && failedSaveForRoot(root) === null) {
     useAgentConsoleStore
       .getState()
       .hydrate(root, restoreAgentSnapshot(root, safeSnapshot));
     recoveryRoot = null;
     writableRoot = root;
-    activeRevision = 0;
-    persistedRevision = 0;
+    activeRevision = revision;
+    persistedRevision = revision;
     restoreFailedSaveIssue();
     return;
   }
@@ -898,13 +972,11 @@ export async function saveAgentState(
   ) {
     recoveryRoot = null;
     writableRoot = root;
-    persistedRevision = activeRevision;
   }
 }
 
-function markRevisionPersisted(root: string, revision: number | null): void {
+function markRevisionPersisted(root: string, revision: number): void {
   if (
-    revision === null ||
     root !== activeRoot ||
     revision !== activeRevision
   ) {
@@ -916,12 +988,11 @@ function markRevisionPersisted(root: string, revision: number | null): void {
 async function writeAgentSnapshot(
   root: string,
   snapshot: PersistedAgentSnapshot,
-  revision: number | null,
-  expectedFailure: FailedAgentSave | null,
+  revision: number,
 ): Promise<void> {
   try {
     await writeAppData(agentStateKey(root), snapshot);
-    clearRecoveredFailure(root, expectedFailure);
+    clearRecoveredFailure(root, revision);
     markRevisionPersisted(root, revision);
   } catch (error) {
     const failure = saveIssue(root, error);
@@ -931,6 +1002,7 @@ async function writeAgentSnapshot(
       snapshot: structuredClone(snapshot),
       issue: failure.issue,
       revision,
+      recovery: null,
     });
     throw failure;
   }
@@ -939,6 +1011,7 @@ async function writeAgentSnapshot(
 function recordSnapshotFailure(
   root: string,
   source: AgentSnapshotSource,
+  revision: number,
   error: unknown,
 ): AgentPersistenceError {
   const failure = saveIssue(root, error);
@@ -947,6 +1020,8 @@ function recordSnapshotFailure(
     root,
     source,
     issue: failure.issue,
+    revision,
+    recovery: null,
   });
   return failure;
 }
@@ -954,31 +1029,25 @@ function recordSnapshotFailure(
 async function persistSnapshotSource(
   root: string,
   source: AgentSnapshotSource,
-  revision: number | null,
-  expectedFailure: FailedAgentSave | null,
+  revision: number,
 ): Promise<void> {
   let snapshot: PersistedAgentSnapshot;
   try {
     snapshot = await snapshotFromSource(source);
     snapshot = await parseAgentSnapshot(snapshot);
   } catch (error) {
-    throw recordSnapshotFailure(root, source, error);
+    throw recordSnapshotFailure(root, source, revision, error);
   }
-  await writeAgentSnapshot(root, snapshot, revision, expectedFailure);
+  await writeAgentSnapshot(root, snapshot, revision);
 }
 
 function captureActiveSnapshot(root: string): Promise<void> {
   const source = captureAgentSnapshotSource();
-  const revision = activeRoot === root ? activeRevision : null;
-  const expectedFailure = failedSaveForRoot(root);
+  const revision = nextRevision();
+  if (activeRoot === root) activeRevision = revision;
   return appendTransition(async () => {
     try {
-      await persistSnapshotSource(
-        root,
-        source,
-        revision,
-        expectedFailure,
-      );
+      await persistSnapshotSource(root, source, revision);
     } catch (error) {
       logPersistenceFailure(root, error);
     }
@@ -1027,6 +1096,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
   return appendTransition(async () => {
     const oldRoot = activeRoot;
     const oldRootWasWritable = oldRoot !== null && writableRoot === oldRoot;
+    const oldRootWasRecovering = oldRoot !== null && recoveryRoot === oldRoot;
     writableRoot = null;
     if (oldRoot !== null) {
       abortAgentRunForProjectSwitch(oldRoot, "project-switch");
@@ -1034,18 +1104,23 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
 
     if (oldRoot !== null && oldRootWasWritable) {
       const source = captureAgentSnapshotSource();
-      const revision = activeRevision;
-      const expectedFailure = failedSaveForRoot(oldRoot);
+      const revision = nextRevision();
+      activeRevision = revision;
       try {
-        await persistSnapshotSource(
-          oldRoot,
-          source,
-          revision,
-          expectedFailure,
-        );
+        await persistSnapshotSource(oldRoot, source, revision);
       } catch (error) {
         logPersistenceFailure(oldRoot, error);
       }
+    }
+
+    if (oldRoot !== null && oldRootWasRecovering) {
+      const revision = nextRevision();
+      activeRevision = revision;
+      recordRecoveryState(
+        oldRoot,
+        captureAgentSnapshotSource(),
+        revision,
+      );
     }
 
     useAgentConsoleStore.getState().resetProject();
@@ -1064,7 +1139,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       if (requestedRoot !== nextRoot) return;
       useAgentConsoleStore.getState().hydrate(nextRoot, retainedState);
       recoveryRoot = nextRoot;
-      activeRevision = 0;
+      activeRevision = failedSaveRevision(retainedFailure);
       persistedRevision = 0;
       useAgentConsoleStore
         .getState()
@@ -1088,8 +1163,9 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     if (requestedRoot !== nextRoot) return;
 
     useAgentConsoleStore.getState().hydrate(nextRoot, loaded);
-    activeRevision = 0;
-    persistedRevision = 0;
+    const hydratedRevision = nextRevision();
+    activeRevision = hydratedRevision;
+    persistedRevision = hydratedRevision;
     writableRoot = nextRoot;
     restoreFailedSaveIssue();
   });
@@ -1107,15 +1183,20 @@ export function retryAgentPersistence(): Promise<void> {
         await writeAgentSnapshot(
           retry.root,
           retry.snapshot,
-          recoveringActiveRoot ? null : retry.revision,
-          retry,
+          retry.revision,
         );
       } else {
         await persistSnapshotSource(
           retry.root,
           retry.source,
-          null,
-          retry,
+          retry.revision,
+        );
+      }
+      if (retry.recovery !== null) {
+        await persistSnapshotSource(
+          retry.root,
+          retry.recovery.source,
+          retry.recovery.revision,
         );
       }
       if (
@@ -1124,7 +1205,6 @@ export function retryAgentPersistence(): Promise<void> {
       ) {
         recoveryRoot = null;
         writableRoot = retry.root;
-        persistedRevision = 0;
       }
       if (activeRevision !== persistedRevision) scheduleAgentSave();
       return;
@@ -1137,12 +1217,12 @@ export function retryAgentPersistence(): Promise<void> {
     ) {
       return;
     }
-    const revision = activeRevision;
+    const revision = nextRevision();
+    activeRevision = revision;
     await persistSnapshotSource(
       root,
       captureAgentSnapshotSource(),
       revision,
-      null,
     );
   });
 }
@@ -1167,10 +1247,9 @@ export function useAgentPersistence(): void {
         if (!persistedFieldsChanged(state, previous)) return;
         if (
           activeRoot !== null &&
-          requestedRoot === activeRoot &&
           state.hydratedProjectRoot === activeRoot
         ) {
-          activeRevision += 1;
+          activeRevision = nextRevision();
         }
         scheduleAgentSave();
       },

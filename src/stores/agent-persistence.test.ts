@@ -931,6 +931,120 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
+  it("persists protected recovery edits captured before switching away", async () => {
+    const disk = new Map<string, unknown>();
+    const persistedOldDrafts: string[] = [];
+    let failOldWrite = true;
+    tauri.readAppData.mockImplementation((key: string) =>
+      Promise.resolve(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(
+      async (key: string, value: unknown) => {
+        if (key === agentStateKey("/books/old") && failOldWrite) {
+          failOldWrite = false;
+          throw new Error("old root unavailable");
+        }
+        disk.set(key, structuredClone(value));
+        if (key === agentStateKey("/books/old")) {
+          persistedOldDrafts.push(
+            (value as PersistedAgentState).draftText,
+          );
+        }
+      },
+    );
+    useProjectStore.setState({ project: project("/books/old") });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/old",
+      ),
+    );
+    useAgentConsoleStore.getState().setDraftText("Original failed draft");
+
+    useProjectStore.setState({ project: project("/books/new") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
+        kind: "save",
+        projectRoot: "/books/old",
+      }),
+    );
+    useProjectStore.setState({ project: project("/books/old") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: "/books/old",
+        draftText: "Original failed draft",
+      }),
+    );
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Recovery edit before switch");
+
+    useProjectStore.setState({ project: project("/books/new") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/new",
+      ),
+    );
+    await retryAgentPersistence();
+
+    expect(persistedOldDrafts).toEqual([
+      "Original failed draft",
+      "Recovery edit before switch",
+    ]);
+    useProjectStore.setState({ project: project("/books/old") });
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: "/books/old",
+        draftText: "Recovery edit before switch",
+        persistenceIssue: null,
+      }),
+    );
+    persistence.unmount();
+  });
+
+  it("lets a newer queued success supersede an older failed save", async () => {
+    useProjectStore.setState({ project: project("/books/one") });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(
+        "/books/one",
+      ),
+    );
+    tauri.writeAppData.mockClear();
+    const firstWrite = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(firstWrite.promise);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    useAgentConsoleStore.getState().setDraftText("Draft A");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(1));
+    useAgentConsoleStore.getState().setDraftText("Draft B");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(tauri.writeAppData).toHaveBeenCalledTimes(1);
+
+    firstWrite.reject(new Error("Draft A failed"));
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    expect(tauri.writeAppData.mock.calls[1]).toEqual([
+      agentStateKey("/books/one"),
+      expect.objectContaining({ draftText: "Draft B" }),
+    ]);
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull(),
+    );
+
+    tauri.writeAppData.mockClear();
+    await retryAgentPersistence();
+    expect(tauri.writeAppData).toHaveBeenCalledOnce();
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey("/books/one"),
+      expect.objectContaining({ draftText: "Draft B" }),
+    );
+    persistence.unmount();
+  });
+
   it("restores an unsavable old-root source when reopened", async () => {
     await transitionAgentProject("/books/old");
     useAgentConsoleStore.setState({

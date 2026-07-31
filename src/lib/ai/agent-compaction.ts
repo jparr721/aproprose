@@ -8,6 +8,10 @@ import type {
   ConversationSummary,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
+import {
+  sanitizeAgentMessages,
+  validateAgentMessages,
+} from "@/lib/ai/agent-messages";
 
 const RECENT_TURNS_TO_KEEP = 4;
 
@@ -50,19 +54,22 @@ function estimatedTokens(messages: AgentUIMessage[]): number {
   return Math.max(1, Math.ceil(JSON.stringify(messages).length / 4));
 }
 
-function completeTurns(messages: AgentUIMessage[]): AgentUIMessage[][] {
+function completeTurnPrefix(messages: AgentUIMessage[]): AgentUIMessage[][] {
   const turns: AgentUIMessage[][] = [];
-  for (let index = 0; index < messages.length - 1; index += 1) {
+  for (let index = 0; index < messages.length; index += 2) {
     const user = messages[index];
     const assistant = messages[index + 1];
     if (
-      user.role === "user" &&
-      assistant.role === "assistant" &&
-      assistant.metadata?.state === "complete"
+      user === undefined ||
+      user.role !== "user" ||
+      user.metadata?.state !== "complete" ||
+      assistant === undefined ||
+      assistant.role !== "assistant" ||
+      assistant.metadata?.state !== "complete"
     ) {
-      turns.push([user, assistant]);
-      index += 1;
+      break;
     }
+    turns.push([user, assistant]);
   }
   return turns;
 }
@@ -71,7 +78,7 @@ export function selectCompactionTurns(
   messages: AgentUIMessage[],
   tokenTarget: number,
 ): AgentUIMessage[] {
-  const turns = completeTurns(messages);
+  const turns = completeTurnPrefix(messages);
   const eligible = turns.slice(0, Math.max(0, turns.length - RECENT_TURNS_TO_KEEP));
   const selected: AgentUIMessage[] = [];
   let tokens = 0;
@@ -124,8 +131,10 @@ export async function compactConversation(args: {
   if (selected.length === 0) {
     return { messages: args.messages, summary: args.currentSummary };
   }
+  const validated = await validateAgentMessages(selected);
+  const sanitized = sanitizeAgentMessages(validated);
   const text = await args.summarize(
-    compactionSource(args.currentSummary, selected),
+    compactionSource(args.currentSummary, sanitized),
   );
   return {
     messages: args.messages,

@@ -38,6 +38,68 @@ const pair = (index: number): AgentUIMessage[] => [
   },
 ];
 
+const toolSummary = {
+  label: "Read chapter",
+  target: "Chapter 1",
+  detail: "2 blocks",
+  itemCount: 2,
+};
+
+function sensitivePair(index: number): AgentUIMessage[] {
+  return [
+    {
+      id: `u${index}`,
+      role: "user",
+      metadata: meta("complete"),
+      parts: [{ type: "text", text: `Question ${index}` }],
+    },
+    {
+      id: `a${index}`,
+      role: "assistant",
+      metadata: meta("complete"),
+      parts: [
+        {
+          type: "reasoning",
+          text: "Hidden compaction reasoning",
+          state: "done",
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "read_chapter",
+          toolCallId: `call-${index}`,
+          state: "output-available",
+          input: { chapterId: "ch1" },
+          output: {
+            kind: "runtime",
+            summary: toolSummary,
+            value: { chapterText: "Secret compaction chapter text" },
+          },
+        },
+      ],
+    },
+  ];
+}
+
+function interruptedPair(
+  index: number,
+  state: "stopped" | "error",
+): AgentUIMessage[] {
+  return [
+    {
+      id: `u${index}`,
+      role: "user",
+      metadata: meta("complete"),
+      parts: [{ type: "text", text: `Interrupted question ${index}` }],
+    },
+    {
+      id: `a${index}`,
+      role: "assistant",
+      metadata: meta(state),
+      parts: [{ type: "text", text: `Interrupted answer ${index}` }],
+    },
+  ];
+}
+
 describe("selectCompactionTurns", () => {
   it("selects oldest complete turns while retaining the latest four", () => {
     const messages = Array.from({ length: 7 }, (_, index) => pair(index)).flat();
@@ -82,6 +144,76 @@ describe("compaction threshold", () => {
 });
 
 describe("compactConversation", () => {
+  it("removes reasoning and runtime values before calling the summarizer", async () => {
+    const messages = [
+      ...sensitivePair(0),
+      ...Array.from({ length: 6 }, (_, index) => pair(index + 1)).flat(),
+    ];
+    let source = "";
+
+    await compactConversation({
+      messages,
+      currentSummary: null,
+      tokenTarget: 1,
+      summarize: async (value) => {
+        source = value;
+        return "Safe summary.";
+      },
+    });
+
+    expect(source).not.toContain("Hidden compaction reasoning");
+    expect(source).not.toContain("Secret compaction chapter text");
+    expect(source).toContain("Read chapter");
+  });
+
+  it("rejects unsafe completed outputs before calling the summarizer", async () => {
+    const unsafe: AgentUIMessage[] = [
+      {
+        id: "u0",
+        role: "user",
+        metadata: meta("complete"),
+        parts: [{ type: "text", text: "Question 0" }],
+      },
+      {
+        id: "a0",
+        role: "assistant",
+        metadata: meta("complete"),
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "call-unsafe",
+            state: "output-available",
+            input: { chapterId: "ch1" },
+            output: {
+              kind: "summary",
+              summary: toolSummary,
+              hidden: "summarizer secret",
+            },
+          },
+        ],
+      },
+    ];
+    const messages = [
+      ...unsafe,
+      ...Array.from({ length: 6 }, (_, index) => pair(index + 1)).flat(),
+    ];
+    let summarizerCalled = false;
+
+    await expect(
+      compactConversation({
+        messages,
+        currentSummary: null,
+        tokenTarget: 1,
+        summarize: async () => {
+          summarizerCalled = true;
+          return "Unsafe summary.";
+        },
+      }),
+    ).rejects.toThrow("Completed agent tool output is not safe to persist");
+    expect(summarizerCalled).toBe(false);
+  });
+
   it("summarizes selected turns without removing them from the visible transcript", async () => {
     const messages = Array.from({ length: 7 }, (_, index) => pair(index)).flat();
     const summarize = vi.fn().mockResolvedValue("Author chose the locked-room reveal.");
@@ -114,6 +246,43 @@ describe("compactConversation", () => {
     expect(summarize.mock.calls[0][0]).not.toContain("Question 0");
     expect(summarize.mock.calls[0][0]).toContain("Question 1");
   });
+
+  it.each(["stopped", "error"] as const)(
+    "stops before a %s gap and keeps the gap plus later turns in the next request",
+    async (state) => {
+      const messages = [
+        ...Array.from({ length: 5 }, (_, index) => pair(index)).flat(),
+        ...interruptedPair(5, state),
+        ...Array.from({ length: 5 }, (_, index) => pair(index + 6)).flat(),
+      ];
+      let source = "";
+
+      const result = await compactConversation({
+        messages,
+        currentSummary: null,
+        tokenTarget: 100_000,
+        summarize: async (value) => {
+          source = value;
+          return `Summary before ${state}.`;
+        },
+      });
+
+      expect(result.summary?.throughMessageId).toBe("a0");
+      expect(source).toContain("Question 0");
+      for (const id of ["u5", "a5", "u6", "a6"]) {
+        expect(source).not.toContain(`\"id\":\"${id}\"`);
+      }
+      if (result.summary === null) {
+        throw new Error("Expected a summary before the interrupted turn.");
+      }
+      const request = messagesForNextRequest(messages, result.summary);
+      const requestIds = request.map((message) => message.id);
+      expect(requestIds).toEqual(expect.arrayContaining(["u5", "a5", "u6", "a6"]));
+      expect(messages.map((message) => message.id)).toEqual(
+        expect.arrayContaining(["u5", "a5", "u6", "a6"]),
+      );
+    },
+  );
 
   it("substitutes the summary only in the next model request", () => {
     const messages = Array.from({ length: 6 }, (_, index) => pair(index)).flat();

@@ -9,7 +9,6 @@ import { z } from "zod";
 import type {
   AgentMessageMetadata,
   AgentToolOutput,
-  AgentToolSummary,
   AgentUIMessage,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
@@ -69,6 +68,31 @@ const contextSnapshotSchema = z.object({
   sourceFingerprint: z.string(),
 });
 
+const agentToolSummarySchema = z
+  .object({
+    label: z.string(),
+    target: z.string(),
+    detail: z.string(),
+    itemCount: z.number(),
+  })
+  .strict();
+
+const completedAgentToolOutputSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("runtime"),
+      summary: agentToolSummarySchema,
+      value: z.unknown(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("summary"),
+      summary: agentToolSummarySchema,
+    })
+    .strict(),
+]);
+
 const dataSchemas = {
   context: z.object({ snapshots: z.array(contextSnapshotSchema) }),
   "proposal-event": z.object({
@@ -112,46 +136,21 @@ export async function validateAgentMessages(
   return validated;
 }
 
-function isAgentToolSummary(value: unknown): value is AgentToolSummary {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    "label" in value &&
-    typeof value.label === "string" &&
-    "target" in value &&
-    typeof value.target === "string" &&
-    "detail" in value &&
-    typeof value.detail === "string" &&
-    "itemCount" in value &&
-    typeof value.itemCount === "number"
-  );
-}
-
 function summaryOnly(output: unknown): AgentToolOutput<never> {
-  if (
-    output !== null &&
-    typeof output === "object" &&
-    "kind" in output &&
-    "summary" in output &&
-    isAgentToolSummary(output.summary) &&
-    output.kind === "runtime"
-  ) {
-    return {
-      kind: "summary",
-      summary: output.summary,
-    } satisfies AgentToolOutput<never>;
+  const parsed = completedAgentToolOutputSchema.safeParse(output);
+  if (!parsed.success) {
+    throw new Error("Completed agent tool output is not safe to persist.");
   }
-  if (
-    output !== null &&
-    typeof output === "object" &&
-    "kind" in output &&
-    "summary" in output &&
-    isAgentToolSummary(output.summary) &&
-    output.kind === "summary"
-  ) {
-    return output as AgentToolOutput<never>;
-  }
-  throw new Error("Completed agent tool output is not safe to persist.");
+  const summary = parsed.data.summary;
+  return {
+    kind: "summary",
+    summary: {
+      label: summary.label,
+      target: summary.target,
+      detail: summary.detail,
+      itemCount: summary.itemCount,
+    },
+  } satisfies AgentToolOutput<never>;
 }
 
 export function sanitizeAgentMessages(
@@ -197,13 +196,9 @@ export async function convertAgentMessagesToModel(
   messages: AgentUIMessage[],
   tools: AgentMessageTools,
 ): Promise<ModelMessage[]> {
-  const validated = await validateUIMessages<AgentUIMessage>({
-    messages,
-    metadataSchema,
-    dataSchemas,
-    tools,
-  });
-  return convertToModelMessages<AgentUIMessage>(validated, {
+  const validated = await validateAgentMessages(messages, tools);
+  const sanitized = sanitizeAgentMessages(validated);
+  return convertToModelMessages<AgentUIMessage>(sanitized, {
     tools,
     ignoreIncompleteToolCalls: true,
     convertDataPart: (part) => {

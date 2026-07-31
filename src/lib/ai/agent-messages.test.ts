@@ -18,6 +18,35 @@ const metadata: AgentUIMessage["metadata"] = {
   usage: null,
 };
 
+const toolSummary = {
+  label: "Read chapter",
+  target: "Chapter 1",
+  detail: "2 blocks",
+  itemCount: 2,
+};
+
+function dynamicToolPart(
+  output: unknown,
+): AgentUIMessage["parts"][number] {
+  return {
+    type: "dynamic-tool",
+    toolName: "read_chapter",
+    toolCallId: "call-1",
+    state: "output-available",
+    input: { chapterId: "ch1" },
+    output,
+  };
+}
+
+function assistantWithOutput(id: string, output: unknown): AgentUIMessage {
+  return {
+    id,
+    role: "assistant",
+    metadata,
+    parts: [dynamicToolPart(output)],
+  };
+}
+
 describe("sanitizeAgentMessages", () => {
   it("removes reasoning and replaces runtime tool values with summaries", () => {
     const messages: AgentUIMessage[] = [
@@ -93,6 +122,57 @@ describe("sanitizeAgentMessages", () => {
     ];
     expect(sanitizeAgentMessages(messages)).toEqual([]);
   });
+
+  it("rejects summary outputs with unexpected top-level fields", () => {
+    const messages = [
+      assistantWithOutput("assistant-extra", {
+        kind: "summary",
+        summary: toolSummary,
+        hidden: "top-level secret",
+      }),
+    ];
+
+    expect(() => sanitizeAgentMessages(messages)).toThrow(
+      "Completed agent tool output is not safe to persist",
+    );
+  });
+
+  it("rejects summary outputs with unexpected nested fields", () => {
+    const messages = [
+      assistantWithOutput("assistant-nested-extra", {
+        kind: "summary",
+        summary: {
+          ...toolSummary,
+          hidden: "nested secret",
+        },
+      }),
+    ];
+
+    expect(() => sanitizeAgentMessages(messages)).toThrow(
+      "Completed agent tool output is not safe to persist",
+    );
+  });
+
+  it("reconstructs valid summary outputs without modifying the original", () => {
+    const output = {
+      kind: "summary",
+      summary: { ...toolSummary },
+    } as const;
+    const messages = [assistantWithOutput("assistant-summary", output)];
+
+    const sanitized = sanitizeAgentMessages(messages);
+    const sanitizedPart = sanitized[0].parts[0] as {
+      output: { kind: "summary"; summary: typeof toolSummary };
+    };
+
+    expect(sanitizedPart.output).not.toBe(output);
+    expect(sanitizedPart.output.summary).not.toBe(output.summary);
+    expect(sanitizedPart.output).toEqual(output);
+    expect(output).toEqual({
+      kind: "summary",
+      summary: toolSummary,
+    });
+  });
 });
 
 describe("validateAgentMessages", () => {
@@ -111,6 +191,47 @@ describe("validateAgentMessages", () => {
 });
 
 describe("convertAgentMessagesToModel", () => {
+  it("rejects system messages at the model boundary", async () => {
+    await expect(
+      convertAgentMessagesToModel(
+        [
+          {
+            id: "system-model",
+            role: "system",
+            metadata,
+            parts: [{ type: "text", text: "Hidden system instructions" }],
+          },
+        ],
+        {},
+      ),
+    ).rejects.toThrow("System messages cannot be persisted");
+  });
+
+  it("removes reasoning and runtime values at the model boundary", async () => {
+    const messages: AgentUIMessage[] = [
+      {
+        id: "assistant-model",
+        role: "assistant",
+        metadata,
+        parts: [
+          { type: "reasoning", text: "Hidden model reasoning", state: "done" },
+          dynamicToolPart({
+            kind: "runtime",
+            summary: toolSummary,
+            value: { chapterText: "Secret model chapter text" },
+          }),
+        ],
+      },
+    ];
+
+    const modelMessages = await convertAgentMessagesToModel(messages, {});
+    const serialized = JSON.stringify(modelMessages);
+
+    expect(serialized).not.toContain("Hidden model reasoning");
+    expect(serialized).not.toContain("Secret model chapter text");
+    expect(serialized).toContain("Read chapter");
+  });
+
   it("converts immutable context snapshots into model-visible text", async () => {
     const messages: AgentUIMessage[] = [
       {

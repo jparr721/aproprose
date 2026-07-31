@@ -4,7 +4,7 @@
 // keys; all match/replace logic lives in the find store. Marked `data-find-widget`
 // so editor history/format shortcuts stay native while typing here (see lib/dom.ts).
 
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import {
   IconAbc,
   IconChevronDown,
@@ -15,40 +15,16 @@ import {
   IconReplace,
   IconX,
 } from "@tabler/icons-react";
+import { FindOptionToggle } from "@/components/app/find-option-toggle";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { useFindStore } from "@/stores/find-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSearchSurfaceStore } from "@/stores/search-surface-store";
-
-function OptionToggle({
-  active,
-  title,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  title: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <InputGroupButton
-      size="icon-xs"
-      variant={active ? "secondary" : "ghost"}
-      aria-pressed={active}
-      title={title}
-      onClick={onClick}
-    >
-      {children}
-    </InputGroupButton>
-  );
-}
 
 export function FindBar() {
   const open = useSearchSurfaceStore((state) => state.openSurface === "editor");
@@ -172,15 +148,27 @@ export function FindBar() {
               {counter}
             </InputGroupAddon>
             <InputGroupAddon align="inline-end">
-              <OptionToggle active={caseSensitive} title="Match case" onClick={toggleCase}>
+              <FindOptionToggle
+                active={caseSensitive}
+                title="Match case"
+                onClick={toggleCase}
+              >
                 <IconLetterCase />
-              </OptionToggle>
-              <OptionToggle active={wholeWord} title="Match whole word" onClick={toggleWord}>
+              </FindOptionToggle>
+              <FindOptionToggle
+                active={wholeWord}
+                title="Match whole word"
+                onClick={toggleWord}
+              >
                 <IconAbc />
-              </OptionToggle>
-              <OptionToggle active={regex} title="Use regular expression" onClick={toggleRegex}>
+              </FindOptionToggle>
+              <FindOptionToggle
+                active={regex}
+                title="Use regular expression"
+                onClick={toggleRegex}
+              >
                 <IconRegex />
-              </OptionToggle>
+              </FindOptionToggle>
             </InputGroupAddon>
           </InputGroup>
           <Button

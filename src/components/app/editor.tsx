@@ -1,6 +1,6 @@
 // editor.tsx — the center column: the chapter as an editable block stream.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   IconGitMerge,
@@ -27,6 +27,16 @@ import { Block } from "@/components/app/block";
 import { FindBar } from "@/components/app/find-bar";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   TypographyForeground,
@@ -46,6 +56,7 @@ import { countWords } from "@/lib/latex";
 import { isInAuxSurface, isInteractiveTarget, scrollBlockIntoView } from "@/lib/dom";
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/hooks/use-dictation";
+import { blockHasContent } from "@/components/app/block/block-text";
 import type { Block as BlockT, BlockType } from "@/lib/types";
 
 // Editor history defers to native undo/redo while the AI panel or a dialog holds
@@ -129,6 +140,7 @@ export function Editor() {
   const editing = useProjectStore((s) => s.editing);
   const select = useProjectStore((s) => s.select);
   const reorderBlock = useProjectStore((s) => s.reorderBlock);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
   // click on the grip a selection rather than a drag; KeyboardSensor makes the
@@ -264,6 +276,30 @@ export function Editor() {
     enterNavOptions,
   );
 
+  const deleteOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: selectedId != null && !editing,
+      ignoreEventWhen: (e) =>
+        isInAuxSurface(e.target as Element | null) || isInteractiveTarget(e.target),
+    }),
+    [selectedId, editing],
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.DELETE_BLOCK,
+    () => {
+      const st = useProjectStore.getState();
+      if (st.selectedId === null) return;
+      const block = st.blocks.find((candidate) => candidate.id === st.selectedId);
+      if (!block) return;
+      if (blockHasContent(block)) {
+        setPendingDeleteId(block.id);
+        return;
+      }
+      st.deleteBlock(block.id);
+    },
+    deleteOptions,
+  );
+
   // Esc exits edit mode (back to nav), or deselects when already in nav mode. It
   // fires from inside the block textarea (firesWhileEditing) but bows out of the
   // AI panel / dialogs, which own their own Esc.
@@ -291,6 +327,13 @@ export function Editor() {
   // Live word count: chapter.wordCount only refreshes on save, which reads as
   // a stuck number to a writer chasing a daily quota.
   const liveWords = useMemo(() => liveWordCount(blocks), [blocks]);
+  const confirmDelete = () => {
+    if (pendingDeleteId === null) {
+      throw new Error("Cannot confirm block deletion without a pending block");
+    }
+    useProjectStore.getState().deleteBlock(pendingDeleteId);
+    setPendingDeleteId(null);
+  };
 
   if (!chapter) {
     return (
@@ -317,6 +360,27 @@ export function Editor() {
   return (
     <div className="relative h-full min-h-0">
       <FindBar />
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this block?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This block contains content. Confirm that you want to delete it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <ScrollArea
         className="h-full bg-background"
         // A press on empty editor surface (gutters, padding, the chapter header)

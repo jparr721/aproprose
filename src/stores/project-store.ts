@@ -15,6 +15,7 @@ import type {
   Block,
   BlockTextEdit,
   BlockType,
+  Card,
   ChapterRef,
   ChapterStatus,
   Character,
@@ -72,6 +73,7 @@ import type {
   AgentOutlineApplyResult,
   AgentProposalApplyResult,
   ManuscriptPendingProposal,
+  OutlinePendingChange,
   OutlinePendingProposal,
   OutlineUndoToken,
 } from "@/lib/ai/agent-types";
@@ -326,6 +328,186 @@ interface HistoryEntry {
 
 const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
+
+interface TargetedProposalChange {
+  changeId: string;
+  targetId: string | null;
+}
+
+function invalidSelectedChangeIds(
+  proposalChanges: readonly { id: string }[],
+  changeIds: readonly string[],
+): string[] {
+  const proposalCounts = new Map<string, number>();
+  for (const change of proposalChanges) {
+    proposalCounts.set(change.id, (proposalCounts.get(change.id) ?? 0) + 1);
+  }
+  const selectedCounts = new Map<string, number>();
+  for (const changeId of changeIds) {
+    selectedCounts.set(changeId, (selectedCounts.get(changeId) ?? 0) + 1);
+  }
+  return [
+    ...new Set(
+      changeIds.filter(
+        (changeId) =>
+          proposalCounts.get(changeId) !== 1 ||
+          selectedCounts.get(changeId) !== 1,
+      ),
+    ),
+  ];
+}
+
+function conflictingTargetChangeIds(
+  changes: TargetedProposalChange[],
+): string[] {
+  const targetCounts = new Map<string, number>();
+  for (const change of changes) {
+    if (change.targetId !== null) {
+      targetCounts.set(
+        change.targetId,
+        (targetCounts.get(change.targetId) ?? 0) + 1,
+      );
+    }
+  }
+  return changes.flatMap((change) =>
+    change.targetId !== null && (targetCounts.get(change.targetId) ?? 0) > 1
+      ? [change.changeId]
+      : [],
+  );
+}
+
+interface ManuscriptProposalMutation {
+  blocks: Block[];
+  selectedId: string | null;
+  selectedIds: string[];
+  editing: boolean;
+  editCaret: "start" | "end" | number | null;
+  chapterDirty: true;
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  lastTextEditId: null;
+}
+
+function manuscriptProposalMutation(
+  state: ProjectState,
+  blocks: Block[],
+): ManuscriptProposalMutation {
+  const liveIds = new Set(blocks.map((block) => block.id));
+  const selectedIds = state.selectedIds.filter((id) => liveIds.has(id));
+  const selectionLost =
+    state.selectedId !== null && !liveIds.has(state.selectedId);
+  const selectedId = selectionLost
+    ? selectedIds[selectedIds.length - 1] ?? null
+    : state.selectedId;
+  return {
+    blocks,
+    selectedId,
+    selectedIds,
+    editing: selectionLost ? false : state.editing,
+    editCaret: selectionLost ? null : state.editCaret,
+    chapterDirty: true,
+    past: capPush(state.past, {
+      blocks: state.blocks,
+      selectedId: state.selectedId,
+    }),
+    future: [],
+    lastTextEditId: null,
+  };
+}
+
+function sameCardOrder(left: Card[], right: Card[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((card, index) => card.id === right[index].id)
+  );
+}
+
+function outlineChangeCanApply(
+  change: OutlinePendingChange["change"],
+  cards: Card[],
+): boolean {
+  if (change.kind === "add") return change.cardId === null;
+  if (
+    change.cardId === null ||
+    !cards.some((card) => card.id === change.cardId)
+  ) {
+    return false;
+  }
+  if (change.kind === "rewrite") {
+    return change.title !== null || change.intention !== null;
+  }
+  if (change.kind === "move") {
+    return change.toIndex !== null && Number.isInteger(change.toIndex);
+  }
+  return true;
+}
+
+function outlineChangeLanded(
+  change: OutlinePendingChange["change"],
+  before: Card[],
+  after: Card[],
+): boolean {
+  if (change.kind === "add") {
+    const added = after[after.length - 1];
+    return (
+      after.length === before.length + 1 &&
+      sameCardOrder(before, after.slice(0, -1)) &&
+      added !== undefined &&
+      !before.some((card) => card.id === added.id) &&
+      added.title === (change.title ?? "") &&
+      added.intention === (change.intention ?? "")
+    );
+  }
+  if (change.cardId === null) return false;
+  if (change.kind === "remove") {
+    return sameCardOrder(
+      before.filter((card) => card.id !== change.cardId),
+      after,
+    );
+  }
+  if (change.kind === "rewrite") {
+    const previous = before.find((card) => card.id === change.cardId);
+    const rewritten = after.find((card) => card.id === change.cardId);
+    return (
+      previous !== undefined &&
+      rewritten !== undefined &&
+      sameCardOrder(before, after) &&
+      rewritten.title === (change.title ?? previous.title) &&
+      rewritten.intention === (change.intention ?? previous.intention)
+    );
+  }
+  if (change.toIndex === null) return false;
+  const expected = [...before];
+  const from = expected.findIndex((card) => card.id === change.cardId);
+  if (from < 0) return false;
+  const [moved] = expected.splice(from, 1);
+  const to = Math.max(0, Math.min(change.toIndex, expected.length));
+  expected.splice(to, 0, moved);
+  return sameCardOrder(expected, after);
+}
+
+function applyOutlineChangesStrict(
+  chapters: ProjectMeta["chapters"],
+  chapterId: string,
+  summary: string,
+  changes: OutlinePendingChange[],
+): ProjectMeta["chapters"] | null {
+  let next = chapters;
+  for (const item of changes) {
+    const before = getChapterOutline(next, chapterId).cards;
+    if (!outlineChangeCanApply(item.change, before)) return null;
+    const proposal: SculptProposal = {
+      chapterId,
+      summary,
+      changes: [item.change],
+    };
+    const candidate = applySculptModel(next, chapterId, proposal, [0]);
+    const after = getChapterOutline(candidate, chapterId).cards;
+    if (!outlineChangeLanded(item.change, before, after)) return null;
+    next = candidate;
+  }
+  return next;
+}
 
 function notifyBuildFailed(errorCount: number): void {
   toast.error(
@@ -795,26 +977,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       // Nothing landed (every kept change targeted a vanished block): report the
       // skips without burning an undo step on an identical snapshot.
       if (outcome.applied === 0) return { applied: 0, skipped: outcome.skipped };
-      // Keep the selection in lockstep with the live list (deleteBlock precedent):
-      // prune removed ids; if the active block was removed, fall to the last
-      // surviving set member and drop out of edit mode.
-      const liveIds = new Set(outcome.blocks.map((b) => b.id));
-      const selectedIds = s.selectedIds.filter((id) => liveIds.has(id));
-      const selectionLost = s.selectedId !== null && !liveIds.has(s.selectedId);
-      const selectedId = selectionLost
-        ? selectedIds[selectedIds.length - 1] ?? null
-        : s.selectedId;
-      set({
-        blocks: outcome.blocks,
-        selectedId,
-        selectedIds,
-        editing: selectionLost ? false : s.editing,
-        editCaret: selectionLost ? null : s.editCaret,
-        chapterDirty: true,
-        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
-        future: [],
-        lastTextEditId: null,
-      });
+      set(manuscriptProposalMutation(s, outcome.blocks));
       return { applied: outcome.applied, skipped: outcome.skipped };
     },
 
@@ -823,9 +986,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       if (
         state.project === null ||
         state.project.root !== proposal.projectRoot ||
-        state.activeChapterId !== proposal.chapterId
+        state.activeChapterId !== proposal.chapterId ||
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
       ) {
         return { status: "stale", staleChangeIds: changeIds };
+      }
+      const invalidChangeIds = invalidSelectedChangeIds(
+        proposal.changes,
+        changeIds,
+      );
+      if (invalidChangeIds.length > 0) {
+        return { status: "stale", staleChangeIds: invalidChangeIds };
       }
       const selected = new Set(changeIds);
       const selectedProposal = {
@@ -844,16 +1017,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         changeIds,
         state.blocks,
       );
-      const result = get().applyManuscriptProposal(
-        {
-          chapterId: proposal.chapterId,
-          summary: proposal.summary,
-          changes,
-        },
-        changes.map((_, index) => index),
+      const conflicts = conflictingTargetChangeIds(
+        changes.map((change, index) => ({
+          changeId: selectedProposal.changes[index].id,
+          targetId: change.kind === "insert" ? null : change.blockId,
+        })),
       );
-      if (result.applied !== changes.length) {
-        throw new Error("Validated manuscript proposal did not apply atomically.");
+      if (conflicts.length > 0) {
+        return { status: "stale", staleChangeIds: conflicts };
+      }
+      const resolveSpeakerId = (name: string): string | undefined =>
+        state.meta.characters.find(
+          (character) => character.name.toLowerCase() === name.toLowerCase(),
+        )?.id;
+      const outcome = applyProposal(state.blocks, changes, resolveSpeakerId);
+      if (outcome.applied !== changes.length || outcome.skipped !== 0) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
+      if (changes.length > 0) {
+        set(manuscriptProposalMutation(state, outcome.blocks));
       }
       return { status: "applied", appliedChangeIds: changeIds };
     },
@@ -1440,8 +1625,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     applyAgentOutlineProposal: (proposal, changeIds) => {
       const state = get();
-      if (state.project === null || state.project.root !== proposal.projectRoot) {
+      if (
+        state.project === null ||
+        state.project.root !== proposal.projectRoot ||
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
         return { status: "stale", staleChangeIds: changeIds };
+      }
+      const invalidChangeIds = invalidSelectedChangeIds(
+        proposal.changes,
+        changeIds,
+      );
+      if (invalidChangeIds.length > 0) {
+        return { status: "stale", staleChangeIds: invalidChangeIds };
       }
       const chapter = getChapterOutline(
         state.meta.chapters,
@@ -1459,18 +1657,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           staleChangeIds: stale.map((item) => item.changeId),
         };
       }
-      const sculpt: SculptProposal = {
-        chapterId: proposal.chapterId,
-        summary: proposal.summary,
-        changes: selectedProposal.changes.map((item) => item.change),
-      };
+      const conflicts = conflictingTargetChangeIds(
+        selectedProposal.changes.map((item) => ({
+          changeId: item.id,
+          targetId: item.change.kind === "add" ? null : item.change.cardId,
+        })),
+      );
+      if (conflicts.length > 0) {
+        return { status: "stale", staleChangeIds: conflicts };
+      }
       const before = state.meta;
-      const chapters = applySculptModel(
+      const chapters = applyOutlineChangesStrict(
         before.chapters,
         proposal.chapterId,
-        sculpt,
-        sculpt.changes.map((_, index) => index),
+        proposal.summary,
+        selectedProposal.changes,
       );
+      if (chapters === null) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
       const meta = { ...before, chapters };
       const undoToken: OutlineUndoToken = {
         id: uid(),

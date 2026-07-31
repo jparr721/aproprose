@@ -3,7 +3,12 @@ import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
 import { useProjectStore } from "@/stores/project-store";
-import type { Card, ProjectInfo, SculptProposal } from "@/lib/types";
+import type {
+  Card,
+  ProjectInfo,
+  SculptChange,
+  SculptProposal,
+} from "@/lib/types";
 
 const cardFixture = (): Card => ({
   id: "card-1",
@@ -38,20 +43,14 @@ const projectFixture = (root: string): ProjectInfo => ({
   ],
 });
 
-const pendingOutlineFixture = () => {
+const buildPendingOutlineFixture = (
+  changes: SculptChange[],
+  cards: Card[],
+) => {
   const raw: SculptProposal = {
     chapterId: "ch1",
     summary: "Strengthen the arrival",
-    changes: [
-      {
-        kind: "rewrite",
-        cardId: "card-1",
-        title: "Hard arrival",
-        intention: null,
-        toIndex: null,
-        reason: "Raise the stakes",
-      },
-    ],
+    changes,
   };
   return buildOutlinePendingProposal({
     run: {
@@ -64,7 +63,7 @@ const pendingOutlineFixture = () => {
       startedAt: "2026-07-30T00:00:00.000Z",
     } satisfies AgentRun,
     raw,
-    cards: [cardFixture()],
+    cards,
     currentPending: null,
     originatingMessageId: "assistant-1",
     makeId: (() => {
@@ -77,6 +76,21 @@ const pendingOutlineFixture = () => {
     now: "2026-07-30T00:01:00.000Z",
   });
 };
+
+const pendingOutlineFixture = () =>
+  buildPendingOutlineFixture(
+    [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ],
+    [cardFixture()],
+  );
 
 beforeEach(() => {
   useProjectStore.setState({
@@ -191,5 +205,88 @@ describe("agent outline proposals", () => {
     expect(
       useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
     ).toBe(false);
+  });
+
+  it("rejects an unknown selected change id before applying known changes", () => {
+    const proposal = pendingOutlineFixture();
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(proposal, ["change-0", "unknown"]);
+
+    expect(result).toEqual({ status: "stale", staleChangeIds: ["unknown"] });
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("rejects conflicting selected targets without a partial mutation", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "remove",
+          cardId: "card-1",
+          title: null,
+          intention: null,
+          toIndex: null,
+          reason: "Remove",
+        },
+        {
+          kind: "remove",
+          cardId: "card-1",
+          title: null,
+          intention: null,
+          toIndex: null,
+          reason: "Remove again",
+        },
+      ],
+      [cardFixture()],
+    );
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("rejects an add-only proposal after its chapter is deleted", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    useProjectStore.setState({
+      project: { ...projectFixture("/book"), chapters: [] },
+    } as never);
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
   });
 });

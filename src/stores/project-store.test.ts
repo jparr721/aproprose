@@ -80,6 +80,17 @@ const rewriteFixture = (blockId: string, newText: string): BlockChange => ({
   reason: "Revise",
 });
 
+const removeFixture = (blockId: string): BlockChange => ({
+  kind: "remove",
+  blockId,
+  afterId: null,
+  type: null,
+  speaker: null,
+  newText: null,
+  toIndex: null,
+  reason: "Remove",
+});
+
 const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
   buildManuscriptPendingProposal({
     run: {
@@ -1283,6 +1294,85 @@ describe("applyAgentManuscriptProposal", () => {
       "Changed live",
       "B",
     ]);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("rejects an unknown selected change id before applying known changes", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(proposal, ["change-0", "unknown"]);
+
+    expect(result).toEqual({ status: "stale", staleChangeIds: ["unknown"] });
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("rejects conflicting selected targets without a partial mutation", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
+    const proposal = pendingManuscriptFixture(blocks, [
+      removeFixture("a"),
+      removeFixture("a"),
+    ]);
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("rejects a proposal after its chapter is deleted", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
+    useProjectStore.setState({
+      project: { ...projectFixture("/book"), chapters: [] },
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
     expect(useProjectStore.getState().past).toHaveLength(0);
   });
 });

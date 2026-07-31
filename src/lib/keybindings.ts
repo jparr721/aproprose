@@ -19,6 +19,8 @@ export interface KeybindingDefinition {
   description: string;
   category: "document" | "view" | "editor";
   label: string;
+  /** Additional keys that invoke the same action without changing its hint. */
+  alternateKeys?: readonly string[];
   /**
    * Opt this binding into firing while a `textarea`/`input` is focused (the
    * default leaves non-chord keys inert in form fields). Used by `Esc` so it can
@@ -175,6 +177,15 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Edit block",
   },
+  DELETE_BLOCK: {
+    id: "delete-block",
+    key: "delete",
+    alternateKeys: ["backspace"],
+    modifiers: {},
+    description: "Delete the selected block",
+    category: "editor",
+    label: "Delete block",
+  },
   EXIT_BLOCK: {
     id: "exit-block",
     key: "escape",
@@ -209,6 +220,14 @@ export function toHotkeyString(keybinding: Pick<KeybindingDefinition, "key" | "m
   if (keybinding.modifiers.alt) parts.push("alt");
   parts.push(KEY_ALIASES[keybinding.key] ?? keybinding.key);
   return parts.join("+");
+}
+
+export function toHotkeyStrings(
+  keybinding: Pick<KeybindingDefinition, "key" | "alternateKeys" | "modifiers">,
+): string[] {
+  return [keybinding.key, ...(keybinding.alternateKeys ?? [])].map((key) =>
+    toHotkeyString({ key, modifiers: keybinding.modifiers }),
+  );
 }
 
 // Compact glyphs for on-screen hints. Only the command modifier differs by

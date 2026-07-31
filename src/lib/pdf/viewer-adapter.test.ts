@@ -63,17 +63,36 @@ interface FakeLoadingTask {
 
 interface Deferred<T> {
   promise: Promise<T>;
+  reject: (reason: unknown) => void;
   resolve: (value: T) => void;
 }
 
 function createDeferred<T>(): Deferred<T> {
+  let reject: (reason: unknown) => void = () => {
+    throw new Error("Deferred rejector was not initialized");
+  };
   let resolve: (value: T) => void = () => {
     throw new Error("Deferred resolver was not initialized");
   };
-  const promise = new Promise<T>((promiseResolve) => {
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    reject = promiseReject;
     resolve = promiseResolve;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
+}
+
+function settlementState(
+  promise: Promise<void>,
+): Promise<"pending" | "rejected" | "resolved"> {
+  return Promise.race([
+    promise.then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    ),
+    new Promise<"pending">((resolve) => {
+      window.setTimeout(() => resolve("pending"), 0);
+    }),
+  ]);
 }
 
 function createFakePdfRuntime({ pages }: { pages: number }) {
@@ -81,6 +100,7 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   let linkService: FakePDFLinkService | null = null;
   let findController: FakePDFFindController | null = null;
   let viewer: FakePDFViewer | null = null;
+  let setViewerError: Error | null = null;
 
   class FakeEventBusConstructor extends FakeEventBus {
     constructor() {
@@ -90,7 +110,9 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   }
 
   class FakePDFLinkService {
-    readonly setViewer = vi.fn();
+    readonly setViewer = vi.fn((): void => {
+      if (setViewerError) throw setViewerError;
+    });
     readonly setDocument = vi.fn();
 
     constructor(_options: unknown) {
@@ -105,6 +127,7 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   }
 
   interface FakeViewerOptions {
+    abortSignal: AbortSignal;
     eventBus: FakeEventBus;
     linkService: FakePDFLinkService;
     findController: FakePDFFindController;
@@ -113,10 +136,14 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   class FakePDFViewer {
     currentPageNumber = 1;
     currentScale = 1;
+    initializeOnSetDocument = true;
+    pagesPromise: Promise<void> = Promise.resolve();
     readonly pagesCount = pages;
     readonly options: FakeViewerOptions;
     readonly setDocument = vi.fn((document: FakePdfDocument | null): void => {
-      if (document) eventBus?.emit("pagesinit", {});
+      if (document && this.initializeOnSetDocument) {
+        eventBus?.emit("pagesinit", {});
+      }
     });
 
     constructor(options: FakeViewerOptions) {
@@ -145,6 +172,9 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   return {
     module,
     loadingTask,
+    failLinkViewerSetup(error: Error): void {
+      setViewerError = error;
+    },
     get eventBus(): FakeEventBus {
       if (!eventBus) throw new Error("EventBus was not constructed");
       return eventBus;
@@ -231,6 +261,252 @@ describe("PDF viewer adapter", () => {
     harness.eventBus.emit("scalechanging", { scale: 1.5 });
     expect(onPageChange).toHaveBeenCalledWith(6);
     expect(onScaleChange).toHaveBeenCalledWith(1.5);
+  });
+
+  // Mutation caught: resolving loadDocument before pagesinit.
+  it("keeps document loading pending until the viewer initializes", async () => {
+    const harness = createFakePdfRuntime({ pages: 12 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const lifecycle: string[] = [];
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(
+        () => lifecycle.push("ready"),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+      ),
+    );
+    harness.viewer.initializeOnSetDocument = false;
+
+    const load = adapter
+      .loadDocument(new Uint8Array([1]), { page: 8, scale: 1.25 })
+      .then(() => {
+        lifecycle.push("resolved");
+      });
+    await vi.waitFor(() =>
+      expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+    );
+
+    const stateBeforeInitialization = await Promise.race([
+      load.then(() => "resolved"),
+      new Promise<string>((resolve) => {
+        window.setTimeout(() => resolve("pending"), 0);
+      }),
+    ]);
+    expect(stateBeforeInitialization).toBe("pending");
+    expect(lifecycle).toEqual([]);
+    harness.eventBus.emit("pagesinit", {});
+    await load;
+    expect(lifecycle).toEqual(["ready", "resolved"]);
+  });
+
+  // Mutation caught: ignoring the active viewer pagesPromise rejection.
+  it("reports and rejects viewer initialization failures", async () => {
+    const harness = createFakePdfRuntime({ pages: 12 });
+    const initialization = createDeferred<void>();
+    const error = new Error("First PDF page failed");
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onError = vi.fn();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const adapter = await createPdfViewerAdapter(
+        createAdapterOptions(
+          vi.fn(),
+          vi.fn(),
+          vi.fn(),
+          vi.fn(),
+          onError,
+        ),
+      );
+      harness.viewer.initializeOnSetDocument = false;
+      harness.viewer.pagesPromise = initialization.promise;
+      void initialization.promise.catch(() => undefined);
+
+      const load = adapter.loadDocument(new Uint8Array([1]), {
+        page: 8,
+        scale: 1.25,
+      });
+      await vi.waitFor(() =>
+        expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+      );
+      initialization.reject(error);
+      const outcome = await Promise.race([
+        load.then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        new Promise<string>((resolve) => {
+          window.setTimeout(() => resolve("pending"), 0);
+        }),
+      ]);
+
+      expect(outcome).toBe("rejected");
+      await expect(load).rejects.toThrow("First PDF page failed");
+      expect(onError).toHaveBeenCalledWith({
+        phase: "initialize",
+        message: "First PDF page failed",
+        error,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  // Mutation caught: clearing without settling the stale initialization.
+  it("settles pending initialization when the document is cleared", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        onError,
+      ),
+    );
+    harness.viewer.initializeOnSetDocument = false;
+
+    const load = adapter.loadDocument(new Uint8Array([1]), {
+      page: 1,
+      scale: 1,
+    });
+    await vi.waitFor(() =>
+      expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+    );
+    await adapter.clearDocument();
+
+    expect(await settlementState(load)).toBe("resolved");
+    expect(onError).not.toHaveBeenCalled();
+    await adapter.dispose();
+  });
+
+  // Mutation caught: replacement overwriting a stale initialization resolver.
+  it("settles pending initialization when the document is replaced", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    const firstDocument = { id: "first", numPages: 2 };
+    const secondDocument = { id: "second", numPages: 2 };
+    const firstTask: FakeLoadingTask = {
+      promise: Promise.resolve(firstDocument),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    const secondTask: FakeLoadingTask = {
+      promise: Promise.resolve(secondDocument),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument
+      .mockReturnValueOnce(firstTask)
+      .mockReturnValueOnce(secondTask);
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        onError,
+      ),
+    );
+    harness.viewer.initializeOnSetDocument = false;
+
+    const firstLoad = adapter.loadDocument(new Uint8Array([1]), {
+      page: 1,
+      scale: 1,
+    });
+    await vi.waitFor(() =>
+      expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+    );
+    const secondLoad = adapter.loadDocument(new Uint8Array([2]), {
+      page: 1,
+      scale: 1,
+    });
+    await vi.waitFor(() =>
+      expect(harness.viewer.setDocument).toHaveBeenCalledWith(secondDocument),
+    );
+    harness.eventBus.emit("pagesinit", {});
+    await secondLoad;
+
+    expect(await settlementState(firstLoad)).toBe("resolved");
+    expect(onError).not.toHaveBeenCalled();
+    await adapter.dispose();
+  });
+
+  // Mutation caught: disposal leaving active initialization unresolved.
+  it("settles pending initialization when the adapter is disposed", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        onError,
+      ),
+    );
+    harness.viewer.initializeOnSetDocument = false;
+
+    const load = adapter.loadDocument(new Uint8Array([1]), {
+      page: 1,
+      scale: 1,
+    });
+    await vi.waitFor(() =>
+      expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+    );
+    await adapter.dispose();
+
+    expect(await settlementState(load)).toBe("resolved");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  // Mutation caught: treating a stale pagesinit event as the active load.
+  it("ignores initialization events after their load is cleared", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onReady = vi.fn();
+    const onError = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(
+        onReady,
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        onError,
+      ),
+    );
+    harness.viewer.initializeOnSetDocument = false;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const load = adapter.loadDocument(new Uint8Array([1]), {
+        page: 1,
+        scale: 1,
+      });
+      await vi.waitFor(() =>
+        expect(harness.viewer.setDocument).toHaveBeenCalledTimes(1),
+      );
+      await adapter.clearDocument();
+      await load;
+
+      expect(() => harness.eventBus.emit("pagesinit", {})).not.toThrow();
+      expect(onReady).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+      await adapter.dispose();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("dispatches complete find, repeat, and close events", async () => {
@@ -468,6 +744,55 @@ describe("PDF viewer adapter", () => {
     expect(harness.eventBus.off).toHaveBeenCalled();
   });
 
+  // Mutation caught: disposing without aborting the viewer-owned signal.
+  it("aborts the exact signal passed to the viewer on dispose", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn()),
+    );
+    const viewerSignal = harness.viewer.options.abortSignal;
+
+    expect(viewerSignal).toBeInstanceOf(AbortSignal);
+    expect(viewerSignal.aborted).toBe(false);
+    await adapter.dispose();
+    expect(viewerSignal.aborted).toBe(true);
+  });
+
+  // Mutation caught: construction failure leaking a partially created viewer.
+  it("aborts the viewer signal when adapter construction fails", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    const error = new Error("Link service setup failed");
+    const onError = vi.fn();
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    harness.failLinkViewerSetup(error);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await expect(
+        createPdfViewerAdapter(
+          createAdapterOptions(
+            vi.fn(),
+            vi.fn(),
+            vi.fn(),
+            vi.fn(),
+            onError,
+          ),
+        ),
+      ).rejects.toThrow("Link service setup failed");
+      expect(harness.viewer.options.abortSignal.aborted).toBe(true);
+      expect(onError).toHaveBeenCalledWith({
+        phase: "initialize",
+        message: "Link service setup failed",
+        error,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  // Mutation caught: an earlier cleanup failure preventing signal abortion.
   it("reports and rethrows listener cleanup failures", async () => {
     const harness = createFakePdfRuntime({ pages: 2 });
     const error = new Error("Listener cleanup failed");
@@ -478,6 +803,7 @@ describe("PDF viewer adapter", () => {
     const adapter = await createPdfViewerAdapter(
       createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), vi.fn(), onError),
     );
+    const viewerSignal = harness.viewer.options.abortSignal;
     await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
     harness.eventBus.off.mockImplementationOnce(() => {
       throw error;
@@ -502,6 +828,7 @@ describe("PDF viewer adapter", () => {
         null,
       );
       expect(harness.loadingTask.destroy).toHaveBeenCalledTimes(1);
+      expect(viewerSignal.aborted).toBe(true);
     } finally {
       consoleError.mockRestore();
     }

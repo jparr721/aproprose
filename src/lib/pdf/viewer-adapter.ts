@@ -79,6 +79,18 @@ interface FindEventState extends PdfFindQuery {
   findPrevious: boolean;
 }
 
+interface PendingInitialization {
+  revision: number;
+  reject: (reason: unknown) => void;
+  resolve: () => void;
+}
+
+type PdfViewerOptionsWithAbortSignal = ConstructorParameters<
+  PdfViewerModule["PDFViewer"]
+>[0] & {
+  abortSignal: AbortSignal;
+};
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -134,6 +146,7 @@ export function base64ToBytes(value: string): Uint8Array {
 export async function createPdfViewerAdapter(
   options: PdfViewerAdapterOptions,
 ): Promise<PdfViewerAdapter> {
+  const viewerAbortController = new AbortController();
   try {
     const module = await loadPdfViewerModule();
     const eventBus = new module.EventBus();
@@ -142,13 +155,15 @@ export async function createPdfViewerAdapter(
       eventBus,
       linkService,
     });
-    const pdfViewer = new module.PDFViewer({
+    const viewerOptions: PdfViewerOptionsWithAbortSignal = {
       container: options.container,
       viewer: options.viewer,
       eventBus,
       linkService,
       findController,
-    });
+      abortSignal: viewerAbortController.signal,
+    };
+    const pdfViewer = new module.PDFViewer(viewerOptions);
     linkService.setViewer(pdfViewer);
 
     const adapterSource: object = {};
@@ -156,6 +171,7 @@ export async function createPdfViewerAdapter(
     let disposed = false;
     let loadRevision = 0;
     let pendingView: Pick<PdfViewState, "page" | "scale"> | null = null;
+    let pendingInitialization: PendingInitialization | null = null;
     let latestQuery: PdfFindQuery = {
       query: "",
       caseSensitive: false,
@@ -178,6 +194,14 @@ export async function createPdfViewerAdapter(
     };
 
     const handlePagesInit = (): void => {
+      const initialization = pendingInitialization;
+      if (
+        !initialization ||
+        initialization.revision !== loadRevision ||
+        disposed
+      ) {
+        return;
+      }
       if (!pendingView) {
         const error = new Error("PDF pages initialized without a pending view");
         reportFailure(options, "initialize", error);
@@ -195,6 +219,8 @@ export async function createPdfViewerAdapter(
         pageCount: pdfViewer.pagesCount,
         scale: pdfViewer.currentScale,
       });
+      pendingInitialization = null;
+      initialization.resolve();
     };
 
     const handlePageChanging = (event: PageChangingEvent): void => {
@@ -235,10 +261,17 @@ export async function createPdfViewerAdapter(
     eventBus.on("updatefindcontrolstate", handleFindControlState);
     eventBus.on("updatefindmatchescount", handleFindMatchesCount);
 
+    const settlePendingInitialization = (): void => {
+      const initialization = pendingInitialization;
+      pendingInitialization = null;
+      pendingView = null;
+      initialization?.resolve();
+    };
+
     const detachDocument = (): Promise<void> | null => {
       const loadingTask = activeLoadingTask;
       activeLoadingTask = null;
-      pendingView = null;
+      settlePendingInitialization();
       const cleanupErrors = runCleanupOperations([
         () => pdfViewer.setDocument(null),
         () => linkService.setDocument(null, null),
@@ -282,6 +315,7 @@ export async function createPdfViewerAdapter(
       if (disposed) throw new Error("PDF viewer adapter has been disposed");
       const revision = loadRevision + 1;
       loadRevision = revision;
+      let failurePhase: PdfViewerPhase = "load";
 
       try {
         const cleanup = detachDocument();
@@ -296,11 +330,35 @@ export async function createPdfViewerAdapter(
         if (disposed || revision !== loadRevision) return;
 
         pendingView = view;
+        failurePhase = "initialize";
+        const initialization = new Promise<void>((resolve, reject) => {
+          pendingInitialization = { revision, reject, resolve };
+        });
         linkService.setDocument(document, null);
         pdfViewer.setDocument(document);
+        const pagesPromise: Promise<unknown> | null =
+          pdfViewer.pagesPromise;
+        if (!pagesPromise) {
+          throw new Error("PDF viewer initialization promise is unavailable");
+        }
+        void pagesPromise.catch((error: unknown) => {
+          const pending = pendingInitialization;
+          if (
+            !pending ||
+            pending.revision !== revision ||
+            disposed ||
+            revision !== loadRevision
+          ) {
+            return;
+          }
+          pendingInitialization = null;
+          pendingView = null;
+          pending.reject(error);
+        });
+        await initialization;
       } catch (error) {
         if (disposed || revision !== loadRevision) return;
-        reportFailure(options, "load", error);
+        reportFailure(options, failurePhase, error);
         throw error;
       }
     };
@@ -389,6 +447,7 @@ export async function createPdfViewerAdapter(
             eventBus.off("updatefindcontrolstate", handleFindControlState),
           () =>
             eventBus.off("updatefindmatchescount", handleFindMatchesCount),
+          () => viewerAbortController.abort(),
         ]);
         try {
           const cleanup = detachDocument();
@@ -406,6 +465,7 @@ export async function createPdfViewerAdapter(
 
     return adapter;
   } catch (error) {
+    viewerAbortController.abort();
     reportFailure(options, "initialize", error);
     throw error;
   }

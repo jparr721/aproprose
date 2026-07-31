@@ -62,6 +62,14 @@ function logCleanupFailure(error: unknown): void {
   console.error("[pdf-viewer]", { phase: "cleanup", error });
 }
 
+function runPdfSearchOperation(operation: () => void): void {
+  try {
+    operation();
+  } catch (error) {
+    usePdfFindStore.getState().setError(errorMessage(error));
+  }
+}
+
 export function PdfPane() {
   const project = useProjectStore((state) => state.project);
   const pdfBase64 = useProjectStore((state) => state.compile.pdfBase64);
@@ -202,10 +210,12 @@ export function PdfPane() {
     const adapter = adapterRef.current;
     if (!adapter) return;
     if (openSurface !== "pdf") {
-      adapter.closeSearch();
+      runPdfSearchOperation(() => adapter.closeSearch());
       return;
     }
-    adapter.search({ query, caseSensitive, wholeWord });
+    runPdfSearchOperation(() =>
+      adapter.search({ query, caseSensitive, wholeWord }),
+    );
   }, [
     adapterRevision,
     documentRevision,
@@ -437,8 +447,12 @@ export function PdfPane() {
 
       <div className="relative min-h-0 flex-1">
         <PdfFindBar
-          onNext={() => adapterRef.current?.nextMatch()}
-          onPrevious={() => adapterRef.current?.previousMatch()}
+          onNext={() =>
+            runPdfSearchOperation(() => adapterRef.current?.nextMatch())
+          }
+          onPrevious={() =>
+            runPdfSearchOperation(() => adapterRef.current?.previousMatch())
+          }
         />
         <div
           ref={containerRef}

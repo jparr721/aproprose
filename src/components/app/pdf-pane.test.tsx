@@ -192,11 +192,169 @@ describe("PdfPane viewer lifecycle", () => {
     );
   });
 
+  // Mutation caught: allowing synchronous search dispatch failures to escape.
+  it("keeps synchronous search failures in the PDF find error state", async () => {
+    renderPane();
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    adapter.search.mockImplementationOnce(() => {
+      throw new Error("Search dispatch failed");
+    });
+
+    act(() => {
+      usePdfFindStore.setState({ query: "Chapter Nine" });
+      useSearchSurfaceStore.setState({
+        activeSurface: "pdf",
+        openSurface: "pdf",
+        focusRevision: 1,
+      });
+    });
+
+    await waitFor(() =>
+      expect(usePdfFindStore.getState()).toMatchObject({
+        status: "error",
+        error: "Search dispatch failed",
+      }),
+    );
+    expect(screen.getByText("Search dispatch failed")).toBeTruthy();
+    expect(screen.queryByText("PDF preview unavailable")).toBeNull();
+  });
+
+  // Mutation caught: allowing synchronous close dispatch failures to escape.
+  it("keeps synchronous close failures in the PDF find error state", async () => {
+    renderPane();
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    await waitFor(() => expect(adapter.closeSearch).toHaveBeenCalled());
+    adapter.closeSearch.mockClear();
+    act(() => {
+      usePdfFindStore.setState({ query: "Chapter Nine" });
+      useSearchSurfaceStore.setState({
+        activeSurface: "pdf",
+        openSurface: "pdf",
+        focusRevision: 1,
+      });
+    });
+    await waitFor(() => expect(adapter.search).toHaveBeenCalled());
+    adapter.closeSearch.mockImplementationOnce(() => {
+      throw new Error("Close search failed");
+    });
+
+    act(() => {
+      useSearchSurfaceStore.setState({ openSurface: "editor" });
+    });
+
+    await waitFor(() =>
+      expect(usePdfFindStore.getState()).toMatchObject({
+        status: "error",
+        error: "Close search failed",
+      }),
+    );
+    expect(screen.queryByText("PDF preview unavailable")).toBeNull();
+  });
+
+  // Mutation caught: allowing synchronous next-match failures to escape.
+  it("keeps synchronous next-match failures in the PDF find error state", async () => {
+    renderPane();
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    act(() => {
+      usePdfFindStore.setState({
+        query: "Chapter Nine",
+        status: "found",
+        current: 1,
+        total: 2,
+        error: null,
+      });
+      useSearchSurfaceStore.setState({
+        activeSurface: "pdf",
+        openSurface: "pdf",
+        focusRevision: 1,
+      });
+    });
+    const next = await screen.findByRole("button", {
+      name: "Next PDF match",
+    });
+    adapter.nextMatch.mockImplementationOnce(() => {
+      throw new Error("Next match failed");
+    });
+
+    fireEvent.click(next);
+
+    await waitFor(() =>
+      expect(usePdfFindStore.getState()).toMatchObject({
+        status: "error",
+        error: "Next match failed",
+      }),
+    );
+    expect(screen.getByText("Next match failed")).toBeTruthy();
+    expect(screen.queryByText("PDF preview unavailable")).toBeNull();
+  });
+
+  // Mutation caught: allowing synchronous previous-match failures to escape.
+  it("keeps synchronous previous-match failures in the PDF find error state", async () => {
+    renderPane();
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    act(() => {
+      usePdfFindStore.setState({
+        query: "Chapter Nine",
+        status: "found",
+        current: 1,
+        total: 2,
+        error: null,
+      });
+      useSearchSurfaceStore.setState({
+        activeSurface: "pdf",
+        openSurface: "pdf",
+        focusRevision: 1,
+      });
+    });
+    const previous = await screen.findByRole("button", {
+      name: "Previous PDF match",
+    });
+    adapter.previousMatch.mockImplementationOnce(() => {
+      throw new Error("Previous match failed");
+    });
+
+    fireEvent.click(previous);
+
+    await waitFor(() =>
+      expect(usePdfFindStore.getState()).toMatchObject({
+        status: "error",
+        error: "Previous match failed",
+      }),
+    );
+    expect(screen.getByText("Previous match failed")).toBeTruthy();
+    expect(screen.queryByText("PDF preview unavailable")).toBeNull();
+  });
+
+  // Mutation caught: counting the adapter's initialization close as a switch.
   it("closes PDF.js search when another find surface opens", async () => {
     renderPane();
-    useSearchSurfaceStore.setState({ openSurface: "pdf" });
-    useSearchSurfaceStore.setState({ openSurface: "editor" });
-    await waitFor(() => expect(adapter.closeSearch).toHaveBeenCalled());
+    await waitFor(() => expect(adapter.loadDocument).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByText("Rendering")).toBeNull(),
+    );
+    adapter.search.mockClear();
+    adapter.closeSearch.mockClear();
+    act(() => {
+      usePdfFindStore.setState({ query: "Chapter Nine" });
+      useSearchSurfaceStore.setState({
+        activeSurface: "pdf",
+        openSurface: "pdf",
+        focusRevision: 1,
+      });
+    });
+    await waitFor(() =>
+      expect(adapter.search).toHaveBeenCalledWith({
+        query: "Chapter Nine",
+        caseSensitive: false,
+        wholeWord: false,
+      }),
+    );
+
+    act(() => {
+      useSearchSurfaceStore.setState({ openSurface: "editor" });
+    });
+
+    await waitFor(() => expect(adapter.closeSearch).toHaveBeenCalledTimes(1));
   });
 
   it("shows a copy-path tooltip and copied accessible label", async () => {

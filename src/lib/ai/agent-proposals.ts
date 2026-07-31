@@ -97,16 +97,15 @@ function assertFollowUpMatches(
 
 function assertManuscriptTask(
   run: AgentRun,
-  change: BlockChange,
   currentPending: PendingProposal | null,
 ): void {
   if (run.task.kind === "chapter-analysis" || run.task.kind === "outline-sculpt") {
     throw new AgentProposalError("task-boundary", "This task is read-only for manuscript changes.");
   }
-  if (run.task.kind === "proposal-follow-up") {
-    assertFollowUpMatches(run, currentPending, "manuscript");
-    return;
-  }
+  assertFollowUpMatches(run, currentPending, "manuscript");
+}
+
+function assertManuscriptChange(run: AgentRun, change: BlockChange): void {
   if (run.task.kind === "bridge") {
     if (change.kind !== "insert" || change.afterId !== run.task.anchorBlockId) {
       throw new AgentProposalError(
@@ -126,6 +125,26 @@ function assertManuscriptTask(
       );
     }
   }
+}
+
+function bridgePrecondition(
+  change: BlockChange,
+  blocks: Block[],
+  successorBlockId: string | null,
+): ManuscriptPendingChange["precondition"] {
+  if (change.kind !== "insert") {
+    throw new AgentProposalError(
+      "task-boundary",
+      "A bridge may insert only after its frozen anchor.",
+    );
+  }
+  return {
+    kind: "insert",
+    anchor:
+      change.afterId === null ? null : blockLocator(blocks, change.afterId),
+    expectedNext:
+      successorBlockId === null ? null : blockLocator(blocks, successorBlockId),
+  };
 }
 
 function assertOutlineTask(
@@ -207,6 +226,7 @@ export function buildManuscriptPendingProposal(args: {
   now: string;
 }): ManuscriptPendingProposal {
   const task = args.run.task;
+  assertManuscriptTask(args.run, args.currentPending);
   const chapterId =
     task.kind === "proposal-follow-up" && args.currentPending !== null
       ? args.currentPending.chapterId
@@ -223,7 +243,7 @@ export function buildManuscriptPendingProposal(args: {
     null,
   );
   for (const change of sanitized.changes) {
-    assertManuscriptTask(args.run, change, args.currentPending);
+    assertManuscriptChange(args.run, change);
   }
   if (
     task.kind === "bridge" &&
@@ -246,7 +266,10 @@ export function buildManuscriptPendingProposal(args: {
     changes: sanitized.changes.map((change) => ({
       id: args.makeId(),
       change,
-      precondition: manuscriptPrecondition(change, args.blocks),
+      precondition:
+        task.kind === "bridge"
+          ? bridgePrecondition(change, args.blocks, task.successorBlockId)
+          : manuscriptPrecondition(change, args.blocks),
     })),
   };
 }
@@ -309,8 +332,8 @@ function resolveBlockLocator(
   blocks: Block[],
 ): Block | null {
   const byId = blocks.find((block) => block.id === locator.sourceId);
-  if (byId !== undefined && blockFingerprint(byId) === locator.fingerprint) {
-    return byId;
+  if (byId !== undefined) {
+    return blockFingerprint(byId) === locator.fingerprint ? byId : null;
   }
   const byOrder = blocks[locator.order];
   return byOrder !== undefined &&
@@ -361,12 +384,21 @@ function validateManuscriptChange(
   if (precondition.anchor !== null && anchor === null) return "anchor-changed";
   const anchorOrder =
     anchor === null ? blocks.length - 1 : blocks.findIndex((block) => block.id === anchor.id);
-  const next = blocks[anchorOrder + 1];
+  const next =
+    precondition.expectedNext === null ||
+    precondition.expectedNext.sourceType === "narration" ||
+    precondition.expectedNext.sourceType === "dialogue"
+      ? blocks
+          .slice(anchorOrder + 1)
+          .find((block) => block.type === "narration" || block.type === "dialogue")
+      : blocks[anchorOrder + 1];
   if (precondition.expectedNext === null) {
     return next === undefined ? null : "successor-changed";
   }
+  const expectedNext = resolveBlockLocator(precondition.expectedNext, blocks);
   return next !== undefined &&
-    blockFingerprint(next) === precondition.expectedNext.fingerprint
+    expectedNext !== null &&
+    next.id === expectedNext.id
     ? null
     : "successor-changed";
 }

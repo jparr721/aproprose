@@ -24,6 +24,11 @@ const block = (id: string, text: string): Block => ({
   dirty: false,
 });
 
+const scratchpad = (id: string, text: string): Block => ({
+  ...block(id, text),
+  type: "scratchpad",
+});
+
 const insert = (afterId: string | null, text: string): BlockChange => ({
   kind: "insert",
   blockId: null,
@@ -127,6 +132,16 @@ describe("proposal task boundaries", () => {
     ).toThrow(/read-only/);
   });
 
+  it("rejects an empty manuscript proposal from a read-only task", () => {
+    expect(() =>
+      buildManuscript(
+        { kind: "chapter-analysis", chapterId: "ch1", analysis: "critique" },
+        [],
+        [block("a", "Left.")],
+      ),
+    ).toThrow(/read-only/);
+  });
+
   it("confines selected-block edits to the frozen target ids", () => {
     const rewrite: BlockChange = {
       ...insert(null, "Changed."),
@@ -196,6 +211,49 @@ describe("proposal preconditions", () => {
     ).toEqual([{ changeId: "generated-id", reason: "successor-changed" }]);
   });
 
+  it("marks a changed frozen prose successor stale across a scratchpad", () => {
+    const proposal = buildManuscript(
+      {
+        kind: "bridge",
+        chapterId: "ch1",
+        anchorBlockId: "a",
+        successorBlockId: "b",
+      },
+      [insert("a", "New bridge.")],
+      [block("a", "Left."), scratchpad("note", "Keep."), block("b", "Right.")],
+    );
+    expect(proposal.changes[0].precondition).toMatchObject({
+      kind: "insert",
+      expectedNext: { sourceId: "b" },
+    });
+    expect(
+      validateManuscriptChanges(proposal, [
+        block("a", "Left."),
+        scratchpad("note", "Keep."),
+        block("b", "Edited."),
+      ]),
+    ).toEqual([{ changeId: "generated-id", reason: "successor-changed" }]);
+  });
+
+  it("marks a deleted frozen prose successor stale across a scratchpad", () => {
+    const proposal = buildManuscript(
+      {
+        kind: "bridge",
+        chapterId: "ch1",
+        anchorBlockId: "a",
+        successorBlockId: "b",
+      },
+      [insert("a", "New bridge.")],
+      [block("a", "Left."), scratchpad("note", "Keep."), block("b", "Right.")],
+    );
+    expect(
+      validateManuscriptChanges(proposal, [
+        block("a", "Left."),
+        scratchpad("note", "Keep."),
+      ]),
+    ).toEqual([{ changeId: "generated-id", reason: "successor-changed" }]);
+  });
+
   it("resolves a reminted target id by frozen order and fingerprint", () => {
     const rewrite: BlockChange = {
       ...insert(null, "New text."),
@@ -213,6 +271,50 @@ describe("proposal preconditions", () => {
         block("new-id", "Old text."),
       ])[0].blockId,
     ).toBe("new-id");
+  });
+
+  it("does not remap a changed original target to an ordinal match", () => {
+    const rewrite: BlockChange = {
+      ...insert(null, "New text."),
+      kind: "rewrite",
+      blockId: "old-id",
+      afterId: null,
+    };
+    const proposal = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [rewrite],
+      [block("old-id", "Old text.")],
+    );
+    const liveBlocks = [
+      block("ordinal-match", "Old text."),
+      block("old-id", "Changed by the author."),
+    ];
+    expect(validateManuscriptChanges(proposal, liveBlocks)).toEqual([
+      { changeId: "generated-id", reason: "target-changed" },
+    ]);
+    expect(() =>
+      materializeManuscriptChanges(proposal, ["generated-id"], liveBlocks),
+    ).toThrow(/preconditions failed/);
+  });
+
+  it("does not remap a changed frozen successor to an ordinal match", () => {
+    const proposal = buildManuscript(
+      {
+        kind: "bridge",
+        chapterId: "ch1",
+        anchorBlockId: "a",
+        successorBlockId: "b",
+      },
+      [insert("a", "New bridge.")],
+      [block("a", "Left."), block("b", "Right.")],
+    );
+    expect(
+      validateManuscriptChanges(proposal, [
+        block("a", "Left."),
+        block("ordinal-match", "Right."),
+        block("b", "Changed by the author."),
+      ]),
+    ).toEqual([{ changeId: "generated-id", reason: "successor-changed" }]);
   });
 
   it("marks changed outline ordering stale", () => {
@@ -253,6 +355,25 @@ describe("proposal preconditions", () => {
       buildManuscriptPendingProposal({
         run: run({ kind: "proposal-follow-up", proposalId: "wrong-id" }),
         raw: manuscript([insert("a", "Replacement.")]),
+        blocks: [block("a", "A")],
+        currentPending: current as PendingProposal,
+        originatingMessageId: "assistant-2",
+        makeId: () => "replacement-id",
+        now: "2026-07-30T00:02:00.000Z",
+      }),
+    ).toThrow(/pending proposal does not match/);
+  });
+
+  it("rejects a mismatched follow-up when every change sanitizes away", () => {
+    const current = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [insert("a", "First.")],
+      [block("a", "A")],
+    );
+    expect(() =>
+      buildManuscriptPendingProposal({
+        run: run({ kind: "proposal-follow-up", proposalId: "wrong-id" }),
+        raw: manuscript([insert("a", " ")]),
         blocks: [block("a", "A")],
         currentPending: current as PendingProposal,
         originatingMessageId: "assistant-2",

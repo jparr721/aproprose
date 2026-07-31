@@ -173,9 +173,44 @@ describe("sanitizeAgentMessages", () => {
       summary: toolSummary,
     });
   });
+
+  it("rejects unknown parts instead of persisting them", () => {
+    const messages = [
+      {
+        id: "assistant-unknown",
+        role: "assistant",
+        metadata,
+        parts: [{ type: "provider-private", value: "raw payload" }],
+      },
+    ] as unknown as AgentUIMessage[];
+
+    expect(() => sanitizeAgentMessages(messages)).toThrow(
+      "Unknown agent message part cannot be persisted",
+    );
+  });
 });
 
 describe("validateAgentMessages", () => {
+  it("accepts an empty conversation", async () => {
+    await expect(validateAgentMessages([])).resolves.toEqual([]);
+  });
+
+  it("accepts a settled assistant error with no renderable parts", async () => {
+    const message: AgentUIMessage = {
+      id: "assistant-error",
+      role: "assistant",
+      metadata: {
+        ...metadata,
+        state: "error",
+        error: "Transport failed",
+        errorCode: "transport",
+      },
+      parts: [],
+    };
+
+    await expect(validateAgentMessages([message])).resolves.toEqual([message]);
+  });
+
   it("rejects persisted system messages", async () => {
     await expect(
       validateAgentMessages([

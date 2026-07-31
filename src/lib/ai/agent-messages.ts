@@ -124,12 +124,39 @@ export async function validateAgentMessages(
   messages: unknown,
   tools?: AgentMessageTools,
 ): Promise<AgentUIMessage[]> {
-  const validated = await validateUIMessages<AgentUIMessage>({
-    messages,
+  if (Array.isArray(messages) && messages.length === 0) return [];
+  const emptyErrorIndexes = new Set<number>();
+  const validationInput = Array.isArray(messages)
+    ? messages.map((message, index) => {
+        if (
+          typeof message !== "object" ||
+          message === null ||
+          !("role" in message) ||
+          message.role !== "assistant" ||
+          !("metadata" in message) ||
+          typeof message.metadata !== "object" ||
+          message.metadata === null ||
+          !("state" in message.metadata) ||
+          message.metadata.state !== "error" ||
+          !("parts" in message) ||
+          !Array.isArray(message.parts) ||
+          message.parts.length !== 0
+        ) {
+          return message;
+        }
+        emptyErrorIndexes.add(index);
+        return { ...message, parts: [{ type: "text", text: "" }] };
+      })
+    : messages;
+  const validatedInput = await validateUIMessages<AgentUIMessage>({
+    messages: validationInput,
     metadataSchema,
     dataSchemas,
     tools,
   });
+  const validated = validatedInput.map((message, index) =>
+    emptyErrorIndexes.has(index) ? { ...message, parts: [] } : message,
+  );
   if (validated.some((message) => message.role === "system")) {
     throw new Error("System messages cannot be persisted in the agent conversation.");
   }
@@ -171,6 +198,29 @@ export function sanitizeAgentMessages(
           : ({ ...message.metadata } satisfies AgentMessageMetadata),
       parts: message.parts.flatMap((part): AgentUIMessage["parts"] => {
         if (part.type === "reasoning") return [];
+        if (
+          part.type !== "text" &&
+          part.type !== "source-url" &&
+          part.type !== "source-document" &&
+          part.type !== "file" &&
+          part.type !== "step-start" &&
+          part.type !== "data-context" &&
+          part.type !== "data-proposal-event" &&
+          part.type !== "data-compaction" &&
+          part.type !== "data-findings" &&
+          part.type !== "dynamic-tool" &&
+          part.type !== "tool-read_chapter" &&
+          part.type !== "tool-read_outline" &&
+          part.type !== "tool-read_lore" &&
+          part.type !== "tool-run_critique" &&
+          part.type !== "tool-run_continuity" &&
+          part.type !== "tool-read_conversation_context" &&
+          part.type !== "tool-read_pending_proposal" &&
+          part.type !== "tool-stage_manuscript_proposal" &&
+          part.type !== "tool-stage_outline_proposal"
+        ) {
+          throw new Error("Unknown agent message part cannot be persisted.");
+        }
         if (isToolOrDynamicToolUIPart(part) && part.state === "output-available") {
           return [
             { ...part, output: summaryOnly(part.output) } as AgentUIMessage["parts"][number],

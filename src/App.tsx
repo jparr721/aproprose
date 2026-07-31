@@ -44,7 +44,7 @@ import { UpdateChecker } from "@/components/app/update-checker";
 import { WhatsNewDialog } from "@/components/app/whats-new-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import { useAiPersistence } from "@/stores/ai-persistence";
+import { useAgentPersistence } from "@/stores/agent-persistence";
 import { cn } from "@/lib/utils";
 import { saveBeforeExit } from "@/lib/exit-guard";
 import { useEffect, useRef } from "react";
@@ -208,7 +208,7 @@ function MigrationGuard() {
 }
 
 function App() {
-  useAiPersistence();
+  useAgentPersistence();
   const status = useProjectStore((s) => s.status);
 
   return (

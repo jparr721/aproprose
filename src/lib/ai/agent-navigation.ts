@@ -1,7 +1,8 @@
 import {
-  cardFingerprint,
   findingFingerprint,
   flattenMessageFindings,
+  resolveLiveBlockLocator,
+  resolveLiveCardLocator,
   resolveSnapshotBlock,
 } from "@/lib/ai/agent-context";
 import type {
@@ -10,7 +11,7 @@ import type {
   OutlinePendingChange,
   SourceLocator,
 } from "@/lib/ai/agent-types";
-import type { Block, Card } from "@/lib/types";
+import type { Block } from "@/lib/types";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -39,7 +40,11 @@ async function selectChapterBlock(
   const state = useProjectStore.getState();
   if (state.activeChapterId !== chapterId) return false;
   const block = resolve(state.blocks);
-  return block === null ? false : selectBlock(block);
+  if (block === null) {
+    state.select(null);
+    return false;
+  }
+  return selectBlock(block);
 }
 
 async function navigateToBlock(
@@ -58,31 +63,21 @@ async function navigateToBlock(
     return block === null ? false : selectBlock(block);
   }
 
-  let navigation: Promise<boolean> | null = null;
-  useViewStore.getState().requestGuarded(() => {
-    navigation = selectChapterBlock(chapterId, resolve);
+  return new Promise<boolean>((resolveResult, rejectResult) => {
+    useViewStore.getState().requestGuarded(() => {
+      void selectChapterBlock(chapterId, resolve).then(
+        resolveResult,
+        rejectResult,
+      );
+    });
   });
-  return navigation === null ? true : await navigation;
 }
 
 function resolveBlockLocator(
   locator: SourceLocator,
   blocks: Block[],
 ): Block | null {
-  return resolveSnapshotBlock(
-    {
-      id: "proposal-navigation",
-      kind: "block",
-      chapterId: "proposal-navigation",
-      sourceId: locator.sourceId,
-      order: locator.order,
-      sourceType: locator.sourceType,
-      label: locator.label,
-      exactText: locator.exactText,
-      sourceFingerprint: locator.fingerprint,
-    },
-    blocks,
-  );
+  return resolveLiveBlockLocator(locator, blocks);
 }
 
 function manuscriptLocator(
@@ -93,16 +88,6 @@ function manuscriptLocator(
     return precondition.target;
   }
   return precondition.anchor ?? precondition.expectedNext;
-}
-
-function resolveCardLocator(locator: SourceLocator, cards: Card[]): Card | null {
-  const exact = cards.find((card) => card.id === locator.sourceId);
-  if (exact !== undefined) return exact;
-  const atOrder = cards[locator.order];
-  return atOrder !== undefined &&
-    cardFingerprint(atOrder) === locator.fingerprint
-    ? atOrder
-    : null;
 }
 
 function outlineLocator(change: OutlinePendingChange): SourceLocator | null {
@@ -123,7 +108,8 @@ function navigateToOutlineCard(
   }
   const chapter = projectState.meta.chapters[chapterId];
   if (chapter === undefined) return false;
-  const card = locator === null ? null : resolveCardLocator(locator, chapter.cards);
+  const card =
+    locator === null ? null : resolveLiveCardLocator(locator, chapter.cards);
   if (locator !== null && card === null) return false;
 
   useViewStore.getState().openOutline();

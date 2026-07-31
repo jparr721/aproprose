@@ -263,6 +263,31 @@ describe("navigateToContextSnapshot", () => {
     expect(useProjectStore.getState().selectedId).toBeNull();
   });
 
+  it("returns the unresolved result after guarded inactive navigation runs", async () => {
+    const frozen = parseChapter("The missing inactive paragraph.")[0];
+    vi.mocked(readTextFile).mockResolvedValue("A different live paragraph.");
+    useProjectStore.setState({ chapterDirty: true });
+
+    const navigation = navigateToContextSnapshot(
+      snapshotFixture(frozen, 0, "ch2"),
+    );
+    let settled = false;
+    void navigation.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(useViewStore.getState().pending).not.toBeNull();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+
+    useViewStore.getState().confirmPending();
+
+    await expect(navigation).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
   it("selects the first live linked block for a finding", async () => {
     const linked = blockFixture("linked-2", "Live linked prose.");
     useProjectStore.setState({ blocks: [linked] });
@@ -383,6 +408,47 @@ describe("navigateToProposalChange", () => {
     expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
 
+  it("relocates a reminted outline card by order and semantic fingerprint", async () => {
+    const frozen = cardFixture("frozen-card-id", "The turn");
+    const reminted = { ...frozen, id: "reminted-card-id" };
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        chapters: {
+          ...state.meta.chapters,
+          ch1: { ...state.meta.chapters.ch1, cards: [reminted] },
+        },
+      },
+    }));
+    const target = addScrollTarget("data-outline-card-id", reminted.id);
+    const change: OutlinePendingChange = {
+      id: "outline-remint",
+      change: {
+        kind: "remove",
+        cardId: frozen.id,
+        title: null,
+        intention: null,
+        toIndex: null,
+        reason: "Cut the repeated turn",
+      },
+      precondition: {
+        kind: "card",
+        target: {
+          sourceId: frozen.id,
+          order: 0,
+          fingerprint: cardFingerprint(frozen),
+          sourceType: "outline-card",
+          label: frozen.title,
+          exactText: `${frozen.title}\n${frozen.intention}`,
+        },
+      },
+    };
+
+    await expect(navigateToProposalChange("ch1", change)).resolves.toBe(true);
+    expect(useOutlineBoardStore.getState().highlightedCardId).toBe(reminted.id);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+  });
+
   it("does not select a neighboring block when a proposal target was deleted", async () => {
     const frozen = blockFixture("deleted-id", "Deleted target.");
     useProjectStore.setState({
@@ -408,21 +474,44 @@ describe("navigateToProposalChange", () => {
     expect(useProjectStore.getState().selectedId).toBeNull();
   });
 
+  it("returns false for an unresolved inactive manuscript proposal", async () => {
+    const frozen = parseChapter("The removed proposal target.")[0];
+    vi.mocked(readTextFile).mockResolvedValue("A neighboring live paragraph.");
+    const change: ManuscriptPendingChange = {
+      id: "inactive-change",
+      change: {
+        kind: "remove",
+        blockId: frozen.id,
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: null,
+        toIndex: null,
+        reason: "Cut the target",
+      },
+      precondition: { kind: "target", target: blockLocator(frozen, 0) },
+    };
+
+    await expect(navigateToProposalChange("ch2", change)).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
   it("keeps guarded inactive navigation pending until the author confirms", async () => {
     const source = "Guarded chapter prose.";
     const frozen = parseChapter(source)[0];
     vi.mocked(readTextFile).mockResolvedValue(source);
     useProjectStore.setState({ chapterDirty: true });
 
-    const didNavigate = await navigateToContextSnapshot(
+    const navigation = navigateToContextSnapshot(
       snapshotFixture(frozen, 0, "ch2"),
     );
 
-    expect(didNavigate).toBe(true);
     expect(useProjectStore.getState().activeChapterId).toBe("ch1");
     expect(useViewStore.getState().pending).not.toBeNull();
 
     useViewStore.getState().confirmPending();
+    await expect(navigation).resolves.toBe(true);
     await waitFor(() => {
       expect(useProjectStore.getState().activeChapterId).toBe("ch2");
       expect(useProjectStore.getState().selectedId).toBe(

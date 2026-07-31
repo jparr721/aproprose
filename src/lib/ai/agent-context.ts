@@ -6,6 +6,7 @@ import type {
   DraftContextRef,
   DraftContextSource,
   DraftSourceLocator,
+  SourceLocator,
 } from "@/lib/ai/agent-types";
 import { dialogueSegments } from "@/lib/blocks/dialogue";
 import type {
@@ -99,7 +100,7 @@ function isProseBlock(block: Block): boolean {
   return block.type === "narration" || block.type === "dialogue";
 }
 
-function blockSourceText(block: Block): string {
+export function blockSnapshotText(block: Block): string {
   const body =
     block.type === "dialogue"
       ? dialogueSegments(block)
@@ -107,6 +108,10 @@ function blockSourceText(block: Block): string {
           .join("\n")
       : block.text;
   return block.title === undefined ? body : `${block.title}\n${body}`;
+}
+
+export function cardSnapshotText(card: Card): string {
+  return `${card.title}\n${card.intention}`;
 }
 
 export function draftContextRefKey(ref: DraftContextRef): string {
@@ -160,7 +165,7 @@ function blockSnapshot(
     order: resolved.order,
     sourceType: resolved.block.type,
     label,
-    exactText: blockSourceText(resolved.block),
+    exactText: blockSnapshotText(resolved.block),
     sourceFingerprint: blockFingerprint(resolved.block),
   };
 }
@@ -189,7 +194,7 @@ function outlineSnapshot(
     order: resolved.order,
     sourceType: "outline-card",
     label: resolved.card.title,
-    exactText: `${resolved.card.title}\n${resolved.card.intention}`,
+    exactText: cardSnapshotText(resolved.card),
     sourceFingerprint: cardFingerprint(resolved.card),
   };
 }
@@ -285,6 +290,33 @@ export function resolveSnapshotBlock(
   const atOrder = blocks[snapshot.order];
   return atOrder !== undefined &&
     blockFingerprint(atOrder) === snapshot.sourceFingerprint
+    ? atOrder
+    : null;
+}
+
+export function resolveLiveBlockLocator(
+  locator: SourceLocator,
+  blocks: Block[],
+): Block | null {
+  const exact = blocks.find((block) => block.id === locator.sourceId);
+  if (exact !== undefined) return exact;
+  const atOrder = blocks[locator.order];
+  return atOrder !== undefined &&
+    blockFingerprint(atOrder) === locator.fingerprint
+    ? atOrder
+    : null;
+}
+
+export function resolveLiveCardLocator(
+  locator: SourceLocator,
+  cards: Card[],
+): Card | null {
+  const exact = cards.find((card) => card.id === locator.sourceId);
+  if (exact !== undefined) return exact;
+  const atOrder = cards[locator.order];
+  if (atOrder === undefined) return null;
+  const frozenIdentityCard = { ...atOrder, id: locator.sourceId };
+  return cardFingerprint(frozenIdentityCard) === locator.fingerprint
     ? atOrder
     : null;
 }

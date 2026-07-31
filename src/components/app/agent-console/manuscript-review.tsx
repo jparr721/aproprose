@@ -16,12 +16,18 @@ import {
   TypographyMuted,
   TypographyP,
 } from "@/components/ui/typography";
+import {
+  blockSnapshotText,
+  resolveLiveBlockLocator,
+} from "@/lib/ai/agent-context";
 import type {
   ManuscriptPendingChange,
   ManuscriptPendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import { diffWords } from "@/lib/diff/word-diff";
+import type { Block } from "@/lib/types";
+import { useProjectStore } from "@/stores/project-store";
 
 export interface ManuscriptReviewProps {
   proposal: ManuscriptPendingProposal;
@@ -38,32 +44,83 @@ function requiredText(value: string | null, field: string): string {
   return value;
 }
 
-function targetLocator(change: ManuscriptPendingChange): SourceLocator | null {
+interface BlockDisplay {
+  sourceId: string;
+  label: string;
+  exactText: string;
+}
+
+type ResolveBlockDisplay = (locator: SourceLocator) => BlockDisplay;
+
+function requiredTargetLocator(
+  change: ManuscriptPendingChange,
+): SourceLocator {
   const precondition = change.precondition;
   if (precondition.kind === "target" || precondition.kind === "move") {
     return precondition.target;
   }
-  return precondition.anchor ?? precondition.expectedNext;
+  throw new Error("A manuscript proposal target is required.");
 }
 
-function changeTitle(change: ManuscriptPendingChange): string {
-  const locator = targetLocator(change);
+function frozenBlockDisplay(locator: SourceLocator): BlockDisplay {
+  return {
+    sourceId: locator.sourceId,
+    label: locator.label,
+    exactText: locator.exactText,
+  };
+}
+
+function liveBlockDisplay(
+  locator: SourceLocator,
+  blocks: Block[],
+): BlockDisplay {
+  const block = resolveLiveBlockLocator(locator, blocks);
+  if (block === null) {
+    throw new Error(`Live manuscript source could not be resolved: ${locator.sourceId}`);
+  }
+  return displayLiveBlock(block, blocks);
+}
+
+function displayLiveBlock(block: Block, blocks: Block[]): BlockDisplay {
+  const order = blocks.findIndex((item) => item.id === block.id);
+  if (order < 0) {
+    throw new Error(`Live manuscript source is outside the chapter: ${block.id}`);
+  }
+  const typeLabel =
+    block.type.charAt(0).toUpperCase() + block.type.slice(1);
+  return {
+    sourceId: block.id,
+    label: `${typeLabel} block ${order + 1}`,
+    exactText: blockSnapshotText(block),
+  };
+}
+
+function insertLocation(
+  change: ManuscriptPendingChange,
+  resolveDisplay: ResolveBlockDisplay,
+): BlockDisplay | null {
+  if (change.precondition.kind !== "insert") {
+    throw new Error("An insert proposal requires an insert precondition.");
+  }
+  if (change.precondition.anchor !== null) {
+    const anchor = resolveDisplay(change.precondition.anchor);
+    return { ...anchor, label: `After ${anchor.label}` };
+  }
+  if (change.precondition.expectedNext !== null) {
+    const next = resolveDisplay(change.precondition.expectedNext);
+    return { ...next, label: `Before ${next.label}` };
+  }
+  return null;
+}
+
+function changeTitle(
+  change: ManuscriptPendingChange,
+  resolveDisplay: ResolveBlockDisplay,
+): string {
   if (change.change.kind === "insert") {
-    if (change.precondition.kind !== "insert") {
-      throw new Error("An insert proposal requires an insert precondition.");
-    }
-    if (change.precondition.anchor !== null) {
-      return `After ${change.precondition.anchor.label}`;
-    }
-    if (change.precondition.expectedNext !== null) {
-      return `Before ${change.precondition.expectedNext.label}`;
-    }
-    return "End of chapter";
+    return insertLocation(change, resolveDisplay)?.label ?? "End of chapter";
   }
-  if (locator === null) {
-    throw new Error("A manuscript proposal target is required.");
-  }
-  return locator.label;
+  return resolveDisplay(requiredTargetLocator(change)).label;
 }
 
 function DiffPreview(props: { before: string; after: string }) {
@@ -97,28 +154,52 @@ function DiffPreview(props: { before: string; after: string }) {
   );
 }
 
-function ManuscriptPreview(props: { change: ManuscriptPendingChange }) {
-  const { change } = props;
+function ManuscriptPreview(props: {
+  change: ManuscriptPendingChange;
+  liveBlocks: Block[] | null;
+  resolveDisplay: ResolveBlockDisplay;
+}) {
+  const { change, liveBlocks, resolveDisplay } = props;
   const proposalChange = change.change;
   if (proposalChange.kind === "rewrite") {
-    const locator = targetLocator(change);
-    if (locator === null) {
-      throw new Error("A rewrite proposal target is required.");
-    }
+    const source = resolveDisplay(requiredTargetLocator(change));
     return (
       <DiffPreview
         after={requiredText(proposalChange.newText, "rewrite text")}
-        before={locator.exactText}
+        before={source.exactText}
       />
     );
   }
   if (proposalChange.kind === "insert") {
+    if (change.precondition.kind !== "insert") {
+      throw new Error("An insert proposal requires an insert precondition.");
+    }
+    const location = insertLocation(change, resolveDisplay);
+    const rightBoundary =
+      change.precondition.anchor === null ||
+      change.precondition.expectedNext === null
+        ? null
+        : resolveDisplay(change.precondition.expectedNext);
     return (
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-1">
           <TypographyEyebrow>Location</TypographyEyebrow>
-          <TypographyMuted>{changeTitle(change)}</TypographyMuted>
+          <TypographyMuted>{location?.label ?? "End of chapter"}</TypographyMuted>
+          {location === null ? null : (
+            <TypographyP className="whitespace-pre-wrap">
+              {location.exactText}
+            </TypographyP>
+          )}
         </div>
+        {rightBoundary === null ? null : (
+          <div className="flex flex-col gap-1">
+            <TypographyEyebrow>Right boundary</TypographyEyebrow>
+            <TypographyMuted>Before {rightBoundary.label}</TypographyMuted>
+            <TypographyP className="whitespace-pre-wrap">
+              {rightBoundary.exactText}
+            </TypographyP>
+          </div>
+        )}
         <div className="flex flex-col gap-1">
           <TypographyEyebrow>Proposed prose</TypographyEyebrow>
           <TypographyP className="whitespace-pre-wrap">
@@ -128,46 +209,76 @@ function ManuscriptPreview(props: { change: ManuscriptPendingChange }) {
       </div>
     );
   }
-  const locator = targetLocator(change);
-  if (locator === null) {
-    throw new Error("A manuscript proposal target is required.");
-  }
+  const source = resolveDisplay(requiredTargetLocator(change));
   if (proposalChange.kind === "remove") {
     return (
       <TypographyP className="whitespace-pre-wrap">
-        {locator.exactText}
+        {source.exactText}
       </TypographyP>
     );
   }
   if (proposalChange.toIndex === null) {
     throw new Error("A move proposal destination is required.");
   }
+  if (change.precondition.kind !== "move") {
+    throw new Error("A move proposal requires a move precondition.");
+  }
+  const destination = (() => {
+    if (liveBlocks === null) return null;
+    const remaining = liveBlocks.filter((block) => block.id !== source.sourceId);
+    const toIndex = Math.max(
+      0,
+      Math.min(proposalChange.toIndex, remaining.length),
+    );
+    const block = remaining[toIndex];
+    if (block === undefined) return null;
+    return displayLiveBlock(block, liveBlocks);
+  })();
   return (
     <div className="flex flex-col gap-2">
-      <TypographyP className="whitespace-pre-wrap">
-        {locator.exactText}
-      </TypographyP>
-      <TypographyMuted>
-        Move to position {proposalChange.toIndex + 1}
-      </TypographyMuted>
+      <div className="flex flex-col gap-1">
+        <TypographyEyebrow>Source</TypographyEyebrow>
+        <TypographyP className="whitespace-pre-wrap">
+          {source.exactText}
+        </TypographyP>
+      </div>
+      <div className="flex flex-col gap-1">
+        <TypographyEyebrow>Destination</TypographyEyebrow>
+        <TypographyMuted>
+          {liveBlocks === null
+            ? `Position ${proposalChange.toIndex + 1}`
+            : destination === null
+              ? "End of chapter"
+              : `Before ${destination.label}`}
+        </TypographyMuted>
+        {destination === null ? null : (
+          <TypographyP className="whitespace-pre-wrap">
+            {destination.exactText}
+          </TypographyP>
+        )}
+      </div>
     </div>
   );
 }
 
 function ManuscriptChangeCard(props: {
+  blocks: Block[];
   change: ManuscriptPendingChange;
   stale: boolean;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
   onNavigate: (changeId: string) => void;
 }) {
-  const { change, stale, onAccept, onReject, onNavigate } = props;
+  const { blocks, change, stale, onAccept, onReject, onNavigate } = props;
+  const resolveDisplay: ResolveBlockDisplay = stale
+    ? frozenBlockDisplay
+    : (locator) => liveBlockDisplay(locator, blocks);
   return (
     <Card data-agent-change-id={change.id} size="sm">
       <CardHeader>
         <div className="flex flex-col gap-1">
           <TypographyEyebrow>{change.change.kind}</TypographyEyebrow>
-          <CardTitle>{changeTitle(change)}</CardTitle>
+          <CardTitle>{changeTitle(change, resolveDisplay)}</CardTitle>
         </div>
         <CardAction>
           <Button
@@ -182,7 +293,11 @@ function ManuscriptChangeCard(props: {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <ManuscriptPreview change={change} />
+        <ManuscriptPreview
+          change={change}
+          liveBlocks={stale ? null : blocks}
+          resolveDisplay={resolveDisplay}
+        />
         <div className="flex flex-col gap-1">
           <TypographyEyebrow>Reason</TypographyEyebrow>
           <TypographyMuted>{change.change.reason}</TypographyMuted>
@@ -222,10 +337,12 @@ export function ManuscriptReview({
   onReject,
   onNavigate,
 }: ManuscriptReviewProps) {
+  const blocks = useProjectStore((state) => state.blocks);
   return (
     <div className="flex flex-col gap-3">
       {proposal.changes.map((change) => (
         <ManuscriptChangeCard
+          blocks={blocks}
           change={change}
           key={change.id}
           onAccept={onAccept}

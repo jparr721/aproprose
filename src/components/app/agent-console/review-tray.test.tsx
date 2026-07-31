@@ -37,6 +37,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@/lib/ai/agent-controller", () => ({
+  dispatchAgentIntent: vi.fn().mockResolvedValue(undefined),
   recordProposalEvent: vi.fn(),
 }));
 
@@ -51,6 +52,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
+import { AgentConversation } from "@/components/app/agent-console/agent-conversation";
 import { ReviewTray } from "@/components/app/agent-console/review-tray";
 import { recordProposalEvent } from "@/lib/ai/agent-controller";
 import { navigateToProposalChange } from "@/lib/ai/agent-navigation";
@@ -210,8 +212,8 @@ const expandReview = (): void => {
   );
 };
 
-const messageFixture = (): AgentUIMessage => ({
-  id: "assistant-later",
+const messageFixture = (id: string, text: string): AgentUIMessage => ({
+  id,
   role: "assistant",
   metadata: {
     runId: "run-later",
@@ -224,8 +226,25 @@ const messageFixture = (): AgentUIMessage => ({
     retryOf: null,
     usage: null,
   },
-  parts: [{ type: "text", text: "A later message." }],
+  parts: [{ type: "text", text }],
 });
+
+function ConversationWithReview() {
+  const messages = useAgentConsoleStore((state) => state.messages);
+
+  return (
+    <div className="flex h-96 flex-col">
+      <AgentConversation
+        messages={messages}
+        onNavigateSnapshot={async () => true}
+        onOpenSettings={() => undefined}
+        onRetry={async () => undefined}
+        summary={null}
+      />
+      <ReviewTray />
+    </div>
+  );
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -520,18 +539,57 @@ describe("ReviewTray rejection and navigation", () => {
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
   });
 
-  it("stays mounted when the conversation receives later messages", () => {
+  it("preserves expanded review and scroll state through conversation updates", () => {
     const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
     ]);
     setPending(proposal);
-    const { container } = render(<ReviewTray />);
+    useAgentConsoleStore.setState({
+      messages: [messageFixture("assistant-first", "The first response.")],
+    });
+    const { container } = render(<ConversationWithReview />);
+    expandReview();
     const tray = container.querySelector("[data-agent-review-tray]");
+    const reviewViewport = tray?.querySelector(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    const conversation = screen.getByRole("log");
+    if (!(tray instanceof HTMLElement)) throw new Error("Missing review tray.");
+    if (!(reviewViewport instanceof HTMLElement)) {
+      throw new Error("Missing review viewport.");
+    }
+    Object.defineProperty(conversation, "scrollHeight", {
+      configurable: true,
+      value: 300,
+    });
+    Object.defineProperty(conversation, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
+    conversation.scrollTop = 41;
+    reviewViewport.scrollTop = 17;
+    fireEvent.scroll(conversation);
+    fireEvent.scroll(reviewViewport);
 
     act(() => {
-      useAgentConsoleStore.setState({ messages: [messageFixture()] });
+      useAgentConsoleStore.setState({
+        messages: [
+          messageFixture("assistant-first", "The first response."),
+          messageFixture("assistant-later", "A later response."),
+        ],
+      });
     });
 
+    expect(screen.getByText("A later response.")).toBeTruthy();
     expect(container.querySelector("[data-agent-review-tray]")).toBe(tray);
+    expect(
+      screen.getByRole("button", { name: "Collapse proposal review" }),
+    ).toBeTruthy();
+    expect(
+      tray.querySelector('[data-slot="scroll-area-viewport"]'),
+    ).toBe(reviewViewport);
+    expect(reviewViewport.scrollTop).toBe(17);
+    expect(screen.getByRole("log")).toBe(conversation);
+    expect(conversation.scrollTop).toBe(41);
   });
 });

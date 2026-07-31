@@ -1,25 +1,44 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ManuscriptReview } from "@/components/app/agent-console/manuscript-review";
+import {
+  blockFingerprint,
+  blockOrderFingerprint,
+} from "@/lib/ai/agent-context";
 import type {
   ManuscriptPendingChange,
   ManuscriptPendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
+import type { Block } from "@/lib/types";
+import { useProjectStore } from "@/stores/project-store";
+
+const block = (id: string, text: string): Block => ({
+  id,
+  type: "narration",
+  text,
+  raw: `${text}\n`,
+  dirty: false,
+});
+
+const frozenBlocks = [
+  block("block-1", "The rain fell hard."),
+  block("block-2", "The door opened."),
+  block("block-3", "She hid the letter."),
+];
 
 const locator = (
-  sourceId: string,
+  source: Block,
   order: number,
-  exactText: string,
 ): SourceLocator => ({
-  sourceId,
+  sourceId: source.id,
   order,
-  fingerprint: `fingerprint-${sourceId}`,
+  fingerprint: blockFingerprint(source),
   sourceType: "narration",
-  label: `Paragraph ${order + 1}`,
-  exactText,
+  label: "narration block",
+  exactText: source.text,
 });
 
 const changes: ManuscriptPendingChange[] = [
@@ -37,7 +56,7 @@ const changes: ManuscriptPendingChange[] = [
     },
     precondition: {
       kind: "target",
-      target: locator("block-1", 0, "The rain fell hard."),
+      target: locator(frozenBlocks[0], 0),
     },
   },
   {
@@ -54,8 +73,8 @@ const changes: ManuscriptPendingChange[] = [
     },
     precondition: {
       kind: "insert",
-      anchor: locator("block-1", 0, "The rain fell hard."),
-      expectedNext: locator("block-2", 1, "The door opened."),
+      anchor: locator(frozenBlocks[0], 0),
+      expectedNext: locator(frozenBlocks[1], 1),
     },
   },
   {
@@ -72,7 +91,7 @@ const changes: ManuscriptPendingChange[] = [
     },
     precondition: {
       kind: "target",
-      target: locator("block-2", 1, "The door opened."),
+      target: locator(frozenBlocks[1], 1),
     },
   },
   {
@@ -89,8 +108,8 @@ const changes: ManuscriptPendingChange[] = [
     },
     precondition: {
       kind: "move",
-      target: locator("block-3", 2, "She hid the letter."),
-      orderFingerprint: "order-1",
+      target: locator(frozenBlocks[2], 2),
+      orderFingerprint: blockOrderFingerprint(frozenBlocks),
     },
   },
 ];
@@ -106,10 +125,40 @@ const proposal: ManuscriptPendingProposal = {
   changes,
 };
 
+beforeEach(() => {
+  useProjectStore.setState({
+    project: {
+      root: "/book",
+      name: "Book",
+      mainFile: "main.tex",
+      title: "Book",
+      author: "Author",
+      metadata: {
+        title: "Book",
+        subtitle: "",
+        author: "Author",
+        publisher: "",
+        isbn: "",
+      },
+      chapters: [
+        {
+          id: "ch1",
+          label: "I",
+          title: "Chapter One",
+          file: "one.tex",
+          wordCount: 12,
+        },
+      ],
+    },
+    activeChapterId: "ch1",
+    blocks: frozenBlocks.map((item) => ({ ...item })),
+  } as never);
+});
+
 afterEach(() => cleanup());
 
 describe("ManuscriptReview", () => {
-  it("renders rewrite, insert, remove, and move previews from frozen sources", () => {
+  it("renders every change from live source and destination context", () => {
     const { container } = render(
       <ManuscriptReview
         proposal={proposal}
@@ -135,11 +184,16 @@ describe("ManuscriptReview", () => {
 
     expect(within(rewrite).getByText("hard.").tagName).toBe("DEL");
     expect(within(rewrite).getByText("softly.").tagName).toBe("INS");
-    expect(within(insert).getAllByText("After Paragraph 1")).toHaveLength(2);
+    expect(within(rewrite).getByText("Narration block 1")).toBeTruthy();
+    expect(within(insert).getAllByText("After Narration block 1")).toHaveLength(2);
+    expect(within(insert).getByText("Before Narration block 2")).toBeTruthy();
+    expect(within(insert).getByText("The rain fell hard.")).toBeTruthy();
+    expect(within(insert).getByText("The door opened.")).toBeTruthy();
     expect(within(insert).getByText("A gull crossed the harbor.")).toBeTruthy();
     expect(within(remove).getByText("The door opened.")).toBeTruthy();
     expect(within(move).getByText("She hid the letter.")).toBeTruthy();
-    expect(within(move).getByText("Move to position 2")).toBeTruthy();
+    expect(within(move).getByText("Before Narration block 2")).toBeTruthy();
+    expect(within(move).getByText("The door opened.")).toBeTruthy();
 
     for (const card of [rewrite, insert, remove, move]) {
       expect(card.querySelector('[data-slot="card-header"]')).toBeTruthy();
@@ -183,6 +237,13 @@ describe("ManuscriptReview", () => {
   });
 
   it("keeps a stale frozen preview visible and disables only its Accept action", () => {
+    useProjectStore.setState({
+      blocks: [
+        frozenBlocks[0],
+        { ...frozenBlocks[1], text: "The changed live door slammed." },
+        frozenBlocks[2],
+      ],
+    });
     const { container } = render(
       <ManuscriptReview
         proposal={proposal}
@@ -200,11 +261,54 @@ describe("ManuscriptReview", () => {
 
     expect(within(stale).getByText("Source changed - regenerate")).toBeTruthy();
     expect(within(stale).getByText("The door opened.")).toBeTruthy();
+    expect(within(stale).queryByText("The changed live door slammed.")).toBeNull();
     expect(
       within(stale).getByRole("button", { name: "Accept" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       within(fresh).getByRole("button", { name: "Accept" }).hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  it("updates a fresh target label and move destination from live ordering", () => {
+    const liveDestination = block("live-destination", "The lantern went dark.");
+    const liveBlocks = [
+      frozenBlocks[1],
+      liveDestination,
+      frozenBlocks[0],
+      frozenBlocks[2],
+    ];
+    useProjectStore.setState({ blocks: liveBlocks });
+    const liveMove: ManuscriptPendingChange = {
+      ...changes[3],
+      precondition: {
+        kind: "move",
+        target: locator(frozenBlocks[2], 3),
+        orderFingerprint: blockOrderFingerprint(liveBlocks),
+      },
+    };
+    const liveProposal: ManuscriptPendingProposal = {
+      ...proposal,
+      changes: [changes[0], liveMove],
+    };
+
+    const { container } = render(
+      <ManuscriptReview
+        proposal={liveProposal}
+        staleChangeIds={new Set<string>()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const rewrite = container.querySelector('[data-agent-change-id="rewrite-1"]');
+    const moveCard = container.querySelector('[data-agent-change-id="move-1"]');
+    if (!(rewrite instanceof HTMLElement) || !(moveCard instanceof HTMLElement)) {
+      throw new Error("Missing live-context review cards.");
+    }
+
+    expect(within(rewrite).getByText("Narration block 3")).toBeTruthy();
+    expect(within(moveCard).getByText("Before Narration block 2")).toBeTruthy();
+    expect(within(moveCard).getByText("The lantern went dark.")).toBeTruthy();
   });
 });

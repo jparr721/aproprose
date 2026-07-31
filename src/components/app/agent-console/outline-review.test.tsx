@@ -1,26 +1,45 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutlineReview } from "@/components/app/agent-console/outline-review";
+import {
+  cardFingerprint,
+  outlineOrderFingerprint,
+} from "@/lib/ai/agent-context";
 import type {
   OutlinePendingChange,
   OutlinePendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
+import type { Card } from "@/lib/types";
+import { useProjectStore } from "@/stores/project-store";
+
+const card = (id: string, title: string, intention: string): Card => ({
+  id,
+  title,
+  intention,
+  characterIds: [],
+  loreIds: [],
+  continuityFlags: [],
+});
+
+const frozenCards = [
+  card("card-1", "Arrival", "Set the stakes"),
+  card("card-2", "Second warning", "Repeat the threat"),
+  card("card-3", "The choice", "Commit the hero"),
+];
 
 const locator = (
-  sourceId: string,
+  source: Card,
   order: number,
-  title: string,
-  intention: string,
 ): SourceLocator => ({
-  sourceId,
+  sourceId: source.id,
   order,
-  fingerprint: `fingerprint-${sourceId}`,
+  fingerprint: cardFingerprint(source),
   sourceType: "outline-card",
-  label: title,
-  exactText: `${title}\n${intention}`,
+  label: "outline card",
+  exactText: `${source.title}\n${source.intention}`,
 });
 
 const changes: OutlinePendingChange[] = [
@@ -36,7 +55,7 @@ const changes: OutlinePendingChange[] = [
     },
     precondition: {
       kind: "card",
-      target: locator("card-1", 0, "Arrival", "Set the stakes"),
+      target: locator(frozenCards[0], 0),
     },
   },
   {
@@ -51,7 +70,7 @@ const changes: OutlinePendingChange[] = [
     },
     precondition: {
       kind: "outline-order",
-      orderFingerprint: "order-1",
+      orderFingerprint: outlineOrderFingerprint(frozenCards),
     },
   },
   {
@@ -66,7 +85,7 @@ const changes: OutlinePendingChange[] = [
     },
     precondition: {
       kind: "card",
-      target: locator("card-2", 1, "Second warning", "Repeat the threat"),
+      target: locator(frozenCards[1], 1),
     },
   },
   {
@@ -81,8 +100,8 @@ const changes: OutlinePendingChange[] = [
     },
     precondition: {
       kind: "outline-move",
-      target: locator("card-3", 2, "The choice", "Commit the hero"),
-      orderFingerprint: "order-1",
+      target: locator(frozenCards[2], 2),
+      orderFingerprint: outlineOrderFingerprint(frozenCards),
     },
   },
 ];
@@ -98,10 +117,57 @@ const proposal: OutlinePendingProposal = {
   changes,
 };
 
+beforeEach(() => {
+  useProjectStore.setState({
+    project: {
+      root: "/book",
+      name: "Book",
+      mainFile: "main.tex",
+      title: "Book",
+      author: "Author",
+      metadata: {
+        title: "Book",
+        subtitle: "",
+        author: "Author",
+        publisher: "",
+        isbn: "",
+      },
+      chapters: [
+        {
+          id: "ch1",
+          label: "I",
+          title: "Chapter One",
+          file: "one.tex",
+          wordCount: 12,
+        },
+      ],
+    },
+    meta: {
+      version: 2,
+      characters: [],
+      lore: [],
+      statuses: {},
+      outline: { premise: "" },
+      chapters: {
+        ch1: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: [],
+          cards: frozenCards.map((item) => ({ ...item })),
+        },
+      },
+    },
+  } as never);
+});
+
 afterEach(() => cleanup());
 
 describe("OutlineReview", () => {
-  it("renders rewrite, add, remove, and move previews from frozen sources", () => {
+  it("renders every change from live source and destination context", () => {
     const { container } = render(
       <OutlineReview
         proposal={proposal}
@@ -129,12 +195,16 @@ describe("OutlineReview", () => {
     expect(rewrite.querySelector("ins")?.textContent).toContain(
       "A harder arrival",
     );
+    expect(within(rewrite).getByText("Arrival")).toBeTruthy();
     expect(within(add).getByText("The warning")).toBeTruthy();
     expect(within(add).getByText("Foreshadow the cost")).toBeTruthy();
+    expect(within(add).getByText("After The choice")).toBeTruthy();
+    expect(within(add).getByText("Commit the hero")).toBeTruthy();
     expect(within(remove).getAllByText("Second warning")).toHaveLength(2);
     expect(within(remove).getByText("Repeat the threat")).toBeTruthy();
     expect(within(move).getAllByText("The choice")).toHaveLength(2);
-    expect(within(move).getByText("Move to position 1")).toBeTruthy();
+    expect(within(move).getByText("Before Arrival")).toBeTruthy();
+    expect(within(move).getByText("Set the stakes")).toBeTruthy();
 
     for (const card of [rewrite, add, remove, move]) {
       expect(card.querySelector('[data-slot="card-header"]')).toBeTruthy();
@@ -178,6 +248,22 @@ describe("OutlineReview", () => {
   });
 
   it("keeps a stale frozen preview visible and disables only its Accept action", () => {
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        chapters: {
+          ...state.meta.chapters,
+          ch1: {
+            ...state.meta.chapters.ch1,
+            cards: [
+              frozenCards[0],
+              card("card-2", "Changed live warning", "Changed live threat"),
+              frozenCards[2],
+            ],
+          },
+        },
+      },
+    }));
     const { container } = render(
       <OutlineReview
         proposal={proposal}
@@ -195,11 +281,62 @@ describe("OutlineReview", () => {
 
     expect(within(stale).getByText("Source changed - regenerate")).toBeTruthy();
     expect(within(stale).getAllByText("Second warning")).toHaveLength(2);
+    expect(within(stale).queryByText("Changed live warning")).toBeNull();
+    expect(within(stale).queryByText("Changed live threat")).toBeNull();
     expect(
       within(stale).getByRole("button", { name: "Accept" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       within(fresh).getByRole("button", { name: "Accept" }).hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  it("updates move destination labels and text from the live outline", () => {
+    const liveDestination = card(
+      "live-destination",
+      "Live destination",
+      "Turn the scene here",
+    );
+    const liveCards = [
+      frozenCards[0],
+      liveDestination,
+      frozenCards[1],
+      frozenCards[2],
+    ];
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        chapters: {
+          ...state.meta.chapters,
+          ch1: { ...state.meta.chapters.ch1, cards: liveCards },
+        },
+      },
+    }));
+    const liveMove: OutlinePendingChange = {
+      ...changes[3],
+      change: { ...changes[3].change, toIndex: 1 },
+      precondition: {
+        kind: "outline-move",
+        target: locator(frozenCards[2], 3),
+        orderFingerprint: outlineOrderFingerprint(liveCards),
+      },
+    };
+
+    const { container } = render(
+      <OutlineReview
+        proposal={{ ...proposal, changes: [liveMove] }}
+        staleChangeIds={new Set<string>()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const moveCard = container.querySelector('[data-agent-change-id="move-1"]');
+    if (!(moveCard instanceof HTMLElement)) {
+      throw new Error("Missing live outline move card.");
+    }
+
+    expect(within(moveCard).getByText("Before Live destination")).toBeTruthy();
+    expect(within(moveCard).getByText("Turn the scene here")).toBeTruthy();
   });
 });

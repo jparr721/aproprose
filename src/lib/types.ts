@@ -342,26 +342,34 @@ export interface ChatMessage {
   content: string;
 }
 
-// ── Outline Sculpt ────────────────────────────────────────────────────────────
+// -- Guided outlining ---------------------------------------------------------
 
-export type SculptChangeKind = "rewrite" | "add" | "move" | "remove";
-
-export interface SculptChange {
-  kind: SculptChangeKind;
-  /** Target card id for rewrite/move/remove; null for add. */
-  cardId: string | null;
-  title: string | null;
-  intention: string | null;
-  /** For move ONLY: zero-based target index within the chapter's cards. */
-  toIndex: number | null;
-  reason: string;
+export interface GuidedOutlineBeat {
+  /** Existing card to preserve when this beat revises one; null for a new beat. */
+  sourceCardId: string | null;
+  title: string;
+  intention: string;
+  characterIds: string[];
+  loreIds: string[];
 }
 
-export interface SculptProposal {
-  /** The chapter being reshaped. */
+/** A complete, reviewable chapter outline assembled from a guided conversation. */
+export interface GuidedOutlinePlan {
   chapterId: string;
   summary: string;
-  changes: SculptChange[];
+  act: ActKind | null;
+  plotPoint: BeatType | null;
+  premise: string;
+  goal: string;
+  conflict: string;
+  turn: string;
+  characterIds: string[];
+  beats: GuidedOutlineBeat[];
+}
+
+export interface GuidedOutlineSession {
+  messages: ChatMessage[];
+  plan: GuidedOutlinePlan | null;
 }
 
 /** A pending text rewrite for one block - the shape applyBlockEdits consumes. */

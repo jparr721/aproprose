@@ -9,7 +9,7 @@ import { useOutlineBoardStore } from "@/stores/outline-board-store";
 afterEach(() => cleanup());
 
 beforeEach(() => {
-  useOutlineBoardStore.setState({ openChapterId: "ch1" } as never);
+  useOutlineBoardStore.setState({ openChapterId: "ch1", chapterView: "edit" } as never);
   useProjectStore.setState({
     project: {
       root: "/x", name: "n", mainFile: "m", title: null, author: null,
@@ -36,5 +36,17 @@ describe("ChapterSubview", () => {
     render(<ChapterSubview />);
     fireEvent.click(screen.getByRole("button", { name: /add card/i }));
     expect(useProjectStore.getState().meta.chapters.ch1.cards).toHaveLength(1);
+  });
+
+  it("switches between manual editing and the guided conversation", () => {
+    render(<ChapterSubview />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
+    expect(useOutlineBoardStore.getState().chapterView).toBe("guide");
+    expect(screen.getByText("Talk the chapter through")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit outline" }));
+    expect(useOutlineBoardStore.getState().chapterView).toBe("edit");
+    expect(screen.getByDisplayValue("What the Letter Said")).toBeTruthy();
   });
 });

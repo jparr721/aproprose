@@ -25,9 +25,8 @@ import type {
   Character,
   CritiqueNote,
   ContinuityFlag,
+  GuidedOutlinePlan,
   ManuscriptProposal,
-  SculptChange,
-  SculptProposal,
   SuggestResult,
 } from "@/lib/types";
 import type { SpeakerAssignment } from "@/lib/blocks/structure-proposal";
@@ -39,8 +38,8 @@ import {
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
   EDIT_SYSTEM,
+  GUIDED_OUTLINE_SYSTEM,
   REVISE_SYSTEM,
-  SCULPT_SYSTEM,
   STRUCTURE_SYSTEM,
   SUGGEST_SYSTEM,
 } from "@/lib/ai/prompts";
@@ -86,6 +85,35 @@ export interface EditRequest {
 /** Options every AI op accepts; the agent threads its AbortSignal through. */
 export interface AiOpOptions {
   signal?: AbortSignal;
+}
+
+/** Current chapter state and reference data for a guided outlining conversation. */
+export interface GuidedOutlineContext {
+  chapterId: string;
+  chapterTitle: string;
+  storyPremise: string;
+  act: GuidedOutlinePlan["act"];
+  plotPoint: GuidedOutlinePlan["plotPoint"];
+  premise: string;
+  goal: string;
+  conflict: string;
+  turn: string;
+  cards: {
+    id: string;
+    title: string;
+    intention: string;
+    characterIds: string[];
+    loreIds: string[];
+  }[];
+  characters: { id: string; name: string; role: string }[];
+  lore: { id: string; title: string; description: string; tags: string[] }[];
+  manuscript: string;
+}
+
+/** One assistant reply plus an optional full plan preview. */
+export interface GuidedOutlineTurn {
+  reply: string;
+  plan: GuidedOutlinePlan | null;
 }
 
 /** AiContext plus the id-labeled blocks offered for anchoring findings. */
@@ -173,6 +201,39 @@ const suggestResultSchema = z.object({
   followups: z
     .array(z.string())
     .describe("a few short 'after this, you could' nudges"),
+});
+
+const guidedOutlineBeatSchema = z.object({
+  sourceCardId: z
+    .string()
+    .nullable()
+    .describe("existing card id copied from context, or null for a new beat"),
+  title: z.string().describe("short, concrete beat title"),
+  intention: z.string().describe("one or two sentences on what the beat accomplishes"),
+  characterIds: z.array(z.string()).describe("character ids copied from the available cast"),
+  loreIds: z.array(z.string()).describe("lore ids copied from the available lore"),
+});
+
+const guidedOutlinePlanSchema = z.object({
+  chapterId: z.string().describe("chapter id copied from the supplied chapter"),
+  summary: z.string().describe("one sentence describing the chapter's dramatic shape"),
+  act: z.enum(["setup", "confrontation", "resolution"]).nullable(),
+  plotPoint: z
+    .enum(["plot-point", "inciting", "pinch", "action", "midpoint", "climax", "resolution"])
+    .nullable(),
+  premise: z.string().describe("what this chapter is about"),
+  goal: z.string().describe("what the point-of-view character wants entering the chapter"),
+  conflict: z.string().describe("the obstacle or question creating tension"),
+  turn: z.string().describe("the irreversible change or hook leaving the chapter"),
+  characterIds: z.array(z.string()).describe("all character ids planned for the chapter"),
+  beats: z.array(guidedOutlineBeatSchema).describe("every chapter beat in reading order"),
+});
+
+const guidedOutlineTurnSchema = z.object({
+  reply: z.string().describe("concise conversational reply with at most one question"),
+  plan: guidedOutlinePlanSchema
+    .nullable()
+    .describe("complete plan preview when ready or requested, otherwise null"),
 });
 
 const critiqueNoteSchema = z.object({
@@ -551,134 +612,114 @@ export async function assignSpeakers(
   return output.assignments;
 }
 
-// ── Sculpt (chapter-level AI write path) ──────────────────────────────────────
-// sculptChapter proposes structural changes to ONE chapter's plot-element cards.
-// Unlike editBlocks (in-place rewrite only), it may also add/move/remove cards.
-// The proposal is reviewed behind a gate in the board before any of it applies.
-
-/** What the board hands `sculptChapter`: one chapter's spine + cards + roster. */
-export interface SculptContext {
-  chapterId: string;
-  chapterTitle: string;
-  /** The global logline. */
-  storyPremise: string;
-  /** The chapter's own premise. */
-  premise: string;
-  goal: string;
-  conflict: string;
-  turn: string;
-  /** The chapter's cards in order, by id, for the model to reference and reorder. */
-  cards: { id: string; title: string; intention: string }[];
-  characters: { name: string }[];
-  lore: { title: string; description: string; tags: string[] }[];
-}
-
-const sculptChangeSchema = z.object({
-  kind: z
-    .enum(["rewrite", "add", "move", "remove"])
-    .describe("rewrite revises a card in place, add inserts a new card, move repositions, remove deletes"),
-  cardId: z
-    .string()
-    .nullable()
-    .describe("for rewrite/move/remove: an id copied exactly from the supplied cards; null for add"),
-  title: z.string().nullable().describe("proposed card title for rewrite/add; null otherwise"),
-  intention: z
-    .string()
-    .nullable()
-    .describe("proposed one-to-two sentence intention for rewrite/add; null otherwise"),
-  toIndex: z
-    .number()
-    .int()
-    .nullable()
-    .describe("for move ONLY: zero-based target index within the chapter; null otherwise"),
-  reason: z.string().describe("one short sentence on why this change strengthens the chapter"),
-});
-
-const sculptProposalSchema = z.object({
-  chapterId: z.string().describe("the chapter being reshaped, echoed back from context"),
-  summary: z.string().describe("one sentence describing the overall reshape"),
-  changes: z
-    .array(sculptChangeSchema)
-    .describe("the structural changes to apply; few or none if the chapter is already tight"),
-});
-
-/** Render the sculpt grounding: the chapter's spine, its ordered cards, cast, lore. */
-function buildSculptGrounding(ctx: SculptContext): string {
-  const parts: string[] = [];
-  parts.push(`CHAPTER: ${ctx.chapterTitle}`);
-  if (ctx.storyPremise.trim()) parts.push(`STORY PREMISE: ${ctx.storyPremise.trim()}`);
-  const spine = [
-    ctx.premise.trim() ? `Premise: ${ctx.premise.trim()}` : "",
-    ctx.goal.trim() ? `Goal: ${ctx.goal.trim()}` : "",
-    ctx.conflict.trim() ? `Conflict: ${ctx.conflict.trim()}` : "",
-    ctx.turn.trim() ? `Turn: ${ctx.turn.trim()}` : "",
-  ].filter(Boolean);
-  if (spine.length > 0) parts.push(`CHAPTER SPINE:\n${spine.join("\n")}`);
-  if (ctx.characters.length > 0) {
-    parts.push(`KNOWN CAST:\n${ctx.characters.map((c) => `- ${c.name}`).join("\n")}`);
+function buildGuidedOutlineGrounding(
+  ctx: GuidedOutlineContext,
+  currentPlan: GuidedOutlinePlan | null,
+): string {
+  const currentCards = ctx.cards.length === 0
+    ? "-"
+    : ctx.cards.map((card, index) => (
+        `[${index}] id=${card.id}\nTitle: ${card.title || "-"}\nIntention: ${card.intention || "-"}\nCharacter ids: ${card.characterIds.join(", ") || "-"}\nLore ids: ${card.loreIds.join(", ") || "-"}`
+      )).join("\n\n");
+  const characters = ctx.characters.length === 0
+    ? "-"
+    : ctx.characters.map((character) => (
+        `- id=${character.id} | ${character.name} | ${character.role || "-"}`
+      )).join("\n");
+  const lore = ctx.lore.length === 0
+    ? "-"
+    : ctx.lore.map((entry) => (
+        `- id=${entry.id} | ${entry.title} | ${entry.description || "-"} | tags: ${entry.tags.join(", ") || "-"}`
+      )).join("\n");
+  const parts = [
+    `CHAPTER:\nid=${ctx.chapterId}\nTitle: ${ctx.chapterTitle}`,
+    `STORY PREMISE:\n${ctx.storyPremise || "-"}`,
+    `CURRENT CHAPTER OUTLINE:\nAct: ${ctx.act || "-"}\nStructural beat: ${ctx.plotPoint || "-"}\nPremise: ${ctx.premise || "-"}\nGoal: ${ctx.goal || "-"}\nConflict: ${ctx.conflict || "-"}\nTurn: ${ctx.turn || "-"}`,
+    `CURRENT PLOT ELEMENTS:\n${currentCards}`,
+    `AVAILABLE CHARACTERS:\n${characters}`,
+    `AVAILABLE LORE:\n${lore}`,
+  ];
+  if (ctx.manuscript.trim()) {
+    parts.push(`CURRENT MANUSCRIPT:\n${ctx.manuscript.trim()}`);
   }
-  if (ctx.lore.length > 0) {
-    parts.push(`LORE:\n${ctx.lore.map((l) => `- ${l.title}${l.description ? `: ${l.description}` : ""}`).join("\n")}`);
+  if (currentPlan !== null) {
+    parts.push(`CURRENT PREVIEW:\n${JSON.stringify(currentPlan, null, 2)}`);
   }
-  const cards = ctx.cards
-    .map((c, i) => `[${i}] (${c.id}) ${c.title}: ${c.intention}`)
-    .join("\n");
-  parts.push(`PLOT ELEMENTS (in order; reorder/rewrite/add/remove these):\n${cards || "(none yet)"}`);
   return parts.join("\n\n");
 }
 
 /**
- * Drop changes the board can't safely apply: rewrite/move/remove whose cardId is
- * not one of `cardIds`, a `move` with no `toIndex`, and a `rewrite` that proposes
- * no title or intention (a no-op). Pure: returns a new proposal.
+ * Continue a guided outlining interview. The model returns conversational text
+ * and, once ready, a complete structured plan preview in the same response.
  */
-export function sanitizeSculpt(proposal: SculptProposal, cardIds: string[]): SculptProposal {
-  const known = new Set(cardIds);
-  const changes = proposal.changes.filter((c: SculptChange) => {
-    switch (c.kind) {
-      case "add":
-        return true;
-      case "rewrite":
-        return c.cardId !== null && known.has(c.cardId) && (c.title !== null || c.intention !== null);
-      case "move":
-        return c.cardId !== null && known.has(c.cardId) && c.toIndex !== null;
-      case "remove":
-        return c.cardId !== null && known.has(c.cardId);
-    }
-  });
-  return { ...proposal, changes };
-}
-
-/**
- * Propose structural changes to ONE chapter. Returns a validated, sanitized
- * proposal the board reviews behind its gate. A truly empty chapter (no spine,
- * no cards) has nothing to reshape, so we skip the call.
- */
-export async function sculptChapter(
-  ctx: SculptContext,
+export async function guideChapterOutline(
+  messages: ChatMessage[],
+  ctx: GuidedOutlineContext,
+  currentPlan: GuidedOutlinePlan | null,
   opts?: AiOpOptions,
-): Promise<SculptProposal> {
-  const empty =
-    ctx.cards.length === 0 &&
-    !ctx.premise.trim() &&
-    !ctx.goal.trim() &&
-    !ctx.conflict.trim() &&
-    !ctx.turn.trim();
-  if (empty) {
-    return { chapterId: ctx.chapterId, summary: "", changes: [] };
-  }
+): Promise<GuidedOutlineTurn> {
   const model = await getModel();
   const { output } = await generateText({
     model,
-    output: Output.object({ schema: sculptProposalSchema }),
-    system: authorSystem(SCULPT_SYSTEM, "voice"),
-    prompt: buildSculptGrounding(ctx),
+    output: Output.object({ schema: guidedOutlineTurnSchema }),
+    system: authorSystem(GUIDED_OUTLINE_SYSTEM, "voice"),
+    messages: [
+      {
+        role: "user",
+        content: `Here is the chapter context for our conversation.\n\n${buildGuidedOutlineGrounding(ctx, currentPlan)}`,
+      },
+      ...messages,
+    ],
     abortSignal: opts?.signal,
   });
-  return sanitizeSculpt(
-    { chapterId: ctx.chapterId, summary: output.summary, changes: output.changes },
-    ctx.cards.map((c) => c.id),
+  return sanitizeGuidedOutlineTurn(
+    { reply: output.reply, plan: output.plan },
+    ctx,
   );
+}
+
+/**
+ * Constrain model-authored outline references to the chapter and roster supplied
+ * by the app. Beat-level cast is folded into chapter cast so the two cannot drift.
+ */
+export function sanitizeGuidedOutlineTurn(
+  turn: GuidedOutlineTurn,
+  ctx: GuidedOutlineContext,
+): GuidedOutlineTurn {
+  if (turn.plan === null) return { reply: turn.reply, plan: null };
+  const characterIds = new Set(ctx.characters.map((character) => character.id));
+  const loreIds = new Set(ctx.lore.map((entry) => entry.id));
+  const cardIds = new Set(ctx.cards.map((card) => card.id));
+  const usedCardIds = new Set<string>();
+  const uniqueAllowed = (ids: string[], allowed: Set<string>): string[] =>
+    [...new Set(ids.filter((id) => allowed.has(id)))];
+  const beats = turn.plan.beats.map((beat) => {
+    const canReuseCard = beat.sourceCardId !== null
+      && cardIds.has(beat.sourceCardId)
+      && !usedCardIds.has(beat.sourceCardId);
+    if (canReuseCard && beat.sourceCardId !== null) usedCardIds.add(beat.sourceCardId);
+    return {
+      ...beat,
+      sourceCardId: canReuseCard ? beat.sourceCardId : null,
+      characterIds: uniqueAllowed(beat.characterIds, characterIds),
+      loreIds: uniqueAllowed(beat.loreIds, loreIds),
+    };
+  });
+  return {
+    reply: turn.reply,
+    plan: {
+      ...turn.plan,
+      chapterId: ctx.chapterId,
+      characterIds: uniqueAllowed(
+        [
+          ...turn.plan.characterIds,
+          ...beats.flatMap((beat) => beat.characterIds),
+        ],
+        characterIds,
+      ),
+      beats,
+    },
+  };
 }
 
 // ── Streaming + freeform operations ─────────────────────────────────────────

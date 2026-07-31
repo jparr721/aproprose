@@ -12,8 +12,8 @@ import type {
   ChapterOutline,
   ChapterRef,
   ContinuityFlag,
+  GuidedOutlinePlan,
   Outline,
-  SculptProposal,
 } from "@/lib/types";
 
 /** Three-act proportions: setup 25%, confrontation 50%, resolution 25%. */
@@ -211,6 +211,81 @@ export function editPremise(outline: Outline, premise: string): Outline {
   return { ...outline, premise };
 }
 
+/** Replace one chapter's planning entry with a reviewed guided-outline plan. */
+export function applyGuidedOutlinePlan(
+  chapters: Chapters,
+  chapterId: string,
+  plan: GuidedOutlinePlan,
+): Chapters {
+  if (plan.chapterId !== chapterId) {
+    throw new Error(
+      `Guided outline plan targets chapter "${plan.chapterId}", not "${chapterId}".`,
+    );
+  }
+  const current = getChapterOutline(chapters, chapterId);
+  const usedIds = new Set<string>();
+  const cards: Card[] = plan.beats.map((beat) => {
+    const source = beat.sourceCardId === null
+      ? undefined
+      : current.cards.find((card) => card.id === beat.sourceCardId && !usedIds.has(card.id));
+    if (source) usedIds.add(source.id);
+    return {
+      id: source?.id ?? uid("card"),
+      title: beat.title,
+      intention: beat.intention,
+      characterIds: [...beat.characterIds],
+      loreIds: [...beat.loreIds],
+      continuityFlags: source ? [...source.continuityFlags] : [],
+    };
+  });
+  return {
+    ...chapters,
+    [chapterId]: {
+      act: plan.act,
+      plotPoint: plan.plotPoint,
+      premise: plan.premise,
+      goal: plan.goal,
+      conflict: plan.conflict,
+      turn: plan.turn,
+      characterIds: [...plan.characterIds],
+      cards,
+    },
+  };
+}
+
+/** True when applying the plan would make no user-visible outline change. */
+export function chapterMatchesGuidedOutlinePlan(
+  chapter: ChapterOutline,
+  plan: GuidedOutlinePlan,
+): boolean {
+  const sameIds = (left: string[], right: string[]): boolean =>
+    left.length === right.length && left.every((id, index) => id === right[index]);
+  if (
+    chapter.act !== plan.act ||
+    chapter.plotPoint !== plan.plotPoint ||
+    chapter.premise !== plan.premise ||
+    chapter.goal !== plan.goal ||
+    chapter.conflict !== plan.conflict ||
+    chapter.turn !== plan.turn ||
+    !sameIds(chapter.characterIds, plan.characterIds) ||
+    chapter.cards.length !== plan.beats.length
+  ) {
+    return false;
+  }
+  return chapter.cards.every((card, index) => {
+    const beat = plan.beats[index];
+    return (
+      (beat.sourceCardId === null
+        ? card.continuityFlags.length === 0
+        : card.id === beat.sourceCardId) &&
+      card.title === beat.title &&
+      card.intention === beat.intention &&
+      sameIds(card.characterIds, beat.characterIds) &&
+      sameIds(card.loreIds, beat.loreIds)
+    );
+  });
+}
+
 export interface ActPacing {
   actualShare: number;
   targetShare: number;
@@ -239,48 +314,4 @@ export function actPacing(chapters: Chapters, chapterRefs: ChapterRef[]): Record
     };
   }
   return out;
-}
-
-/**
- * Fold a sculpt proposal's KEPT changes into one chapter's cards, in proposal
- * order, by delegating to the same pure card editors the manual UI uses. A
- * skipped change is a no-op; a change targeting a card that no longer exists is
- * skipped defensively. Pure: returns a new chapters map.
- */
-export function applySculpt(
-  chapters: Chapters,
-  chapterId: string,
-  proposal: SculptProposal,
-  kept: number[],
-): Chapters {
-  const keptSet = new Set(kept);
-  return proposal.changes.reduce((acc, change, index) => {
-    if (!keptSet.has(index)) return acc;
-    const cards = acc[chapterId]?.cards ?? [];
-    const exists = (id: string) => cards.some((c) => c.id === id);
-    switch (change.kind) {
-      case "rewrite": {
-        if (change.cardId === null || !exists(change.cardId)) return acc;
-        const patch: Partial<Pick<Card, "title" | "intention">> = {};
-        if (change.title !== null) patch.title = change.title;
-        if (change.intention !== null) patch.intention = change.intention;
-        return editCard(acc, chapterId, change.cardId, patch);
-      }
-      case "add": {
-        const { chapters: added, cardId } = addCard(acc, chapterId);
-        const patch: Partial<Pick<Card, "title" | "intention">> = {};
-        if (change.title !== null) patch.title = change.title;
-        if (change.intention !== null) patch.intention = change.intention;
-        return editCard(added, chapterId, cardId, patch);
-      }
-      case "move": {
-        if (change.cardId === null || change.toIndex === null || !exists(change.cardId)) return acc;
-        return moveCardWithin(acc, chapterId, change.cardId, change.toIndex);
-      }
-      case "remove": {
-        if (change.cardId === null || !exists(change.cardId)) return acc;
-        return removeCard(acc, chapterId, change.cardId);
-      }
-    }
-  }, chapters);
 }

@@ -1,6 +1,6 @@
 // muse-store.ts -- the Muse tab's run state: status, the directive being (or
 // last) run, the live activity feed, and whether the finished run staged a
-// proposal into the Edit tab. Purely ephemeral (sculpt precedent): runs are
+// proposal into the Edit tab. Purely ephemeral: runs are
 // never persisted; only the staged proposal survives, in ai-cache-store. The
 // AbortController lives at module scope in muse-tab.tsx, not here (not
 // serializable state, one owner).

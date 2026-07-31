@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "@/lib/migration";
+import type { GuidedOutlinePlan } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
 beforeEach(() => {
@@ -54,5 +55,37 @@ describe("card + chapter actions", () => {
     expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c1", "c2"]);
     useProjectStore.getState().removeCharacterFromChapter("ch1", "c1");
     expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c2"]);
+  });
+
+  it("applies a reviewed guided plan in one outline update", () => {
+    const plan: GuidedOutlinePlan = {
+      chapterId: "ch1",
+      summary: "The invitation becomes a threat.",
+      act: "setup",
+      plotPoint: "inciting",
+      premise: "Mara is invited to the winter court.",
+      goal: "Decline without insulting the queen.",
+      conflict: "The invitation already names her as an attendee.",
+      turn: "Mara decides to attend under a false name.",
+      characterIds: ["mara"],
+      beats: [
+        {
+          sourceCardId: null,
+          title: "The courier waits",
+          intention: "Make a polite refusal impossible.",
+          characterIds: ["mara"],
+          loreIds: [],
+        },
+      ],
+    };
+
+    useProjectStore.getState().applyGuidedOutlinePlan("ch1", plan);
+
+    expect(useProjectStore.getState().meta.chapters.ch1).toMatchObject({
+      act: "setup",
+      plotPoint: "inciting",
+      goal: "Decline without insulting the queen.",
+    });
+    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe("The courier waits");
   });
 });

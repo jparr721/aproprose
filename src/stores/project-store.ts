@@ -20,6 +20,7 @@ import type {
   Character,
   CompileError,
   ContinuityFlag,
+  GuidedOutlinePlan,
   LoreEntry,
   ManuscriptProposal,
   NovelMetadata,
@@ -29,7 +30,6 @@ import type {
   ProposalApplyResult,
   RecentProject,
   SkeletonModel,
-  SculptProposal,
 } from "@/lib/types";
 import {
   countWords,
@@ -67,7 +67,7 @@ import {
   addCharacterToCard as addCharacterToCardModel,
   addCharacterToChapter as addCharacterToChapterModel,
   addLoreToCard as addLoreToCardModel,
-  applySculpt as applySculptModel,
+  applyGuidedOutlinePlan as applyGuidedOutlinePlanModel,
   editCard as editCardModel,
   editChapterField,
   editPremise,
@@ -289,7 +289,7 @@ interface ProjectState {
   setChapterAct: (chapterId: string, act: ActKind | null) => void;
   setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
   setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
-  applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
+  applyGuidedOutlinePlan: (chapterId: string, plan: GuidedOutlinePlan) => void;
 }
 
 const HISTORY_CAP = 100;
@@ -1368,12 +1368,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
-    applySculpt: (chapterId, proposal, kept) =>
+    applyGuidedOutlinePlan: (chapterId, plan) =>
       set((s) => {
-        const meta = { ...s.meta, chapters: applySculptModel(s.meta.chapters, chapterId, proposal, kept) };
+        const meta = {
+          ...s.meta,
+          chapters: applyGuidedOutlinePlanModel(s.meta.chapters, chapterId, plan),
+        };
         persistMeta(meta);
         return { meta };
       }),
+
   };
 });
 

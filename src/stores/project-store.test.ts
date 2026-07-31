@@ -24,6 +24,8 @@ vi.mock("sonner", () => ({
 
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
+import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
+import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
   openProject,
@@ -42,6 +44,66 @@ const mkBlock = (p: Partial<Block> = {}): Block => ({
   dirty: false,
   ...p,
 });
+
+const projectFixture = (root: string): ProjectInfo => ({
+  root,
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [
+    {
+      id: "ch1",
+      label: "I",
+      title: "Chapter One",
+      file: "chapter-one.tex",
+      wordCount: 2,
+    },
+  ],
+});
+
+const rewriteFixture = (blockId: string, newText: string): BlockChange => ({
+  kind: "rewrite",
+  blockId,
+  afterId: null,
+  type: null,
+  speaker: null,
+  newText,
+  toIndex: null,
+  reason: "Revise",
+});
+
+const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
+  buildManuscriptPendingProposal({
+    run: {
+      id: "run-1",
+      projectRoot: "/book",
+      mode: "edit",
+      task: { kind: "conversation", targetChapterId: "ch1" },
+      userMessageId: "user-1",
+      attachments: [],
+      startedAt: "2026-07-30T00:00:00.000Z",
+    } satisfies AgentRun,
+    raw: { chapterId: "ch1", summary: "Revise", changes },
+    blocks,
+    currentPending: null,
+    originatingMessageId: "assistant-1",
+    makeId: (() => {
+      let index = -1;
+      return () => {
+        index += 1;
+        return index === 0 ? "proposal-1" : `change-${index - 1}`;
+      };
+    })(),
+    now: "2026-07-30T00:01:00.000Z",
+  });
 
 beforeEach(() => {
   useProjectStore.setState({
@@ -1153,5 +1215,74 @@ describe("applyManuscriptProposal", () => {
       [0],
     );
     expect(useProjectStore.getState().blocks[1].speaker).toBeUndefined();
+  });
+});
+
+describe("applyAgentManuscriptProposal", () => {
+  it("applies all selected changes as one editor undo step", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+      future: [],
+    } as never);
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      rewriteFixture("b", "B revised"),
+    ]);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  it("applies nothing when one selected precondition is stale", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      rewriteFixture("b", "B revised"),
+    ]);
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks: [{ ...blocks[0], text: "Changed live" }, blocks[1]],
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({ status: "stale", staleChangeIds: ["change-0"] });
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "Changed live",
+      "B",
+    ]);
+    expect(useProjectStore.getState().past).toHaveLength(0);
   });
 });

@@ -5,6 +5,7 @@ import type {
   Card,
   CritiqueNote,
   ContinuityFlag,
+  ProjectMeta,
   SculptChange,
 } from "@/lib/types";
 
@@ -159,6 +160,25 @@ export interface OutlinePendingProposal extends PendingProposalBase {
 export type PendingProposal =
   | ManuscriptPendingProposal
   | OutlinePendingProposal;
+
+export type AgentProposalApplyResult =
+  | { status: "applied"; appliedChangeIds: string[] }
+  | { status: "stale"; staleChangeIds: string[] };
+
+export interface OutlineUndoToken {
+  id: string;
+  projectRoot: string;
+  before: ProjectMeta;
+  afterFingerprint: string;
+}
+
+export type AgentOutlineApplyResult =
+  | {
+      status: "applied";
+      appliedChangeIds: string[];
+      undoToken: OutlineUndoToken;
+    }
+  | { status: "stale"; staleChangeIds: string[] };
 
 export interface PersistedUsage {
   modelId: string;

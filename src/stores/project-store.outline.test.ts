@@ -1,11 +1,105 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
 import { useProjectStore } from "@/stores/project-store";
+import type { Card, ProjectInfo, SculptProposal } from "@/lib/types";
+
+const cardFixture = (): Card => ({
+  id: "card-1",
+  title: "Arrival",
+  intention: "Set the stakes",
+  characterIds: [],
+  loreIds: [],
+  continuityFlags: [],
+});
+
+const projectFixture = (root: string): ProjectInfo => ({
+  root,
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [
+    {
+      id: "ch1",
+      label: "I",
+      title: "Chapter One",
+      file: "chapter-one.tex",
+      wordCount: 0,
+    },
+  ],
+});
+
+const pendingOutlineFixture = () => {
+  const raw: SculptProposal = {
+    chapterId: "ch1",
+    summary: "Strengthen the arrival",
+    changes: [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ],
+  };
+  return buildOutlinePendingProposal({
+    run: {
+      id: "run-1",
+      projectRoot: "/book",
+      mode: "edit",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      userMessageId: "user-1",
+      attachments: [],
+      startedAt: "2026-07-30T00:00:00.000Z",
+    } satisfies AgentRun,
+    raw,
+    cards: [cardFixture()],
+    currentPending: null,
+    originatingMessageId: "assistant-1",
+    makeId: (() => {
+      let index = -1;
+      return () => {
+        index += 1;
+        return index === 0 ? "proposal-1" : `change-${index - 1}`;
+      };
+    })(),
+    now: "2026-07-30T00:01:00.000Z",
+  });
+};
 
 beforeEach(() => {
   useProjectStore.setState({
-    project: null,
-    meta: { version: 2, characters: [], lore: [], statuses: {}, outline: { premise: "" }, chapters: {} },
+    project: projectFixture("/book"),
+    meta: {
+      version: 2,
+      characters: [],
+      lore: [],
+      statuses: {},
+      outline: { premise: "" },
+      chapters: {
+        ch1: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: [],
+          cards: [cardFixture()],
+        },
+      },
+    },
   } as never);
 });
 
@@ -35,7 +129,11 @@ describe("card + chapter actions", () => {
   it("adds and edits a card", () => {
     const id = useProjectStore.getState().addCard("ch1");
     useProjectStore.getState().editCard("ch1", id, { title: "Hello" });
-    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe("Hello");
+    expect(
+      useProjectStore
+        .getState()
+        .meta.chapters.ch1.cards.find((card) => card.id === id)?.title,
+    ).toBe("Hello");
   });
   it("moves a card between chapters", () => {
     const id = useProjectStore.getState().addCard("ch1");
@@ -54,5 +152,44 @@ describe("card + chapter actions", () => {
     expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c1", "c2"]);
     useProjectStore.getState().removeCharacterFromChapter("ch1", "c1");
     expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c2"]);
+  });
+});
+
+describe("agent outline proposals", () => {
+  it("applies selected changes in one metadata write and returns one undo token", () => {
+    const proposal = pendingOutlineFixture();
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe(
+      "Hard arrival",
+    );
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(true);
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("refuses undo after a later outline mutation", () => {
+    const proposal = pendingOutlineFixture();
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    useProjectStore.getState().setChapterField("ch1", { goal: "Changed later" });
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(false);
   });
 });

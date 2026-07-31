@@ -7,7 +7,13 @@ import type {
   DraftSourceLocator,
 } from "@/lib/ai/agent-types";
 import { dialogueSegments } from "@/lib/blocks/dialogue";
-import type { Block, Card, CritiqueNote, ContinuityFlag } from "@/lib/types";
+import type {
+  Block,
+  Card,
+  CritiqueNote,
+  ContinuityFlag,
+  ProjectMeta,
+} from "@/lib/types";
 
 function fnv1a(value: string): string {
   let hash = 0x811c9dc5;
@@ -51,6 +57,10 @@ export function outlineOrderFingerprint(cards: Card[]): string {
   return fnv1a(
     JSON.stringify(cards.map((card) => [card.id, cardFingerprint(card)])),
   );
+}
+
+export function projectMetaFingerprint(meta: ProjectMeta): string {
+  return fnv1a(JSON.stringify(meta));
 }
 
 export function findingFingerprint(

@@ -62,6 +62,19 @@ import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
+import { projectMetaFingerprint } from "@/lib/ai/agent-context";
+import {
+  materializeManuscriptChanges,
+  validateManuscriptChanges,
+  validateOutlineChanges,
+} from "@/lib/ai/agent-proposals";
+import type {
+  AgentOutlineApplyResult,
+  AgentProposalApplyResult,
+  ManuscriptPendingProposal,
+  OutlinePendingProposal,
+  OutlineUndoToken,
+} from "@/lib/ai/agent-types";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
@@ -71,6 +84,7 @@ import {
   editCard as editCardModel,
   editChapterField,
   editPremise,
+  getChapterOutline,
   moveCardToChapter as moveCardToChapterModel,
   moveCardWithin as moveCardWithinModel,
   removeCard as removeCardModel,
@@ -226,6 +240,10 @@ interface ProjectState {
   /** Apply the kept changes of a reviewed proposal as ONE undo step. Returns
    *  counts so the caller can warn about skipped (vanished-target) changes. */
   applyManuscriptProposal: (proposal: ManuscriptProposal, kept: number[]) => ProposalApplyResult;
+  applyAgentManuscriptProposal: (
+    proposal: ManuscriptPendingProposal,
+    changeIds: string[],
+  ) => AgentProposalApplyResult;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
@@ -290,6 +308,11 @@ interface ProjectState {
   setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
   setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
   applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
+  applyAgentOutlineProposal: (
+    proposal: OutlinePendingProposal,
+    changeIds: string[],
+  ) => AgentOutlineApplyResult;
+  undoAgentOutlineProposal: (token: OutlineUndoToken) => boolean;
 }
 
 const HISTORY_CAP = 100;
@@ -793,6 +816,46 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         lastTextEditId: null,
       });
       return { applied: outcome.applied, skipped: outcome.skipped };
+    },
+
+    applyAgentManuscriptProposal: (proposal, changeIds) => {
+      const state = get();
+      if (
+        state.project === null ||
+        state.project.root !== proposal.projectRoot ||
+        state.activeChapterId !== proposal.chapterId
+      ) {
+        return { status: "stale", staleChangeIds: changeIds };
+      }
+      const selected = new Set(changeIds);
+      const selectedProposal = {
+        ...proposal,
+        changes: proposal.changes.filter((item) => selected.has(item.id)),
+      };
+      const stale = validateManuscriptChanges(selectedProposal, state.blocks);
+      if (stale.length > 0) {
+        return {
+          status: "stale",
+          staleChangeIds: stale.map((item) => item.changeId),
+        };
+      }
+      const changes = materializeManuscriptChanges(
+        proposal,
+        changeIds,
+        state.blocks,
+      );
+      const result = get().applyManuscriptProposal(
+        {
+          chapterId: proposal.chapterId,
+          summary: proposal.summary,
+          changes,
+        },
+        changes.map((_, index) => index),
+      );
+      if (result.applied !== changes.length) {
+        throw new Error("Validated manuscript proposal did not apply atomically.");
+      }
+      return { status: "applied", appliedChangeIds: changeIds };
     },
 
     updateBlock: (id, patch) =>
@@ -1374,6 +1437,69 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         persistMeta(meta);
         return { meta };
       }),
+
+    applyAgentOutlineProposal: (proposal, changeIds) => {
+      const state = get();
+      if (state.project === null || state.project.root !== proposal.projectRoot) {
+        return { status: "stale", staleChangeIds: changeIds };
+      }
+      const chapter = getChapterOutline(
+        state.meta.chapters,
+        proposal.chapterId,
+      );
+      const selected = new Set(changeIds);
+      const selectedProposal = {
+        ...proposal,
+        changes: proposal.changes.filter((item) => selected.has(item.id)),
+      };
+      const stale = validateOutlineChanges(selectedProposal, chapter.cards);
+      if (stale.length > 0) {
+        return {
+          status: "stale",
+          staleChangeIds: stale.map((item) => item.changeId),
+        };
+      }
+      const sculpt: SculptProposal = {
+        chapterId: proposal.chapterId,
+        summary: proposal.summary,
+        changes: selectedProposal.changes.map((item) => item.change),
+      };
+      const before = state.meta;
+      const chapters = applySculptModel(
+        before.chapters,
+        proposal.chapterId,
+        sculpt,
+        sculpt.changes.map((_, index) => index),
+      );
+      const meta = { ...before, chapters };
+      const undoToken: OutlineUndoToken = {
+        id: uid(),
+        projectRoot: state.project.root,
+        before,
+        afterFingerprint: projectMetaFingerprint(meta),
+      };
+      persistMeta(meta);
+      set({ meta });
+      return {
+        status: "applied",
+        appliedChangeIds: changeIds,
+        undoToken,
+      };
+    },
+
+    undoAgentOutlineProposal: (token) => {
+      const state = get();
+      if (
+        state.project === null ||
+        state.project.root !== token.projectRoot ||
+        projectMetaFingerprint(state.meta) !== token.afterFingerprint
+      ) {
+        return false;
+      }
+      persistMeta(token.before);
+      set({ meta: token.before });
+      return true;
+    },
   };
 });
 

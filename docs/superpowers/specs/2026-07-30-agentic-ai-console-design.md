@@ -150,12 +150,16 @@ the controller freezes the current mode and creates a new agent instance with:
 shared base instructions
 + exactly one current mode prompt
 + current author voice preferences
-+ current editing rules when applicable
++ current writing and editing instructions
 ```
 
 The request contains the compacted conversation summary, recent messages, sent
 context snapshots, and current pending-proposal state. Previous Writing or Edit
 system prompts are never replayed.
+
+The author voice and standing writing and editing instructions apply to both modes.
+The mode prompt changes how the agent interprets those preferences; it does not
+silently omit them.
 
 Switching modes does not clear or fork the conversation. If the author switches
 while a run is active, the active run keeps its frozen mode and the new mode applies
@@ -190,19 +194,16 @@ Draft attachments are live references:
 type DraftContextRef =
   | {
       kind: "block";
-      projectRoot: string;
       chapterId: string;
       blockId: string;
     }
   | {
       kind: "outline-card";
-      projectRoot: string;
       chapterId: string;
       cardId: string;
     }
   | {
       kind: "finding";
-      projectRoot: string;
       chapterId: string;
       findingId: string;
     };
@@ -220,7 +221,6 @@ Submission resolves every draft reference into an immutable snapshot:
 interface ContextSnapshot {
   id: string;
   kind: "block" | "outline-card" | "finding";
-  projectRoot: string;
   chapterId: string;
   sourceId: string;
   order: number;
@@ -241,6 +241,9 @@ The domain model remains strongly typed. A presentation adapter maps a
 for the stock attachment UI. Manuscript state is not coerced into `FileUIPart`, and
 the AI Elements attachment components are not forked.
 
+The per-project store supplies project identity. Absolute project paths stay in the
+run controller and are never included in model-visible attachment content.
+
 ## Agent Runtime
 
 ### Run boundary
@@ -248,20 +251,68 @@ the AI Elements attachment components are not forked.
 One run is active per project. Submission creates a frozen run descriptor:
 
 ```ts
+type AgentTask =
+  | {
+      kind: "conversation";
+      targetChapterId: string | null;
+    }
+  | {
+      kind: "bridge";
+      chapterId: string;
+      anchorBlockId: string;
+      successorBlockId: string | null;
+    }
+  | {
+      kind: "selected-block-edit";
+      chapterId: string;
+      blockIds: string[];
+      operation: "clean" | "structure" | "custom";
+    }
+  | {
+      kind: "chapter-analysis";
+      chapterId: string;
+      analysis: "critique" | "continuity";
+    }
+  | {
+      kind: "outline-sculpt";
+      chapterId: string;
+    }
+  | {
+      kind: "proposal-follow-up";
+      proposalId: string;
+    };
+
 interface AgentRun {
   id: string;
   projectRoot: string;
   mode: AgentMode;
-  targetChapterId: string | null;
+  task: AgentTask;
   userMessageId: string;
   attachments: ContextSnapshot[];
   startedAt: string;
 }
 ```
 
+`projectRoot` is controller-only scope data. It is not converted into a model
+message or rendered in a tool row.
+
 Changing the active chapter does not redirect the run. Read tools use the frozen
 project and explicit target IDs, never whichever chapter happens to be visible when
 the tool executes.
+
+Mode controls behavior, while the frozen task controls proposal safety. Stage tools
+validate every proposed target against the task:
+
+- A bridge task can stage inserts only at its frozen anchor boundary.
+- A selected-block edit can change only its frozen target blocks and permitted
+  structure anchors.
+- A chapter analysis is read-only.
+- An outline sculpt can stage outline changes only for its frozen chapter.
+- A general conversation can stage changes for at most its one target chapter.
+- A proposal follow-up can replace only the identified pending workspace.
+
+Attachments from other chapters may inform an answer, but one pending write proposal
+never spans multiple chapters.
 
 The composer may continue accepting text and new draft attachments while a run is
 active, but it cannot submit a second turn. Those edits prepare the next turn. The
@@ -296,6 +347,7 @@ The shared tool set is:
 | `read_lore` | Read relevant lore and project context | No |
 | `run_critique` | Produce structured, block-linked critique findings | No |
 | `run_continuity` | Produce structured, block-linked continuity findings | No |
+| `read_conversation_context` | Read compacted message excerpts and attachment snapshots | No |
 | `read_pending_proposal` | Read the complete current proposal workspace | No |
 | `stage_manuscript_proposal` | Replace the pending manuscript proposal | Agent state only |
 | `stage_outline_proposal` | Replace the pending outline proposal | Agent state only |
@@ -390,12 +442,14 @@ The block action dispatches an immediate Writing run with:
 - A standard bridging directive.
 
 The agent calls `read_chapter` and receives the complete ordered chapter, including
-all prose before and after the anchor.
+all prose before and after the anchor. At submission, the bridge task freezes the
+next ordered prose block as its successor, or freezes a null successor when no later
+prose block exists.
 
-If a later block exists:
+If a later prose block exists:
 
 - Treat the anchor as the left boundary.
-- Treat the next existing block as the right boundary.
+- Treat the frozen successor prose block as the right boundary.
 - Propose the minimum insertion needed to bridge into that later prose.
 - Preserve the later block and the remainder of the chapter.
 - Never interpret the action as permission to rewrite the existing later half.
@@ -406,7 +460,8 @@ If the anchor is the final prose block:
 - Do not invent a right boundary.
 
 The result is staged as a manuscript proposal between the anchor and its expected
-successor. Nothing is inserted until the author accepts it.
+successor. The stage tool rejects rewrites, removals, moves, and inserts outside this
+boundary for a bridge task. Nothing is inserted until the author accepts it.
 
 ## Entry-point Mapping
 
@@ -426,6 +481,7 @@ type AgentIntent =
       mode: AgentMode;
       text: string;
       refs: DraftContextRef[];
+      task: AgentTask;
     }
   | { kind: "focus"; mode: AgentMode };
 ```
@@ -435,13 +491,13 @@ The discriminated union replaces the legacy tab target and `autoRun` flag.
 | Existing entry point | Agent intent |
 |---|---|
 | Add to Chat | `add-context`, current mode, no submission |
-| Pick Up From Here | `run`, Writing, anchor attachment |
-| Suggest next | `run`, Writing, selected anchor |
-| Clean up with AI | `run`, Edit, selected block |
-| Structure with AI | `run`, Edit, selected block |
-| Critique | `run`, Edit, current chapter |
-| Continuity | `run`, Edit, current chapter |
-| Outline Sculpt | `run`, Edit, selected outline chapter |
+| Pick Up From Here | `run`, Writing, `bridge` task |
+| Suggest next | `run`, Writing, `conversation` task with selected anchor |
+| Clean up with AI | `run`, Edit, `selected-block-edit` clean task |
+| Structure with AI | `run`, Edit, `selected-block-edit` structure task |
+| Critique | `run`, Edit, `chapter-analysis` critique task |
+| Continuity | `run`, Edit, `chapter-analysis` continuity task |
+| Outline Sculpt | `run`, Edit, `outline-sculpt` task |
 | Brainstorm | `focus`, Writing |
 | Muse | Removed; Writing is the replacement |
 | Send to Edit | Removed; follow up in the same conversation |
@@ -552,12 +608,12 @@ The runtime uses the existing `tokenlens` dependency:
 - `shouldCompact` uses its default 85 percent threshold.
 - `tokensToCompact` determines how much settled history must leave the next request.
 
-Compaction selects the oldest complete user and assistant turns, excluding the most
-recent turns and any active stream. A separate no-tool model call summarizes those
-turns into neutral context containing:
+Compaction selects the oldest complete user and assistant turns, always retaining
+the four most recent complete turns and any active stream. A separate no-tool model
+call summarizes the selected turns into neutral context containing:
 
 - Author decisions.
-- Referenced source identities.
+- Referenced source identities and stable message IDs.
 - Important story and editing constraints.
 - Proposal outcomes.
 - Unresolved questions.
@@ -572,6 +628,9 @@ The summary excludes:
 The saved `throughMessageId` prevents the same turns from being summarized twice.
 The full transcript remains visible; only the next model request substitutes the
 summary for older turns. A visible context-compaction status row records the event.
+When an author refers to compacted material, `read_conversation_context` can retrieve
+the archived message excerpt or immutable attachment snapshot from the full local
+transcript without replaying the complete archive on every request.
 
 If compaction fails, submission stops with an inline retryable error. It does not
 silently drop history or submit an oversized request.
@@ -594,7 +653,7 @@ Stopping a run:
 Retry creates a new run from the failed turn's frozen:
 
 - Mode.
-- Project and target chapter.
+- Project and task.
 - User text.
 - Context snapshots.
 
@@ -625,8 +684,7 @@ Remove from frontend product code:
 - CLI invoke types and functions in `src/lib/tauri.ts`.
 - `supportsTools` and provider branches in `src/lib/ai/model.ts`.
 - Muse unsupported-provider UI and tests.
-- Unused AI Elements Open in Chat provider menu if it is the remaining product
-  reference to Claude.
+- The unused `src/components/ai-elements/open-in-chat.tsx` provider menu.
 
 Remove from the Rust product backend:
 
@@ -642,7 +700,7 @@ AI Settings retain:
 - OpenAI API key management.
 - OpenAI model discovery and selection.
 - Writing voice preferences.
-- Editing rules, renamed to remove Muse terminology.
+- Standing writing and editing instructions, renamed to remove Muse terminology.
 
 Persisted settings ignore and remove the obsolete `aiProvider` field during
 hydration. Users without an OpenAI key or selected model see the standard OpenAI
@@ -689,6 +747,7 @@ has moved.
 - Request construction includes exactly one current mode prompt.
 - Persisted history never contains system prompts.
 - Switching modes during a run affects only the next run.
+- Proposal tools enforce every frozen task boundary.
 - Draft context stays live and sent context freezes exact text, order, and type.
 - Sent attachments retain snapshots when live sources change or disappear.
 - "Pick Up From Here" reads the full chapter.
@@ -702,6 +761,7 @@ has moved.
 - Accept All is atomic and creates one undo operation.
 - Stop and retry preserve the correct frozen run data.
 - Compaction omits old mode prompts and retains author decisions.
+- Compacted attachment snapshots remain available through conversation-context reads.
 - Persistence round-trips v3 state.
 - v1 and v2 AI state intentionally migrate to an empty v3 conversation.
 - Malformed current state and save failures surface typed errors.

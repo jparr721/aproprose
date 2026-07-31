@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { useProjectStore } from "@/stores/project-store";
@@ -11,6 +11,7 @@ afterEach(() => cleanup());
 beforeEach(() => {
   useOutlineBoardStore.setState({
     openChapterId: null,
+    highlightedCardId: null,
     proposal: null,
     decisions: {},
     sculptingChapterId: null,
@@ -66,5 +67,44 @@ describe("BoardChapterColumn sculpt states", () => {
     const { container } = render(<OutlineBoard />);
     expect(container.querySelector('svg[data-slot="spinner"]')).toBeNull();
     expect(screen.queryByText("Try again")).toBeNull();
+  });
+});
+
+describe("BoardCard agent navigation highlight", () => {
+  it("marks the exact card and clears the highlight before opening its chapter", () => {
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        chapters: {
+          ...state.meta.chapters,
+          ch1: {
+            ...state.meta.chapters.ch1,
+            cards: [
+              {
+                id: "card-1",
+                title: "The letter arrives",
+                intention: "Force a choice",
+                characterIds: [],
+                loreIds: [],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+      },
+    }));
+    useOutlineBoardStore.setState({ highlightedCardId: "card-1" });
+
+    const { container } = render(<OutlineBoard />);
+    const card = container.querySelector('[data-outline-card-id="card-1"]');
+    if (!(card instanceof HTMLElement)) {
+      throw new Error("Expected the highlighted outline card.");
+    }
+
+    expect(card.className).toContain("ring-2");
+    expect(card.className).toContain("ring-ring");
+    fireEvent.click(card);
+    expect(useOutlineBoardStore.getState().highlightedCardId).toBeNull();
+    expect(useOutlineBoardStore.getState().openChapterId).toBe("ch1");
   });
 });

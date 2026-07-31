@@ -11,12 +11,14 @@ import type { SculptProposal } from "@/lib/types";
 interface OutlineBoardState {
   /** The chapter whose subview is open, or null for the board overview. */
   openChapterId: string | null;
+  highlightedCardId: string | null;
   proposal: SculptProposal | null;
   decisions: Record<number, "keep" | "skip">;
   sculptingChapterId: string | null;
   sculptError: string | null;
   openChapter: (id: string) => void;
   closeChapter: () => void;
+  highlightCard: (id: string | null) => void;
   startSculpt: (chapterId: string) => void;
   setProposal: (p: SculptProposal | null) => void;
   setSculptError: (e: string | null) => void;
@@ -27,12 +29,14 @@ interface OutlineBoardState {
 
 export const useOutlineBoardStore = create<OutlineBoardState>()((set) => ({
   openChapterId: null,
+  highlightedCardId: null,
   proposal: null,
   decisions: {},
   sculptingChapterId: null,
   sculptError: null,
   openChapter: (openChapterId) => set({ openChapterId }),
   closeChapter: () => set({ openChapterId: null }),
+  highlightCard: (highlightedCardId) => set({ highlightedCardId }),
   startSculpt: (chapterId) =>
     set({ sculptingChapterId: chapterId, proposal: null, sculptError: null, decisions: {} }),
   setProposal: (p) => set({ proposal: p, decisions: {} }),

@@ -76,6 +76,7 @@ export function CommandPalette() {
   const ctx: CommandContext = { toggleSidebar };
 
   const runCommand = (cmd: Cmd) => {
+    if (!(cmd.enabled?.() ?? true)) return;
     if (cmd.page) {
       pushPage(cmd.page);
       return;
@@ -97,7 +98,10 @@ export function CommandPalette() {
   const recentCommands = showRecent
     ? recentIds
         .map((id) => resolveStaticCommand(id))
-        .filter((c): c is Cmd => Boolean(c))
+        .filter(
+          (command): command is Cmd =>
+            command !== undefined && (command.enabled?.() ?? true),
+        )
     : [];
 
   const renderItem = (cmd: Cmd, opts?: { recent?: boolean }) => {

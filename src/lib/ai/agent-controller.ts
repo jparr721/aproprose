@@ -11,7 +11,6 @@ import {
   blockFingerprint,
   cardFingerprint,
   draftContextRefKey,
-  findBridgeSuccessor,
   findingFingerprint,
   flattenMessageFindings,
   resolveDraftSnapshots,
@@ -120,6 +119,15 @@ interface ResolvedDraftContext {
   attachments: ResolvedContextAttachment[];
 }
 
+interface DraftContextCapture {
+  project: ProjectInfo;
+  activeChapter: LoadedChapter | null;
+  attachments: CapturedContextAttachment[];
+  locators: Record<string, DraftSourceLocator>;
+  meta: ProjectMeta;
+  messages: AgentUIMessage[];
+}
+
 function storeContextResolutions(
   resolved: ResolvedDraftContext,
 ): AgentDraftContextResolution[] {
@@ -151,6 +159,7 @@ interface SubmissionCapture {
   lastUsage: ReturnType<typeof useAgentConsoleStore.getState>["lastUsage"];
   pendingProposal: PendingProposal | null;
   retryOf: string | null;
+  activeChapter: LoadedChapter | null;
   resolveTaskAndTarget: () => Promise<{
     task: AgentTask;
     chapter: LoadedChapter | null;
@@ -192,36 +201,15 @@ function currentProjectAtRoot(projectRoot: string): ProjectInfo {
   return project;
 }
 
-async function loadChapterSnapshot(
-  projectRoot: string,
+function loadedChapter(
   chapterId: string,
-): Promise<LoadedChapter> {
-  const before = useProjectStore.getState();
-  const project = currentProjectAtRoot(projectRoot);
-  const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
-  if (chapter === undefined) {
-    throw new Error(`Chapter does not belong to the frozen project: ${chapterId}`);
-  }
-  if (before.activeChapterId === chapterId) {
-    return {
-      chapterId,
-      title: chapter.title,
-      blocks: before.blocks.map((block, order) => {
-        const cloned = cloneBlock(block);
-        return {
-          ...cloned,
-          order,
-          fingerprint: blockFingerprint(cloned),
-        };
-      }),
-    };
-  }
-  const source = await readTextFile(projectRoot, chapter.file);
-  currentProjectAtRoot(projectRoot);
+  title: string,
+  blocks: Block[],
+): LoadedChapter {
   return {
     chapterId,
-    title: chapter.title,
-    blocks: parseChapter(source).map((block, order) => {
+    title,
+    blocks: blocks.map((block, order) => {
       const cloned = cloneBlock(block);
       return {
         ...cloned,
@@ -230,6 +218,39 @@ async function loadChapterSnapshot(
       };
     }),
   };
+}
+
+function captureActiveChapter(
+  project: ProjectInfo,
+  activeChapterId: string | null,
+  blocks: Block[],
+): LoadedChapter | null {
+  if (activeChapterId === null) return null;
+  const chapter = project.chapters.find(
+    (candidate) => candidate.id === activeChapterId,
+  );
+  if (chapter === undefined) {
+    throw new Error(
+      `Active chapter does not belong to the frozen project: ${activeChapterId}`,
+    );
+  }
+  return loadedChapter(chapter.id, chapter.title, blocks);
+}
+
+async function loadChapterSnapshot(
+  project: ProjectInfo,
+  chapterId: string,
+  activeChapter: LoadedChapter | null,
+): Promise<LoadedChapter> {
+  currentProjectAtRoot(project.root);
+  const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
+  if (chapter === undefined) {
+    throw new Error(`Chapter does not belong to the frozen project: ${chapterId}`);
+  }
+  if (activeChapter?.chapterId === chapterId) return activeChapter;
+  const source = await readTextFile(project.root, chapter.file);
+  currentProjectAtRoot(project.root);
+  return loadedChapter(chapterId, chapter.title, parseChapter(source));
 }
 
 function unavailableSource(
@@ -343,19 +364,59 @@ function settledFindings(
   return findings;
 }
 
-async function resolveDraftContext(args: {
-  projectRoot: string;
+function captureDraftContext(args: {
+  project: ProjectInfo;
+  activeChapter: LoadedChapter | null;
   attachments: CapturedContextAttachment[];
   locators: Record<string, DraftSourceLocator>;
   meta: ProjectMeta;
   messages: AgentUIMessage[];
+}): DraftContextCapture {
+  const project = cloneProject(args.project);
+  const activeChapter =
+    args.activeChapter === null
+      ? null
+      : structuredClone(args.activeChapter);
+  const attachments = structuredClone(args.attachments);
+  const locators = structuredClone(args.locators);
+  if (activeChapter !== null) {
+    for (const attachment of attachments) {
+      const ref = attachment.ref;
+      if (ref.kind !== "block" || ref.chapterId !== activeChapter.chapterId) {
+        continue;
+      }
+      const order = activeChapter.blocks.findIndex(
+        (block) => block.id === ref.blockId,
+      );
+      if (order < 0) continue;
+      locators[draftContextRefKey(ref)] = {
+        order,
+        sourceFingerprint: activeChapter.blocks[order].fingerprint,
+      };
+    }
+  }
+  return {
+    project,
+    activeChapter,
+    attachments,
+    locators,
+    meta: structuredClone(args.meta),
+    messages: structuredClone(args.messages),
+  };
+}
+
+async function resolveDraftContext(args: DraftContextCapture & {
   makeId: () => string;
 }): Promise<ResolvedDraftContext> {
   const documents = new Map<string, Promise<LoadedChapter>>();
   const document = (chapterId: string): Promise<LoadedChapter> => {
     const existing = documents.get(chapterId);
     if (existing !== undefined) return existing;
-    const loading = loadChapterSnapshot(args.projectRoot, chapterId);
+    const loading = loadChapterSnapshot(
+      args.project,
+      chapterId,
+      args.activeChapter,
+    );
     documents.set(chapterId, loading);
     return loading;
   };
@@ -535,35 +596,63 @@ function targetChapterId(
   return task.chapterId;
 }
 
-async function freezeTaskAndTarget(args: {
-  projectRoot: string;
-  task: AgentTask;
-  pendingProposal: PendingProposal | null;
-}): Promise<{ task: AgentTask; chapter: LoadedChapter | null }> {
-  const task = structuredClone(args.task);
-  const chapterId = targetChapterId(task, args.pendingProposal);
-  const chapter =
-    chapterId === null
-      ? null
-      : await loadChapterSnapshot(args.projectRoot, chapterId);
-  if (task.kind !== "bridge") return { task, chapter };
-  if (chapter === null || chapter.chapterId !== task.chapterId) {
+function requireBridgeAnchor(task: AgentTask, chapter: LoadedChapter): void {
+  if (task.kind !== "bridge") return;
+  if (chapter.chapterId !== task.chapterId) {
     throw new Error(`Bridge chapter is unavailable: ${task.chapterId}`);
   }
+  const anchor = chapter.blocks.find(
+    (block) => block.id === task.anchorBlockId,
+  );
+  if (anchor === undefined) {
+    throw new Error(`Bridge anchor not found: ${task.anchorBlockId}`);
+  }
+  if (anchor.type !== "narration" && anchor.type !== "dialogue") {
+    throw new Error(`Bridge anchor is not prose: ${task.anchorBlockId}`);
+  }
+}
+
+function captureTaskAndTarget(args: {
+  project: ProjectInfo;
+  activeChapter: LoadedChapter | null;
+  task: AgentTask;
+  pendingProposal: PendingProposal | null;
+}): {
+  task: AgentTask;
+  resolve: SubmissionCapture["resolveTaskAndTarget"];
+} {
+  const task = structuredClone(args.task);
+  const chapterId = targetChapterId(task, args.pendingProposal);
+  if (chapterId === null) {
+    return {
+      task,
+      resolve: async () => ({ task, chapter: null }),
+    };
+  }
+  if (args.activeChapter?.chapterId === chapterId) {
+    requireBridgeAnchor(task, args.activeChapter);
+    return {
+      task,
+      resolve: async () => ({ task, chapter: args.activeChapter }),
+    };
+  }
   return {
-    task: {
-      ...task,
-      successorBlockId: findBridgeSuccessor(
-        chapter.blocks,
-        task.anchorBlockId,
-      ),
+    task,
+    resolve: async () => {
+      const chapter = await loadChapterSnapshot(
+        args.project,
+        chapterId,
+        args.activeChapter,
+      );
+      requireBridgeAnchor(task, chapter);
+      return { task, chapter };
     },
-    chapter,
   };
 }
 
 async function loadExactTaskAndTarget(args: {
-  projectRoot: string;
+  project: ProjectInfo;
+  activeChapter: LoadedChapter | null;
   task: AgentTask;
   pendingProposal: PendingProposal | null;
 }): Promise<{ task: AgentTask; chapter: LoadedChapter | null }> {
@@ -574,7 +663,11 @@ async function loadExactTaskAndTarget(args: {
     chapter:
       chapterId === null
         ? null
-        : await loadChapterSnapshot(args.projectRoot, chapterId),
+        : await loadChapterSnapshot(
+            args.project,
+            chapterId,
+            args.activeChapter,
+          ),
   };
 }
 
@@ -1277,23 +1370,21 @@ export function createAgentController(
   };
 
   const contextResolver = (args: {
-    projectRoot: string;
+    project: ProjectInfo;
+    activeChapter: LoadedChapter | null;
     attachments: CapturedContextAttachment[];
     locators: Record<string, DraftSourceLocator>;
     meta: ProjectMeta;
     messages: AgentUIMessage[];
     publish: (resolved: ResolvedDraftContext) => void;
   }) => {
+    const capture = captureDraftContext(args);
     return async (
       _signal: AbortSignal,
       ownsCurrentRun: () => boolean,
     ): Promise<{ refs: DraftContextRef[]; snapshots: ContextSnapshot[] }> => {
       const resolved = await resolveDraftContext({
-        projectRoot: args.projectRoot,
-        attachments: args.attachments,
-        locators: args.locators,
-        meta: args.meta,
-        messages: args.messages,
+        ...capture,
         makeId: dependencies.id,
       });
       if (ownsCurrentRun()) args.publish(resolved);
@@ -1313,7 +1404,7 @@ export function createAgentController(
     retryOf: string | null;
   }): Omit<
     SubmissionCapture,
-    "resolveAttachments" | "enterRun"
+    "resolveTaskAndTarget" | "resolveAttachments" | "enterRun"
   > => {
     const projectState = useProjectStore.getState();
     const project = projectState.project;
@@ -1325,9 +1416,15 @@ export function createAgentController(
       consoleState.pendingProposal === null
         ? null
         : structuredClone(consoleState.pendingProposal);
+    const frozenProject = cloneProject(project);
+    const activeChapter = captureActiveChapter(
+      frozenProject,
+      projectState.activeChapterId,
+      projectState.blocks,
+    );
     return {
       projectRoot: project.root,
-      project: cloneProject(project),
+      project: frozenProject,
       meta: structuredClone(projectState.meta),
       mode: args.mode,
       task,
@@ -1346,12 +1443,7 @@ export function createAgentController(
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
       retryOf: args.retryOf,
-      resolveTaskAndTarget: () =>
-        freezeTaskAndTarget({
-          projectRoot: project.root,
-          task,
-          pendingProposal,
-        }),
+      activeChapter,
     };
   };
 
@@ -1377,12 +1469,24 @@ export function createAgentController(
       consoleState.pendingProposal === null
         ? null
         : structuredClone(consoleState.pendingProposal);
+    const frozenProject = cloneProject(project);
+    const activeChapter = captureActiveChapter(
+      frozenProject,
+      projectState.activeChapterId,
+      projectState.blocks,
+    );
+    const taskTarget = captureTaskAndTarget({
+      project: frozenProject,
+      activeChapter,
+      task: frozenTask,
+      pendingProposal,
+    });
     const capture: SubmissionCapture = {
       projectRoot: project.root,
-      project: cloneProject(project),
+      project: frozenProject,
       meta: structuredClone(projectState.meta),
       mode: consoleState.mode,
-      task: frozenTask,
+      task: taskTarget.task,
       text,
       modelId: settings.aiModel,
       styleGuide: settings.styleGuide,
@@ -1398,14 +1502,11 @@ export function createAgentController(
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
       retryOf: null,
-      resolveTaskAndTarget: () =>
-        freezeTaskAndTarget({
-          projectRoot: project.root,
-          task: frozenTask,
-          pendingProposal,
-        }),
+      activeChapter,
+      resolveTaskAndTarget: taskTarget.resolve,
       resolveAttachments: contextResolver({
-        projectRoot: project.root,
+        project: frozenProject,
+        activeChapter,
         attachments,
         locators: structuredClone(consoleState.draftSourceLocators),
         meta: structuredClone(projectState.meta),
@@ -1450,13 +1551,22 @@ export function createAgentController(
       task: frozenRequest.task,
       retryOf: null,
     });
+    const taskTarget = captureTaskAndTarget({
+      project: base.project,
+      activeChapter: base.activeChapter,
+      task: base.task,
+      pendingProposal: base.pendingProposal,
+    });
     const consoleState = useAgentConsoleStore.getState();
     const attachments: CapturedContextAttachment[] =
       frozenRequest.refs.map((ref) => ({ ref, revision: null }));
     await runSubmission({
       ...base,
+      task: taskTarget.task,
+      resolveTaskAndTarget: taskTarget.resolve,
       resolveAttachments: contextResolver({
-        projectRoot: base.projectRoot,
+        project: base.project,
+        activeChapter: base.activeChapter,
         attachments,
         locators: structuredClone(consoleState.draftSourceLocators),
         meta: base.meta,
@@ -1528,7 +1638,8 @@ export function createAgentController(
       ...base,
       resolveTaskAndTarget: () =>
         loadExactTaskAndTarget({
-          projectRoot: base.projectRoot,
+          project: base.project,
+          activeChapter: base.activeChapter,
           task: base.task,
           pendingProposal: base.pendingProposal,
         }),
@@ -1598,6 +1709,20 @@ export function createAgentController(
     }
     const state = useAgentConsoleStore.getState();
     const capturedDraft = state.captureDraft();
+    const frozenProject = cloneProject(requestedProject);
+    const activeChapter = captureActiveChapter(
+      frozenProject,
+      projectState.activeChapterId,
+      projectState.blocks,
+    );
+    const contextCapture = captureDraftContext({
+      project: frozenProject,
+      activeChapter,
+      attachments: capturedDraft.attachments,
+      locators: state.draftSourceLocators,
+      meta: projectState.meta,
+      messages: state.messages,
+    });
     const ownsContextProject = (): boolean => {
       const currentProject = useProjectStore.getState().project;
       const currentConsole = useAgentConsoleStore.getState();
@@ -1613,11 +1738,7 @@ export function createAgentController(
     let resolved: ResolvedDraftContext;
     try {
       resolved = await resolveDraftContext({
-        projectRoot: requestedProject.root,
-        attachments: capturedDraft.attachments,
-        locators: state.draftSourceLocators,
-        meta: structuredClone(projectState.meta),
-        messages: structuredClone(state.messages),
+        ...contextCapture,
         makeId: dependencies.id,
       });
     } catch (error) {
@@ -1648,6 +1769,7 @@ export function createAgentController(
   };
 
   const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
+    const frozenIntent = structuredClone(intent);
     useViewStore.getState().openAiConsole();
     try {
       const project = useProjectStore.getState().project;
@@ -1655,20 +1777,20 @@ export function createAgentController(
         throw new Error("Open a project before using the agent console.");
       }
       requireAgentConsoleProject(project.root);
-      if (intent.kind === "focus") {
-        useAgentConsoleStore.getState().setMode(intent.mode);
+      if (frozenIntent.kind === "focus") {
+        useAgentConsoleStore.getState().setMode(frozenIntent.mode);
         return;
       }
-      if (intent.kind === "add-context") {
-        await addAgentContext(intent.refs);
+      if (frozenIntent.kind === "add-context") {
+        await addAgentContext(frozenIntent.refs);
         return;
       }
-      if (intent.kind === "prefill") {
-        await prefillAgentDraft(intent);
+      if (frozenIntent.kind === "prefill") {
+        await prefillAgentDraft(frozenIntent);
         return;
       }
-      useAgentConsoleStore.getState().setMode(intent.mode);
-      await submitAgentRequest(intent);
+      useAgentConsoleStore.getState().setMode(frozenIntent.mode);
+      await submitAgentRequest(frozenIntent);
     } catch (error) {
       if (useAgentConsoleStore.getState().runError === null) {
         const failure = runError(error, null);
@@ -1728,17 +1850,27 @@ async function refreshAttachedDraftSources(): Promise<void> {
     return;
   }
   const capturedDraft = consoleState.captureDraft();
+  const frozenProject = cloneProject(project);
+  const activeChapter = captureActiveChapter(
+    frozenProject,
+    projectState.activeChapterId,
+    projectState.blocks,
+  );
+  const contextCapture = captureDraftContext({
+    project: frozenProject,
+    activeChapter,
+    attachments: capturedDraft.attachments,
+    locators: consoleState.draftSourceLocators,
+    meta: projectState.meta,
+    messages: consoleState.messages,
+  });
   const ownership: DraftSourceRefreshOwnership = {
     sequence,
     projectRoot: project.root,
   };
   try {
     const resolved = await resolveDraftContext({
-      projectRoot: ownership.projectRoot,
-      attachments: capturedDraft.attachments,
-      locators: structuredClone(consoleState.draftSourceLocators),
-      meta: structuredClone(projectState.meta),
-      messages: structuredClone(consoleState.messages),
+      ...contextCapture,
       makeId: () => uid("agent-source"),
     });
     if (!ownsDraftSourceRefresh(ownership)) return;

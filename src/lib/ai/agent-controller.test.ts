@@ -42,7 +42,10 @@ import {
   submitAgentRequest as submitProductionAgentRequest,
   type AgentControllerDependencies,
 } from "@/lib/ai/agent-controller";
-import { blockFingerprint } from "@/lib/ai/agent-context";
+import {
+  blockFingerprint,
+  draftContextRefKey,
+} from "@/lib/ai/agent-context";
 import type {
   StreamAgentRunInput,
   StreamAgentRunResult,
@@ -414,6 +417,77 @@ describe("dispatchAgentIntent", () => {
     });
   });
 
+  it("freezes a new active ref before an earlier inactive ref finishes loading", async () => {
+    const inactiveSource = "Inactive first.\n\nInactive target.\n";
+    const inactiveBlocks = parseChapter(inactiveSource);
+    const inactiveRef = blockRef("stale-inactive", "ch2");
+    const delayedRead = deferred<string>();
+    mocks.readTextFile.mockImplementationOnce(async () => delayedRead.promise);
+    const controller = createAgentController(makeDependencies(null));
+    const store = useAgentConsoleStore.getState();
+    store.setDraftContextRefs([inactiveRef]);
+    useAgentConsoleStore.setState({
+      draftSourceLocators: {
+        [draftContextRefKey(inactiveRef)]: {
+          order: 1,
+          sourceFingerprint: blockFingerprint(inactiveBlocks[1]),
+        },
+      },
+    });
+
+    const activeRef = blockRef("b1", "ch1");
+    const adding = controller.dispatchAgentIntent({
+      kind: "add-context",
+      refs: [activeRef],
+    });
+    await vi.waitFor(() => expect(mocks.readTextFile).toHaveBeenCalled());
+    if (activeRef.kind !== "block") {
+      throw new Error("Expected an active block reference");
+    }
+    activeRef.blockId = "b2";
+    useProjectStore.setState({
+      activeChapterId: "ch2",
+      blocks: parseChapter(inactiveSource),
+    });
+    delayedRead.resolve(inactiveSource);
+    await adding;
+
+    const state = useAgentConsoleStore.getState();
+    expect(state.draftContextRefs).toHaveLength(2);
+    const relocatedInactiveRef = state.draftContextRefs[0];
+    expect(relocatedInactiveRef).toMatchObject({
+      kind: "block",
+      chapterId: "ch2",
+    });
+    expect(state.draftContextRefs[1]).toEqual(blockRef("b1", "ch1"));
+    expect(
+      state.draftContextSources[draftContextRefKey(relocatedInactiveRef)],
+    ).toMatchObject({
+      available: true,
+      preview: "Inactive target.",
+      resolved: { chapterId: "ch2", order: 1 },
+    });
+    expect(state.draftContextSources["block:ch1:b1"]).toMatchObject({
+      available: true,
+      preview: "First live paragraph.",
+      resolved: {
+        chapterId: "ch1",
+        sourceId: "b1",
+        order: 0,
+      },
+    });
+    expect(state.draftSourceLocators).toMatchObject({
+      [draftContextRefKey(relocatedInactiveRef)]: {
+        order: 1,
+        sourceFingerprint: blockFingerprint(inactiveBlocks[1]),
+      },
+      "block:ch1:b1": {
+        order: 0,
+        sourceFingerprint: blockFingerprint(activeBlocks[0]),
+      },
+    });
+  });
+
   it("returns visible typed feedback instead of resolving context during a cross-root transition", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
@@ -710,7 +784,7 @@ describe("dispatchAgentIntent", () => {
 });
 
 describe("frozen run preflight", () => {
-  it("freezes root, mode, task, exact attachments, and the bridge successor", async () => {
+  it("freezes root, mode, task, attachments, and dispatched bridge successor", async () => {
     let chapterRead: Awaited<
       ReturnType<StreamAgentRunInput["environment"]["readChapter"]>
     > | null = null;
@@ -729,7 +803,7 @@ describe("frozen run preflight", () => {
         kind: "bridge",
         chapterId: "ch1",
         anchorBlockId: "b2",
-        successorBlockId: null,
+        successorBlockId: "b3",
       },
     });
 
@@ -812,6 +886,155 @@ describe("frozen run preflight", () => {
       type: "text",
       text: "Use the opening.",
     });
+  });
+
+  it.each([
+    {
+      name: "Suggest",
+      request: {
+        kind: "run",
+        mode: "writing",
+        text: "Suggest from here.",
+        refs: [blockRef("b1", "ch1")],
+        task: conversationTask("ch1"),
+      },
+      sourceId: "b1",
+      exactText: "First live paragraph.",
+      order: 0,
+    },
+    {
+      name: "Clean",
+      request: {
+        kind: "run",
+        mode: "edit",
+        text: "Clean this.",
+        refs: [blockRef("b2", "ch1")],
+        task: {
+          kind: "selected-block-edit",
+          chapterId: "ch1",
+          blockIds: ["b2"],
+          operation: "clean",
+        },
+      },
+      sourceId: "b2",
+      exactText: "Middle live paragraph.",
+      order: 2,
+    },
+    {
+      name: "Pick Up with a successor",
+      request: {
+        kind: "run",
+        mode: "writing",
+        text: "Bridge this.",
+        refs: [blockRef("b2", "ch1")],
+        task: {
+          kind: "bridge",
+          chapterId: "ch1",
+          anchorBlockId: "b2",
+          successorBlockId: "b3",
+        },
+      },
+      sourceId: "b2",
+      exactText: "Middle live paragraph.",
+      order: 2,
+    },
+    {
+      name: "Pick Up with a null successor",
+      request: {
+        kind: "run",
+        mode: "writing",
+        text: "Continue this.",
+        refs: [blockRef("b3", "ch1")],
+        task: {
+          kind: "bridge",
+          chapterId: "ch1",
+          anchorBlockId: "b3",
+          successorBlockId: null,
+        },
+      },
+      sourceId: "b3",
+      exactText: "Final live paragraph.",
+      order: 3,
+    },
+  ] satisfies Array<{
+    name: string;
+    request: Extract<AgentIntent, { kind: "run" }>;
+    sourceId: string;
+    exactText: string;
+    order: number;
+  }>)(
+    "captures $name inputs before deferred model lookup",
+    async ({ request, sourceId, exactText, order }) => {
+      const model = deferred<MockLanguageModelV3>();
+      let modelRequested = false;
+      let frozenChapterIds: string[] = [];
+      const dependencies = makeDependencies(async (input) => {
+        const frozenChapter = await input.environment.readChapter("ch1");
+        frozenChapterIds = frozenChapter.blocks.map((current) => current.id);
+        return successfulResult(input, "Finished");
+      });
+      dependencies.getModel = async () => {
+        modelRequested = true;
+        return model.promise;
+      };
+      const controller = createAgentController(dependencies);
+
+      const submission = controller.dispatchAgentIntent(request);
+      await vi.waitFor(() => expect(modelRequested).toBe(true));
+      useProjectStore.setState({
+        blocks: [
+          activeBlocks[0],
+          activeBlocks[2],
+          block("inserted-middle", "Inserted middle.", "narration"),
+          activeBlocks[3],
+          block("inserted-tail", "Inserted tail.", "narration"),
+          activeBlocks[1],
+        ],
+      });
+      useProjectStore.setState({
+        activeChapterId: "ch2",
+        blocks: [block("other", "Other chapter.", "narration")],
+      });
+      model.resolve(new MockLanguageModelV3());
+      await submission;
+
+      const input = dependencies.stream.mock.calls[0][0];
+      expect(input.run.task).toEqual(request.task);
+      expect(input.run.attachments).toEqual([
+        expect.objectContaining({ sourceId, exactText, order }),
+      ]);
+      expect(frozenChapterIds).toEqual([
+        "b1",
+        "note",
+        "b2",
+        "b3",
+      ]);
+    },
+  );
+
+  it("rejects an invalid dispatched bridge anchor before model lookup", async () => {
+    const dependencies = makeDependencies(null);
+    const getModel = vi.fn(async () => new MockLanguageModelV3());
+    dependencies.getModel = getModel;
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentRequest({
+        kind: "run",
+        mode: "writing",
+        text: "Bridge this.",
+        refs: [],
+        task: {
+          kind: "bridge",
+          chapterId: "ch1",
+          anchorBlockId: "missing-anchor",
+          successorBlockId: null,
+        },
+      }),
+    ).rejects.toThrow("Bridge anchor not found: missing-anchor");
+
+    expect(getModel).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
   });
 
   it("rejects submission immediately while persistence owns a transition", async () => {

@@ -75,12 +75,14 @@ describe("CommandPalette recent command availability", () => {
       blocks: [block("selected", "scratchpad")],
     },
     { name: "no selection", selectedId: null, blocks: [] },
-  ])("hides a recent Pick Up for $name", ({ selectedId, blocks }) => {
+  ])("omits a disabled-only Recent section for $name", ({ selectedId, blocks }) => {
     useProjectStore.setState({ selectedId, selectedIds: [], blocks });
 
-    renderPalette();
+    const { container } = renderPalette();
 
     expect(screen.queryByText("Pick Up From Here")).toBeNull();
+    expect(screen.queryByText("Recent")).toBeNull();
+    expect(container.querySelector("[cmdk-separator]")).toBeNull();
   });
 
   it("rechecks a recent command before closing, recording, or running it", () => {

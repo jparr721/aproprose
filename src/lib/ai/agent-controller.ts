@@ -1195,25 +1195,33 @@ export function createAgentController(
           "Select an AI model in Settings before using AI features.",
         );
       }
-      failurePhase = "configuration";
-      const model = await dependencies.getModel();
+      const [attachmentsResult, targetResult] = await Promise.allSettled([
+        capture.resolveAttachments(
+          abortController.signal,
+          ownsCurrentRun,
+        ),
+        capture.resolveTaskAndTarget(),
+      ]);
       if (!ownsCurrentRun()) return;
-      const contextWindow = modelContextWindow(capture.modelId);
-      failurePhase = null;
-
-      const attachments = await capture.resolveAttachments(
-        abortController.signal,
-        ownsCurrentRun,
-      );
-      if (!ownsCurrentRun()) return;
+      if (attachmentsResult.status === "rejected") {
+        throw attachmentsResult.reason;
+      }
+      const attachments = attachmentsResult.value;
       if (attachments.snapshots.length !== attachments.refs.length) {
         throw new Error(
           "Remove unavailable context sources before submitting this request.",
         );
       }
+      if (targetResult.status === "rejected") {
+        throw targetResult.reason;
+      }
+      const frozen = targetResult.value;
 
-      const frozen = await capture.resolveTaskAndTarget();
+      failurePhase = "configuration";
+      const model = await dependencies.getModel();
       if (!ownsCurrentRun()) return;
+      const contextWindow = modelContextWindow(capture.modelId);
+      failurePhase = null;
 
       let summary = capture.summary;
       failurePhase = "compaction";

@@ -1012,6 +1012,163 @@ describe("frozen run preflight", () => {
     },
   );
 
+  it("resolves an inactive Outline Sculpt run before deferred model lookup", async () => {
+    const initialSource = "Before model first.\n\nBefore model target.\n";
+    const changedSource = "Changed after model first.\n\nChanged after model target.\n";
+    const initialBlocks = parseChapter(initialSource);
+    const inactiveRef = blockRef("stale-outline-source", "ch2");
+    const releaseReads = deferred<void>();
+    const model = deferred<MockLanguageModelV3>();
+    let diskSource = initialSource;
+    let readStarts = 0;
+    let readCompletions = 0;
+    let readStartsAtModelLookup = -1;
+    let readCompletionsAtModelLookup = -1;
+    let modelRequested = false;
+    let frozenChapterText: string[] = [];
+    let frozenOutline: Awaited<
+      ReturnType<StreamAgentRunInput["environment"]["readOutline"]>
+    > | null = null;
+    mocks.readTextFile.mockImplementation(async (_root, path) => {
+      if (path !== "chapters/two.tex") {
+        throw new Error(`Unexpected chapter read: ${path}`);
+      }
+      const capturedSource = diskSource;
+      readStarts += 1;
+      await releaseReads.promise;
+      readCompletions += 1;
+      return capturedSource;
+    });
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        outline: { premise: "Initial outline premise" },
+        chapters: {
+          ...state.meta.chapters,
+          ch2: {
+            ...outlineChapter,
+            act: "confrontation",
+            cards: [
+              {
+                id: "ch2-card-initial",
+                title: "Initial road turn",
+                intention: "Force the detective onward",
+                characterIds: [],
+                loreIds: [],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+      },
+    }));
+    useAgentConsoleStore.setState({
+      draftSourceLocators: {
+        [draftContextRefKey(inactiveRef)]: {
+          order: 1,
+          sourceFingerprint: blockFingerprint(initialBlocks[1]),
+        },
+      },
+    });
+    const dependencies = makeDependencies(async (input) => {
+      const chapter = await input.environment.readChapter("ch2");
+      frozenChapterText = chapter.blocks.map((current) => current.text);
+      frozenOutline = await input.environment.readOutline("ch2");
+      return successfulResult(input, "Sculpted");
+    });
+    dependencies.getModel = async () => {
+      readStartsAtModelLookup = readStarts;
+      readCompletionsAtModelLookup = readCompletions;
+      modelRequested = true;
+      return model.promise;
+    };
+    const controller = createAgentController(dependencies);
+
+    const submission = controller.dispatchAgentIntent({
+      kind: "run",
+      mode: "edit",
+      text: "Sculpt the second chapter.",
+      refs: [inactiveRef],
+      task: { kind: "outline-sculpt", chapterId: "ch2" },
+    });
+    await vi.waitFor(() =>
+      expect(readStarts > 0 || modelRequested).toBe(true),
+    );
+    releaseReads.resolve(undefined);
+    await vi.waitFor(() => expect(modelRequested).toBe(true));
+    diskSource = changedSource;
+    const current = useProjectStore.getState();
+    if (current.project === null) {
+      throw new Error("Expected an active project");
+    }
+    useProjectStore.setState({
+      project: {
+        ...current.project,
+        chapters: current.project.chapters.map((chapter) =>
+          chapter.id === "ch2"
+            ? { ...chapter, title: "Changed Chapter Two" }
+            : chapter,
+        ),
+      },
+      meta: {
+        ...current.meta,
+        outline: { premise: "Changed outline premise" },
+        chapters: {
+          ...current.meta.chapters,
+          ch2: {
+            ...current.meta.chapters.ch2,
+            cards: [
+              {
+                id: "ch2-card-changed",
+                title: "Changed road turn",
+                intention: "Change the plan",
+                characterIds: [],
+                loreIds: [],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+      },
+    });
+    model.resolve(new MockLanguageModelV3());
+    await submission;
+
+    expect(readStartsAtModelLookup).toBeGreaterThan(0);
+    expect(readCompletionsAtModelLookup).toBe(readStartsAtModelLookup);
+    const input = dependencies.stream.mock.calls[0][0];
+    expect(input.run).toMatchObject({
+      task: { kind: "outline-sculpt", chapterId: "ch2" },
+      attachments: [
+        expect.objectContaining({
+          chapterId: "ch2",
+          exactText: "Before model target.",
+          order: 1,
+        }),
+      ],
+    });
+    expect(frozenChapterText).toEqual([
+      "Before model first.",
+      "Before model target.",
+    ]);
+    expect(frozenOutline).toMatchObject({
+      premise: "Initial outline premise",
+      chapters: [
+        {
+          chapterId: "ch2",
+          title: "Chapter Two",
+          cards: [
+            {
+              id: "ch2-card-initial",
+              title: "Initial road turn",
+              intention: "Force the detective onward",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it("rejects an invalid dispatched bridge anchor before model lookup", async () => {
     const dependencies = makeDependencies(null);
     const getModel = vi.fn(async () => new MockLanguageModelV3());

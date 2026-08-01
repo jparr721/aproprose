@@ -94,15 +94,16 @@ export function CommandPalette() {
   };
 
   const commands = !open ? [] : page === "root" ? buildRootCommands() : buildPage(page);
-  const showRecent = page === "root" && query.trim() === "" && recentIds.length > 0;
-  const recentCommands = showRecent
-    ? recentIds
-        .map((id) => resolveStaticCommand(id))
-        .filter(
-          (command): command is Cmd =>
-            command !== undefined && (command.enabled?.() ?? true),
-        )
-    : [];
+  const recentCommands =
+    page === "root" && query.trim() === "" && recentIds.length > 0
+      ? recentIds
+          .map((id) => resolveStaticCommand(id))
+          .filter(
+            (command): command is Cmd =>
+              command !== undefined && (command.enabled?.() ?? true),
+          )
+      : [];
+  const showRecent = recentCommands.length > 0;
 
   const renderItem = (cmd: Cmd, opts?: { recent?: boolean }) => {
     const Icon = cmd.icon;

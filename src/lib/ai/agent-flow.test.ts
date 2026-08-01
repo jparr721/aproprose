@@ -73,7 +73,7 @@ import type {
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
-import { readAppData, writeAppData } from "@/lib/tauri";
+import { readAppData, writeAppData, writeProjectMeta } from "@/lib/tauri";
 import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
 import {
   agentStateKey,
@@ -1044,7 +1044,8 @@ describe("agent console authoring flows", () => {
     }
     expect(applied.appliedChangeIds).toEqual(["flow-5", "flow-6"]);
     expect(applied.undoToken.id).toBe("b-test-1");
-    expect(useProjectStore.getState().meta.chapters.ch1.cards).toEqual([
+    const appliedMeta = useProjectStore.getState().meta;
+    expect(appliedMeta.chapters.ch1.cards).toEqual([
       {
         id: "card-1",
         title: "The summons arrives",
@@ -1062,10 +1063,20 @@ describe("agent console authoring flows", () => {
         continuityFlags: [],
       },
     ]);
+    expect(writeProjectMeta).toHaveBeenCalledOnce();
+    expect(writeProjectMeta).toHaveBeenLastCalledWith(
+      "/book",
+      JSON.stringify(appliedMeta),
+    );
     expect(
       useProjectStore.getState().undoAgentOutlineProposal(applied.undoToken),
     ).toBe(true);
     expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    expect(writeProjectMeta).toHaveBeenLastCalledWith(
+      "/book",
+      JSON.stringify(before),
+    );
   });
 
   it("stops after a completed tool row while preserving the next draft", async () => {
@@ -1144,39 +1155,12 @@ describe("agent console authoring flows", () => {
             state: "output-available",
             input: { chapterId: "ch1" },
             output: {
-              kind: "runtime",
+              kind: "summary",
               summary: {
                 label: "Read chapter",
                 target: "Chapter One",
                 detail: "3 blocks",
                 itemCount: 3,
-              },
-              value: {
-                chapterId: "ch1",
-                title: "Chapter One",
-                blocks: [
-                  {
-                    id: "anchor",
-                    order: 0,
-                    type: "narration",
-                    text: "Mara closed the ledger.",
-                    fingerprint: "64e5c668",
-                  },
-                  {
-                    id: "successor",
-                    order: 1,
-                    type: "narration",
-                    text: "At dawn, the harbor bells woke her.",
-                    fingerprint: "106a8c7e",
-                  },
-                  {
-                    id: "later",
-                    order: 2,
-                    type: "narration",
-                    text: "She found the summons under the door.",
-                    fingerprint: "bd042c29",
-                  },
-                ],
               },
             },
           },
@@ -1221,6 +1205,10 @@ describe("agent console authoring flows", () => {
         activeRun: stopped.activeRun,
         runError: stopped.runError,
       }).toEqual(expectedStoppedState);
+      expect(JSON.stringify(stopped.messages)).not.toContain(
+        "Mara closed the ledger.",
+      );
+      expect(JSON.stringify(stopped.messages)).not.toContain("64e5c668");
       if (captured === null) {
         throw new Error("Expected the stopped stream input.");
       }

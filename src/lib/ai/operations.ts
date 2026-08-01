@@ -52,25 +52,51 @@ function buildAnchoredGrounding(ctx: AnchoredContext): string {
 }
 
 const critiqueNoteSchema = z.object({
-  kind: z.enum(["strength", "watch", "idea"]),
-  tag: z.string(),
-  text: z.string(),
-  blockIds: z.array(z.string()).nullable(),
+  kind: z
+    .enum(["strength", "watch", "idea"])
+    .describe("strength = working, watch = risk, idea = opportunity"),
+  tag: z
+    .string()
+    .describe("one- or two-word craft category, e.g. Voice, Pacing"),
+  text: z
+    .string()
+    .describe("one or two sentences naming the specific moment and why"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe(
+      "ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene",
+    ),
 });
 
 export const critiqueResultSchema = z.object({
-  notes: z.array(critiqueNoteSchema),
+  notes: z
+    .array(critiqueNoteSchema)
+    .describe("a balanced handful of notes, leading with at least one strength"),
 });
 
 const continuityFlagSchema = z.object({
-  sev: z.enum(["ok", "warn", "flag"]),
-  tag: z.string(),
-  text: z.string(),
-  blockIds: z.array(z.string()).nullable(),
+  sev: z
+    .enum(["ok", "warn", "flag"])
+    .describe("ok = tracked cleanly, warn = soft inconsistency, flag = likely error"),
+  tag: z
+    .string()
+    .describe("short label for the tracked thing, e.g. Cast, Timeline"),
+  text: z
+    .string()
+    .describe("one or two sentences describing the observation and where it appears"),
+  blockIds: z
+    .array(z.string())
+    .nullable()
+    .describe(
+      "ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene",
+    ),
 });
 
 export const continuityResultSchema = z.object({
-  flags: z.array(continuityFlagSchema),
+  flags: z
+    .array(continuityFlagSchema)
+    .describe("high-signal continuity observations grounded in the supplied text"),
 });
 
 export function sanitizeFindingIds<T extends { blockIds: string[] }>(

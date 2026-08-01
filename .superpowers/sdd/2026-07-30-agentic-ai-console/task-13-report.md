@@ -223,6 +223,7 @@ The unrelated `Suggestion` UI primitive in `src/components/ai-elements/suggestio
 - Source diff before this report: 80 files, 333 insertions, 7,344 deletions.
 - No dependency, Tauri capability, runtime model-selection, or release automation changes.
 - No spec, implementation plan, or progress ledger edits.
+
 - No known blockers or unresolved failures.
 
 ## Fix Round 1
@@ -288,4 +289,64 @@ forbidden in-app product concepts: 0 matches
 - Added-line ASCII scan: PASS, zero matches.
 - Report ASCII scan: PASS, zero matches.
 - Source diff before this report append: 7 files, 2 insertions, 176 deletions.
+- No spec, implementation plan, or progress ledger edits.
+
+## Fix Round 2
+
+### Review target
+
+- Reviewed Task 13 fix commit: `b0a39fe` (`refactor: remove legacy proposal apply bypass`).
+- Fix commit: the commit containing this report section. Its SHA is returned in the task handoff because a commit cannot contain its own final SHA.
+- Scope: restore retained critique and continuity contracts and prove strict manuscript proposal parity without restoring legacy files, names, operations, or wrappers.
+
+### RED
+
+- Audited the exact pre-deletion `prompts.ts`, `prompts.test.ts`, and analysis result schemas from baseline commit `44f7cc7` before editing production code.
+- Added critique and continuity regressions that inspect the actual `system` prompt and `Output.object` schema passed to `generateText`.
+- The prompt assertions cover every retained shared, critique, and continuity instruction. The schema assertions cover every meaningful field and collection description.
+- Initial focused run: 1 file, 11 tests, 4 failed and 7 passed.
+- The four failures were the complete critique prompt contract, critique schema descriptions, complete continuity prompt contract, and continuity schema descriptions.
+
+### GREEN
+
+- Restored the exact retained shared voice preamble and the exact retained critique and continuity instruction bodies from `44f7cc7`, using ASCII punctuation only.
+- Restored the original meaningful Zod descriptions for critique kind, tag, text, block ids, and notes, plus continuity severity, tag, text, block ids, and flags.
+- Repeated focused run: 1 file, 11 tests, all passed.
+
+### Retained semantic parity audit
+
+- Shared analysis framing again requires exact tense and point-of-view matching, including first-person present; preserves unsanitized diction, rhythm, and profanity; remains concrete and manuscript-specific; follows the served beat and Goal/Conflict/Turn when structure exists; avoids structural speculation otherwise; and preserves emphasis formatting.
+- Critique again quotes or paraphrases the cited line, uses exact block ids, emits roughly 4-7 balanced notes led by a genuine strength, avoids invented problems, follows an explicit author request, and otherwise prioritizes the most important craft findings.
+- Continuity again tracks the full cast, position, prop, timeline, geography, and pronoun surface; distinguishes clean tracking, ambiguity, and likely errors; uses exact block ids; avoids assumptions about unavailable earlier chapters; favors high-signal findings; follows an explicit request; and otherwise sweeps broadly.
+- An exact extraction comparison against `44f7cc7` returned `voice: true`, `critique: true`, and `continuity: true`.
+- No deleted legacy prompt module, operation, product name, or apply wrapper was restored.
+
+### Strict proposal parity
+
+- Audited `applyAgentManuscriptProposal` before changing store production code. Its existing strict path already pruned dead selections after removal and resolved dialogue speaker display names case-insensitively.
+- Added regression coverage using frozen proposals and preconditions built by `buildManuscriptPendingProposal`.
+- The accepted rewrite-and-removal batch is applied atomically as one history entry, prunes the removed active selection to the surviving selected block, exits edit mode, clears redo state, performs no implicit disk write, and is restored by one undo.
+- The accepted dialogue insertion resolves mixed-case `mArA` to character id `character-mara`, marks the inserted block dirty, records one undo entry, writes the speaker metadata during `saveChapter`, and preserves it through the serialize/reparse save boundary.
+- No store production change was needed because both reviewed behaviors were already present in the strict path.
+
+### Residue scans
+
+- Legacy concepts: 0 matches.
+- Pure helper concepts: 0 matches.
+- Dead operation concepts: 0 matches.
+- Forbidden in-app product concepts: 0 matches.
+- Exact `applyManuscriptProposal`, `ProposalApplyResult`, and `blocksText` symbols: 0 matches.
+
+### Fix verification
+
+- Focused Vitest run: PASS, 8 files and 207 tests.
+- `just typecheck`: PASS.
+- `just test`: PASS, 88 frontend files and 938 tests; Rust 44 passed, 1 ignored, 0 failed.
+- `just build`: PASS. Vite emitted its chunk-size advisory and completed successfully.
+- `just fmt`: PASS.
+- `cargo clippy --all-targets -- -D warnings`: PASS.
+- `git diff --check`: PASS.
+- Added-line ASCII scan: PASS, zero matches.
+- Report ASCII scan: PASS, zero matches.
+- Source diff before this report append: 4 files, 329 insertions, 24 deletions.
 - No spec, implementation plan, or progress ledger edits.

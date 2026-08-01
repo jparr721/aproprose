@@ -92,6 +92,20 @@ const removeFixture = (blockId: string): BlockChange => ({
   reason: "Remove",
 });
 
+const dialogueInsertFixture = (
+  afterId: string,
+  speaker: string,
+): BlockChange => ({
+  kind: "insert",
+  blockId: null,
+  afterId,
+  type: "dialogue",
+  speaker,
+  newText: "Where were you?",
+  toIndex: null,
+  reason: "Add dialogue",
+});
+
 const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
   buildManuscriptPendingProposal({
     run: {
@@ -1124,6 +1138,123 @@ describe("applyAgentManuscriptProposal", () => {
       "A",
       "B",
     ]);
+  });
+
+  it("prunes a removed active selection and restores the batch with one undo", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+      mkBlock({ id: "c", text: "C" }),
+    ];
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      selectedId: "b",
+      selectedIds: ["a", "b"],
+      editing: true,
+      editCaret: 1,
+      chapterDirty: false,
+      past: [],
+      future: [{ blocks, selectedId: "a" }],
+    });
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      removeFixture("b"),
+    ]);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks: [expect.objectContaining({ id: "a", text: "A revised" }), blocks[2]],
+      selectedId: "a",
+      selectedIds: ["a"],
+      editing: false,
+      editCaret: null,
+      chapterDirty: true,
+      future: [],
+    });
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(writeTextFile).not.toHaveBeenCalled();
+
+    useProjectStore.getState().undo();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks,
+      selectedId: "b",
+      selectedIds: [],
+      editing: false,
+      editCaret: null,
+      chapterDirty: true,
+    });
+  });
+
+  it("resolves an inserted dialogue speaker case-insensitively and persists it", async () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [
+          {
+            id: "character-mara",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+          },
+        ],
+      },
+      blocks,
+      chapterDirty: false,
+      past: [],
+      future: [],
+    });
+    const proposal = pendingManuscriptFixture(blocks, [
+      dialogueInsertFixture("a", "mArA"),
+    ]);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(proposal, [proposal.changes[0].id]);
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().blocks[1]).toMatchObject({
+      type: "dialogue",
+      text: "Where were you?",
+      speaker: "character-mara",
+      dirty: true,
+    });
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(writeTextFile).not.toHaveBeenCalled();
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(writeTextFile).toHaveBeenCalledWith(
+      "/book",
+      "chapter-one.tex",
+      expect.stringContaining("% @speaker: character-mara"),
+    );
+    expect(useProjectStore.getState().blocks[1]).toMatchObject({
+      type: "dialogue",
+      text: "Where were you?",
+      speaker: "character-mara",
+      dirty: false,
+    });
+    expect(useProjectStore.getState().chapterDirty).toBe(false);
   });
 
   it("applies nothing when one selected precondition is stale", () => {

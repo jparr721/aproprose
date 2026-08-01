@@ -3,6 +3,7 @@ import {
   shouldCompact,
   tokensToCompact,
 } from "tokenlens";
+import type { ModelCatalog, ProviderInfo } from "@tokenlens/core";
 import type {
   AgentUIMessage,
   ConversationSummary,
@@ -22,13 +23,25 @@ function tokenlensModelId(modelId: string): string {
   return modelId.includes(":") ? modelId : `openai:${modelId}`;
 }
 
-export function modelContextWindow(modelId: string): number {
-  const context = getContextWindow(tokenlensModelId(modelId));
-  const maximum = context.combinedMax ?? context.inputMax;
-  if (maximum === undefined) {
-    throw new Error(`No context-window metadata for model: ${modelId}`);
-  }
-  return maximum;
+function maximumContextWindow(
+  context: ReturnType<typeof getContextWindow>,
+): number | null {
+  return context.combinedMax ?? context.inputMax ?? null;
+}
+
+export function modelContextWindow(
+  modelId: string,
+  currentOpenAiModels: ProviderInfo | null,
+): number | null {
+  const bundled = maximumContextWindow(
+    getContextWindow(tokenlensModelId(modelId)),
+  );
+  if (bundled !== null || currentOpenAiModels === null) return bundled;
+  return maximumContextWindow(
+    getContextWindow(tokenlensModelId(modelId), {
+      catalog: { openai: currentOpenAiModels },
+    }),
+  );
 }
 
 function tokenlensUsage(usage: PersistedUsage) {
@@ -39,10 +52,27 @@ function tokenlensUsage(usage: PersistedUsage) {
   };
 }
 
+function persistedUsageCatalog(usage: PersistedUsage): ModelCatalog {
+  return {
+    openai: {
+      id: "openai",
+      name: "OpenAI",
+      models: {
+        [usage.modelId]: {
+          id: usage.modelId,
+          name: usage.modelId,
+          limit: { context: usage.contextWindow },
+        },
+      },
+    },
+  };
+}
+
 export function shouldCompactConversation(usage: PersistedUsage): boolean {
   return shouldCompact({
     modelId: tokenlensModelId(usage.modelId),
     usage: tokenlensUsage(usage),
+    catalog: persistedUsageCatalog(usage),
   });
 }
 
@@ -50,6 +80,7 @@ export function compactionTokenTarget(usage: PersistedUsage): number {
   return tokensToCompact({
     modelId: tokenlensModelId(usage.modelId),
     usage: tokenlensUsage(usage),
+    catalog: persistedUsageCatalog(usage),
   });
 }
 

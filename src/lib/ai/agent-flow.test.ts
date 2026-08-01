@@ -217,6 +217,7 @@ function dependencies(
     now: () => "2026-07-30T12:00:00.000Z",
     id: () => `flow-${++nextId}`,
     getModel: async () => new MockLanguageModelV3(),
+    getContextWindow: async () => 1_047_576,
     summarize: async () => "Compacted history",
     stream: streamImplementation,
   };

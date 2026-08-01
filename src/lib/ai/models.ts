@@ -5,9 +5,37 @@
 
 import { uniq } from "es-toolkit";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import {
+  fetchModels,
+  type FetchLike,
+  type ProviderInfo,
+} from "tokenlens";
+import { modelContextWindow } from "@/lib/ai/agent-compaction";
+import { withAiRetry } from "@/lib/ai/errors";
 import { getAiConfig } from "@/lib/tauri";
 
 const MODELS_ENDPOINT = "https://api.openai.com/v1/models";
+
+let currentOpenAiModelsPromise: Promise<ProviderInfo> | null = null;
+
+function currentOpenAiModels(): Promise<ProviderInfo> {
+  if (currentOpenAiModelsPromise === null) {
+    currentOpenAiModelsPromise = withAiRetry(async () => {
+      const provider = await fetchModels({
+        provider: "openai",
+        fetch: tauriFetch as unknown as FetchLike,
+      });
+      if (provider === undefined) {
+        throw new Error("models.dev returned no OpenAI model metadata.");
+      }
+      return provider;
+    }).catch((error: unknown) => {
+      currentOpenAiModelsPromise = null;
+      throw error;
+    });
+  }
+  return currentOpenAiModelsPromise;
+}
 
 /** Model-id prefixes that denote a text/chat-generation family. */
 const TEXT_MODEL_PREFIXES = ["gpt", "chatgpt", "o1", "o3", "o4"] as const;
@@ -39,6 +67,18 @@ export function filterTextModels(ids: string[]): string[] {
     return isTextFamily && !isNonText;
   });
   return uniq(kept).sort();
+}
+
+export async function resolveModelContextWindow(
+  modelId: string,
+): Promise<number> {
+  const bundled = modelContextWindow(modelId, null);
+  if (bundled !== null) return bundled;
+  const current = modelContextWindow(modelId, await currentOpenAiModels());
+  if (current === null) {
+    throw new Error(`No context-window metadata for model: ${modelId}`);
+  }
+  return current;
 }
 
 interface ModelsResponse {

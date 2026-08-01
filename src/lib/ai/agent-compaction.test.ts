@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  compactionTokenTarget,
   compactConversation,
   messagesForNextRequest,
+  modelContextWindow,
   selectCompactionTurns,
   shouldCompactConversation,
 } from "@/lib/ai/agent-compaction";
+import type { ProviderInfo } from "@tokenlens/core";
 import type {
   AgentMessageMetadata,
   AgentUIMessage,
@@ -201,6 +204,59 @@ describe("compaction threshold", () => {
       raw: {} as PersistedUsage["raw"],
     } satisfies PersistedUsage;
     expect(shouldCompactConversation(usage)).toBe(true);
+  });
+
+  it("uses persisted context metadata for a model absent from the bundled catalog", () => {
+    const usage = {
+      modelId: "gpt-5.6-luna",
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      contextWindow: 1_050_000,
+      raw: {} as PersistedUsage["raw"],
+    } satisfies PersistedUsage;
+
+    expect(shouldCompactConversation(usage)).toBe(false);
+    expect(
+      shouldCompactConversation({
+        ...usage,
+        inputTokens: 900_000,
+        outputTokens: 1_000,
+        totalTokens: 901_000,
+      }),
+    ).toBe(true);
+    expect(
+      compactionTokenTarget({
+        ...usage,
+        inputTokens: 900_000,
+        outputTokens: 1_000,
+        totalTokens: 901_000,
+      }),
+    ).toBe(271_000);
+  });
+});
+
+describe("modelContextWindow", () => {
+  it("reads a current OpenAI model absent from the bundled catalog", () => {
+    const currentOpenAiModels = {
+      id: "openai",
+      name: "OpenAI",
+      models: {
+        "gpt-5.6-luna": {
+          id: "gpt-5.6-luna",
+          name: "GPT-5.6 Luna",
+          limit: {
+            context: 1_050_000,
+            input: 922_000,
+            output: 128_000,
+          },
+        },
+      },
+    } satisfies ProviderInfo;
+
+    expect(modelContextWindow("gpt-5.6-luna", currentOpenAiModels)).toBe(
+      1_050_000,
+    );
   });
 });
 

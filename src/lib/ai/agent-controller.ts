@@ -4,7 +4,6 @@ import {
   compactionTokenTarget,
   compactConversation,
   messagesForNextRequest,
-  modelContextWindow,
   shouldCompactConversation,
 } from "@/lib/ai/agent-compaction";
 import {
@@ -17,6 +16,7 @@ import {
 } from "@/lib/ai/agent-context";
 import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import { getModel } from "@/lib/ai/model";
+import { resolveModelContextWindow } from "@/lib/ai/models";
 import { buildAgentInstructions } from "@/lib/ai/agent-prompts";
 import {
   buildManuscriptPendingProposal,
@@ -76,6 +76,7 @@ export interface AgentControllerDependencies {
   now: () => string;
   id: () => string;
   getModel: (modelId: string) => Promise<LanguageModel>;
+  getContextWindow: (modelId: string) => Promise<number>;
   summarize: (
     model: LanguageModel,
     source: string,
@@ -1277,9 +1278,9 @@ export function createAgentController(
 
       failurePhase = "configuration";
       const model = await dependencies.getModel(capture.modelId);
-      if (!ownsCurrentRun()) return;
-      const contextWindow = modelContextWindow(capture.modelId);
       failurePhase = null;
+      const contextWindow = await dependencies.getContextWindow(capture.modelId);
+      if (!ownsCurrentRun()) return;
 
       let summary = capture.summary;
       failurePhase = "compaction";
@@ -1391,6 +1392,15 @@ export function createAgentController(
         return;
       }
       const failure = runError(error, failurePhase);
+      console.error("Agent run failed", {
+        cause: error,
+        code: failure.code,
+        message: failure.message,
+        modelId: capture.modelId,
+        phase: failurePhase,
+        projectRoot: capture.projectRoot,
+        runId,
+      });
       if (!enteredRun) {
         useAgentConsoleStore.getState().failPreflight(failure);
       } else {
@@ -1983,6 +1993,7 @@ const productionController = createAgentController({
   now: () => new Date().toISOString(),
   id: () => uid("agent"),
   getModel,
+  getContextWindow: resolveModelContextWindow,
   summarize: async (model, source, signal) => {
     const result = await generateText({
       model,

@@ -455,3 +455,32 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod capability_tests {
+    use serde_json::Value;
+
+    #[test]
+    fn http_capability_allows_model_metadata_endpoint() {
+        let capability: Value = serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("default capability must be valid JSON");
+        let http = capability["permissions"]
+            .as_array()
+            .expect("permissions must be an array")
+            .iter()
+            .find(|permission| permission["identifier"] == "http:default")
+            .expect("http:default permission must exist");
+        let urls: Vec<&str> = http["allow"]
+            .as_array()
+            .expect("http allowlist must be an array")
+            .iter()
+            .map(|entry| {
+                entry["url"]
+                    .as_str()
+                    .expect("http allowlist entries must contain URLs")
+            })
+            .collect();
+
+        assert!(urls.contains(&"https://models.dev/*"));
+    }
+}

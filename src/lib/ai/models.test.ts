@@ -1,10 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
 
-// Keep the Tauri/http import graph inert; this suite only tests the pure filter.
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
-vi.mock("@/lib/tauri", () => ({ getAiConfig: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  fetchModels: vi.fn(),
+  getAiConfig: vi.fn(),
+  tauriFetch: vi.fn(),
+  toastWarning: vi.fn(),
+}));
 
-import { filterTextModels } from "@/lib/ai/models";
+// Keep the Tauri/http import graph inert and control metadata network requests.
+vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mocks.tauriFetch }));
+vi.mock("@/lib/tauri", () => ({ getAiConfig: mocks.getAiConfig }));
+vi.mock("tokenlens", async () => {
+  const actual = await vi.importActual<typeof import("tokenlens")>("tokenlens");
+  return { ...actual, fetchModels: mocks.fetchModels };
+});
+vi.mock("sonner", () => ({ toast: { warning: mocks.toastWarning } }));
+
+import {
+  filterTextModels,
+  resolveModelContextWindow,
+} from "@/lib/ai/models";
 
 describe("filterTextModels", () => {
   it("keeps gpt and o-series text models", () => {
@@ -37,5 +52,37 @@ describe("filterTextModels", () => {
 
   it("returns empty when nothing is text-capable", () => {
     expect(filterTextModels(["text-embedding-3-large", "dall-e-2"])).toEqual([]);
+  });
+});
+
+describe("resolveModelContextWindow", () => {
+  it("retries and loads current metadata for a live model missing from the bundle", async () => {
+    mocks.fetchModels
+      .mockRejectedValueOnce(new Error("models.dev unavailable"))
+      .mockResolvedValueOnce({
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-5.6-luna": {
+            id: "gpt-5.6-luna",
+            name: "GPT-5.6 Luna",
+            limit: {
+              context: 1_050_000,
+              input: 922_000,
+              output: 128_000,
+            },
+          },
+        },
+      });
+
+    await expect(resolveModelContextWindow("gpt-5.6-luna")).resolves.toBe(
+      1_050_000,
+    );
+    expect(mocks.fetchModels).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchModels).toHaveBeenLastCalledWith({
+      provider: "openai",
+      fetch: mocks.tauriFetch,
+    });
+    expect(mocks.toastWarning).toHaveBeenCalledOnce();
   });
 });

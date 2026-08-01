@@ -21,7 +21,10 @@
     "core:window:allow-close",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://api.openai.com/*" }]
+      "allow": [
+        { "url": "https://api.openai.com/*" },
+        { "url": "https://models.dev/*" }
+      ]
     }
   ]
 }

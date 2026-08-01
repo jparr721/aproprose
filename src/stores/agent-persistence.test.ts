@@ -52,6 +52,14 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/ai/models", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ai/models")>();
+  return {
+    ...actual,
+    resolveModelContextWindow: vi.fn().mockResolvedValue(400_000),
+  };
+});
+
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;

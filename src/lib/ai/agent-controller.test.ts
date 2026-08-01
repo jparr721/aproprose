@@ -46,6 +46,7 @@ import {
   blockFingerprint,
   draftContextRefKey,
 } from "@/lib/ai/agent-context";
+import { modelContextWindow } from "@/lib/ai/agent-compaction";
 import type {
   StreamAgentRunInput,
   StreamAgentRunResult,
@@ -270,6 +271,13 @@ function makeDependencies(
     now: () => "2026-07-30T12:00:00.000Z",
     id: () => `agent-${++nextId}`,
     getModel: async () => new MockLanguageModelV3(),
+    getContextWindow: async (modelId) => {
+      const contextWindow = modelContextWindow(modelId, null);
+      if (contextWindow === null) {
+        throw new Error(`Missing test context metadata: ${modelId}`);
+      }
+      return contextWindow;
+    },
     summarize: async () => "Compacted history",
     stream,
   };
@@ -820,6 +828,9 @@ describe("dispatchAgentIntent", () => {
   it("resolves product run failures without erasing their typed error", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     useSettingsStore.setState({ aiModel: null });
 
     await controller.dispatchAgentIntent({
@@ -839,6 +850,54 @@ describe("dispatchAgentIntent", () => {
       messages: [],
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Agent run failed",
+      expect.objectContaining({
+        code: "configuration",
+        message: "Select an AI model in Settings before using AI features.",
+        phase: "configuration",
+        projectRoot: "/book",
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("does not report model metadata transport failures as missing configuration", async () => {
+    const dependencies = makeDependencies(null);
+    dependencies.getContextWindow = async () => {
+      const error = new Error("Model metadata service unavailable") as Error & {
+        status: number;
+      };
+      error.status = 503;
+      throw error;
+    };
+    const controller = createAgentController(dependencies);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    await controller.dispatchAgentIntent({
+      kind: "run",
+      mode: "writing",
+      text: "Continue.",
+      refs: [],
+      task: conversationTask("ch1"),
+    });
+
+    expect(useAgentConsoleStore.getState().runError).toEqual({
+      code: "transport",
+      message: "HTTP 503 - Model metadata service unavailable",
+    });
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Agent run failed",
+      expect.objectContaining({
+        code: "transport",
+        message: "HTTP 503 - Model metadata service unavailable",
+        phase: null,
+      }),
+    );
+    consoleError.mockRestore();
   });
 });
 

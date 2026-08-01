@@ -774,6 +774,20 @@ export function emptyPersistedAgentState(): PersistedAgentSnapshot &
   };
 }
 
+export async function resetAgentConversation(root: string): Promise<void> {
+  const empty = emptyPersistedAgentState();
+  await writeAppData(agentStateKey(root), empty);
+  useAgentConsoleStore.getState().hydrate(root, empty);
+  useAgentConsoleStore.getState().setPersistenceIssue(null);
+  if (activeRoot === root && requestedRoot === root) {
+    const resetRevision = nextRevision();
+    recoveryRoot = null;
+    writableRoot = root;
+    activeRevision = resetRevision;
+    persistedRevision = resetRevision;
+  }
+}
+
 function captureAgentSnapshotSource(): AgentSnapshotSource {
   const state = useAgentConsoleStore.getState();
   return {

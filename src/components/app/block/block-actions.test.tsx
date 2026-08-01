@@ -40,6 +40,7 @@ beforeEach(() => {
     blocks: [block("A", "narration"), block("B", "dialogue")],
   } as never);
   useAiIntentStore.setState({ pending: null });
+  useViewStore.setState({ aiOpen: false, focus: false });
 });
 
 describe("Pick up from here block action", () => {
@@ -56,7 +57,7 @@ describe("Pick up from here block action", () => {
       instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix("A"),
       autoRun: true,
     });
-    expect(useViewStore.getState().aiTab).toBe("muse");
+    expect(useViewStore.getState().aiOpen).toBe(true);
   });
 
   it("is disabled on non-prose blocks", () => {

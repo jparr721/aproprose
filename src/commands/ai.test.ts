@@ -41,6 +41,7 @@ describe("ai.pick-up command", () => {
   beforeEach(() => {
     useAiIntentStore.setState({ pending: null });
     useProjectStore.setState({ selectedId: null, editing: false });
+    useViewStore.setState({ aiOpen: false, focus: true });
   });
 
   it("parks an auto-running muse intent carrying the directive and the cursor line", () => {
@@ -52,7 +53,10 @@ describe("ai.pick-up command", () => {
       instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix("b7"),
       autoRun: true,
     });
-    expect(useViewStore.getState().aiTab).toBe("muse");
+    expect(useViewStore.getState()).toMatchObject({
+      aiOpen: true,
+      focus: false,
+    });
   });
 
   it("appends the no-cursor line when nothing is selected", () => {

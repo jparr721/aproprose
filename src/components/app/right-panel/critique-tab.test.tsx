@@ -78,7 +78,7 @@ describe("CritiqueTab card actions", () => {
       blockIds: ["b2"],
       scope: "block",
     });
-    expect(useViewStore.getState().aiTab).toBe("edit");
+    expect(useViewStore.getState().aiOpen).toBe(true);
   });
 
   it("a scene-level note sends chapter scope", () => {

@@ -1,13 +1,16 @@
 // commands/ai.ts - open the AI panel on a given tab, or dispatch an AI intent.
 
 import { IconSparkles, IconMessageCircle, IconListTree, IconWand } from "@tabler/icons-react";
-import { useViewStore, type AiTab } from "@/stores/view-store";
+import { useViewStore } from "@/stores/view-store";
 import { useProjectStore } from "@/stores/project-store";
-import { dispatchAiIntent } from "@/stores/ai-intent-store";
+import {
+  dispatchAiIntent,
+  type LegacyAssistantTab,
+} from "@/stores/ai-intent-store";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import type { Command } from "./types";
 
-const AI_TABS: { tab: AiTab; title: string }[] = [
+const AI_TABS: { tab: LegacyAssistantTab; title: string }[] = [
   { tab: "suggest", title: "AI: Suggest" },
   { tab: "edit", title: "AI: Edit" },
   { tab: "critique", title: "AI: Critique" },
@@ -23,7 +26,7 @@ export const aiCommands: Command[] = [
     title: "Outline",
     icon: IconListTree,
     keywords: ["structure", "beats", "acts", "story spine"],
-    run: () => useViewStore.getState().openAiTab("outline"),
+    run: () => useViewStore.getState().openOutline(),
   },
   {
     id: "ai.suggest",
@@ -57,6 +60,6 @@ export const aiCommands: Command[] = [
     group: "AI",
     title,
     icon: IconMessageCircle,
-    run: () => useViewStore.getState().openAiTab(tab),
+    run: () => useViewStore.getState().openAiConsole(),
   })),
 ];

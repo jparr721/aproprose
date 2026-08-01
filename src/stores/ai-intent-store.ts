@@ -7,11 +7,20 @@
 // unconsumed intent is simply replaced by the next dispatch.
 
 import { create } from "zustand";
-import { useViewStore, type AiTab } from "@/stores/view-store";
+import { useViewStore } from "@/stores/view-store";
 import type { ReadScope } from "@/lib/ai/context";
 
+export type LegacyAssistantTab =
+  | "outline"
+  | "suggest"
+  | "edit"
+  | "critique"
+  | "brainstorm"
+  | "continuity"
+  | "muse";
+
 export interface AiIntent {
-  tab: AiTab;
+  tab: LegacyAssistantTab;
   /** Prefill for the tab's composer ask box. */
   instruction?: string;
   /** Blocks the intent targets (Edit selects them via setSelection). */
@@ -24,16 +33,16 @@ export interface AiIntent {
 
 interface AiIntentState {
   pending: AiIntent | null;
-  /** Park an intent and open the panel on its tab (openAiTab). */
+  /** Park an intent and open the shared console. */
   dispatch: (intent: AiIntent) => void;
   /** Return-and-clear pending when it targets `tab`, else null. */
-  consume: (tab: AiTab) => AiIntent | null;
+  consume: (tab: LegacyAssistantTab) => AiIntent | null;
 }
 
 export const useAiIntentStore = create<AiIntentState>()((set, get) => ({
   pending: null,
   dispatch: (intent) => {
-    useViewStore.getState().openAiTab(intent.tab);
+    useViewStore.getState().openAiConsole();
     set({ pending: intent });
   },
   consume: (tab) => {

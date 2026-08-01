@@ -20,6 +20,7 @@ import {
   emptyPersistedAgentState,
   fromAgentSnapshot,
   loadAgentState,
+  resetAgentConversation,
   retryAgentPersistence,
   saveAgentState,
   toAgentSnapshot,
@@ -1424,6 +1425,96 @@ describe("agent persistence", () => {
     await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(1));
     vi.useRealTimers();
     persistence.unmount();
+  });
+
+  it("resets a malformed conversation to empty v3 state after an explicit action", async () => {
+    const root = "/books/corrupt";
+    const issue = {
+      kind: "corrupt" as const,
+      projectRoot: root,
+      message: "Malformed agent conversation",
+    };
+    useAgentConsoleStore.setState({
+      mode: "edit",
+      messages: [textMessage("user-corrupt", "user", "Keep me", "complete")],
+      draftText: "Unreadable draft",
+      pendingProposal: proposal,
+      persistenceIssue: issue,
+    });
+
+    await resetAgentConversation(root);
+
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey(root),
+      emptyPersistedAgentState(),
+    );
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      mode: "writing",
+      messages: [],
+      draftText: "",
+      pendingProposal: null,
+      persistenceIssue: null,
+      hydratedProjectRoot: root,
+    });
+  });
+
+  it("restores automatic saves after resetting a malformed conversation", async () => {
+    const root = "/books/corrupt";
+    tauri.readAppData.mockResolvedValue({
+      ...emptyPersistedAgentState(),
+      draftSourceLocators: undefined,
+    });
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
+        kind: "corrupt",
+        projectRoot: root,
+      }),
+    );
+
+    await resetAgentConversation(root);
+    tauri.writeAppData.mockClear();
+    vi.useFakeTimers();
+
+    useAgentConsoleStore.getState().setDraftText("Writable after reset");
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(1));
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey(root),
+      expect.objectContaining({ draftText: "Writable after reset" }),
+    );
+
+    vi.useRealTimers();
+    persistence.unmount();
+  });
+
+  it("retains the malformed conversation and issue when reset cannot be written", async () => {
+    const root = "/books/corrupt";
+    const issue = {
+      kind: "corrupt" as const,
+      projectRoot: root,
+      message: "Malformed agent conversation",
+    };
+    const messages = [
+      textMessage("user-corrupt", "user", "Keep me", "complete"),
+    ];
+    useAgentConsoleStore.setState({
+      mode: "edit",
+      messages,
+      draftText: "Unreadable draft",
+      persistenceIssue: issue,
+    });
+    tauri.writeAppData.mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(resetAgentConversation(root)).rejects.toThrow("disk full");
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      mode: "edit",
+      messages,
+      draftText: "Unreadable draft",
+      persistenceIssue: issue,
+    });
   });
 
   it("aborts app-exit work even when the corrupt root cannot be flushed", async () => {

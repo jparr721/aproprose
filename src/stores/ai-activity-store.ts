@@ -9,25 +9,25 @@
 // (never persisted) and is reset alongside the AI stores on project switch.
 
 import { create } from "zustand";
-import { useViewStore, type AiTab } from "@/stores/view-store";
+import type { LegacyAssistantTab } from "@/stores/ai-intent-store";
+import { useViewStore } from "@/stores/view-store";
 
 export type AiActivity = "running" | "done" | "failed";
 
 interface AiActivityState {
   /** Per-tab status; absent means nothing to surface. */
-  status: Partial<Record<AiTab, AiActivity>>;
-  start: (tab: AiTab) => void;
-  finish: (tab: AiTab, outcome: "done" | "failed") => void;
-  markSeen: (tab: AiTab) => void;
+  status: Partial<Record<LegacyAssistantTab, AiActivity>>;
+  start: (tab: LegacyAssistantTab) => void;
+  finish: (tab: LegacyAssistantTab, outcome: "done" | "failed") => void;
+  markSeen: (tab: LegacyAssistantTab) => void;
   reset: () => void;
 }
 
-/** True when `tab` is the one the author is actively looking at: the panel is
- *  open, expanded, not in focus mode, and this tab is selected. A job that
- *  settles while its tab is watched needs no indicator. */
-function isWatched(tab: AiTab): boolean {
+/** True when the shared console is visible. A legacy job that settles while the
+ *  console is visible needs no off-screen indicator. */
+function isWatched(): boolean {
   const v = useViewStore.getState();
-  return v.aiOpen && !v.focus && !v.aiCollapsed && v.aiTab === tab;
+  return v.aiOpen && !v.focus;
 }
 
 export const useAiActivityStore = create<AiActivityState>((set) => ({
@@ -36,7 +36,7 @@ export const useAiActivityStore = create<AiActivityState>((set) => ({
   finish: (tab, outcome) =>
     set((s) => {
       const next = { ...s.status };
-      if (isWatched(tab)) delete next[tab];
+      if (isWatched()) delete next[tab];
       else next[tab] = outcome;
       return { status: next };
     }),

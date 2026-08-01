@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
-import type { AiTab } from "@/stores/view-store";
+import type { LegacyAssistantTab } from "@/stores/ai-intent-store";
 import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 
 /**
@@ -20,7 +20,7 @@ import { describeAiError, withAiRetry } from "@/lib/ai/errors";
 export function useAi<T>(
   op: (instruction?: string) => Promise<T>,
   cacheKey: string,
-  tab: AiTab,
+  tab: LegacyAssistantTab,
 ) {
   const entry = useAiCacheStore((s) => s.entries[cacheKey]);
   const patch = useAiCacheStore((s) => s.patch);

@@ -80,6 +80,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useAiCacheStore } from "@/stores/ai-cache-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useAiIntentStore } from "@/stores/ai-intent-store";
+import { useViewStore } from "@/stores/view-store";
 import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
 import type { Block, ManuscriptProposal } from "@/lib/types";
 
@@ -129,6 +130,7 @@ beforeEach(() => {
   useAiCacheStore.setState({ entries: {} });
   useAiActivityStore.setState({ status: {} });
   useAiIntentStore.setState({ pending: null });
+  useViewStore.setState({ aiOpen: true, focus: false });
 });
 
 describe("MuseTab", () => {
@@ -153,7 +155,7 @@ describe("MuseTab", () => {
     });
     expect(useMuseStore.getState().status).toBe("done");
     expect(useMuseStore.getState().staged).toBe(true);
-    expect(useAiActivityStore.getState().status.edit).toBe("done");
+    expect(useAiActivityStore.getState().status.edit).toBeUndefined();
   });
 
   it("stages a selected-block Muse proposal under Edit's block key", async () => {

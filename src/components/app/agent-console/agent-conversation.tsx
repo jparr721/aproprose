@@ -32,7 +32,7 @@ export function AgentConversation({
 }: AgentConversationProps) {
   return (
     <Conversation className="min-h-0">
-      <ConversationContent>
+      <ConversationContent scrollClassName="overflow-y-auto">
         {messages.length === 0 ? (
           <ConversationEmptyState
             description="Add manuscript context or ask a project question."

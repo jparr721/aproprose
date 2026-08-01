@@ -10,15 +10,13 @@ vi.mock("@/lib/tauri", () => ({
 import { useAiActivityStore } from "@/stores/ai-activity-store";
 import { useViewStore } from "@/stores/view-store";
 
-/** Put the panel in a known viewing state (open + expanded, looking at `aiTab`). */
-function viewing(aiTab: "outline" | "suggest"): void {
-  useViewStore.setState({ aiOpen: true, focus: false, aiCollapsed: false, aiTab });
+function viewingConsole(): void {
+  useViewStore.setState({ aiOpen: true, focus: false });
 }
 
 beforeEach(() => {
   useAiActivityStore.setState({ status: {} });
-  // Default: looking at the outline tab, so the generating tabs are all "away".
-  viewing("outline");
+  useViewStore.setState({ aiOpen: false, focus: false });
 });
 
 describe("ai-activity-store", () => {
@@ -27,46 +25,38 @@ describe("ai-activity-store", () => {
     expect(useAiActivityStore.getState().status.suggest).toBe("running");
   });
 
-  it("finish on a tab the author isn't watching flags it done", () => {
+  it("finish while the console is closed flags it done", () => {
     const s = useAiActivityStore.getState();
     s.start("suggest");
     s.finish("suggest", "done");
     expect(useAiActivityStore.getState().status.suggest).toBe("done");
   });
 
-  it("finish with a failed outcome flags the tab failed when away", () => {
+  it("finish with a failed outcome flags it when the console is closed", () => {
     const s = useAiActivityStore.getState();
     s.start("suggest");
     s.finish("suggest", "failed");
     expect(useAiActivityStore.getState().status.suggest).toBe("failed");
   });
 
-  it("finish while watching the tab clears it whatever the outcome -- a visible result needs no badge", () => {
-    viewing("suggest");
+  it("finish while the shared console is visible clears it", () => {
+    viewingConsole();
     const s = useAiActivityStore.getState();
     s.start("suggest");
     s.finish("suggest", "failed");
     expect(useAiActivityStore.getState().status.suggest).toBeUndefined();
   });
 
-  it("a collapsed panel does not count as watching, so finish still flags done", () => {
-    useViewStore.setState({ aiOpen: true, focus: false, aiCollapsed: true, aiTab: "suggest" });
+  it("focus mode does not count as watching", () => {
+    useViewStore.setState({ aiOpen: true, focus: true });
     const s = useAiActivityStore.getState();
     s.start("suggest");
     s.finish("suggest", "done");
     expect(useAiActivityStore.getState().status.suggest).toBe("done");
   });
 
-  it("focus mode does not count as watching, so finish flags even the selected tab", () => {
-    useViewStore.setState({ aiOpen: true, focus: true, aiCollapsed: false, aiTab: "suggest" });
-    const s = useAiActivityStore.getState();
-    s.start("suggest");
-    s.finish("suggest", "done");
-    expect(useAiActivityStore.getState().status.suggest).toBe("done");
-  });
-
-  it("a closed panel does not count as watching, so finish flags the selected tab", () => {
-    useViewStore.setState({ aiOpen: false, focus: false, aiCollapsed: false, aiTab: "suggest" });
+  it("a closed console does not count as watching", () => {
+    useViewStore.setState({ aiOpen: false, focus: false });
     const s = useAiActivityStore.getState();
     s.start("suggest");
     s.finish("suggest", "done");

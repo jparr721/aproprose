@@ -10,7 +10,7 @@
 // disk per project (ai-persistence). Each function lives in its own <tab>-tab.tsx
 // file; shared chrome (composer, anchor, scope toggle, helpers) sits in shared.tsx.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   IconListTree,
   IconMessages,
@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TypographyMuted } from "@/components/ui/typography";
 import { OutlineSurface } from "@/components/app/outline/outline-surface";
-import { useViewStore, type AiTab } from "@/stores/view-store";
+import type { LegacyAssistantTab } from "@/stores/ai-intent-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-store";
 import { useAiActivityStore } from "@/stores/ai-activity-store";
@@ -39,9 +39,9 @@ import { MuseTab } from "@/components/app/right-panel/muse-tab";
 // -- Panel shell --------------------------------------------------------------
 type TabMeta = { label: string; Icon: typeof IconSparkles };
 
-// Keyed by AiTab: adding a member to the union without a rail entry is a type error,
+// Keyed by the legacy tab type so a missing rail entry remains a type error,
 // so the icon rail can never silently omit a function.
-const TAB_META: Record<AiTab, TabMeta> = {
+const TAB_META: Record<LegacyAssistantTab, TabMeta> = {
   outline: { label: "Outline", Icon: IconListTree },
   suggest: { label: "Suggest", Icon: IconSparkles },
   edit: { label: "Edit", Icon: IconPencil },
@@ -52,14 +52,14 @@ const TAB_META: Record<AiTab, TabMeta> = {
 };
 
 // The ordered list the rail renders (insertion order of the meta map).
-const TABS = (Object.entries(TAB_META) as [AiTab, TabMeta][]).map(
+const TABS = (Object.entries(TAB_META) as [LegacyAssistantTab, TabMeta][]).map(
   ([id, meta]) => ({ id, ...meta }),
 );
 
 /** Render the body for the active tab. Only the active one is mounted at a time
  *  (intentional); each body reads its data from the stores (ai-cache / brainstorm)
  *  so results survive switching tabs and panel toggles. */
-function ActivePanel({ tab }: { tab: AiTab }) {
+function ActivePanel({ tab }: { tab: LegacyAssistantTab }) {
   switch (tab) {
     case "outline":
       return <OutlineSurface />;
@@ -101,7 +101,7 @@ function NoModelNotice() {
  *  by `RightPanelRail`. Carries `data-right-panel` so editor shortcuts treat typing
  *  in here as an aux surface (see lib/dom.ts). */
 export function RightPanelContent() {
-  const tab = useViewStore((s) => s.aiTab);
+  const [tab] = useState<LegacyAssistantTab>("suggest");
   const aiModel = useSettingsStore((s) => s.aiModel);
   const hydrated = useSettingsStore((s) => s.hydrated);
 
@@ -127,15 +127,13 @@ export function RightPanelContent() {
 /** The always-visible far-right icon rail. Switching tabs expands the content;
  *  clicking the active icon collapses it back to just this rail. */
 export function RightPanelRail() {
-  const tab = useViewStore((s) => s.aiTab);
-  const setTab = useViewStore((s) => s.setAiTab);
-  const collapsed = useViewStore((s) => s.aiCollapsed);
-  const setCollapsed = useViewStore((s) => s.setAiCollapsed);
+  const [tab, setTab] = useState<LegacyAssistantTab>("suggest");
+  const [collapsed, setCollapsed] = useState(false);
   const status = useAiActivityStore((s) => s.status);
 
   // Click the active icon -> collapse/expand; click another -> switch + expand.
-  const pick = (id: AiTab) => {
-    if (id === tab) setCollapsed(!collapsed);
+  const pick = (id: LegacyAssistantTab) => {
+    if (id === tab) setCollapsed((value) => !value);
     else {
       setTab(id);
       setCollapsed(false);

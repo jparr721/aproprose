@@ -32,11 +32,22 @@ describe("view-store outline toggle", () => {
       JSON.stringify(useViewStore.persist.getOptions().partialize!(useViewStore.getState())),
     );
     expect(persisted).toStrictEqual({
-      aiTab: useViewStore.getState().aiTab,
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,
     });
     expect(persisted.outlineOpen).toBe(true);
+  });
+
+  it("openOutline clears focus without changing AI visibility", () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+
+    useViewStore.getState().openOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      outlineOpen: true,
+      aiOpen: false,
+      focus: false,
+    });
   });
 });

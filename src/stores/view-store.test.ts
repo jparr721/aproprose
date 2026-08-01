@@ -13,59 +13,80 @@ import { useProjectStore } from "@/stores/project-store";
 
 beforeEach(() => {
   useViewStore.setState({
-    aiTab: "suggest",
-    aiCollapsed: false,
+    aiOpen: true,
+    pdfOpen: false,
+    outlineOpen: false,
+    focus: false,
     buildErrorsOpen: false,
     pending: null,
+    rightPanelWidth: 360,
   });
   useProjectStore.setState({ chapterDirty: false });
 });
 
-describe("view-store aiTab", () => {
-  it("setAiTab switches the active tab, including the new 'edit' tab", () => {
-    useViewStore.getState().setAiTab("edit");
-    expect(useViewStore.getState().aiTab).toBe("edit");
+describe("view-store AI console", () => {
+  it("removes the obsolete tab and rail state", () => {
+    const state = useViewStore.getState();
+
+    expect(state).not.toHaveProperty("aiTab");
+    expect(state).not.toHaveProperty("aiCollapsed");
+    expect(state).not.toHaveProperty("setAiTab");
+    expect(state).not.toHaveProperty("setAiCollapsed");
+    expect(state).not.toHaveProperty("openAiTab");
   });
 
-  it("can switch to the outline surface", () => {
-    useViewStore.getState().setAiTab("outline");
-    expect(useViewStore.getState().aiTab).toBe("outline");
-  });
+  it("sets AI visibility explicitly without changing neighboring panes", () => {
+    useViewStore.setState({ pdfOpen: true, outlineOpen: true });
 
-  it("setAiTab can switch to the muse tab", () => {
-    useViewStore.getState().setAiTab("muse");
-    expect(useViewStore.getState().aiTab).toBe("muse");
-  });
-});
+    useViewStore.getState().setAiOpen(false);
 
-describe("view-store aiCollapsed", () => {
-  it("defaults to false and setAiCollapsed flips it", () => {
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
-    useViewStore.getState().setAiCollapsed(true);
-    expect(useViewStore.getState().aiCollapsed).toBe(true);
-  });
-
-  it("toggleAi reopening a collapsed panel restores content, not a bare rail", () => {
-    // Collapse to the rail, close via the toggle, then reopen: the content must
-    // show. Otherwise aiOpen + aiCollapsed disagree and the panel reopens collapsed.
-    useViewStore.setState({ aiOpen: true, aiCollapsed: true });
-    useViewStore.getState().toggleAi(); // close
     expect(useViewStore.getState().aiOpen).toBe(false);
-    useViewStore.getState().toggleAi(); // reopen
+    expect(useViewStore.getState().pdfOpen).toBe(true);
+    expect(useViewStore.getState().outlineOpen).toBe(true);
+    useViewStore.getState().setAiOpen(true);
     expect(useViewStore.getState().aiOpen).toBe(true);
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+  });
+
+  it("toggleAi changes only AI visibility and clears focus", () => {
+    useViewStore.setState({
+      aiOpen: true,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: true,
+      rightPanelWidth: 412,
+    });
+
+    useViewStore.getState().toggleAi();
+
+    expect(useViewStore.getState()).toMatchObject({
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: false,
+      rightPanelWidth: 412,
+    });
+  });
+
+  it("openAiConsole opens the dock and leaves the left sidebar outside this store", () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+
+    useViewStore.getState().openAiConsole();
+
+    const state = useViewStore.getState();
+    expect(state).toMatchObject({ aiOpen: true, focus: false });
+    expect(state).not.toHaveProperty("sidebarOpen");
   });
 });
 
 describe("view-store applyLayoutPreset", () => {
-  it("the two/three presets clear the collapse flag so panel content shows", () => {
-    useViewStore.setState({ aiCollapsed: true });
+  it("the two and three pane presets open the AI console", () => {
+    useViewStore.setState({ aiOpen: false });
     useViewStore.getState().applyLayoutPreset("two");
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+    expect(useViewStore.getState().aiOpen).toBe(true);
 
-    useViewStore.setState({ aiCollapsed: true });
+    useViewStore.setState({ aiOpen: false });
     useViewStore.getState().applyLayoutPreset("three");
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+    expect(useViewStore.getState().aiOpen).toBe(true);
   });
 });
 
@@ -86,7 +107,6 @@ describe("view-store buildErrorsOpen", () => {
       : {};
     expect(persisted).not.toHaveProperty("buildErrorsOpen");
     expect(persisted).toEqual({
-      aiTab: useViewStore.getState().aiTab,
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,

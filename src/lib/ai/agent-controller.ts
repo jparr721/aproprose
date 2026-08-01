@@ -1521,7 +1521,7 @@ export function createAgentController(
   };
 
   const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
-    useViewStore.setState({ aiOpen: true, aiCollapsed: false });
+    useViewStore.getState().openAiConsole();
     try {
       if (intent.kind === "focus") {
         useAgentConsoleStore.getState().setMode(intent.mode);

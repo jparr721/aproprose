@@ -187,7 +187,7 @@ export function TopBar() {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Toggle assistant panel"
+              aria-label="Toggle AI Console"
               aria-pressed={aiOpen && !focus}
               onClick={toggleAi}
               className={cn(
@@ -196,7 +196,7 @@ export function TopBar() {
               )}
             >
               <IconLayoutSidebarRight />
-              <span className="sr-only">Toggle assistant panel</span>
+              <span className="sr-only">Toggle AI Console</span>
             </Button>
           </>
         ) : null}

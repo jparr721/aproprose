@@ -382,7 +382,7 @@ beforeEach(() => {
     styleGuide: "Keep the clipped voice.",
     editingRules: "Preserve intentional fragments.",
   });
-  useViewStore.setState({ aiOpen: false, aiCollapsed: true });
+  useViewStore.setState({ aiOpen: false });
 });
 
 describe("dispatchAgentIntent", () => {
@@ -397,7 +397,7 @@ describe("dispatchAgentIntent", () => {
 
     expect(useViewStore.getState()).toMatchObject({
       aiOpen: true,
-      aiCollapsed: false,
+      focus: false,
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([

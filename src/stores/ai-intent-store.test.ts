@@ -10,17 +10,15 @@ import { useViewStore } from "@/stores/view-store";
 
 beforeEach(() => {
   useAiIntentStore.setState({ pending: null });
-  useViewStore.setState({ aiOpen: false, aiCollapsed: true, aiTab: "critique", focus: true });
+  useViewStore.setState({ aiOpen: false, focus: true });
 });
 
 describe("dispatch", () => {
-  it("parks the intent and opens the panel on its tab", () => {
+  it("parks the legacy intent and opens the shared console", () => {
     dispatchAiIntent({ tab: "suggest", instruction: "go" });
     expect(useAiIntentStore.getState().pending).toEqual({ tab: "suggest", instruction: "go" });
     const v = useViewStore.getState();
     expect(v.aiOpen).toBe(true);
-    expect(v.aiTab).toBe("suggest");
-    expect(v.aiCollapsed).toBe(false);
     expect(v.focus).toBe(false);
   });
 

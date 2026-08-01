@@ -1,11 +1,17 @@
 import { useEffect, useRef } from "react";
-import { useAiIntentStore, type AiIntent } from "@/stores/ai-intent-store";
-import type { AiTab } from "@/stores/view-store";
+import {
+  useAiIntentStore,
+  type AiIntent,
+  type LegacyAssistantTab,
+} from "@/stores/ai-intent-store";
 
 /** Fire `onIntent` exactly once per pending intent targeting `tab` - on mount
  *  when one is already parked, or live while mounted. Clears it after firing.
  *  onIntent is read through a ref so a fresh closure never re-fires. */
-export function useAiIntent(tab: AiTab, onIntent: (intent: AiIntent) => void): void {
+export function useAiIntent(
+  tab: LegacyAssistantTab,
+  onIntent: (intent: AiIntent) => void,
+): void {
   const onIntentRef = useRef(onIntent);
   onIntentRef.current = onIntent;
   const pending = useAiIntentStore((s) => s.pending);

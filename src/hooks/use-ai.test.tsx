@@ -21,9 +21,8 @@ const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0))
 beforeEach(() => {
   useAiCacheStore.setState({ entries: {} });
   useAiActivityStore.setState({ status: {} });
-  // Looking at another tab, so a finished suggest job flags the rail rather than
-  // clearing (the panel isn't watching suggest).
-  useViewStore.setState({ aiOpen: true, focus: false, aiCollapsed: false, aiTab: "outline" });
+  // The legacy job is off-screen while the shared console is closed.
+  useViewStore.setState({ aiOpen: false, focus: false });
 });
 
 describe("useAi", () => {

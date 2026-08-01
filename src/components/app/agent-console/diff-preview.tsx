@@ -9,7 +9,7 @@ export function AgentDiffPreview(props: { before: string; after: string }) {
         if (segment.type === "add") {
           return (
             <ins
-              className="bg-success/10 text-success-foreground no-underline"
+              className="bg-success/10 no-underline"
               key={`${segment.type}-${index}`}
             >
               {segment.text}

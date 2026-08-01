@@ -54,6 +54,7 @@ export function compactionTokenTarget(usage: PersistedUsage): number {
 }
 
 function estimatedTokens(messages: AgentUIMessage[]): number {
+  if (messages.length === 0) return 0;
   return Math.max(1, Math.ceil(JSON.stringify(messages).length / 4));
 }
 
@@ -153,6 +154,12 @@ export async function compactConversation(args: {
     args.messages.slice(boundary + 1),
     args.tokenTarget,
   );
+  const selectedTokens = estimatedTokens(selected);
+  if (selectedTokens < args.tokenTarget) {
+    throw new Error(
+      `Compaction cannot reclaim the required token target: required ${args.tokenTarget}, eligible ${selectedTokens}.`,
+    );
+  }
   if (selected.length === 0) {
     return { messages: args.messages, summary: args.currentSummary };
   }

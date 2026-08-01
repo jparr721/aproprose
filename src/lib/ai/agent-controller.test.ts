@@ -198,6 +198,21 @@ const usage: PersistedUsage = {
   },
 };
 
+const compactingUsage: PersistedUsage = {
+  ...usage,
+  modelId: "gpt-3.5-turbo",
+  inputTokens: 14_000,
+  outputTokens: 100,
+  totalTokens: 14_100,
+  contextWindow: 16_385,
+  raw: {
+    ...usage.raw,
+    inputTokens: 14_000,
+    outputTokens: 100,
+    totalTokens: 14_100,
+  },
+};
+
 function metadata(
   run: AgentRun,
   state: AgentMessageMetadata["state"],
@@ -326,7 +341,7 @@ function persistedState(messages: AgentUIMessage[]): PersistedAgentState {
   };
 }
 
-function compactionMessages(): AgentUIMessage[] {
+function compactionMessages(payloadLength: number): AgentUIMessage[] {
   const task = conversationTask("ch1");
   return Array.from({ length: 7 }, (_, index) => {
     const run: AgentRun = {
@@ -343,13 +358,23 @@ function compactionMessages(): AgentUIMessage[] {
         id: run.userMessageId,
         role: "user" as const,
         metadata: metadata(run, "complete", null),
-        parts: [{ type: "text" as const, text: `Question ${index}` }],
+        parts: [
+          {
+            type: "text" as const,
+            text: `Question ${index} ${"x".repeat(payloadLength)}`,
+          },
+        ],
       },
       {
         id: `history-assistant-${index}`,
         role: "assistant" as const,
         metadata: metadata(run, "complete", null),
-        parts: [{ type: "text" as const, text: `Answer ${index}` }],
+        parts: [
+          {
+            type: "text" as const,
+            text: `Answer ${index} ${"y".repeat(payloadLength)}`,
+          },
+        ],
       },
     ];
   }).flat();
@@ -1851,7 +1876,7 @@ describe("run settlement and cancellation", () => {
     const controller = createAgentController(dependencies);
     useAgentConsoleStore.setState({
       draftText: "Keep this request",
-      messages: compactionMessages(),
+      messages: compactionMessages(0),
       summary: {
         throughMessageId: "missing-boundary",
         text: "Prior summary",
@@ -1868,6 +1893,32 @@ describe("run settlement and cancellation", () => {
       runError: { code: "compaction" },
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
+  it("refuses to stream when eligible history cannot meet the compaction target", async () => {
+    const dependencies = makeDependencies(null);
+    const summarize = vi.fn().mockResolvedValue("Too-small summary");
+    dependencies.summarize = summarize;
+    const controller = createAgentController(dependencies);
+    const messages = compactionMessages(0);
+    useAgentConsoleStore.setState({
+      draftText: "Keep this request",
+      messages,
+      lastUsage: compactingUsage,
+    });
+
+    await expect(
+      controller.submitAgentDraft(conversationTask("ch1")),
+    ).rejects.toThrow("Compaction cannot reclaim the required token target");
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftText: "Keep this request",
+      messages,
+      runStatus: "idle",
+      runError: { code: "compaction" },
+    });
   });
 
   it("classifies frozen tool environment failures as tool errors", async () => {
@@ -2119,13 +2170,8 @@ describe("project ownership", () => {
     };
     const controller = createAgentController(dependencies);
     useAgentConsoleStore.setState({
-      messages: compactionMessages(),
-      lastUsage: {
-        ...usage,
-        inputTokens: 900_000,
-        outputTokens: 1_000,
-        totalTokens: 901_000,
-      },
+      messages: compactionMessages(3_000),
+      lastUsage: compactingUsage,
     });
     const submission = controller.submitAgentRequest({
       kind: "run",
@@ -2203,13 +2249,8 @@ describe("production compaction", () => {
       return { text: "Compacted history" };
     });
     useAgentConsoleStore.setState({
-      messages: compactionMessages(),
-      lastUsage: {
-        ...usage,
-        inputTokens: 900_000,
-        outputTokens: 1_000,
-        totalTokens: 901_000,
-      },
+      messages: compactionMessages(3_000),
+      lastUsage: compactingUsage,
     });
 
     await submitProductionAgentRequest({

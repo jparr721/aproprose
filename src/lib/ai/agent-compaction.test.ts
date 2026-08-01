@@ -205,6 +205,20 @@ describe("compaction threshold", () => {
 });
 
 describe("compactConversation", () => {
+  it("rejects before summarizing when eligible history cannot meet the target", async () => {
+    const summarize = vi.fn().mockResolvedValue("Too-small summary.");
+
+    await expect(
+      compactConversation({
+        messages: Array.from({ length: 7 }, (_, index) => pair(index)).flat(),
+        currentSummary: null,
+        tokenTarget: 100_000,
+        summarize,
+      }),
+    ).rejects.toThrow("Compaction cannot reclaim the required token target");
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
   it("removes reasoning and runtime values before calling the summarizer", async () => {
     const messages = [
       ...sensitivePair(0),
@@ -356,7 +370,7 @@ describe("compactConversation", () => {
       const result = await compactConversation({
         messages,
         currentSummary: null,
-        tokenTarget: 100_000,
+        tokenTarget: 1,
         summarize: async (value) => {
           source = value;
           return `Summary before ${state}.`;

@@ -32,10 +32,13 @@ import {
   validateOutlineChanges,
 } from "@/lib/ai/agent-proposals";
 import type {
+  AgentOutlineApplyResult,
+  AgentProposalApplyResult,
   OutlineUndoToken,
   PendingProposal,
   ProposalEventData,
 } from "@/lib/ai/agent-types";
+import { getChapterOutline } from "@/lib/outline/model";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
@@ -91,6 +94,23 @@ function showOutlineUndo(token: OutlineUndoToken): void {
   });
 }
 
+type ProposalApplyFailure = Exclude<
+  AgentProposalApplyResult | AgentOutlineApplyResult,
+  { status: "applied" }
+>;
+
+function showProposalApplyFailure(result: ProposalApplyFailure): void {
+  if (result.status === "stale") {
+    toast.error("Proposal source changed", {
+      description: "Keep this proposal open and ask the agent to regenerate it.",
+    });
+    return;
+  }
+  toast.error("Proposal couldn't be applied", {
+    description: "Keep this proposal open and ask the agent to replace it.",
+  });
+}
+
 function proposalStaleIds(proposal: PendingProposal): Set<string> {
   const projectState = useProjectStore.getState();
   if (
@@ -112,10 +132,10 @@ function proposalStaleIds(proposal: PendingProposal): Set<string> {
       ),
     );
   }
-  const chapter = projectState.meta.chapters[proposal.chapterId];
-  if (chapter === undefined) {
-    return new Set(proposal.changes.map((change) => change.id));
-  }
+  const chapter = getChapterOutline(
+    projectState.meta.chapters,
+    proposal.chapterId,
+  );
   return new Set(
     validateOutlineChanges(proposal, chapter.cards).map(
       (stale) => stale.changeId,
@@ -160,12 +180,18 @@ export function ReviewTray() {
       const result = useProjectStore
         .getState()
         .applyAgentManuscriptProposal(proposal, [changeId]);
-      if (result.status === "stale") return;
+      if (result.status !== "applied") {
+        showProposalApplyFailure(result);
+        return;
+      }
     } else {
       const result = useProjectStore
         .getState()
         .applyAgentOutlineProposal(proposal, [changeId]);
-      if (result.status === "stale") return;
+      if (result.status !== "applied") {
+        showProposalApplyFailure(result);
+        return;
+      }
       showOutlineUndo(result.undoToken);
     }
     removePendingChanges([changeId]);
@@ -178,12 +204,18 @@ export function ReviewTray() {
       const result = useProjectStore
         .getState()
         .applyAgentManuscriptProposal(proposal, changeIds);
-      if (result.status === "stale") return;
+      if (result.status !== "applied") {
+        showProposalApplyFailure(result);
+        return;
+      }
     } else {
       const result = useProjectStore
         .getState()
         .applyAgentOutlineProposal(proposal, changeIds);
-      if (result.status === "stale") return;
+      if (result.status !== "applied") {
+        showProposalApplyFailure(result);
+        return;
+      }
       showOutlineUndo(result.undoToken);
     }
     clearPendingProposal();

@@ -628,16 +628,17 @@ function buildSculptGrounding(ctx: SculptContext): string {
 }
 
 /**
- * Drop changes the board can't safely apply: rewrite/move/remove whose cardId is
- * not one of `cardIds`, a `move` with no `toIndex`, and a `rewrite` that proposes
- * no title or intention (a no-op). Pure: returns a new proposal.
+ * Drop changes the board can't safely apply: add with a non-null cardId,
+ * rewrite/move/remove whose cardId is not one of `cardIds`, a `move` with no
+ * `toIndex`, and a `rewrite` that proposes no title or intention (a no-op).
+ * Pure: returns a new proposal.
  */
 export function sanitizeSculpt(proposal: SculptProposal, cardIds: string[]): SculptProposal {
   const known = new Set(cardIds);
   const changes = proposal.changes.filter((c: SculptChange) => {
     switch (c.kind) {
       case "add":
-        return true;
+        return c.cardId === null;
       case "rewrite":
         return c.cardId !== null && known.has(c.cardId) && (c.title !== null || c.intention !== null);
       case "move":

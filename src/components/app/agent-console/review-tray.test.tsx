@@ -446,9 +446,66 @@ describe("ReviewTray manuscript decisions", () => {
       expect.objectContaining({ action: "accepted-all", changeCount: 2 }),
     );
   });
+
+  it("keeps a change visible and reports an apply-time stale result", () => {
+    const blocks = useProjectStore.getState().blocks;
+    const proposal = manuscriptProposal(blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    vi.spyOn(
+      useProjectStore.getState(),
+      "applyAgentManuscriptProposal",
+    ).mockReturnValue({ status: "stale", staleChangeIds: ["change-0"] });
+    setPending(proposal);
+    const { container } = render(<ReviewTray />);
+    expandReview();
+    const card = container.querySelector('[data-agent-change-id="change-0"]');
+    if (!(card instanceof HTMLElement)) throw new Error("Missing review card.");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+    expect(within(card).getByRole("button", { name: "Accept" })).toBeTruthy();
+    expect(recordProposalEvent).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Proposal source changed", {
+      description: "Keep this proposal open and ask the agent to regenerate it.",
+    });
+  });
 });
 
 describe("ReviewTray outline decisions", () => {
+  it("renders and accepts an add for a valid sparse empty outline", () => {
+    useProjectStore.setState((state) => ({
+      meta: { ...state.meta, chapters: {} },
+    }));
+    const proposal = outlineProposal([], [
+      {
+        kind: "add",
+        cardId: null,
+        title: "The turn",
+        intention: "Force the final choice",
+        toIndex: null,
+        reason: "Complete the arc",
+      },
+    ]);
+    setPending(proposal);
+    render(<ReviewTray />);
+
+    expect(
+      screen.getByRole("button", { name: "Accept All" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expandReview();
+    expect(screen.getByText("Start of outline")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
+
+    expect(useProjectStore.getState().meta.chapters.ch1.cards).toHaveLength(1);
+    expect(useProjectStore.getState().meta.chapters.ch1.cards[0]).toMatchObject({
+      title: "The turn",
+      intention: "Force the final choice",
+    });
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+  });
+
   it("offers guarded Undo after applying all outline changes", () => {
     const cards = useProjectStore.getState().meta.chapters.ch1.cards;
     const proposal = outlineProposal(cards, [
@@ -489,6 +546,40 @@ describe("ReviewTray outline decisions", () => {
     expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe(
       "Arrival",
     );
+  });
+
+  it("keeps a proposal visible and reports an invalid batch result", () => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const proposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ]);
+    vi.spyOn(
+      useProjectStore.getState(),
+      "applyAgentOutlineProposal",
+    ).mockReturnValue({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "conflicting-changes",
+    });
+    setPending(proposal);
+    render(<ReviewTray />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+    expect(screen.getByRole("button", { name: "Accept All" })).toBeTruthy();
+    expect(recordProposalEvent).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Proposal couldn't be applied", {
+      description: "Keep this proposal open and ask the agent to replace it.",
+    });
   });
 });
 

@@ -367,6 +367,7 @@ export function Editor() {
 
           <AddBlockRow />
           <SelectionToolbar />
+          <div aria-hidden data-editor-end />
         </div>
       </ScrollArea>
     </div>

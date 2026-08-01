@@ -3,6 +3,7 @@ import {
   IconMapPin,
   IconX,
 } from "@tabler/icons-react";
+import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,7 +26,7 @@ import type {
   OutlinePendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
-import { diffWords } from "@/lib/diff/word-diff";
+import { getChapterOutline } from "@/lib/outline/model";
 import type { Card as OutlineCard } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
@@ -96,37 +97,6 @@ function liveCardDisplay(
   return displayLiveCard(card);
 }
 
-function DiffPreview(props: { before: string; after: string }) {
-  const { before, after } = props;
-  return (
-    <TypographyP className="whitespace-pre-wrap">
-      {diffWords(before, after).map((segment, index) => {
-        if (segment.type === "add") {
-          return (
-            <ins
-              className="bg-success/10 text-success-foreground no-underline"
-              key={`${segment.type}-${index}`}
-            >
-              {segment.text}
-            </ins>
-          );
-        }
-        if (segment.type === "del") {
-          return (
-            <del
-              className="bg-destructive/10 text-destructive"
-              key={`${segment.type}-${index}`}
-            >
-              {segment.text}
-            </del>
-          );
-        }
-        return <span key={`${segment.type}-${index}`}>{segment.text}</span>;
-      })}
-    </TypographyP>
-  );
-}
-
 function OutlinePreview(props: {
   cards: OutlineCard[] | null;
   change: OutlinePendingChange;
@@ -139,7 +109,7 @@ function OutlinePreview(props: {
     const nextTitle = proposalChange.title ?? source.title;
     const nextIntention = proposalChange.intention ?? source.intention;
     return (
-      <DiffPreview
+      <AgentDiffPreview
         after={`${nextTitle}\n${nextIntention}`}
         before={source.mutableText}
       />
@@ -310,8 +280,18 @@ export function OutlineReview({
   onReject,
   onNavigate,
 }: OutlineReviewProps) {
-  const chapter = useProjectStore((state) => state.meta.chapters[proposal.chapterId]);
-  const cards = chapter === undefined ? null : chapter.cards;
+  const cards = useProjectStore((state) => {
+    if (
+      state.project === null ||
+      state.project.root !== proposal.projectRoot ||
+      !state.project.chapters.some(
+        (chapter) => chapter.id === proposal.chapterId,
+      )
+    ) {
+      return null;
+    }
+    return getChapterOutline(state.meta.chapters, proposal.chapterId).cards;
+  });
   return (
     <div className="flex flex-col gap-3">
       {proposal.changes.map((change) => (

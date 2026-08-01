@@ -281,12 +281,7 @@ export function resolveSnapshotBlock(
   blocks: Block[],
 ): Block | null {
   const exact = blocks.find((block) => block.id === snapshot.sourceId);
-  if (
-    exact !== undefined &&
-    blockFingerprint(exact) === snapshot.sourceFingerprint
-  ) {
-    return exact;
-  }
+  if (exact !== undefined) return exact;
   const atOrder = blocks[snapshot.order];
   return atOrder !== undefined &&
     blockFingerprint(atOrder) === snapshot.sourceFingerprint

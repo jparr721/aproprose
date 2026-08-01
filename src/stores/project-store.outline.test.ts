@@ -1,7 +1,26 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/tauri", () => ({
+  compileProject: vi.fn(),
+  openProject: vi.fn(),
+  createProject: vi.fn(),
+  writeSkeleton: vi.fn(),
+  deleteChapterCmd: vi.fn(),
+  migrateToManaged: vi.fn(),
+  pickProjectDir: vi.fn(),
+  readAppData: vi.fn().mockResolvedValue(null),
+  readPdf: vi.fn().mockResolvedValue(null),
+  readProjectMeta: vi.fn().mockResolvedValue(null),
+  readTextFile: vi.fn(),
+  writeAppData: vi.fn().mockResolvedValue(undefined),
+  writeProjectMeta: vi.fn().mockResolvedValue(undefined),
+  writeTextFile: vi.fn(),
+}));
+
 import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
+import { writeProjectMeta } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import type {
   Card,
@@ -93,6 +112,7 @@ const pendingOutlineFixture = () =>
   );
 
 beforeEach(() => {
+  vi.mocked(writeProjectMeta).mockClear();
   useProjectStore.setState({
     project: projectFixture("/book"),
     meta: {
@@ -215,7 +235,11 @@ describe("agent outline proposals", () => {
       .getState()
       .applyAgentOutlineProposal(proposal, ["change-0", "unknown"]);
 
-    expect(result).toEqual({ status: "stale", staleChangeIds: ["unknown"] });
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["unknown"],
+      reason: "unknown-selection",
+    });
     expect(useProjectStore.getState().meta).toEqual(before);
   });
 
@@ -230,31 +254,76 @@ describe("agent outline proposals", () => {
           toIndex: null,
           reason: "Remove",
         },
-        {
-          kind: "remove",
-          cardId: "card-1",
-          title: null,
-          intention: null,
-          toIndex: null,
-          reason: "Remove again",
-        },
       ],
       [cardFixture()],
     );
+    const conflictingProposal = {
+      ...proposal,
+      changes: [
+        proposal.changes[0],
+        {
+          ...proposal.changes[0],
+          id: "change-1",
+          change: {
+            ...proposal.changes[0].change,
+            reason: "Remove again",
+          },
+        },
+      ],
+    };
     const before = useProjectStore.getState().meta;
 
     const result = useProjectStore
       .getState()
       .applyAgentOutlineProposal(
-        proposal,
-        proposal.changes.map((change) => change.id),
+        conflictingProposal,
+        conflictingProposal.changes.map((change) => change.id),
       );
 
     expect(result).toEqual({
-      status: "stale",
-      staleChangeIds: ["change-0", "change-1"],
+      status: "invalid",
+      invalidChangeIds: ["change-0", "change-1"],
+      reason: "conflicting-changes",
     });
     expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("rejects a legacy malformed add without writing metadata", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    const malformed = {
+      ...proposal,
+      changes: [
+        {
+          ...proposal.changes[0],
+          change: { ...proposal.changes[0].change, cardId: "legacy-card-id" },
+        },
+      ],
+    };
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(malformed, ["change-0"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "apply-failed",
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
   });
 
   it("rejects an add-only proposal after its chapter is deleted", () => {

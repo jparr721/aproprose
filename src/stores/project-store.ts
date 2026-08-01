@@ -65,6 +65,7 @@ import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
 import { projectMetaFingerprint } from "@/lib/ai/agent-context";
 import {
+  conflictingTargetChangeIds,
   materializeManuscriptChanges,
   validateManuscriptChanges,
   validateOutlineChanges,
@@ -329,11 +330,6 @@ interface HistoryEntry {
 const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
 
-interface TargetedProposalChange {
-  changeId: string;
-  targetId: string | null;
-}
-
 function invalidSelectedChangeIds(
   proposalChanges: readonly { id: string }[],
   changeIds: readonly string[],
@@ -355,25 +351,6 @@ function invalidSelectedChangeIds(
       ),
     ),
   ];
-}
-
-function conflictingTargetChangeIds(
-  changes: TargetedProposalChange[],
-): string[] {
-  const targetCounts = new Map<string, number>();
-  for (const change of changes) {
-    if (change.targetId !== null) {
-      targetCounts.set(
-        change.targetId,
-        (targetCounts.get(change.targetId) ?? 0) + 1,
-      );
-    }
-  }
-  return changes.flatMap((change) =>
-    change.targetId !== null && (targetCounts.get(change.targetId) ?? 0) > 1
-      ? [change.changeId]
-      : [],
-  );
 }
 
 interface ManuscriptProposalMutation {
@@ -998,7 +975,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
-        return { status: "stale", staleChangeIds: invalidChangeIds };
+        return {
+          status: "invalid",
+          invalidChangeIds,
+          reason: "unknown-selection",
+        };
       }
       const selected = new Set(changeIds);
       const selectedProposal = {
@@ -1024,7 +1005,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         })),
       );
       if (conflicts.length > 0) {
-        return { status: "stale", staleChangeIds: conflicts };
+        return {
+          status: "invalid",
+          invalidChangeIds: conflicts,
+          reason: "conflicting-changes",
+        };
       }
       const resolveSpeakerId = (name: string): string | undefined =>
         state.meta.characters.find(
@@ -1033,8 +1018,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const outcome = applyProposal(state.blocks, changes, resolveSpeakerId);
       if (outcome.applied !== changes.length || outcome.skipped !== 0) {
         return {
-          status: "stale",
-          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+          status: "invalid",
+          invalidChangeIds: selectedProposal.changes.map((item) => item.id),
+          reason: "apply-failed",
         };
       }
       if (changes.length > 0) {
@@ -1639,7 +1625,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
-        return { status: "stale", staleChangeIds: invalidChangeIds };
+        return {
+          status: "invalid",
+          invalidChangeIds,
+          reason: "unknown-selection",
+        };
       }
       const chapter = getChapterOutline(
         state.meta.chapters,
@@ -1664,7 +1654,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         })),
       );
       if (conflicts.length > 0) {
-        return { status: "stale", staleChangeIds: conflicts };
+        return {
+          status: "invalid",
+          invalidChangeIds: conflicts,
+          reason: "conflicting-changes",
+        };
       }
       const before = state.meta;
       const chapters = applyOutlineChangesStrict(
@@ -1675,8 +1669,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       );
       if (chapters === null) {
         return {
-          status: "stale",
-          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+          status: "invalid",
+          invalidChangeIds: selectedProposal.changes.map((item) => item.id),
+          reason: "apply-failed",
         };
       }
       const meta = { ...before, chapters };

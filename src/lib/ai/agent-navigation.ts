@@ -12,6 +12,7 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import type { Block } from "@/lib/types";
+import { getChapterOutline } from "@/lib/outline/model";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -23,6 +24,14 @@ function scheduleScroll(attribute: string, id: string): void {
   requestAnimationFrame(() => {
     const selector = `[${attribute}="${CSS.escape(id)}"]`;
     document.querySelector(selector)?.scrollIntoView({ block: "center" });
+  });
+}
+
+function scheduleEditorEndScroll(): void {
+  requestAnimationFrame(() => {
+    document
+      .querySelector("[data-editor-end]")
+      ?.scrollIntoView({ block: "end" });
   });
 }
 
@@ -69,6 +78,35 @@ async function navigateToBlock(
   return result.status === "ran" ? result.value : false;
 }
 
+function clearSelectionAtChapterEnd(): boolean {
+  useProjectStore.getState().select(null);
+  scheduleEditorEndScroll();
+  return true;
+}
+
+async function selectChapterEnd(chapterId: string): Promise<boolean> {
+  await useProjectStore.getState().selectChapter(chapterId);
+  if (useProjectStore.getState().activeChapterId !== chapterId) return false;
+  return clearSelectionAtChapterEnd();
+}
+
+async function navigateToChapterEnd(chapterId: string): Promise<boolean> {
+  const projectState = useProjectStore.getState();
+  if (
+    projectState.project === null ||
+    !projectState.project.chapters.some((chapter) => chapter.id === chapterId)
+  ) {
+    return false;
+  }
+  if (projectState.activeChapterId === chapterId) {
+    return clearSelectionAtChapterEnd();
+  }
+  const result = await useViewStore
+    .getState()
+    .requestGuarded(() => selectChapterEnd(chapterId));
+  return result.status === "ran" ? result.value : false;
+}
+
 function resolveBlockLocator(
   locator: SourceLocator,
   blocks: Block[],
@@ -102,8 +140,7 @@ function navigateToOutlineCard(
   ) {
     return false;
   }
-  const chapter = projectState.meta.chapters[chapterId];
-  if (chapter === undefined) return false;
+  const chapter = getChapterOutline(projectState.meta.chapters, chapterId);
   const card =
     locator === null ? null : resolveLiveCardLocator(locator, chapter.cards);
   if (locator !== null && card === null) return false;
@@ -166,7 +203,11 @@ export async function navigateToProposalChange(
 ): Promise<boolean> {
   if (isManuscriptChange(change)) {
     const locator = manuscriptLocator(change);
-    if (locator === null) return false;
+    if (locator === null) {
+      return change.change.kind === "insert"
+        ? navigateToChapterEnd(chapterId)
+        : false;
+    }
     return navigateToBlock(chapterId, (blocks) =>
       resolveBlockLocator(locator, blocks),
     );

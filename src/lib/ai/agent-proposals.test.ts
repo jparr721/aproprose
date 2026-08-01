@@ -83,6 +83,62 @@ const buildManuscript = (
   });
 
 describe("proposal task boundaries", () => {
+  it("rejects duplicate manuscript targets before creating pending changes", () => {
+    const rewrite: BlockChange = {
+      kind: "rewrite",
+      blockId: "a",
+      afterId: null,
+      type: null,
+      speaker: null,
+      newText: "Revised once.",
+      toIndex: null,
+      reason: "Tighten",
+    };
+    const remove: BlockChange = {
+      ...rewrite,
+      kind: "remove",
+      newText: null,
+      reason: "Remove instead",
+    };
+
+    expect(() =>
+      buildManuscript(
+        { kind: "conversation", targetChapterId: "ch1" },
+        [rewrite, remove],
+        [block("a", "Original.")],
+      ),
+    ).toThrow(/same manuscript source/);
+  });
+
+  it("rejects a malformed outline add before creating a pending proposal", () => {
+    const raw: SculptProposal = {
+      chapterId: "ch1",
+      summary: "Add a turn",
+      changes: [
+        {
+          kind: "add",
+          cardId: "legacy-card-id",
+          title: "The turn",
+          intention: "Force the choice",
+          toIndex: null,
+          reason: "Complete the arc",
+        },
+      ],
+    };
+
+    expect(() =>
+      buildOutlinePendingProposal({
+        run: run({ kind: "outline-sculpt", chapterId: "ch1" }),
+        raw,
+        cards,
+        currentPending: null,
+        originatingMessageId: "assistant-1",
+        makeId: () => "generated-id",
+        now: "2026-07-30T00:01:00.000Z",
+      }),
+    ).toThrow(/invalid outline change/);
+  });
+
   it("allows a bridge insert only after the frozen anchor", () => {
     const proposal = buildManuscript(
       {

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
-import { cleanup, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/storage", () => ({
@@ -39,6 +40,7 @@ import {
   cardSnapshotText,
   findingFingerprint,
 } from "@/lib/ai/agent-context";
+import { Editor } from "@/components/app/editor";
 import {
   navigateToContextSnapshot,
   navigateToProposalChange,
@@ -59,6 +61,7 @@ import {
 } from "@/stores/agent-console-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 
 const projectFixture = (): ProjectInfo => ({
@@ -117,6 +120,41 @@ const blockLocator = (block: Block, order: number): SourceLocator => ({
   label: "Narration block",
   exactText: block.text,
   previewText: blockSnapshotText(block),
+});
+
+const appendChange = (): ManuscriptPendingChange => ({
+  id: "append-change",
+  change: {
+    kind: "insert",
+    blockId: null,
+    afterId: null,
+    type: "narration",
+    speaker: null,
+    newText: "A final line.",
+    toIndex: null,
+    reason: "Complete the chapter",
+  },
+  precondition: {
+    kind: "insert",
+    anchor: null,
+    expectedNext: null,
+  },
+});
+
+const outlineAddChange = (): OutlinePendingChange => ({
+  id: "outline-add",
+  change: {
+    kind: "add",
+    cardId: null,
+    title: "The final turn",
+    intention: "Force the choice",
+    toIndex: null,
+    reason: "Complete the outline",
+  },
+  precondition: {
+    kind: "outline-order",
+    orderFingerprint: "811c9dc5",
+  },
 });
 
 const snapshotFixture = (
@@ -210,12 +248,21 @@ beforeEach(() => {
       },
     },
   } as never);
+  useSyncStore.setState({ conflictedFiles: [] });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("Editor navigation target", () => {
+  it("mounts one stable target at the end of the active chapter", () => {
+    const { container } = render(createElement(Editor));
+
+    expect(container.querySelectorAll("[data-editor-end]")).toHaveLength(1);
+  });
 });
 
 describe("navigateToContextSnapshot", () => {
@@ -230,6 +277,20 @@ describe("navigateToContextSnapshot", () => {
     ).resolves.toBe(true);
 
     expect(useProjectStore.getState().selectedId).toBe(reminted.id);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+  });
+
+  it("navigates a sent snapshot to its exact live id after the text changes", async () => {
+    const frozen = blockFixture("stable-id", "The original paragraph.");
+    const live = blockFixture("stable-id", "The author revised this paragraph.");
+    useProjectStore.setState({ blocks: [live] });
+    const target = addScrollTarget("data-block-id", live.id);
+
+    await expect(
+      navigateToContextSnapshot(snapshotFixture(frozen, 0, "ch1")),
+    ).resolves.toBe(true);
+
+    expect(useProjectStore.getState().selectedId).toBe(live.id);
     expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
 
@@ -344,6 +405,129 @@ describe("navigateToContextSnapshot", () => {
 });
 
 describe("navigateToProposalChange", () => {
+  it("opens a valid sparse empty outline for an add change", async () => {
+    useProjectStore.setState((state) => ({
+      meta: { ...state.meta, chapters: {} },
+    }));
+
+    await expect(
+      navigateToProposalChange("ch1", outlineAddChange()),
+    ).resolves.toBe(true);
+
+    expect(useViewStore.getState().outlineOpen).toBe(true);
+    expect(useOutlineBoardStore.getState().highlightedCardId).toBeNull();
+  });
+
+  it("does not open a neighboring outline for a deleted chapter", async () => {
+    const neighbor = cardFixture("neighbor-card", "Neighboring chapter");
+    useProjectStore.setState((state) => ({
+      project: {
+        ...projectFixture(),
+        chapters: projectFixture().chapters.filter(
+          (chapter) => chapter.id !== "ch1",
+        ),
+      },
+      meta: {
+        ...state.meta,
+        chapters: {
+          ch2: { ...state.meta.chapters.ch2, cards: [neighbor] },
+        },
+      },
+    }));
+    const neighborTarget = addScrollTarget(
+      "data-outline-card-id",
+      neighbor.id,
+    );
+
+    await expect(
+      navigateToProposalChange("ch1", outlineAddChange()),
+    ).resolves.toBe(false);
+
+    expect(useViewStore.getState().outlineOpen).toBe(false);
+    expect(useOutlineBoardStore.getState().highlightedCardId).toBeNull();
+    expect(neighborTarget.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("navigates an active append insert to the exact editor end", async () => {
+    const neighbor = blockFixture("neighbor-id", "Neighboring prose.");
+    useProjectStore.setState({ blocks: [neighbor], selectedId: neighbor.id });
+    const target = document.createElement("div");
+    target.setAttribute("data-editor-end", "");
+    document.body.append(target);
+
+    await expect(
+      navigateToProposalChange("ch1", appendChange()),
+    ).resolves.toBe(true);
+
+    expect(useProjectStore.getState().selectedId).toBeNull();
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "end" });
+  });
+
+  it("guards an inactive append insert and clears the loaded selection", async () => {
+    vi.mocked(readTextFile).mockResolvedValue("Loaded neighboring prose.");
+    const requestGuarded = vi.spyOn(
+      useViewStore.getState(),
+      "requestGuarded",
+    );
+    const target = document.createElement("div");
+    target.setAttribute("data-editor-end", "");
+    document.body.append(target);
+
+    await expect(
+      navigateToProposalChange("ch2", appendChange()),
+    ).resolves.toBe(true);
+
+    expect(requestGuarded).toHaveBeenCalledOnce();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "end" });
+  });
+
+  it("navigates an empty chapter append to its editor end", async () => {
+    vi.mocked(readTextFile).mockResolvedValue("");
+    const target = document.createElement("div");
+    target.setAttribute("data-editor-end", "");
+    document.body.append(target);
+
+    await expect(
+      navigateToProposalChange("ch2", appendChange()),
+    ).resolves.toBe(true);
+
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks).toEqual([]);
+    expect(useProjectStore.getState().selectedId).toBeNull();
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "end" });
+  });
+
+  it("settles a canceled guarded append navigation as false", async () => {
+    vi.mocked(readTextFile).mockResolvedValue("Loaded prose.");
+    useProjectStore.setState({ chapterDirty: true });
+
+    const navigation = navigateToProposalChange("ch2", appendChange());
+    useViewStore.getState().cancelPending();
+
+    await expect(navigation).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().selectedId).toBeNull();
+  });
+
+  it("does not navigate an append insert after its chapter is deleted", async () => {
+    useProjectStore.setState({
+      project: { ...projectFixture(), chapters: [] },
+      selectedId: "neighbor-id",
+    });
+    const target = document.createElement("div");
+    target.setAttribute("data-editor-end", "");
+    document.body.append(target);
+
+    await expect(
+      navigateToProposalChange("ch1", appendChange()),
+    ).resolves.toBe(false);
+
+    expect(useProjectStore.getState().selectedId).toBe("neighbor-id");
+    expect(target.scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("uses a manuscript frozen locator instead of the stale raw change id", async () => {
     const frozen = blockFixture("frozen-id", "Unchanged prose.");
     const reminted = blockFixture("reminted-id", "Unchanged prose.");

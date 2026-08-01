@@ -168,6 +168,28 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("OutlineReview", () => {
+  it("renders an add against a valid sparse empty outline", () => {
+    useProjectStore.setState((state) => ({
+      meta: { ...state.meta, chapters: {} },
+    }));
+
+    render(
+      <OutlineReview
+        proposal={{ ...proposal, changes: [changes[1]] }}
+        staleChangeIds={new Set<string>()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("New outline card")).toBeTruthy();
+    expect(screen.getByText("Start of outline")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Accept" }).hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
   it("renders every change from live source and destination context", () => {
     const { container } = render(
       <OutlineReview

@@ -170,7 +170,17 @@ export type PersistedPendingProposal =
 
 export type AgentProposalApplyResult =
   | { status: "applied"; appliedChangeIds: string[] }
-  | { status: "stale"; staleChangeIds: string[] };
+  | { status: "stale"; staleChangeIds: string[] }
+  | {
+      status: "invalid";
+      invalidChangeIds: string[];
+      reason: AgentProposalInvalidReason;
+    };
+
+export type AgentProposalInvalidReason =
+  | "unknown-selection"
+  | "conflicting-changes"
+  | "apply-failed";
 
 export interface OutlineUndoToken {
   id: string;
@@ -185,7 +195,12 @@ export type AgentOutlineApplyResult =
       appliedChangeIds: string[];
       undoToken: OutlineUndoToken;
     }
-  | { status: "stale"; staleChangeIds: string[] };
+  | { status: "stale"; staleChangeIds: string[] }
+  | {
+      status: "invalid";
+      invalidChangeIds: string[];
+      reason: AgentProposalInvalidReason;
+    };
 
 export interface PersistedUsage {
   modelId: string;

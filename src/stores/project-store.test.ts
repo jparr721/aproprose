@@ -1313,7 +1313,11 @@ describe("applyAgentManuscriptProposal", () => {
       .getState()
       .applyAgentManuscriptProposal(proposal, ["change-0", "unknown"]);
 
-    expect(result).toEqual({ status: "stale", staleChangeIds: ["unknown"] });
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["unknown"],
+      reason: "unknown-selection",
+    });
     expect(useProjectStore.getState().blocks).toEqual(blocks);
     expect(useProjectStore.getState().past).toHaveLength(0);
   });
@@ -1323,10 +1327,21 @@ describe("applyAgentManuscriptProposal", () => {
       mkBlock({ id: "a", text: "A" }),
       mkBlock({ id: "b", text: "B" }),
     ];
-    const proposal = pendingManuscriptFixture(blocks, [
-      removeFixture("a"),
-      removeFixture("a"),
-    ]);
+    const proposal = pendingManuscriptFixture(blocks, [removeFixture("a")]);
+    const conflictingProposal = {
+      ...proposal,
+      changes: [
+        proposal.changes[0],
+        {
+          ...proposal.changes[0],
+          id: "change-1",
+          change: {
+            ...proposal.changes[0].change,
+            reason: "Remove the same source again",
+          },
+        },
+      ],
+    };
     useProjectStore.setState({
       project: projectFixture("/book"),
       activeChapterId: "ch1",
@@ -1337,13 +1352,14 @@ describe("applyAgentManuscriptProposal", () => {
     const result = useProjectStore
       .getState()
       .applyAgentManuscriptProposal(
-        proposal,
-        proposal.changes.map((change) => change.id),
+        conflictingProposal,
+        conflictingProposal.changes.map((change) => change.id),
       );
 
     expect(result).toEqual({
-      status: "stale",
-      staleChangeIds: ["change-0", "change-1"],
+      status: "invalid",
+      invalidChangeIds: ["change-0", "change-1"],
+      reason: "conflicting-changes",
     });
     expect(useProjectStore.getState().blocks).toEqual(blocks);
     expect(useProjectStore.getState().past).toHaveLength(0);

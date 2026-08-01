@@ -210,6 +210,25 @@ describe("resolveDraftSnapshots", () => {
     );
   });
 
+  it("resolves an exact sent block id after its live text changes", () => {
+    const frozen = prose("stable-id", "Original prose.");
+    const live = prose("stable-id", "Revised live prose.");
+    const resolver: ContextSourceResolver = {
+      resolveBlock: () => ({ chapterId: "ch1", order: 0, block: frozen }),
+      resolveOutlineCard: () => null,
+      resolveFinding: () => null,
+    };
+    const [snapshot] = resolveDraftSnapshots(
+      [{ kind: "block", chapterId: "ch1", blockId: frozen.id }],
+      {},
+      resolver,
+      () => "snapshot-1",
+    );
+
+    expect(resolveSnapshotBlock(snapshot, [live])).toBe(live);
+    expect(snapshot.exactText).toBe("Original prose.");
+  });
+
   it("freezes every dialogue segment in authored order", () => {
     const dialogue: Block = {
       id: "dialogue-1",

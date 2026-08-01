@@ -52,6 +52,7 @@ import { critique, continuityCheck, type AnchoredContext } from "@/lib/ai/operat
 import { uid } from "@/lib/id";
 import { parseChapter } from "@/lib/latex";
 import { renderStoryStructure } from "@/lib/outline/grounding";
+import { getChapterOutline } from "@/lib/outline/model";
 import { readTextFile } from "@/lib/tauri";
 import type {
   Block,
@@ -916,7 +917,7 @@ export function createAgentController(
           );
         }
         requireTarget(chapterId);
-        const cards = args.meta.chapters[chapterId]?.cards ?? [];
+        const cards = getChapterOutline(args.meta.chapters, chapterId).cards;
         try {
           return buildOutlinePendingProposal({
             run: args.run,

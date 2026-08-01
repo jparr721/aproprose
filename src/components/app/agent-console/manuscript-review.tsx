@@ -3,6 +3,7 @@ import {
   IconMapPin,
   IconX,
 } from "@tabler/icons-react";
+import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,7 +26,6 @@ import type {
   ManuscriptPendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
-import { diffWords } from "@/lib/diff/word-diff";
 import type { Block } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
@@ -126,37 +126,6 @@ function changeTitle(
   return resolveDisplay(requiredTargetLocator(change)).label;
 }
 
-function DiffPreview(props: { before: string; after: string }) {
-  const { before, after } = props;
-  return (
-    <TypographyP className="whitespace-pre-wrap">
-      {diffWords(before, after).map((segment, index) => {
-        if (segment.type === "add") {
-          return (
-            <ins
-              className="bg-success/10 text-success-foreground no-underline"
-              key={`${segment.type}-${index}`}
-            >
-              {segment.text}
-            </ins>
-          );
-        }
-        if (segment.type === "del") {
-          return (
-            <del
-              className="bg-destructive/10 text-destructive"
-              key={`${segment.type}-${index}`}
-            >
-              {segment.text}
-            </del>
-          );
-        }
-        return <span key={`${segment.type}-${index}`}>{segment.text}</span>;
-      })}
-    </TypographyP>
-  );
-}
-
 function ManuscriptPreview(props: {
   change: ManuscriptPendingChange;
   liveBlocks: Block[] | null;
@@ -167,7 +136,7 @@ function ManuscriptPreview(props: {
   if (proposalChange.kind === "rewrite") {
     const source = resolveDisplay(requiredTargetLocator(change));
     return (
-      <DiffPreview
+      <AgentDiffPreview
         after={requiredText(proposalChange.newText, "rewrite text")}
         before={source.mutableText}
       />

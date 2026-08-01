@@ -31,6 +31,7 @@ export class AgentProposalError extends Error {
     | "task-boundary"
     | "source-missing"
     | "proposal-mismatch"
+    | "invalid-proposal"
     | "wrong-chapter";
 
   constructor(
@@ -41,6 +42,37 @@ export class AgentProposalError extends Error {
     this.name = "AgentProposalError";
     this.code = code;
   }
+}
+
+export function conflictingTargetChangeIds(
+  changes: readonly { changeId: string; targetId: string | null }[],
+): string[] {
+  const targetCounts = new Map<string, number>();
+  for (const change of changes) {
+    if (change.targetId !== null) {
+      targetCounts.set(
+        change.targetId,
+        (targetCounts.get(change.targetId) ?? 0) + 1,
+      );
+    }
+  }
+  return changes.flatMap((change) =>
+    change.targetId !== null && (targetCounts.get(change.targetId) ?? 0) > 1
+      ? [change.changeId]
+      : [],
+  );
+}
+
+function assertNoDroppedChanges(
+  rawCount: number,
+  sanitizedCount: number,
+  kind: PendingProposal["kind"],
+): void {
+  if (rawCount === sanitizedCount) return;
+  throw new AgentProposalError(
+    "invalid-proposal",
+    `The proposal contains an invalid ${kind} change.`,
+  );
 }
 
 function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
@@ -246,6 +278,11 @@ export function buildManuscriptPendingProposal(args: {
     args.blocks.map((block) => ({ id: block.id, text: block.text })),
     null,
   );
+  assertNoDroppedChanges(
+    args.raw.changes.length,
+    sanitized.changes.length,
+    "manuscript",
+  );
   for (const change of sanitized.changes) {
     assertManuscriptChange(args.run, change);
   }
@@ -259,22 +296,36 @@ export function buildManuscriptPendingProposal(args: {
       "The frozen bridge successor is no longer present.",
     );
   }
-  return {
+  const proposalId = args.makeId();
+  const changes = sanitized.changes.map((change) => ({
     id: args.makeId(),
+    change,
+    precondition:
+      task.kind === "bridge"
+        ? bridgePrecondition(change, args.blocks, task.successorBlockId)
+        : manuscriptPrecondition(change, args.blocks),
+  }));
+  const conflicts = conflictingTargetChangeIds(
+    changes.map((item) => ({
+      changeId: item.id,
+      targetId: item.change.kind === "insert" ? null : item.change.blockId,
+    })),
+  );
+  if (conflicts.length > 0) {
+    throw new AgentProposalError(
+      "invalid-proposal",
+      "A manuscript proposal cannot change the same manuscript source more than once.",
+    );
+  }
+  return {
+    id: proposalId,
     kind: "manuscript",
     projectRoot: args.run.projectRoot,
     chapterId,
     summary: sanitized.summary,
     createdAt: args.now,
     originatingMessageId: args.originatingMessageId,
-    changes: sanitized.changes.map((change) => ({
-      id: args.makeId(),
-      change,
-      precondition:
-        task.kind === "bridge"
-          ? bridgePrecondition(change, args.blocks, task.successorBlockId)
-          : manuscriptPrecondition(change, args.blocks),
-    })),
+    changes,
   };
 }
 
@@ -302,19 +353,38 @@ export function buildOutlinePendingProposal(args: {
     args.raw,
     args.cards.map((card) => card.id),
   );
-  return {
+  assertNoDroppedChanges(
+    args.raw.changes.length,
+    sanitized.changes.length,
+    "outline",
+  );
+  const proposalId = args.makeId();
+  const changes = sanitized.changes.map((change) => ({
     id: args.makeId(),
+    change,
+    precondition: outlinePrecondition(change, args.cards),
+  }));
+  const conflicts = conflictingTargetChangeIds(
+    changes.map((item) => ({
+      changeId: item.id,
+      targetId: item.change.kind === "add" ? null : item.change.cardId,
+    })),
+  );
+  if (conflicts.length > 0) {
+    throw new AgentProposalError(
+      "invalid-proposal",
+      "An outline proposal cannot change the same outline card more than once.",
+    );
+  }
+  return {
+    id: proposalId,
     kind: "outline",
     projectRoot: args.run.projectRoot,
     chapterId,
     summary: sanitized.summary,
     createdAt: args.now,
     originatingMessageId: args.originatingMessageId,
-    changes: sanitized.changes.map((change) => ({
-      id: args.makeId(),
-      change,
-      precondition: outlinePrecondition(change, args.cards),
-    })),
+    changes,
   };
 }
 

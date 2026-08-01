@@ -932,6 +932,14 @@ function assistantMetadata(args: {
   };
 }
 
+function settledAssistantMessage(message: AgentUIMessage): AgentUIMessage {
+  const sanitized = sanitizeAgentMessages([message]);
+  if (sanitized.length !== 1) {
+    throw new Error(`Agent run emitted no settled message: ${message.id}`);
+  }
+  return sanitized[0];
+}
+
 export function createAgentController(
   dependencies: AgentControllerDependencies,
 ) {
@@ -1161,15 +1169,17 @@ export function createAgentController(
           message.metadata?.runId === active.runId,
       );
     if (assistant !== undefined) {
-      state.upsertAssistantMessage({
-        ...assistant,
-        metadata: {
-          ...requireMetadata(assistant),
-          state: "stopped",
-          error: null,
-          errorCode: null,
-        },
-      });
+      state.upsertAssistantMessage(
+        settledAssistantMessage({
+          ...assistant,
+          metadata: {
+            ...requireMetadata(assistant),
+            state: "stopped",
+            error: null,
+            errorCode: null,
+          },
+        }),
+      );
     }
     state.interruptRun({
       runId: active.runId,
@@ -1337,11 +1347,9 @@ export function createAgentController(
         error: null,
         errorCode: null,
       });
-      const sanitized = sanitizeAgentMessages([completed]);
-      if (sanitized.length !== 1) {
-        throw new Error(`Agent run emitted no settled message: ${run.id}`);
-      }
-      useAgentConsoleStore.getState().finishRun(sanitized[0], result.usage);
+      useAgentConsoleStore
+        .getState()
+        .finishRun(settledAssistantMessage(completed), result.usage);
     } catch (error) {
       if (!ownsCurrentRun()) return;
       if (isAbortError(error)) {
@@ -1382,7 +1390,9 @@ export function createAgentController(
           error: failure.message,
           errorCode: failure.code,
         });
-        useAgentConsoleStore.getState().failRun(failed, failure.message);
+        useAgentConsoleStore
+          .getState()
+          .failRun(settledAssistantMessage(failed), failure.message);
       }
       throw error;
     } finally {

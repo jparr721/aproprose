@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isEqual } from "es-toolkit";
 import { z } from "zod";
 import { abortAgentRunForProjectSwitch } from "@/lib/ai/agent-controller";
 import {
@@ -591,16 +592,23 @@ function validatePersistedParts(messages: Array<{ parts: unknown[] }>): void {
         throw new Error("Persisted agent text must be settled.");
       }
       if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
-        if (!("state" in part) || part.state !== "output-available") {
+        if (
+          !("state" in part) ||
+          (part.state !== "output-available" &&
+            part.state !== "output-error" &&
+            part.state !== "output-denied")
+        ) {
           throw new Error("Incomplete agent tool calls cannot be persisted.");
         }
-        if ("preliminary" in part && part.preliminary === true) {
-          throw new Error("Preliminary agent tool results cannot be persisted.");
+        if (part.state === "output-available") {
+          if ("preliminary" in part && part.preliminary === true) {
+            throw new Error("Preliminary agent tool results cannot be persisted.");
+          }
+          if (!("output" in part)) {
+            throw new Error("Completed agent tool output is missing.");
+          }
+          persistedToolOutputSchema.parse(part.output);
         }
-        if (!("output" in part)) {
-          throw new Error("Completed agent tool output is missing.");
-        }
-        persistedToolOutputSchema.parse(part.output);
       }
     }
   }
@@ -933,6 +941,20 @@ async function parseAgentSnapshot(
   }));
   validatePersistedParts(normalizedMessages);
   const messages = await validateAgentMessages(normalizedMessages);
+  const sanitizedMessages = sanitizeAgentMessages(messages);
+  const persistedToolParts = messages.flatMap((message) =>
+    message.parts.filter(
+      (part) => part.type === "dynamic-tool" || part.type.startsWith("tool-"),
+    ),
+  );
+  const sanitizedToolParts = sanitizedMessages.flatMap((message) =>
+    message.parts.filter(
+      (part) => part.type === "dynamic-tool" || part.type.startsWith("tool-"),
+    ),
+  );
+  if (!isEqual(sanitizedToolParts, persistedToolParts)) {
+    throw new Error("Persisted agent messages must use safe settled projections.");
+  }
   return {
     v: 3,
     mode: parsed.mode,

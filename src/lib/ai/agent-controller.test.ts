@@ -1651,6 +1651,73 @@ describe("run settlement and cancellation", () => {
     ).not.toContain("Late completion");
   });
 
+  it("settles a denied tool row safely when a run is stopped", async () => {
+    const pending = deferred<StreamAgentRunResult>();
+    let captured: StreamAgentRunInput | null = null;
+    const dependencies = makeDependencies(async (input) => {
+      captured = input;
+      input.onMessage({
+        id: input.generateMessageId(),
+        role: "assistant",
+        metadata: metadata(input.run, "streaming", null),
+        parts: [
+          {
+            type: "tool-stage_manuscript_proposal",
+            toolCallId: "call-denied",
+            state: "output-denied",
+            input: {
+              summary: "PRIVATE STOP SUMMARY",
+              changes: [
+                {
+                  kind: "remove",
+                  blockId: "block-1",
+                  afterId: null,
+                  type: null,
+                  speaker: null,
+                  newText: null,
+                  toIndex: null,
+                  reason: "PRIVATE STOP REASON",
+                },
+              ],
+            },
+            approval: {
+              id: "PRIVATE STOP APPROVAL",
+              approved: false,
+              reason: "PRIVATE STOP DENIAL",
+            },
+          },
+        ],
+      });
+      return pending.promise;
+    });
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest({
+      kind: "run",
+      mode: "writing",
+      text: "Continue.",
+      refs: [],
+      task: conversationTask("ch1"),
+    });
+    await vi.waitFor(() => expect(captured).not.toBeNull());
+
+    controller.stopAgentRun();
+
+    const settled = useAgentConsoleStore.getState().messages.at(-1);
+    expect(settled?.parts).toEqual([
+      {
+        type: "tool-stage_manuscript_proposal",
+        toolCallId: "call-denied",
+        state: "output-denied",
+        input: { summary: "", changes: [] },
+        approval: { id: "call-denied", approved: false },
+      },
+    ]);
+    expect(JSON.stringify(settled)).not.toContain("PRIVATE STOP");
+    if (captured === null) throw new Error("Expected captured stream input");
+    pending.resolve(successfulResult(captured, "Late completion"));
+    await submission;
+  });
+
   it("aborts preflight without clearing the composer or adding a turn", async () => {
     const model = deferred<MockLanguageModelV3>();
     let modelRequested = false;
@@ -1728,6 +1795,55 @@ describe("run settlement and cancellation", () => {
       role: "assistant",
       metadata: { state: "error", errorCode: "transport" },
     });
+  });
+
+  it("settles a failed tool row safely when streaming rejects", async () => {
+    const transport = new Error("Network unavailable");
+    transport.name = "AI_APICallError";
+    const dependencies = makeDependencies(async (input) => {
+      input.onMessage({
+        id: input.generateMessageId(),
+        role: "assistant",
+        metadata: metadata(input.run, "streaming", null),
+        parts: [
+          {
+            type: "tool-run_critique",
+            toolCallId: "call-error",
+            state: "output-error",
+            input: {
+              chapterId: "/Users/author/private/chapter.tex",
+              focus: "PRIVATE FAILURE FOCUS",
+            },
+            rawInput: "PRIVATE FAILURE INPUT",
+            errorText: "ENOENT /Users/author/private/chapter.tex PRIVATE FAILURE",
+          },
+        ],
+      });
+      throw transport;
+    });
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentRequest({
+        kind: "run",
+        mode: "writing",
+        text: "Review this.",
+        refs: [],
+        task: conversationTask("ch1"),
+      }),
+    ).rejects.toBe(transport);
+
+    const settled = useAgentConsoleStore.getState().messages.at(-1);
+    expect(settled?.parts).toEqual([
+      {
+        type: "tool-run_critique",
+        toolCallId: "call-error",
+        state: "output-error",
+        input: { chapterId: "Chapter", focus: null },
+        errorText: "Tool execution failed.",
+      },
+    ]);
+    expect(JSON.stringify(settled)).not.toMatch(/PRIVATE FAILURE|\/Users\/author/);
   });
 
   it("classifies a missing summary boundary as a compaction failure", async () => {

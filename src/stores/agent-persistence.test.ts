@@ -656,6 +656,133 @@ describe("agent persistence", () => {
     });
   });
 
+  it("round-trips safe failed and denied tool lifecycle rows", async () => {
+    const unsafeLifecycleMessage = {
+      id: "assistant-tool-lifecycle",
+      role: "assistant",
+      metadata: {
+        ...metadata,
+        state: "error",
+        error: "Tool failed",
+        errorCode: "tool",
+      },
+      parts: [
+        {
+          type: "tool-run_continuity",
+          toolCallId: "call-error",
+          state: "output-error",
+          input: {
+            chapterId: "/Users/author/private/chapter.tex",
+            focus: "PRIVATE ERROR FOCUS",
+          },
+          rawInput: "PRIVATE RAW INPUT",
+          errorText: "ENOENT /Users/author/private/chapter.tex PRIVATE ERROR",
+        },
+        {
+          type: "tool-stage_outline_proposal",
+          toolCallId: "call-denied",
+          state: "output-denied",
+          input: {
+            summary: "PRIVATE DENIED SUMMARY",
+            changes: [
+              {
+                kind: "add",
+                cardId: null,
+                title: "PRIVATE DENIED TITLE",
+                intention: "PRIVATE DENIED INTENTION",
+                toIndex: null,
+                reason: "PRIVATE DENIED REASON",
+              },
+            ],
+          },
+          approval: {
+            id: "PRIVATE APPROVAL ID",
+            approved: false,
+            reason: "PRIVATE APPROVAL REASON",
+          },
+        },
+      ],
+    } as AgentUIMessage;
+    useAgentConsoleStore.setState({ messages: [unsafeLifecycleMessage] });
+
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/books/reopened", snapshot);
+
+    expect(restored.messages[0].parts).toEqual([
+      {
+        type: "tool-run_continuity",
+        toolCallId: "call-error",
+        state: "output-error",
+        input: { chapterId: "Chapter", focus: null },
+        errorText: "Tool execution failed.",
+      },
+      {
+        type: "tool-stage_outline_proposal",
+        toolCallId: "call-denied",
+        state: "output-denied",
+        input: { summary: "", changes: [] },
+        approval: { id: "call-denied", approved: false },
+      },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toMatch(/PRIVATE|\/Users\/author/);
+    expect(JSON.stringify(restored)).not.toMatch(/PRIVATE|\/Users\/author/);
+  });
+
+  it.each([
+    {
+      name: "failed",
+      part: {
+        type: "tool-run_critique",
+        toolCallId: "call-error",
+        state: "output-error",
+        input: {
+          chapterId: "/Users/author/private/chapter.tex",
+          focus: "PRIVATE PERSISTED FOCUS",
+        },
+        errorText: "PRIVATE PERSISTED ERROR",
+      },
+    },
+    {
+      name: "denied",
+      part: {
+        type: "tool-stage_manuscript_proposal",
+        toolCallId: "call-denied",
+        state: "output-denied",
+        input: {
+          summary: "PRIVATE PERSISTED SUMMARY",
+          changes: [],
+        },
+        approval: {
+          id: "PRIVATE PERSISTED APPROVAL",
+          approved: false,
+          reason: "PRIVATE PERSISTED DENIAL",
+        },
+      },
+    },
+  ])("rejects a raw $name tool lifecycle row on load", async ({ part }) => {
+    const raw = persistedState("", [
+      {
+        id: `assistant-${part.state}`,
+        role: "assistant",
+        metadata: {
+          ...metadata,
+          state: "error",
+          error: "Tool failed",
+          errorCode: "tool",
+        },
+        parts: [part],
+      },
+    ] as unknown as AgentUIMessage[]);
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: {
+        kind: "corrupt",
+        projectRoot: "/books/one",
+        message: expect.stringContaining("safe settled projections"),
+      },
+    });
+  });
+
   it("never saves streaming messages, raw reasoning, or active run state", async () => {
     const completeWithReasoning: AgentUIMessage = {
       id: "assistant-complete",

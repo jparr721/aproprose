@@ -9,7 +9,9 @@ import { z } from "zod";
 import type {
   AgentMessageMetadata,
   AgentToolOutput,
+  AgentToolSummary,
   AgentUIMessage,
+  AgentUiTools,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
 import type { ContinuityFlag, CritiqueNote } from "@/lib/types";
@@ -100,6 +102,166 @@ const completedAgentToolOutputSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+type AgentToolName = keyof AgentUiTools;
+
+interface AgentToolDescriptor {
+  title: string;
+  targetFallback: string;
+  itemName: string;
+}
+
+const agentToolDescriptors: Record<AgentToolName, AgentToolDescriptor> = {
+  read_chapter: {
+    title: "Read chapter",
+    targetFallback: "Chapter",
+    itemName: "block",
+  },
+  read_outline: {
+    title: "Read outline",
+    targetFallback: "Outline",
+    itemName: "card",
+  },
+  read_lore: {
+    title: "Read lore",
+    targetFallback: "Lore",
+    itemName: "entry",
+  },
+  run_critique: {
+    title: "Run critique",
+    targetFallback: "Chapter",
+    itemName: "finding",
+  },
+  run_continuity: {
+    title: "Check continuity",
+    targetFallback: "Chapter",
+    itemName: "finding",
+  },
+  read_conversation_context: {
+    title: "Read conversation context",
+    targetFallback: "Conversation",
+    itemName: "message",
+  },
+  read_pending_proposal: {
+    title: "Read proposal",
+    targetFallback: "Proposal",
+    itemName: "change",
+  },
+  stage_manuscript_proposal: {
+    title: "Stage manuscript proposal",
+    targetFallback: "Manuscript proposal",
+    itemName: "change",
+  },
+  stage_outline_proposal: {
+    title: "Stage outline proposal",
+    targetFallback: "Outline proposal",
+    itemName: "change",
+  },
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolName(part: AgentUIMessage["parts"][number]): AgentToolName {
+  const name =
+    part.type === "dynamic-tool"
+      ? part.toolName
+      : part.type.startsWith("tool-")
+        ? part.type.slice("tool-".length)
+        : "";
+  if (!Object.hasOwn(agentToolDescriptors, name)) {
+    throw new Error("Unknown agent tool cannot be persisted.");
+  }
+  return name as AgentToolName;
+}
+
+function containsAbsolutePath(value: string): boolean {
+  return (
+    /(^|[\s("'=])\/(?!\/)\S+/.test(value) ||
+    /(^|[\s("'=])[A-Za-z]:[\\/]\S+/.test(value) ||
+    /(^|[\s("'=])\\\\[^\\\s]+\\/.test(value) ||
+    /\bfile:\/\/\//i.test(value)
+  );
+}
+
+function safeTarget(value: unknown, fallback: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    containsAbsolutePath(value)
+  ) {
+    return fallback;
+  }
+  return value;
+}
+
+function inputValue(input: unknown, key: string): unknown {
+  return isRecord(input) ? input[key] : undefined;
+}
+
+function safeToolInput(name: AgentToolName, input: unknown): unknown {
+  const descriptor = agentToolDescriptors[name];
+  switch (name) {
+    case "read_chapter":
+      return {
+        chapterId: safeTarget(
+          inputValue(input, "chapterId"),
+          descriptor.targetFallback,
+        ),
+      };
+    case "read_outline": {
+      const chapterId = inputValue(input, "chapterId");
+      return {
+        chapterId:
+          chapterId === null
+            ? null
+            : safeTarget(chapterId, descriptor.targetFallback),
+      };
+    }
+    case "read_lore":
+      return { query: null };
+    case "run_critique":
+    case "run_continuity":
+      return {
+        chapterId: safeTarget(
+          inputValue(input, "chapterId"),
+          descriptor.targetFallback,
+        ),
+        focus: null,
+      };
+    case "read_conversation_context":
+      return { messageIds: [] };
+    case "read_pending_proposal":
+      return {
+        proposalId: safeTarget(
+          inputValue(input, "proposalId"),
+          descriptor.targetFallback,
+        ),
+      };
+    case "stage_manuscript_proposal":
+    case "stage_outline_proposal":
+      return { summary: "", changes: [] };
+  }
+}
+
+function countDetail(name: AgentToolName, count: number): string {
+  const itemName = agentToolDescriptors[name].itemName;
+  return `${count} ${itemName}${count === 1 ? "" : "s"}`;
+}
+
+function safeToolSummary(
+  name: AgentToolName,
+  summary: AgentToolSummary,
+): AgentToolSummary {
+  const descriptor = agentToolDescriptors[name];
+  return {
+    label: descriptor.title,
+    target: safeTarget(summary.target, descriptor.targetFallback),
+    detail: countDetail(name, summary.itemCount),
+    itemCount: summary.itemCount,
+  };
+}
+
 const dataSchemas = {
   context: z.object({ snapshots: z.array(contextSnapshotSchema) }),
   "proposal-event": z.object({
@@ -170,21 +332,74 @@ export async function validateAgentMessages(
   return validated;
 }
 
-function summaryOnly(output: unknown): AgentToolOutput<never> {
+function summaryOnly(
+  name: AgentToolName,
+  output: unknown,
+): AgentToolOutput<never> {
   const parsed = completedAgentToolOutputSchema.safeParse(output);
   if (!parsed.success) {
     throw new Error("Completed agent tool output is not safe to persist.");
   }
-  const summary = parsed.data.summary;
   return {
     kind: "summary",
-    summary: {
-      label: summary.label,
-      target: summary.target,
-      detail: summary.detail,
-      itemCount: summary.itemCount,
-    },
+    summary: safeToolSummary(name, parsed.data.summary),
   } satisfies AgentToolOutput<never>;
+}
+
+function settledToolProjection(
+  part: AgentUIMessage["parts"][number],
+): AgentUIMessage["parts"][number] | null {
+  if (!isToolOrDynamicToolUIPart(part)) {
+    throw new Error("Agent tool projection requires a tool part.");
+  }
+  if (
+    part.state !== "output-available" &&
+    part.state !== "output-error" &&
+    part.state !== "output-denied"
+  ) {
+    return null;
+  }
+  if (part.state === "output-available" && part.preliminary === true) {
+    return null;
+  }
+  const name = toolName(part);
+  const identity =
+    part.type === "dynamic-tool"
+      ? {
+          type: "dynamic-tool" as const,
+          toolName: name,
+          toolCallId: part.toolCallId,
+        }
+      : {
+          type: `tool-${name}` as const,
+          toolCallId: part.toolCallId,
+        };
+  const input = safeToolInput(name, part.input);
+  if (part.state === "output-available") {
+    return {
+      ...identity,
+      state: "output-available",
+      input,
+      output: summaryOnly(name, part.output),
+    } as AgentUIMessage["parts"][number];
+  }
+  if (part.state === "output-error") {
+    return {
+      ...identity,
+      state: "output-error",
+      input,
+      errorText: "Tool execution failed.",
+    } as AgentUIMessage["parts"][number];
+  }
+  return {
+    ...identity,
+    state: "output-denied",
+    input,
+    approval: {
+      id: part.toolCallId,
+      approved: false,
+    },
+  } as AgentUIMessage["parts"][number];
 }
 
 export function sanitizeAgentMessages(
@@ -232,15 +447,8 @@ export function sanitizeAgentMessages(
           return [{ ...part, state: "done" }];
         }
         if (isToolOrDynamicToolUIPart(part)) {
-          if (
-            part.state !== "output-available" ||
-            part.preliminary === true
-          ) {
-            return [];
-          }
-          return [
-            { ...part, output: summaryOnly(part.output) } as AgentUIMessage["parts"][number],
-          ];
+          const projected = settledToolProjection(part);
+          return projected === null ? [] : [projected];
         }
         return [{ ...part }];
       }),

@@ -573,6 +573,44 @@ describe("AgentMessage safe tool activity", () => {
     expect(document.body.textContent).not.toContain("C:\\Users\\author");
   });
 
+  it("renders reopened failed and denied lifecycle rows", () => {
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-reopened-tool-lifecycle",
+        [
+          {
+            type: "tool-run_continuity",
+            toolCallId: "call-error",
+            state: "output-error",
+            input: { chapterId: "Chapter", focus: null },
+            errorText: "Tool execution failed.",
+          },
+          {
+            type: "tool-stage_outline_proposal",
+            toolCallId: "call-denied",
+            state: "output-denied",
+            input: { summary: "", changes: [] },
+            approval: { id: "call-denied", approved: false },
+          },
+        ],
+        metadata({ state: "error", errorCode: "tool" }),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /Check continuity/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Stage outline proposal/ }),
+    ).toBeTruthy();
+    expect(screen.getByText("Error")).toBeTruthy();
+    expect(screen.getByText("Denied")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Check continuity/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Stage outline proposal/ }),
+    );
+    expect(screen.getByText("Chapter")).toBeTruthy();
+    expect(screen.getByText("Outline proposal")).toBeTruthy();
+  });
+
   it("uses safe copy when a production tool projection throws", () => {
     vi.stubEnv("DEV", false);
     const rawError = "ENOENT /Users/author/private/chapter.tex";

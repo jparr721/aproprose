@@ -47,6 +47,57 @@ function assistantWithOutput(id: string, output: unknown): AgentUIMessage {
   };
 }
 
+function assistantWithUnsafeToolFailures(): AgentUIMessage {
+  return {
+    id: "assistant-tool-failures",
+    role: "assistant",
+    metadata: {
+      ...metadata,
+      state: "error",
+      error: "Tool failed",
+      errorCode: "tool",
+    },
+    parts: [
+      {
+        type: "tool-run_critique",
+        toolCallId: "call-error",
+        state: "output-error",
+        input: {
+          chapterId: "/Users/author/private/chapter.tex",
+          focus: "PRIVATE ERROR FOCUS",
+        },
+        rawInput: "PRIVATE RAW INPUT",
+        errorText: "ENOENT /Users/author/private/chapter.tex PRIVATE ERROR",
+      },
+      {
+        type: "tool-stage_manuscript_proposal",
+        toolCallId: "call-denied",
+        state: "output-denied",
+        input: {
+          summary: "PRIVATE DENIED SUMMARY",
+          changes: [
+            {
+              kind: "rewrite",
+              blockId: "block-1",
+              afterId: null,
+              type: null,
+              speaker: null,
+              newText: "PRIVATE DENIED PROSE",
+              toIndex: null,
+              reason: "PRIVATE DENIED REASON",
+            },
+          ],
+        },
+        approval: {
+          id: "PRIVATE APPROVAL ID",
+          approved: false,
+          reason: "PRIVATE APPROVAL REASON",
+        },
+      },
+    ],
+  } as AgentUIMessage;
+}
+
 describe("sanitizeAgentMessages", () => {
   it("removes reasoning and replaces runtime tool values with summaries", () => {
     const messages: AgentUIMessage[] = [
@@ -181,6 +232,85 @@ describe("sanitizeAgentMessages", () => {
     expect(serialized).not.toContain("Unexecuted tool input");
     expect(serialized).not.toContain("Preliminary runtime tool value");
     expect(serialized).not.toContain("Private runtime tool value");
+  });
+
+  it("projects failed and denied tools into safe settled lifecycle rows", () => {
+    const sanitized = sanitizeAgentMessages([
+      assistantWithUnsafeToolFailures(),
+    ]);
+
+    expect(sanitized[0].parts).toEqual([
+      {
+        type: "tool-run_critique",
+        toolCallId: "call-error",
+        state: "output-error",
+        input: { chapterId: "Chapter", focus: null },
+        errorText: "Tool execution failed.",
+      },
+      {
+        type: "tool-stage_manuscript_proposal",
+        toolCallId: "call-denied",
+        state: "output-denied",
+        input: { summary: "", changes: [] },
+        approval: {
+          id: "call-denied",
+          approved: false,
+        },
+      },
+    ]);
+    expect(JSON.stringify(sanitized)).not.toMatch(/PRIVATE|\/Users\/author/);
+  });
+
+  it("projects completed tool input and summaries into safe canonical fields", () => {
+    const messages = [
+      {
+        id: "assistant-completed-private",
+        role: "assistant",
+        metadata,
+        parts: [
+          {
+            type: "tool-run_continuity",
+            toolCallId: "call-complete",
+            state: "output-available",
+            input: {
+              chapterId: "file:///Users/author/private/chapter.tex",
+              focus: "PRIVATE COMPLETED FOCUS",
+            },
+            output: {
+              kind: "runtime",
+              summary: {
+                label: "PRIVATE COMPLETED LABEL",
+                target: "/Users/author/private/chapter.tex",
+                detail: "PRIVATE COMPLETED DETAIL",
+                itemCount: 3,
+              },
+              value: { findings: "PRIVATE COMPLETED OUTPUT" },
+            },
+          },
+        ],
+      },
+    ] as AgentUIMessage[];
+
+    const sanitized = sanitizeAgentMessages(messages);
+
+    expect(sanitized[0].parts).toEqual([
+      {
+        type: "tool-run_continuity",
+        toolCallId: "call-complete",
+        state: "output-available",
+        input: { chapterId: "Chapter", focus: null },
+        output: {
+          kind: "summary",
+          summary: {
+            label: "Check continuity",
+            target: "Chapter",
+            detail: "3 findings",
+            itemCount: 3,
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(sanitized)).not.toMatch(/PRIVATE|\/Users\/author/);
   });
 
   it("rejects summary outputs with unexpected top-level fields", () => {
@@ -358,5 +488,19 @@ describe("convertAgentMessagesToModel", () => {
     ];
     const modelMessages = await convertAgentMessagesToModel(messages, {});
     expect(JSON.stringify(modelMessages)).toContain("Frozen exact prose.");
+  });
+
+  it("replays safe failed and denied tool projections without raw data", async () => {
+    const modelMessages = await convertAgentMessagesToModel(
+      [assistantWithUnsafeToolFailures()],
+      {},
+    );
+    const serialized = JSON.stringify(modelMessages);
+
+    expect(serialized).toContain("run_critique");
+    expect(serialized).toContain("stage_manuscript_proposal");
+    expect(serialized).toContain("Tool execution failed.");
+    expect(serialized).toContain("Tool execution denied.");
+    expect(serialized).not.toMatch(/PRIVATE|\/Users\/author/);
   });
 });

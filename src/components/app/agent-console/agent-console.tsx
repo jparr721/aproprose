@@ -55,11 +55,16 @@ function AgentPersistenceBanner({ issue }: { issue: AgentPersistenceIssue }) {
 
   const reset = (): void => {
     setActionError(null);
-    void resetAgentConversation(issue.projectRoot).catch(() => {
+    const reportResetFailure = (): void => {
       setActionError(
         "AI conversation could not be reset. Check storage access and try again.",
       );
-    });
+    };
+    try {
+      resetAgentConversation(issue.projectRoot).catch(reportResetFailure);
+    } catch {
+      reportResetFailure();
+    }
   };
 
   return (

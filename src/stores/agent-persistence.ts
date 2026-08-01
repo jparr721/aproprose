@@ -18,6 +18,7 @@ import { pathHash } from "@/lib/path-hash";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import {
   type AgentPersistenceTransitionCapture,
+  AgentConsoleOwnershipError,
   agentConsoleOwnershipStatus,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -797,15 +798,27 @@ export function emptyPersistedAgentState(): PersistedAgentSnapshot &
 }
 
 export function resetAgentConversation(root: string): Promise<void> {
+  const initialState = useAgentConsoleStore.getState();
+  const ownsExactRoot =
+    initialState.activeProjectRoot === root &&
+    initialState.requestedProjectRoot === root;
+  const issue = initialState.persistenceIssue;
+  const ownsFailedLoad =
+    initialState.persistenceTransition === null &&
+    initialState.hydratedProjectRoot === null &&
+    issue !== null &&
+    issue.projectRoot === root &&
+    (issue.kind === "load" || issue.kind === "corrupt");
+  if (
+    !ownsExactRoot ||
+    (agentConsoleOwnershipStatus(initialState, root) !== "ready" &&
+      !ownsFailedLoad)
+  ) {
+    throw new AgentConsoleOwnershipError();
+  }
   const empty = emptyPersistedAgentState();
   clearSaveTimer();
-  const initialState = useAgentConsoleStore.getState();
-  if (
-    initialState.activeProjectRoot === root &&
-    initialState.requestedProjectRoot === root
-  ) {
-    writableRoot = null;
-  }
+  writableRoot = null;
   const capture = initialState.beginPersistenceTransition(root, "reset");
   return appendTransition(async () => {
     useAgentConsoleStore
@@ -1028,6 +1041,14 @@ export function saveAgentState(
   const resetsActiveRecovery =
     recoveryRoot === root &&
     agentConsoleOwnershipStatus(initialState, root) === "ready";
+  const recoveryFailure = resetsActiveRecovery
+    ? failedSaveForRoot(root)
+    : null;
+  if (resetsActiveRecovery && recoveryFailure === null) {
+    throw new Error(`Agent recovery state is missing for ${root}.`);
+  }
+  const recoveryFailureRevision =
+    recoveryFailure === null ? null : failedSaveRevision(recoveryFailure);
   const recoveryCapture = resetsActiveRecovery
     ? useAgentConsoleStore
         .getState()
@@ -1070,6 +1091,18 @@ export function saveAgentState(
       throw error;
     }
     if (recoveryCapture !== null) {
+      if (!ownsPersistenceCapture(recoveryCapture)) {
+        const currentFailure = failedSaveForRoot(root);
+        if (
+          recoveryFailure !== null &&
+          recoveryFailureRevision !== null &&
+          currentFailure === recoveryFailure &&
+          failedSaveRevision(currentFailure) === recoveryFailureRevision
+        ) {
+          failedSaves.delete(root);
+        }
+        return;
+      }
       if (
         !useAgentConsoleStore
           .getState()

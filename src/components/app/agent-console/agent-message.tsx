@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { isStaticToolUIPart } from "ai";
 import { SentContextAttachments } from "@/components/app/agent-console/context-attachments";
 import {
@@ -41,12 +41,14 @@ import {
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import type {
+  AgentErrorCode,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import {
+  AgentConsoleOwnershipError,
   agentConsoleOwnershipStatus,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -452,6 +454,8 @@ export function AgentMessage({
   const authorMutationsDisabled = useAgentConsoleStore(
     (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
+  const [retryErrorCode, setRetryErrorCode] =
+    useState<AgentErrorCode | null>(null);
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
@@ -461,6 +465,16 @@ export function AgentMessage({
     messageMetadata.state === "error"
       ? safeAgentErrorText(messageMetadata.errorCode)
       : null;
+  const retry = (): void => {
+    setRetryErrorCode(null);
+    onRetry(retryUserMessageId(message)).catch((retryError: unknown) => {
+      setRetryErrorCode(
+        retryError instanceof AgentConsoleOwnershipError
+          ? retryError.agentErrorCode
+          : "unknown",
+      );
+    });
+  };
   return (
     <Message from={message.role}>
       <MessageContent>
@@ -479,6 +493,9 @@ export function AgentMessage({
           <TypographyMuted>Stopped</TypographyMuted>
         ) : null}
         {error === null ? null : <InlineMessageError message={error} />}
+        {retryErrorCode === null ? null : (
+          <InlineMessageError message={safeAgentErrorText(retryErrorCode)} />
+        )}
       </MessageContent>
       {error === null && messageMetadata.usage === null ? null : (
         <MessageActions>
@@ -487,7 +504,8 @@ export function AgentMessage({
           )}
           {error === null ? null : (
             <Button
-              onClick={() => void onRetry(retryUserMessageId(message))}
+              disabled={authorMutationsDisabled}
+              onClick={retry}
               size="sm"
               type="button"
               variant="outline"

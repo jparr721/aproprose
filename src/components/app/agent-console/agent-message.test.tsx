@@ -9,7 +9,11 @@ import type {
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
-import { EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  AgentConsoleOwnershipError,
+  EMPTY_AGENT_STATE,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 
 function metadata(
@@ -638,9 +642,97 @@ describe("AgentMessage errors", () => {
     ).toBeTruthy();
     expect(document.body.textContent).not.toContain("/Users/author");
     expect(document.body.textContent).not.toContain("C:\\Users\\author");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retry = screen.getByRole("button", {
+      name: "Retry",
+    }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    fireEvent.click(retry);
 
     await waitFor(() => expect(onRetry).toHaveBeenCalledWith("original-user"));
+  });
+
+  it.each([
+    {
+      name: "a same-project persistence transition",
+      state: {
+        hydratedProjectRoot: "/book",
+        persistenceTransition: {
+          generation: 12,
+          kind: "load" as const,
+          projectRoot: "/book",
+        },
+      },
+    },
+    {
+      name: "a token-null hydration mismatch",
+      state: {
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+      },
+    },
+  ])("disables failed-turn Retry during $name", ({ state }) => {
+    const runMetadata = metadata({ runId: "locked-run" });
+    const user: AgentUIMessage = {
+      id: "locked-user",
+      role: "user",
+      metadata: runMetadata,
+      parts: [{ type: "text", text: "Continue the scene." }],
+    };
+    const failed = assistantMessage(
+      "locked-assistant",
+      [],
+      metadata({
+        runId: "locked-run",
+        state: "error",
+        error: "Request failed",
+        errorCode: "transport",
+      }),
+    );
+    useAgentConsoleStore.setState({ messages: [user, failed], ...state });
+    const { onRetry } = renderAgentMessage(failed);
+
+    const retry = screen.getByRole("button", {
+      name: "Retry",
+    }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(retry);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("renders safe feedback when Retry loses an ownership race", async () => {
+    const runMetadata = metadata({ runId: "racing-run" });
+    const user: AgentUIMessage = {
+      id: "racing-user",
+      role: "user",
+      metadata: runMetadata,
+      parts: [{ type: "text", text: "Continue the scene." }],
+    };
+    const failed = assistantMessage(
+      "racing-assistant",
+      [],
+      metadata({
+        runId: "racing-run",
+        state: "error",
+        error: "Request failed",
+        errorCode: "transport",
+      }),
+    );
+    useAgentConsoleStore.setState({ messages: [user, failed] });
+    const { onRetry } = renderAgentMessage(failed);
+    onRetry.mockRejectedValueOnce(new AgentConsoleOwnershipError());
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "The AI conversation is loading for this project. Retry when loading finishes.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(document.body.textContent).not.toContain(
+      "AI conversation is not ready",
+    );
   });
 
   it("offers AI Settings only for a typed configuration error", () => {

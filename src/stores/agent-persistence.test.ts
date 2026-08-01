@@ -4,6 +4,7 @@ import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentMessageMetadata,
+  AgentPersistenceIssue,
   AgentUIMessage,
   DraftContextRef,
   PendingProposal,
@@ -54,6 +55,15 @@ interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
+}
+
+interface CapturedFailedWrite {
+  kind: "write";
+  root: string;
+  snapshot: PersistedAgentState;
+  issue: AgentPersistenceIssue;
+  revision: number;
+  recovery: null;
 }
 
 function deferred<T>(): Deferred<T> {
@@ -1340,6 +1350,178 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
+  it("reconciles a successful recovery superseded by a project switch", async () => {
+    const root = "/books/stale-recovery-a";
+    const otherRoot = "/books/stale-recovery-b";
+    const disk = new Map<string, unknown>();
+    let failsOldFlush = true;
+    let delaysRecovery = false;
+    const recoveryWrite = deferred<void>();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(
+      async (key: string, value: unknown) => {
+        if (key === agentStateKey(root) && failsOldFlush) {
+          failsOldFlush = false;
+          throw new Error("retain the older A payload");
+        }
+        if (key === agentStateKey(root) && delaysRecovery) {
+          delaysRecovery = false;
+          await recoveryWrite.promise;
+        }
+        disk.set(key, structuredClone(value));
+      },
+    );
+    await transitionAgentProject(root);
+    useProjectStore.setState({ project: project(root) });
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Older retained A payload");
+    await transitionAgentProject(otherRoot);
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftText: "Older retained A payload",
+      persistenceIssue: { kind: "save", projectRoot: root },
+    });
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Latest frozen A snapshot");
+    const latestSnapshot = await toAgentSnapshot();
+    tauri.writeAppData.mockClear();
+    delaysRecovery = true;
+
+    const recovering = saveAgentState(root, latestSnapshot);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    useProjectStore.setState({ project: project(otherRoot) });
+    const switching = transitionAgentProject(otherRoot);
+    recoveryWrite.resolve(undefined);
+    await Promise.all([recovering, switching]);
+    const stateWhileOtherRoot = {
+      hydratedProjectRoot:
+        useAgentConsoleStore.getState().hydratedProjectRoot,
+      draftText: useAgentConsoleStore.getState().draftText,
+      persistenceIssue: useAgentConsoleStore.getState().persistenceIssue,
+    };
+
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const reopenedState = {
+      hydratedProjectRoot:
+        useAgentConsoleStore.getState().hydratedProjectRoot,
+      draftText: useAgentConsoleStore.getState().draftText,
+      persistenceIssue: useAgentConsoleStore.getState().persistenceIssue,
+    };
+    tauri.writeAppData.mockClear();
+    await retryAgentPersistence();
+    const diskAfterRetry = disk.get(agentStateKey(root));
+
+    expect(stateWhileOtherRoot).toEqual({
+      hydratedProjectRoot: otherRoot,
+      draftText: "",
+      persistenceIssue: null,
+    });
+    expect(reopenedState).toEqual({
+      hydratedProjectRoot: root,
+      draftText: "Latest frozen A snapshot",
+      persistenceIssue: null,
+    });
+    expect(diskAfterRetry).toMatchObject({
+      draftText: "Latest frozen A snapshot",
+    });
+    expect(
+      JSON.stringify(disk.get(agentStateKey(otherRoot)) ?? null),
+    ).not.toContain("Latest frozen A snapshot");
+  });
+
+  it("preserves a newer root-local failure across an older stale recovery success", async () => {
+    const root = "/books/recovery-cas-a";
+    const otherRoot = "/books/recovery-cas-b";
+    const disk = new Map<string, unknown>();
+    let failsOldFlush = true;
+    let delaysRecovery = false;
+    const recoveryWrite = deferred<void>();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(
+      async (key: string, value: unknown) => {
+        if (key === agentStateKey(root) && failsOldFlush) {
+          failsOldFlush = false;
+          throw new Error("capture the original A failure");
+        }
+        if (key === agentStateKey(root) && delaysRecovery) {
+          delaysRecovery = false;
+          await recoveryWrite.promise;
+        }
+        disk.set(key, structuredClone(value));
+      },
+    );
+    const mapSet = vi.spyOn(Map.prototype, "set");
+    await transitionAgentProject(root);
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Original retained A payload");
+    await transitionAgentProject(otherRoot);
+    const failureCallIndex = mapSet.mock.calls.findIndex(
+      ([key, value]) =>
+        key === root &&
+        typeof value === "object" &&
+        value !== null &&
+        "revision" in value,
+    );
+    const failureLedger = mapSet.mock.contexts[failureCallIndex];
+    mapSet.mockRestore();
+    if (!(failureLedger instanceof Map)) {
+      throw new Error("Failed-save ledger was not captured.");
+    }
+    const retainedFailure = failureLedger.get(root) as
+      | CapturedFailedWrite
+      | undefined;
+    if (retainedFailure === undefined || retainedFailure.kind !== "write") {
+      throw new Error("Retained write failure was not captured.");
+    }
+
+    await transitionAgentProject(root);
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Older successful recovery payload");
+    const recoverySnapshot = await toAgentSnapshot();
+    tauri.writeAppData.mockClear();
+    delaysRecovery = true;
+    const recovering = saveAgentState(root, recoverySnapshot);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    const switching = transitionAgentProject(otherRoot);
+    const newerFailure: CapturedFailedWrite = {
+      ...retainedFailure,
+      snapshot: persistedState("Newer failed A payload", []),
+      issue: {
+        kind: "save",
+        projectRoot: root,
+        message: "Newer A failure",
+      },
+      revision: retainedFailure.revision + 100,
+    };
+    failureLedger.set(root, newerFailure);
+    recoveryWrite.resolve(undefined);
+    await Promise.all([recovering, switching]);
+
+    await transitionAgentProject(root);
+    const reopenedState = {
+      draftText: useAgentConsoleStore.getState().draftText,
+      persistenceIssue: useAgentConsoleStore.getState().persistenceIssue,
+    };
+    await retryAgentPersistence();
+
+    expect(reopenedState).toEqual({
+      draftText: "Newer failed A payload",
+      persistenceIssue: newerFailure.issue,
+    });
+    expect(disk.get(agentStateKey(root))).toMatchObject({
+      draftText: "Newer failed A payload",
+    });
+  });
+
   it("persists protected recovery edits captured before switching away", async () => {
     const disk = new Map<string, unknown>();
     const persistedOldDrafts: string[] = [];
@@ -1687,6 +1869,122 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
+  it("rejects a wrong-root reset before touching state, disk, or the save timer", async () => {
+    const root = "/books/current-reset-owner";
+    const wrongRoot = "/books/stale-reset-dialog";
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root),
+    );
+    tauri.writeAppData.mockClear();
+    vi.useFakeTimers();
+    useAgentConsoleStore.getState().setDraftText("Current root draft");
+    const stateBeforeReset = useAgentConsoleStore.getState();
+
+    expect(() => resetAgentConversation(wrongRoot)).toThrowError(
+      expect.objectContaining({
+        name: "AgentConsoleOwnershipError",
+        agentErrorCode: "transition",
+      }),
+    );
+    expect(useAgentConsoleStore.getState()).toBe(stateBeforeReset);
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey(root),
+      expect.objectContaining({ draftText: "Current root draft" }),
+    );
+    vi.useRealTimers();
+    persistence.unmount();
+  });
+
+  it("rejects reset authority after the console closes to null", async () => {
+    const root = "/books/closed-reset";
+    await transitionAgentProject(root);
+    await transitionAgentProject(null);
+    tauri.writeAppData.mockClear();
+    const stateBeforeReset = useAgentConsoleStore.getState();
+
+    expect(() => resetAgentConversation(root)).toThrowError(
+      expect.objectContaining({ name: "AgentConsoleOwnershipError" }),
+    );
+    expect(useAgentConsoleStore.getState()).toBe(stateBeforeReset);
+    await Promise.resolve();
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+  });
+
+  it("rejects reset authority while a same-root transition is active", async () => {
+    const root = "/books/active-reset-transition";
+    await transitionAgentProject(root);
+    tauri.writeAppData.mockClear();
+    const store = useAgentConsoleStore.getState();
+    const activeTransition = store.beginPersistenceTransition(root, "load");
+    const stateBeforeReset = useAgentConsoleStore.getState();
+
+    expect(() => resetAgentConversation(root)).toThrowError(
+      expect.objectContaining({ name: "AgentConsoleOwnershipError" }),
+    );
+    expect(useAgentConsoleStore.getState()).toBe(stateBeforeReset);
+    expect(useAgentConsoleStore.getState().persistenceTransition).toEqual(
+      activeTransition,
+    );
+    await Promise.resolve();
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "a load I/O failure",
+      arrangeRead: () => {
+        tauri.readAppData.mockRejectedValueOnce(new Error("read unavailable"));
+      },
+      issueKind: "load" as const,
+    },
+    {
+      name: "a malformed v3 snapshot",
+      arrangeRead: () => {
+        tauri.readAppData.mockResolvedValueOnce({
+          ...emptyPersistedAgentState(),
+          draftSourceLocators: undefined,
+        });
+      },
+      issueKind: "corrupt" as const,
+    },
+  ])("allows an exact same-root reset after $name", async ({
+    arrangeRead,
+    issueKind,
+  }) => {
+    const root = `/books/reset-after-${issueKind}`;
+    arrangeRead();
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: null,
+      persistenceTransition: null,
+      persistenceIssue: { kind: issueKind, projectRoot: root },
+    });
+    tauri.writeAppData.mockClear();
+
+    await resetAgentConversation(root);
+
+    expect(tauri.writeAppData).toHaveBeenCalledOnce();
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentStateKey(root),
+      emptyPersistedAgentState(),
+    );
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: root,
+      persistenceTransition: null,
+      persistenceIssue: null,
+    });
+  });
+
   it("leaves corrupt v3 data locked until an explicit safe reset", async () => {
     tauri.readAppData.mockResolvedValue({
       ...emptyPersistedAgentState(),
@@ -1896,15 +2194,13 @@ describe("agent persistence", () => {
     );
   });
 
-  it("serializes two resets and lets only the newest generation complete", async () => {
+  it("rejects a second reset while preserving the first serialized write", async () => {
     const root = "/books/two-resets";
     await transitionAgentProject(root);
     useAgentConsoleStore.getState().setDraftText("Before both resets");
     tauri.writeAppData.mockClear();
     const firstWrite = deferred<void>();
-    tauri.writeAppData
-      .mockReturnValueOnce(firstWrite.promise)
-      .mockResolvedValueOnce(undefined);
+    tauri.writeAppData.mockReturnValueOnce(firstWrite.promise);
 
     const firstReset = resetAgentConversation(root);
     await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
@@ -1915,13 +2211,14 @@ describe("agent persistence", () => {
     ).toThrowError(
       expect.objectContaining({ name: "AgentConsoleOwnershipError" }),
     );
-    const secondReset = resetAgentConversation(root);
+    expect(() => resetAgentConversation(root)).toThrowError(
+      expect.objectContaining({ name: "AgentConsoleOwnershipError" }),
+    );
     const callsBeforeFirstCompletes = tauri.writeAppData.mock.calls.length;
     const transitionBeforeFirstCompletes =
       useAgentConsoleStore.getState().persistenceTransition;
     firstWrite.resolve(undefined);
-    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
-    await Promise.all([firstReset, secondReset]);
+    await firstReset;
 
     expect(callsBeforeFirstCompletes).toBe(1);
     expect(transitionBeforeFirstCompletes).toMatchObject({
@@ -1929,7 +2226,6 @@ describe("agent persistence", () => {
       projectRoot: root,
     });
     expect(tauri.writeAppData.mock.calls).toEqual([
-      [agentStateKey(root), emptyPersistedAgentState()],
       [agentStateKey(root), emptyPersistedAgentState()],
     ]);
     expect(useAgentConsoleStore.getState()).toMatchObject({
@@ -1942,7 +2238,7 @@ describe("agent persistence", () => {
     });
   });
 
-  it("serializes delayed recovery, reset, and load with newest-generation bookkeeping", async () => {
+  it("serializes delayed recovery and load while rejecting reset", async () => {
     const root = "/books/recovery-overlap";
     const otherRoot = "/books/recovery-overlap-other";
     await transitionAgentProject(root);
@@ -1958,19 +2254,15 @@ describe("agent persistence", () => {
     });
 
     const recoveryWrite = deferred<void>();
-    const resetWrite = deferred<void>();
     let disk: unknown = null;
     tauri.writeAppData.mockClear();
     tauri.readAppData.mockClear();
-    tauri.writeAppData
-      .mockImplementationOnce(async (_key: string, value: unknown) => {
+    tauri.writeAppData.mockImplementationOnce(
+      async (_key: string, value: unknown) => {
         await recoveryWrite.promise;
         disk = structuredClone(value);
-      })
-      .mockImplementationOnce(async (_key: string, value: unknown) => {
-        await resetWrite.promise;
-        disk = structuredClone(value);
-      });
+      },
+    );
     tauri.readAppData.mockImplementation(async () => structuredClone(disk));
     const recoverySnapshot = {
       ...emptyPersistedAgentState(),
@@ -1979,19 +2271,16 @@ describe("agent persistence", () => {
 
     const recovering = saveAgentState(root, recoverySnapshot);
     await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
-    const resetting = resetAgentConversation(root);
+    expect(() => resetAgentConversation(root)).toThrowError(
+      expect.objectContaining({ name: "AgentConsoleOwnershipError" }),
+    );
     const loading = transitionAgentProject(root);
     const callsBeforeRecoveryCompletes = tauri.writeAppData.mock.calls.length;
     const readsBeforeRecoveryCompletes = tauri.readAppData.mock.calls.length;
     const transitionBeforeRecoveryCompletes =
       useAgentConsoleStore.getState().persistenceTransition;
     recoveryWrite.resolve(undefined);
-    await vi.waitFor(() =>
-      expect(tauri.writeAppData.mock.calls.length).toBeGreaterThanOrEqual(2),
-    );
-    const stateBeforeResetCompletes = useAgentConsoleStore.getState();
-    resetWrite.resolve(undefined);
-    await Promise.all([recovering, resetting, loading]);
+    await Promise.all([recovering, loading]);
 
     expect(callsBeforeRecoveryCompletes).toBe(1);
     expect(readsBeforeRecoveryCompletes).toBe(0);
@@ -1999,15 +2288,11 @@ describe("agent persistence", () => {
       kind: "load",
       projectRoot: root,
     });
-    expect(stateBeforeResetCompletes).toMatchObject({
-      draftText: "",
-      persistenceIssue: null,
-      persistenceTransition: { kind: "load", projectRoot: root },
-    });
-    expect(disk).toEqual(emptyPersistedAgentState());
+    expect(tauri.writeAppData).toHaveBeenCalledOnce();
+    expect(disk).toEqual(recoverySnapshot);
     expect(useAgentConsoleStore.getState()).toMatchObject({
       hydratedProjectRoot: root,
-      draftText: "",
+      draftText: "Explicit recovery",
       messages: [],
       persistenceIssue: null,
       persistenceTransition: null,
@@ -2087,6 +2372,9 @@ describe("agent persistence", () => {
       messages,
       draftText: "Unreadable draft",
       persistenceIssue: issue,
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: null,
     });
     tauri.writeAppData.mockRejectedValueOnce(new Error("disk full"));
 

@@ -354,6 +354,35 @@ describe("AgentConsole persistence banner", () => {
       hydratedProjectRoot: project.root,
     });
   });
+
+  it("reports a stale reset dialog without throwing through the click handler", async () => {
+    await transitionAgentProject(project.root);
+    const issue: AgentPersistenceIssue = {
+      kind: "corrupt",
+      projectRoot: project.root,
+      message: `Malformed conversation at ${project.root}`,
+    };
+    useAgentConsoleStore.setState({ persistenceIssue: issue });
+    render(<AgentConsole />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset AI Conversation" }),
+    );
+    const reset = screen.getByRole("button", { name: "Reset Conversation" });
+    useAgentConsoleStore.setState({
+      requestedProjectRoot: "/private/books/new-novel",
+      activeProjectRoot: "/private/books/new-novel",
+      hydratedProjectRoot: "/private/books/new-novel",
+    });
+
+    expect(() => fireEvent.click(reset)).not.toThrow();
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        "AI conversation could not be reset. Check storage access and try again.",
+      ),
+    ).toBeTruthy();
+  });
 });
 
 describe("AgentConsole configuration navigation", () => {

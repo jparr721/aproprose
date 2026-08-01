@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   getModel: vi.fn().mockResolvedValue({}),
   productionStream: vi.fn(),
+  uid: vi.fn(),
 }));
 
 vi.mock("ai", async () => {
@@ -22,6 +23,10 @@ vi.mock("@/lib/ai/agent-runtime", async () => {
   );
   return { ...actual, streamAgentRun: mocks.productionStream };
 });
+
+vi.mock("@/lib/id", () => ({
+  uid: mocks.uid,
+}));
 
 vi.mock("@/lib/tauri", () => ({
   compileProject: vi.fn(),
@@ -53,7 +58,6 @@ import {
   submitAgentRequest as submitProductionAgentRequest,
   type AgentControllerDependencies,
 } from "@/lib/ai/agent-controller";
-import { blockFingerprint } from "@/lib/ai/agent-context";
 import type {
   StreamAgentRunInput,
   StreamAgentRunResult,
@@ -63,6 +67,8 @@ import type {
   AgentMessageMetadata,
   AgentRun,
   AgentUIMessage,
+  ManuscriptPendingProposal,
+  OutlinePendingProposal,
   PersistedAgentSnapshot,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
@@ -219,9 +225,16 @@ const originalBlocks: Block[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  const uidCounts = new Map<string, number>();
   mocks.generateText.mockReset();
   mocks.getModel.mockReset().mockResolvedValue({});
   mocks.productionStream.mockReset();
+  mocks.uid.mockReset().mockImplementation((prefix?: string): string => {
+    const key = prefix ?? "b";
+    const next = (uidCounts.get(key) ?? 0) + 1;
+    uidCounts.set(key, next);
+    return `${key}-test-${next}`;
+  });
   vi.mocked(readAppData).mockReset().mockResolvedValue(null);
   vi.mocked(writeAppData).mockReset().mockResolvedValue(undefined);
   useAgentConsoleStore.setState({
@@ -301,34 +314,94 @@ describe("agent console authoring flows", () => {
     });
 
     const pending = useAgentConsoleStore.getState().pendingProposal;
-    expect(pending?.kind).toBe("manuscript");
     if (pending === null || pending.kind !== "manuscript") {
       throw new Error("Expected a pending manuscript proposal.");
     }
-    const insert = pending.changes[0];
-    expect(insert.precondition.kind).toBe("insert");
-    if (insert.precondition.kind !== "insert") {
-      throw new Error("Expected an insert precondition.");
-    }
-    expect(insert.precondition.expectedNext?.sourceId).toBe("successor");
+    expect(pending).toEqual({
+      id: "flow-5",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Bridge into dawn",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-6",
+          change: {
+            kind: "insert",
+            blockId: null,
+            afterId: "anchor",
+            type: "narration",
+            speaker: null,
+            newText: "Sleep never came, only the slow whitening of the window.",
+            toIndex: null,
+            reason: "Connect the ledger to the morning bell",
+          },
+          precondition: {
+            kind: "insert",
+            anchor: {
+              sourceId: "anchor",
+              order: 0,
+              fingerprint: "64e5c668",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "Mara closed the ledger.",
+              previewText: "Mara closed the ledger.",
+            },
+            expectedNext: {
+              sourceId: "successor",
+              order: 1,
+              fingerprint: "106a8c7e",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "At dawn, the harbor bells woke her.",
+              previewText: "At dawn, the harbor bells woke her.",
+            },
+          },
+        },
+      ],
+    });
     expect(useProjectStore.getState().blocks).toEqual(before);
 
     const applied = useProjectStore
       .getState()
-      .applyAgentManuscriptProposal(
-        pending,
-        pending.changes.map((change) => change.id),
-      );
-    expect(applied.status).toBe("applied");
+      .applyAgentManuscriptProposal(pending, ["flow-6"]);
+    expect(applied).toEqual({
+      status: "applied",
+      appliedChangeIds: ["flow-6"],
+    });
     const after = useProjectStore.getState().blocks;
-    expect(after.map((item) => item.id)).toEqual([
-      "anchor",
-      expect.any(String),
-      "successor",
-      "later",
+    expect(after).toEqual([
+      {
+        id: "anchor",
+        type: "narration",
+        text: "Mara closed the ledger.",
+        raw: "Mara closed the ledger.\n\n",
+        dirty: false,
+      },
+      {
+        id: "b-test-1",
+        type: "narration",
+        text: "Sleep never came, only the slow whitening of the window.",
+        raw: "",
+        dirty: true,
+      },
+      {
+        id: "successor",
+        type: "narration",
+        text: "At dawn, the harbor bells woke her.",
+        raw: "At dawn, the harbor bells woke her.\n\n",
+        dirty: false,
+      },
+      {
+        id: "later",
+        type: "narration",
+        text: "She found the summons under the door.",
+        raw: "She found the summons under the door.\n\n",
+        dirty: false,
+      },
     ]);
-    expect(after[2].text).toBe("At dawn, the harbor bells woke her.");
-    expect(after[3].text).toBe("She found the summons under the door.");
 
     useProjectStore.getState().undo();
     expect(useProjectStore.getState().blocks).toEqual(before);
@@ -377,29 +450,86 @@ describe("agent console authoring flows", () => {
     if (pending === null || pending.kind !== "manuscript") {
       throw new Error("Expected a final-anchor manuscript proposal.");
     }
-    const insert = pending.changes[0];
-    expect(insert.precondition).toMatchObject({
-      kind: "insert",
-      expectedNext: null,
+    expect(pending).toEqual({
+      id: "flow-5",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Continue after the summons",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-6",
+          change: {
+            kind: "insert",
+            blockId: null,
+            afterId: "later",
+            type: "narration",
+            speaker: null,
+            newText: "By noon, Mara was already walking toward the quay.",
+            toIndex: null,
+            reason: "Continue from the final prose block",
+          },
+          precondition: {
+            kind: "insert",
+            anchor: {
+              sourceId: "later",
+              order: 2,
+              fingerprint: "bd042c29",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "She found the summons under the door.",
+              previewText: "She found the summons under the door.",
+            },
+            expectedNext: null,
+          },
+        },
+      ],
     });
 
     const applied = useProjectStore
       .getState()
-      .applyAgentManuscriptProposal(
-        pending,
-        pending.changes.map((change) => change.id),
-      );
-    expect(applied.status).toBe("applied");
-    const after = useProjectStore.getState().blocks;
-    expect(after.slice(0, 3)).toEqual(before);
-    expect(after[3].text).toBe(
-      "By noon, Mara was already walking toward the quay.",
-    );
+      .applyAgentManuscriptProposal(pending, ["flow-6"]);
+    expect(applied).toEqual({
+      status: "applied",
+      appliedChangeIds: ["flow-6"],
+    });
+    expect(useProjectStore.getState().blocks).toEqual([
+      {
+        id: "anchor",
+        type: "narration",
+        text: "Mara closed the ledger.",
+        raw: "Mara closed the ledger.\n\n",
+        dirty: false,
+      },
+      {
+        id: "successor",
+        type: "narration",
+        text: "At dawn, the harbor bells woke her.",
+        raw: "At dawn, the harbor bells woke her.\n\n",
+        dirty: false,
+      },
+      {
+        id: "later",
+        type: "narration",
+        text: "She found the summons under the door.",
+        raw: "She found the summons under the door.\n\n",
+        dirty: false,
+      },
+      {
+        id: "b-test-1",
+        type: "narration",
+        text: "By noon, Mara was already walking toward the quay.",
+        raw: "",
+        dirty: true,
+      },
+    ]);
   });
 
   it("reads and completely replaces a proposal on follow-up while preserving it on failure", async () => {
     let streamCall = 0;
-    let readPendingChanges: unknown = null;
+    const readPendingChanges: unknown[] = [];
     const controller = createAgentController(
       dependencies(async (input) => {
         streamCall += 1;
@@ -433,10 +563,25 @@ describe("agent console authoring flows", () => {
         if (read.kind !== "runtime") {
           throw new Error("Expected the complete pending proposal tool value.");
         }
-        readPendingChanges = structuredClone(read.value.changes);
+        readPendingChanges.push(structuredClone(read.value.changes));
 
         if (streamCall === 3) {
-          throw new Error("Scripted follow-up failure");
+          await handlers.stageManuscript({
+            summary: "Invalid follow-up revision",
+            changes: [
+              {
+                kind: "rewrite",
+                blockId: "missing-block",
+                afterId: null,
+                type: null,
+                speaker: null,
+                newText: "This source does not exist.",
+                toIndex: null,
+                reason: "Exercise transactional proposal staging",
+              },
+            ],
+          });
+          throw new Error("Expected invalid proposal staging to fail.");
         }
 
         expect(input.run.attachments).toEqual([
@@ -477,7 +622,43 @@ describe("agent console authoring flows", () => {
     if (initial === null || initial.kind !== "manuscript") {
       throw new Error("Expected the initial manuscript proposal.");
     }
-    const initialSnapshot = structuredClone(initial);
+    const expectedInitial: ManuscriptPendingProposal = {
+      id: "flow-4",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Initial revision",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-5",
+          change: {
+            kind: "rewrite",
+            blockId: "anchor",
+            afterId: null,
+            type: null,
+            speaker: null,
+            newText: "Mara snapped the ledger shut.",
+            toIndex: null,
+            reason: "Sharpen the gesture",
+          },
+          precondition: {
+            kind: "target",
+            target: {
+              sourceId: "anchor",
+              order: 0,
+              fingerprint: "64e5c668",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "Mara closed the ledger.",
+              previewText: "Mara closed the ledger.",
+            },
+          },
+        },
+      ],
+    };
+    expect(initial).toEqual(expectedInitial);
 
     await controller.dispatchAgentIntent({
       kind: "add-context",
@@ -488,55 +669,65 @@ describe("agent console authoring flows", () => {
     );
     await controller.submitAgentDraft({
       kind: "proposal-follow-up",
-      proposalId: initial.id,
+      proposalId: "flow-4",
     });
 
-    expect(readPendingChanges).toEqual(initialSnapshot.changes);
     const replacement = useAgentConsoleStore.getState().pendingProposal;
     if (replacement === null || replacement.kind !== "manuscript") {
       throw new Error("Expected the replacement manuscript proposal.");
     }
-    expect(replacement.id).not.toBe(initial.id);
-    expect(replacement.changes[0].id).not.toBe(initial.changes[0].id);
-    expect(replacement.changes).toEqual([
-      {
-        id: replacement.changes[0].id,
-        change: {
-          kind: "rewrite",
-          blockId: "successor",
-          afterId: null,
-          type: null,
-          speaker: null,
-          newText: "At dawn, the harbor bells dragged her awake.",
-          toIndex: null,
-          reason: "Carry the harder tone into morning",
-        },
-        precondition: {
-          kind: "target",
-          target: {
-            sourceId: "successor",
-            order: 1,
-            fingerprint: blockFingerprint(originalBlocks[1]),
-            sourceType: "narration",
-            label: "narration block",
-            exactText: "At dawn, the harbor bells woke her.",
-            previewText: "At dawn, the harbor bells woke her.",
+    const expectedReplacement: ManuscriptPendingProposal = {
+      id: "flow-11",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Replacement revision",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-9",
+      changes: [
+        {
+          id: "flow-12",
+          change: {
+            kind: "rewrite",
+            blockId: "successor",
+            afterId: null,
+            type: null,
+            speaker: null,
+            newText: "At dawn, the harbor bells dragged her awake.",
+            toIndex: null,
+            reason: "Carry the harder tone into morning",
+          },
+          precondition: {
+            kind: "target",
+            target: {
+              sourceId: "successor",
+              order: 1,
+              fingerprint: "106a8c7e",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "At dawn, the harbor bells woke her.",
+              previewText: "At dawn, the harbor bells woke her.",
+            },
           },
         },
-      },
-    ]);
-    expect(replacement.changes).not.toEqual(initial.changes);
-    const replacementSnapshot = structuredClone(replacement);
+      ],
+    };
+    expect(replacement).toEqual(expectedReplacement);
+    expect(readPendingChanges).toEqual([expectedInitial.changes]);
 
     useAgentConsoleStore.getState().setDraftText("Try another follow-up.");
     await expect(
       controller.submitAgentDraft({
         kind: "proposal-follow-up",
-        proposalId: replacement.id,
+        proposalId: "flow-11",
       }),
-    ).rejects.toThrow("Scripted follow-up failure");
+    ).rejects.toThrow("invalid manuscript change");
+    expect(readPendingChanges).toEqual([
+      expectedInitial.changes,
+      expectedReplacement.changes,
+    ]);
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
-      replacementSnapshot,
+      expectedReplacement,
     );
   });
 
@@ -666,18 +857,36 @@ describe("agent console authoring flows", () => {
         message.parts.filter((part) => part.type === "data-findings"),
       );
     expect(findings).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
+      {
+        type: "data-findings",
+        data: {
           kind: "critique",
-          items: [expect.objectContaining({ tag: "Voice" })],
-        }),
-      }),
-      expect.objectContaining({
-        data: expect.objectContaining({
+          chapterId: "ch1",
+          items: [
+            {
+              kind: "strength",
+              tag: "Voice",
+              text: "The ledger image gives Mara a precise, controlled gesture.",
+              blockIds: ["anchor"],
+            },
+          ],
+        },
+      },
+      {
+        type: "data-findings",
+        data: {
           kind: "continuity",
-          items: [expect.objectContaining({ tag: "Timeline" })],
-        }),
-      }),
+          chapterId: "ch1",
+          items: [
+            {
+              sev: "ok",
+              tag: "Timeline",
+              text: "The ledger closes before the dawn bells ring.",
+              blockIds: ["anchor", "successor"],
+            },
+          ],
+        },
+      },
     ]);
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
   });
@@ -705,13 +914,29 @@ describe("agent console authoring flows", () => {
       dependencies(async (input) => {
         const handlers = createAgentToolHandlers(input.environment);
         const outline = await handlers.readOutline({ chapterId: "ch1" });
-        expect(outline).toMatchObject({
+        expect(outline).toEqual({
           kind: "runtime",
+          summary: {
+            label: "Read outline",
+            target: "ch1",
+            detail: "1 card",
+            itemCount: 1,
+          },
           value: {
+            premise: "",
             chapters: [
               {
                 chapterId: "ch1",
-                cards: [{ id: "card-1", title: "The ledger closes" }],
+                title: "Chapter One",
+                cards: [
+                  {
+                    id: "card-1",
+                    order: 0,
+                    title: "The ledger closes",
+                    intention: "End the night scene",
+                    fingerprint: "ed97ddf8",
+                  },
+                ],
               },
             ],
           },
@@ -753,19 +978,83 @@ describe("agent console authoring flows", () => {
     if (pending === null || pending.kind !== "outline") {
       throw new Error("Expected a shared pending outline proposal.");
     }
+    const expectedProposal: OutlinePendingProposal = {
+      id: "flow-4",
+      kind: "outline",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Strengthen the chapter turn",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-5",
+          change: {
+            kind: "rewrite",
+            cardId: "card-1",
+            title: "The summons arrives",
+            intention: "Turn Mara toward the harbor",
+            toIndex: null,
+            reason: "Align the beat with the chapter ending",
+          },
+          precondition: {
+            kind: "card",
+            target: {
+              sourceId: "card-1",
+              order: 0,
+              fingerprint: "ed97ddf8",
+              sourceType: "outline-card",
+              label: "The ledger closes",
+              exactText: "The ledger closes\nEnd the night scene",
+              previewText: "The ledger closes\nEnd the night scene",
+            },
+          },
+        },
+        {
+          id: "flow-6",
+          change: {
+            kind: "add",
+            cardId: null,
+            title: "Mara leaves",
+            intention: "Commit her to the next scene",
+            toIndex: 1,
+            reason: "Make the transition explicit",
+          },
+          precondition: {
+            kind: "outline-order",
+            orderFingerprint: "f9295252",
+          },
+        },
+      ],
+    };
+    expect(pending).toEqual(expectedProposal);
     expect(useProjectStore.getState().meta).toEqual(before);
     const applied = useProjectStore
       .getState()
-      .applyAgentOutlineProposal(
-        pending,
-        pending.changes.map((change) => change.id),
-      );
+      .applyAgentOutlineProposal(pending, ["flow-5", "flow-6"]);
     if (applied.status !== "applied") {
       throw new Error("Expected the complete outline proposal to apply.");
     }
-    expect(
-      useProjectStore.getState().meta.chapters.ch1.cards.map((item) => item.title),
-    ).toEqual(["The summons arrives", "Mara leaves"]);
+    expect(applied.appliedChangeIds).toEqual(["flow-5", "flow-6"]);
+    expect(applied.undoToken.id).toBe("b-test-1");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards).toEqual([
+      {
+        id: "card-1",
+        title: "The summons arrives",
+        intention: "Turn Mara toward the harbor",
+        characterIds: [],
+        loreIds: [],
+        continuityFlags: [],
+      },
+      {
+        id: "card-test-1",
+        title: "Mara leaves",
+        intention: "Commit her to the next scene",
+        characterIds: [],
+        loreIds: [],
+        continuityFlags: [],
+      },
+    ]);
     expect(
       useProjectStore.getState().undoAgentOutlineProposal(applied.undoToken),
     ).toBe(true);
@@ -775,6 +1064,7 @@ describe("agent console authoring flows", () => {
   it("stops after a completed tool row while preserving the next draft", async () => {
     const pending = deferred<StreamAgentRunResult>();
     let captured: StreamAgentRunInput | null = null;
+    let pendingResolved = false;
     const controller = createAgentController(
       dependencies(async (input) => {
         captured = input;
@@ -805,51 +1095,151 @@ describe("agent console authoring flows", () => {
       targetChapterId: "ch1",
     });
     await vi.waitFor(() => expect(captured).not.toBeNull());
-    useAgentConsoleStore.getState().setDraftText("Ask about the summons next.");
-    useAgentConsoleStore.getState().addDraftContextRefs([
-      { kind: "block", chapterId: "ch1", blockId: "later" },
-    ]);
-
-    controller.stopAgentRun();
-
-    const stopped = useAgentConsoleStore.getState();
-    expect(
-      stopped.messages.some(
-        (message) =>
-          message.role === "user" &&
-          message.parts.some(
-            (part) =>
-              part.type === "text" && part.text === "Read before answering.",
-          ),
-      ),
-    ).toBe(true);
-    const assistant = stopped.messages.find(
-      (message) => message.role === "assistant",
-    );
-    expect(assistant?.metadata?.state).toBe("stopped");
-    expect(assistant?.parts).toEqual([
-      expect.objectContaining({
-        type: "dynamic-tool",
-        toolName: "read_chapter",
-        state: "output-available",
-      }),
-    ]);
-    expect(stopped).toMatchObject({
+    const expectedStoppedMessages: AgentUIMessage[] = [
+      {
+        id: "flow-2",
+        role: "user",
+        metadata: {
+          runId: "flow-1",
+          mode: "writing",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
+        parts: [
+          { type: "text", text: "Read before answering." },
+          { type: "data-context", data: { snapshots: [] } },
+        ],
+      },
+      {
+        id: "flow-3",
+        role: "assistant",
+        metadata: {
+          runId: "flow-1",
+          mode: "writing",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "stopped",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "flow-read-chapter",
+            state: "output-available",
+            input: { chapterId: "ch1" },
+            output: {
+              kind: "runtime",
+              summary: {
+                label: "Read chapter",
+                target: "Chapter One",
+                detail: "3 blocks",
+                itemCount: 3,
+              },
+              value: {
+                chapterId: "ch1",
+                title: "Chapter One",
+                blocks: [
+                  {
+                    id: "anchor",
+                    order: 0,
+                    type: "narration",
+                    text: "Mara closed the ledger.",
+                    fingerprint: "64e5c668",
+                  },
+                  {
+                    id: "successor",
+                    order: 1,
+                    type: "narration",
+                    text: "At dawn, the harbor bells woke her.",
+                    fingerprint: "106a8c7e",
+                  },
+                  {
+                    id: "later",
+                    order: 2,
+                    type: "narration",
+                    text: "She found the summons under the door.",
+                    fingerprint: "bd042c29",
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    ];
+    const expectedStoppedState = {
+      messages: expectedStoppedMessages,
+      interruptedRun: {
+        runId: "flow-1",
+        userMessageId: "flow-2",
+        assistantMessageId: "flow-3",
+        reason: "stopped" as const,
+        interruptedAt: "2026-07-30T12:00:00.000Z",
+      },
       draftText: "Ask about the summons next.",
       draftContextRefs: [
-        { kind: "block", chapterId: "ch1", blockId: "later" },
+        { kind: "block" as const, chapterId: "ch1", blockId: "later" },
       ],
-      runStatus: "idle",
+      runStatus: "idle" as const,
       activeRun: null,
-    });
-    if (captured === null) {
-      throw new Error("Expected the stopped stream input.");
+      runError: null,
+    };
+
+    try {
+      useAgentConsoleStore
+        .getState()
+        .setDraftText("Ask about the summons next.");
+      useAgentConsoleStore.getState().addDraftContextRefs([
+        { kind: "block", chapterId: "ch1", blockId: "later" },
+      ]);
+
+      controller.stopAgentRun();
+
+      const stopped = useAgentConsoleStore.getState();
+      expect({
+        messages: stopped.messages,
+        interruptedRun: stopped.interruptedRun,
+        draftText: stopped.draftText,
+        draftContextRefs: stopped.draftContextRefs,
+        runStatus: stopped.runStatus,
+        activeRun: stopped.activeRun,
+        runError: stopped.runError,
+      }).toEqual(expectedStoppedState);
+      if (captured === null) {
+        throw new Error("Expected the stopped stream input.");
+      }
+      pending.resolve({ message: completeAssistant(captured), usage });
+      pendingResolved = true;
+      await submission;
+      const afterLateCompletion = useAgentConsoleStore.getState();
+      expect({
+        messages: afterLateCompletion.messages,
+        interruptedRun: afterLateCompletion.interruptedRun,
+        draftText: afterLateCompletion.draftText,
+        draftContextRefs: afterLateCompletion.draftContextRefs,
+        runStatus: afterLateCompletion.runStatus,
+        activeRun: afterLateCompletion.activeRun,
+        runError: afterLateCompletion.runError,
+      }).toEqual(expectedStoppedState);
+    } finally {
+      if (!pendingResolved) {
+        if (captured === null) {
+          throw new Error("Expected the stopped stream input during cleanup.");
+        }
+        controller.stopAgentRun();
+        pending.resolve({ message: completeAssistant(captured), usage });
+        await submission;
+      }
     }
-    pending.resolve({ message: completeAssistant(captured), usage });
-    await submission;
-    expect(
-      JSON.stringify(useAgentConsoleStore.getState().messages),
-    ).not.toContain("Proposal ready.");
   });
 
   it("flushes a stopped project and restores only its conversation on reopen", async () => {
@@ -950,10 +1340,52 @@ describe("agent console authoring flows", () => {
     if (bookAProposal === null || bookAProposal.kind !== "manuscript") {
       throw new Error("Expected Book A's pending manuscript proposal.");
     }
+    const expectedBookAProposal: ManuscriptPendingProposal = {
+      id: "flow-4",
+      kind: "manuscript",
+      projectRoot: bookA,
+      chapterId: "ch1",
+      summary: "Revise Mara's final beat",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-5",
+          change: {
+            kind: "rewrite",
+            blockId: "later",
+            afterId: null,
+            type: null,
+            speaker: null,
+            newText: "She found the sealed summons under the door.",
+            toIndex: null,
+            reason: "Make the summons concrete",
+          },
+          precondition: {
+            kind: "target",
+            target: {
+              sourceId: "later",
+              order: 2,
+              fingerprint: "bd042c29",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "She found the summons under the door.",
+              previewText: "She found the summons under the door.",
+            },
+          },
+        },
+      ],
+    };
+    expect(bookAProposal).toEqual(expectedBookAProposal);
     useAgentConsoleStore.getState().setDraftText("Book A draft");
 
     const liveResult = deferred<StreamAgentRunResult>();
     let liveInput: StreamAgentRunInput | null = null;
+    let liveResultResolved = false;
+    const productionTime = "2026-07-30T13:00:00.000Z";
+    const dateSpy = vi
+      .spyOn(Date.prototype, "toISOString")
+      .mockReturnValue(productionTime);
     mocks.productionStream.mockImplementation(
       async (input: StreamAgentRunInput): Promise<StreamAgentRunResult> => {
         liveInput = input;
@@ -989,41 +1421,137 @@ describe("agent console authoring flows", () => {
       refs: [],
       task: { kind: "conversation", targetChapterId: "ch1" },
     });
-    await vi.waitFor(() => expect(liveInput).not.toBeNull());
-    const bookATranscriptBeforeSwitch = structuredClone(
-      useAgentConsoleStore.getState().messages,
-    );
-    const [
-      stagedUserBeforeSwitch,
-      stagedAssistantBeforeSwitch,
-      interruptedUserBeforeSwitch,
-      completedToolBeforeSwitch,
-    ] = bookATranscriptBeforeSwitch;
-    if (
-      bookATranscriptBeforeSwitch.length !== 4 ||
-      stagedUserBeforeSwitch.role !== "user" ||
-      stagedAssistantBeforeSwitch.role !== "assistant" ||
-      interruptedUserBeforeSwitch.role !== "user" ||
-      completedToolBeforeSwitch.role !== "assistant" ||
-      completedToolBeforeSwitch.metadata === undefined
-    ) {
-      throw new Error("Expected Book A's complete pre-switch transcript.");
-    }
-    expect(interruptedUserBeforeSwitch.parts).toEqual([
-      { type: "text", text: "Read Book A before the next revision." },
-      { type: "data-context", data: { snapshots: [] } },
-    ]);
-    expect(completedToolBeforeSwitch.parts).toEqual([
-      expect.objectContaining({
-        type: "dynamic-tool",
-        toolName: "read_chapter",
-        toolCallId: "book-a-read",
-        state: "output-available",
-      }),
-    ]);
-    const expectedBookATranscript: AgentUIMessage[] = [
+    const expectedLiveBookATranscript: AgentUIMessage[] = [
       {
-        ...stagedUserBeforeSwitch,
+        id: "flow-2",
+        role: "user",
+        metadata: {
+          runId: "flow-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
+        parts: [
+          { type: "text", text: "Revise the final beat in Book A." },
+          { type: "data-context", data: { snapshots: [] } },
+        ],
+      },
+      {
+        id: "flow-3",
+        role: "assistant",
+        metadata: {
+          runId: "flow-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage,
+        },
+        parts: [{ type: "text", text: "Proposal ready.", state: "done" }],
+      },
+      {
+        id: "agent-test-2",
+        role: "user",
+        metadata: {
+          runId: "agent-test-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: productionTime,
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
+        parts: [
+          { type: "text", text: "Read Book A before the next revision." },
+          { type: "data-context", data: { snapshots: [] } },
+        ],
+      },
+      {
+        id: "agent-test-3",
+        role: "assistant",
+        metadata: {
+          runId: "agent-test-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "streaming",
+          createdAt: productionTime,
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "book-a-read",
+            state: "output-available",
+            input: { chapterId: "ch1" },
+            output: {
+              kind: "runtime",
+              summary: {
+                label: "Read chapter",
+                target: "Chapter One",
+                detail: "3 blocks",
+                itemCount: 3,
+              },
+              value: {
+                chapterId: "ch1",
+                title: "Chapter One",
+                blocks: [
+                  {
+                    id: "anchor",
+                    order: 0,
+                    type: "narration",
+                    text: "Mara closed the ledger.",
+                    fingerprint: "64e5c668",
+                  },
+                  {
+                    id: "successor",
+                    order: 1,
+                    type: "narration",
+                    text: "At dawn, the harbor bells woke her.",
+                    fingerprint: "106a8c7e",
+                  },
+                  {
+                    id: "later",
+                    order: 2,
+                    type: "narration",
+                    text: "She found the summons under the door.",
+                    fingerprint: "bd042c29",
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    ];
+    const expectedPersistedBookATranscript: AgentUIMessage[] = [
+      {
+        id: "flow-2",
+        role: "user",
+        metadata: {
+          runId: "flow-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
         parts: [
           {
             type: "text",
@@ -1034,11 +1562,35 @@ describe("agent console authoring flows", () => {
         ],
       },
       {
-        ...stagedAssistantBeforeSwitch,
+        id: "flow-3",
+        role: "assistant",
+        metadata: {
+          runId: "flow-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: "2026-07-30T12:00:00.000Z",
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage,
+        },
         parts: [{ type: "text", text: "Proposal ready.", state: "done" }],
       },
       {
-        ...interruptedUserBeforeSwitch,
+        id: "agent-test-2",
+        role: "user",
+        metadata: {
+          runId: "agent-test-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
+          state: "complete",
+          createdAt: productionTime,
+          error: null,
+          errorCode: null,
+          retryOf: null,
+          usage: null,
+        },
         parts: [
           {
             type: "text",
@@ -1049,12 +1601,18 @@ describe("agent console authoring flows", () => {
         ],
       },
       {
-        ...completedToolBeforeSwitch,
+        id: "agent-test-3",
+        role: "assistant",
         metadata: {
-          ...completedToolBeforeSwitch.metadata,
+          runId: "agent-test-1",
+          mode: "edit",
+          task: { kind: "conversation", targetChapterId: "ch1" },
           state: "stopped",
+          createdAt: productionTime,
           error: null,
           errorCode: null,
+          retryOf: null,
+          usage: null,
         },
         parts: [
           {
@@ -1076,92 +1634,179 @@ describe("agent console authoring flows", () => {
         ],
       },
     ];
+    const expectedInterruptedRun = {
+      runId: "agent-test-1",
+      userMessageId: "agent-test-2",
+      assistantMessageId: "agent-test-3",
+      reason: "project-switch" as const,
+      interruptedAt: productionTime,
+    };
+    const expectedPersistedBookAProposal = {
+      id: "flow-4",
+      kind: "manuscript" as const,
+      chapterId: "ch1",
+      summary: "Revise Mara's final beat",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "flow-3",
+      changes: [
+        {
+          id: "flow-5",
+          change: {
+            kind: "rewrite" as const,
+            blockId: "later",
+            afterId: null,
+            type: null,
+            speaker: null,
+            newText: "She found the sealed summons under the door.",
+            toIndex: null,
+            reason: "Make the summons concrete",
+          },
+          precondition: {
+            kind: "target" as const,
+            target: {
+              sourceId: "later",
+              order: 2,
+              fingerprint: "bd042c29",
+              sourceType: "narration",
+              label: "narration block",
+              exactText: "She found the summons under the door.",
+              previewText: "She found the summons under the door.",
+            },
+          },
+        },
+      ],
+    };
 
     let recordedReset = false;
     let recordedHydration = false;
-    const unsubscribe = useAgentConsoleStore.subscribe((state, previous) => {
-      if (
-        !recordedReset &&
-        state.persistenceTransition?.projectRoot === bookB &&
-        previous.messages.length > 0 &&
-        state.messages.length === 0
-      ) {
-        recordedReset = true;
-        events.push("reset");
+    let unsubscribe = (): void => undefined;
+    try {
+      await vi.waitFor(() => expect(liveInput).not.toBeNull());
+      expect(useAgentConsoleStore.getState().messages).toEqual(
+        expectedLiveBookATranscript,
+      );
+      unsubscribe = useAgentConsoleStore.subscribe((state, previous) => {
+        if (
+          !recordedReset &&
+          state.persistenceTransition?.projectRoot === bookB &&
+          previous.messages.length > 0 &&
+          state.messages.length === 0
+        ) {
+          recordedReset = true;
+          events.push("reset");
+        }
+        if (
+          !recordedHydration &&
+          state.hydratedProjectRoot === bookB &&
+          previous.hydratedProjectRoot !== bookB
+        ) {
+          recordedHydration = true;
+          events.push("hydrate-b");
+        }
+      });
+      useProjectStore.setState({ project: project(bookB) });
+      await transitionAgentProject(bookB);
+
+      expect(events).toEqual([
+        "abort",
+        "write-a",
+        "reset",
+        "read-b",
+        "hydrate-b",
+      ]);
+      const persistedA = disk.get(keyA);
+      if (persistedA === undefined) {
+        throw new Error("Expected Book A to be flushed before Book B loaded.");
       }
-      if (
-        !recordedHydration &&
-        state.hydratedProjectRoot === bookB &&
-        previous.hydratedProjectRoot !== bookB
-      ) {
-        recordedHydration = true;
-        events.push("hydrate-b");
+      expect(persistedA).toEqual({
+        v: 3,
+        mode: "edit",
+        messages: expectedPersistedBookATranscript,
+        summary: null,
+        draftText: "Book A draft",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: expectedPersistedBookAProposal,
+        lastUsage: usage,
+        interruptedRun: expectedInterruptedRun,
+      });
+      const hydratedB = useAgentConsoleStore.getState();
+      expect({
+        mode: hydratedB.mode,
+        messages: hydratedB.messages,
+        summary: hydratedB.summary,
+        draftText: hydratedB.draftText,
+        draftContextRefs: hydratedB.draftContextRefs,
+        pendingProposal: hydratedB.pendingProposal,
+        lastUsage: hydratedB.lastUsage,
+        interruptedRun: hydratedB.interruptedRun,
+        activeRun: hydratedB.activeRun,
+        runStatus: hydratedB.runStatus,
+        runError: hydratedB.runError,
+        hydratedProjectRoot: hydratedB.hydratedProjectRoot,
+      }).toEqual({
+        mode: "writing",
+        messages: bookBMessages,
+        summary: null,
+        draftText: "Book B draft",
+        draftContextRefs: [],
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+        activeRun: null,
+        runStatus: "idle",
+        runError: null,
+        hydratedProjectRoot: bookB,
+      });
+
+      if (liveInput === null) {
+        throw new Error("Expected the interrupted Book A stream input.");
       }
-    });
-    useProjectStore.setState({ project: project(bookB) });
-    await transitionAgentProject(bookB);
+      liveResult.resolve({ message: completeAssistant(liveInput), usage });
+      liveResultResolved = true;
+      await liveSubmission;
+      expect(useAgentConsoleStore.getState().messages).toEqual(bookBMessages);
 
-    expect(events).toEqual([
-      "abort",
-      "write-a",
-      "reset",
-      "read-b",
-      "hydrate-b",
-    ]);
-    const persistedA = disk.get(keyA);
-    if (persistedA === undefined) {
-      throw new Error("Expected Book A to be flushed before Book B loaded.");
+      events.length = 0;
+      useProjectStore.setState({ project: project(bookA) });
+      await transitionAgentProject(bookA);
+
+      expect(events).toEqual(["write-b", "read-a"]);
+      const restoredA = useAgentConsoleStore.getState();
+      expect({
+        mode: restoredA.mode,
+        messages: restoredA.messages,
+        summary: restoredA.summary,
+        draftText: restoredA.draftText,
+        draftContextRefs: restoredA.draftContextRefs,
+        pendingProposal: restoredA.pendingProposal,
+        lastUsage: restoredA.lastUsage,
+        interruptedRun: restoredA.interruptedRun,
+        activeRun: restoredA.activeRun,
+        runStatus: restoredA.runStatus,
+        runError: restoredA.runError,
+        hydratedProjectRoot: restoredA.hydratedProjectRoot,
+      }).toEqual({
+        mode: "edit",
+        messages: expectedPersistedBookATranscript,
+        summary: null,
+        draftText: "Book A draft",
+        draftContextRefs: [],
+        pendingProposal: expectedBookAProposal,
+        lastUsage: usage,
+        interruptedRun: expectedInterruptedRun,
+        activeRun: null,
+        runStatus: "idle",
+        runError: null,
+        hydratedProjectRoot: bookA,
+      });
+    } finally {
+      unsubscribe();
+      if (!liveResultResolved && liveInput !== null) {
+        liveResult.resolve({ message: completeAssistant(liveInput), usage });
+        await liveSubmission;
+      }
+      dateSpy.mockRestore();
     }
-    expect(persistedA).toMatchObject({
-      mode: "edit",
-      draftText: "Book A draft",
-      interruptedRun: { reason: "project-switch" },
-    });
-    expect(persistedA.messages).toEqual(expectedBookATranscript);
-    expect(persistedA.pendingProposal).toEqual({
-      id: bookAProposal.id,
-      kind: bookAProposal.kind,
-      chapterId: bookAProposal.chapterId,
-      summary: bookAProposal.summary,
-      createdAt: bookAProposal.createdAt,
-      originatingMessageId: bookAProposal.originatingMessageId,
-      changes: bookAProposal.changes,
-    });
-    expect(useAgentConsoleStore.getState()).toMatchObject({
-      mode: "writing",
-      draftText: "Book B draft",
-      messages: bookBMessages,
-      pendingProposal: null,
-      hydratedProjectRoot: bookB,
-    });
-
-    if (liveInput === null) {
-      throw new Error("Expected the interrupted Book A stream input.");
-    }
-    liveResult.resolve({ message: completeAssistant(liveInput), usage });
-    await liveSubmission;
-    expect(JSON.stringify(useAgentConsoleStore.getState().messages)).not.toContain(
-      "Proposal ready.",
-    );
-
-    events.length = 0;
-    useProjectStore.setState({ project: project(bookA) });
-    await transitionAgentProject(bookA);
-    unsubscribe();
-
-    expect(events).toEqual(["write-b", "read-a"]);
-    const restoredA = useAgentConsoleStore.getState();
-    expect(restoredA).toMatchObject({
-      mode: "edit",
-      draftText: "Book A draft",
-      messages: expectedBookATranscript,
-      pendingProposal: bookAProposal,
-      interruptedRun: { reason: "project-switch" },
-      hydratedProjectRoot: bookA,
-    });
-    expect(JSON.stringify(restoredA.messages)).not.toContain("Book B");
-    expect(restoredA.messages.map((message) => message.id)).not.toContain(
-      "book-b-user",
-    );
   });
 });

@@ -324,6 +324,36 @@ describe("AgentComposer draft behavior", () => {
     expect(textarea.value).toBe("A store-owned revision");
   });
 
+  it("disables target-project editing and submit while cross-project hydration is active", () => {
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      draftText: "",
+      persistenceTransition: {
+        generation: 4,
+        kind: "load",
+        projectRoot: project.root,
+      },
+    });
+    render(<AgentComposer />);
+
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Writing" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.getByText("AI conversation is loading.")).toBeTruthy();
+  });
+
   it("removes one of multiple live attachments without submitting", () => {
     useAgentConsoleStore.setState({
       draftText: "Compare these",
@@ -383,6 +413,11 @@ describe("AgentComposer draft behavior", () => {
       draftText: "Next turn",
       activeRun: activeRun("writing"),
       runStatus: "streaming",
+      persistenceTransition: {
+        generation: 7,
+        kind: "load",
+        projectRoot: project.root,
+      },
     });
     render(<AgentComposer />);
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;

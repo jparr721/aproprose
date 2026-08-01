@@ -7,6 +7,8 @@ const agentErrorText: Record<AgentErrorCode, string> = {
   tool: "A project action could not be completed. Retry the request.",
   compaction:
     "Older conversation context could not be prepared. Retry the request.",
+  transition:
+    "The AI conversation is loading for this project. Retry when loading finishes.",
   unknown: "The AI request could not be completed. Retry the request.",
 };
 

@@ -244,6 +244,7 @@ describe("AgentMessage content", () => {
         chapters: [],
       },
     });
+    useAgentConsoleStore.setState({ hydratedProjectRoot: "/book" });
     const message = assistantMessage(
       "assistant-split-findings",
       [

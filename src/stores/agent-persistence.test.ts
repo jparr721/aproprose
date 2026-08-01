@@ -10,7 +10,10 @@ import type {
   PersistedAgentState,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
-import { submitAgentRequest } from "@/lib/ai/agent-controller";
+import {
+  dispatchAgentIntent,
+  submitAgentRequest,
+} from "@/lib/ai/agent-controller";
 import { resetAiProvider } from "@/lib/ai/model";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
@@ -795,6 +798,99 @@ describe("agent persistence", () => {
     expect(tauri.readAppData).toHaveBeenCalledWith(agentStateKey("/books/new"));
   });
 
+  it("installs cross-root ownership and freezes the old snapshot synchronously", async () => {
+    const oldRoot = "/books/ownership-old";
+    const nextRoot = "/books/ownership-new";
+    await transitionAgentProject(oldRoot);
+    const oldRef: DraftContextRef = {
+      kind: "block",
+      chapterId: "chapter-1",
+      blockId: "old-block",
+    };
+    const store = useAgentConsoleStore.getState();
+    store.setMode("edit");
+    store.setDraftText("Frozen old draft");
+    store.addDraftContextRefs([oldRef]);
+    tauri.writeAppData.mockClear();
+    tauri.readAppData.mockClear();
+    const oldWrite = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(oldWrite.promise);
+    tauri.readAppData.mockResolvedValueOnce(
+      persistedState("Loaded new draft", []),
+    );
+    useProjectStore.setState({
+      project: project(nextRoot),
+      meta: EMPTY_META,
+      status: "ready",
+    });
+
+    const switching = transitionAgentProject(nextRoot);
+    const mutationError = {
+      name: "AgentConsoleProjectTransitionError",
+      agentErrorCode: "transition",
+    };
+    const immediateState = useAgentConsoleStore.getState();
+    const mutationErrors = [
+      () => store.setDraftText("Wrong-root text"),
+      () => store.setMode("writing"),
+      () => store.addDraftContextRefs([retainedDuringLoadRef]),
+      () => store.removeDraftContextRef(oldRef),
+    ].map((mutation): unknown => {
+      try {
+        mutation();
+        return null;
+      } catch (error) {
+        return error;
+      }
+    });
+    await expect(
+      submitAgentRequest({
+        kind: "run",
+        mode: "writing",
+        text: "Do not run against the old root.",
+        refs: [],
+        task: { kind: "conversation", targetChapterId: null },
+      }),
+    ).rejects.toMatchObject(mutationError);
+    await dispatchAgentIntent({
+      kind: "add-context",
+      refs: [retainedDuringLoadRef],
+    });
+    const transitionRunError = useAgentConsoleStore.getState().runError;
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    const oldWriteCall = structuredClone(tauri.writeAppData.mock.calls[0]);
+    const readCallsBeforeRelease = tauri.readAppData.mock.calls.length;
+    oldWrite.resolve(undefined);
+    await switching;
+
+    expect(immediateState).toMatchObject({
+      hydratedProjectRoot: null,
+      mode: "writing",
+      draftText: "",
+      draftContextRefs: [],
+      persistenceTransition: { projectRoot: nextRoot },
+    });
+    for (const error of mutationErrors) {
+      expect(error).toMatchObject(mutationError);
+    }
+    expect(transitionRunError).toMatchObject({ code: "transition" });
+    expect(tauri.getAiConfig).not.toHaveBeenCalled();
+    expect(oldWriteCall).toEqual([
+      agentStateKey(oldRoot),
+      expect.objectContaining({
+        mode: "edit",
+        draftText: "Frozen old draft",
+        draftContextRefs: [oldRef],
+      }),
+    ]);
+    expect(readCallsBeforeRelease).toBe(0);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: nextRoot,
+      draftText: "Loaded new draft",
+      persistenceTransition: null,
+    });
+  });
+
   it("ignores a late load result after a newer project switch", async () => {
     const first = deferred<unknown>();
     const second = deferred<unknown>();
@@ -881,12 +977,57 @@ describe("agent persistence", () => {
     });
   });
 
-  it("queues a submit attempt until owned project hydration completes", async () => {
+  it("keeps a newer rebased draft after a delayed same-root flush fails and retries", async () => {
+    const root = "/books/rebased-failure";
+    const otherRoot = "/books/rebased-failure-other";
+    const disk = new Map<string, unknown>();
+    disk.set(agentStateKey(root), persistedState("Disk baseline", []));
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+      disk.set(key, structuredClone(value));
+    });
+    await transitionAgentProject(root);
+    useAgentConsoleStore.getState().setDraftText("Failed flush draft");
+    const failedWrite = deferred<void>();
+    tauri.writeAppData.mockImplementationOnce(async () => failedWrite.promise);
+
+    const reloading = transitionAgentProject(root);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalled());
+    useAgentConsoleStore.getState().setDraftText("Rebased newer draft");
+    failedWrite.reject(new Error("delayed flush failed"));
+    await reloading;
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: root,
+      draftText: "Rebased newer draft",
+      persistenceIssue: { kind: "save", projectRoot: root },
+    });
+    tauri.writeAppData.mockClear();
+    vi.useFakeTimers();
+    await retryAgentPersistence();
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    expect(tauri.writeAppData.mock.calls[1]).toEqual([
+      agentStateKey(root),
+      expect.objectContaining({ draftText: "Rebased newer draft" }),
+    ]);
+    vi.useRealTimers();
+
+    await transitionAgentProject(otherRoot);
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: root,
+      draftText: "Rebased newer draft",
+      persistenceIssue: null,
+    });
+  });
+
+  it("rejects a submit attempt while owned project hydration is active", async () => {
     const root = "/books/loading-submit";
     const loaded = deferred<unknown>();
-    const config = deferred<{ apiKey: string }>();
     tauri.readAppData.mockReturnValueOnce(loaded.promise);
-    tauri.getAiConfig.mockReturnValueOnce(config.promise);
     useProjectStore.setState({
       project: project(root),
       meta: EMPTY_META,
@@ -905,21 +1046,14 @@ describe("agent persistence", () => {
       refs: [],
       task: { kind: "conversation", targetChapterId: null },
     });
-    await Promise.resolve();
-    await Promise.resolve();
-    const configCallsBeforeLoad = tauri.getAiConfig.mock.calls.length;
-    const statusBeforeLoad = useAgentConsoleStore.getState().runStatus;
+    await expect(submission).rejects.toMatchObject({
+      name: "AgentConsoleProjectTransitionError",
+      agentErrorCode: "transition",
+    });
 
     loaded.resolve(null);
     await loading;
-    await vi.waitFor(() => expect(tauri.getAiConfig).toHaveBeenCalledTimes(1));
-    useProjectStore.setState({ project: null });
-    const closing = transitionAgentProject(null);
-    config.resolve({ apiKey: "test-key" });
-    await Promise.all([submission, closing]);
-
-    expect(configCallsBeforeLoad).toBe(0);
-    expect(statusBeforeLoad).toBe("idle");
+    expect(tauri.getAiConfig).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
   });
 
@@ -1003,6 +1137,13 @@ describe("agent persistence", () => {
     tauri.writeAppData.mockRejectedValueOnce(new Error("old root unavailable"));
 
     useProjectStore.setState({ project: project("/books/new") });
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: null,
+      persistenceTransition: {
+        kind: "load",
+        projectRoot: "/books/new",
+      },
+    });
     await vi.waitFor(() =>
       expect(useAgentConsoleStore.getState()).toMatchObject({
         hydratedProjectRoot: "/books/new",
@@ -1086,6 +1227,15 @@ describe("agent persistence", () => {
     tauri.writeAppData.mockRejectedValueOnce(new Error("old root unavailable"));
 
     useProjectStore.setState({ project: project("/books/new") });
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: null,
+      persistenceTransition: {
+        kind: "load",
+        projectRoot: "/books/new",
+      },
+    });
+    staleWrite.resolve(undefined);
+    await staleSaving;
     await vi.waitFor(() =>
       expect(useAgentConsoleStore.getState()).toMatchObject({
         hydratedProjectRoot: "/books/new",
@@ -1095,8 +1245,6 @@ describe("agent persistence", () => {
         },
       }),
     );
-    staleWrite.resolve(undefined);
-    await staleSaving;
     expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
       kind: "save",
       projectRoot: "/books/old",
@@ -1653,15 +1801,145 @@ describe("agent persistence", () => {
     vi.useRealTimers();
   });
 
+  it("serializes two resets and lets only the newest generation complete", async () => {
+    const root = "/books/two-resets";
+    await transitionAgentProject(root);
+    useAgentConsoleStore.getState().setDraftText("Before both resets");
+    tauri.writeAppData.mockClear();
+    const firstWrite = deferred<void>();
+    tauri.writeAppData
+      .mockReturnValueOnce(firstWrite.promise)
+      .mockResolvedValueOnce(undefined);
+
+    const firstReset = resetAgentConversation(root);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    useAgentConsoleStore.getState().setDraftText("Between reset requests");
+    const secondReset = resetAgentConversation(root);
+    const callsBeforeFirstCompletes = tauri.writeAppData.mock.calls.length;
+    const transitionBeforeFirstCompletes =
+      useAgentConsoleStore.getState().persistenceTransition;
+    firstWrite.resolve(undefined);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    await Promise.all([firstReset, secondReset]);
+
+    expect(callsBeforeFirstCompletes).toBe(1);
+    expect(transitionBeforeFirstCompletes).toMatchObject({
+      kind: "reset",
+      projectRoot: root,
+    });
+    expect(tauri.writeAppData.mock.calls).toEqual([
+      [agentStateKey(root), emptyPersistedAgentState()],
+      [agentStateKey(root), emptyPersistedAgentState()],
+    ]);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: root,
+      mode: "writing",
+      draftText: "",
+      messages: [],
+      persistenceIssue: null,
+      persistenceTransition: null,
+    });
+  });
+
+  it("serializes delayed recovery, reset, and load with newest-generation bookkeeping", async () => {
+    const root = "/books/recovery-overlap";
+    const otherRoot = "/books/recovery-overlap-other";
+    await transitionAgentProject(root);
+    useAgentConsoleStore.getState().setDraftText("Retained recovery draft");
+    tauri.writeAppData.mockRejectedValueOnce(new Error("retain this failure"));
+    await transitionAgentProject(otherRoot);
+    tauri.writeAppData.mockResolvedValue(undefined);
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: root,
+      draftText: "Retained recovery draft",
+      persistenceIssue: { kind: "save", projectRoot: root },
+    });
+
+    const recoveryWrite = deferred<void>();
+    const resetWrite = deferred<void>();
+    let disk: unknown = null;
+    tauri.writeAppData.mockClear();
+    tauri.readAppData.mockClear();
+    tauri.writeAppData
+      .mockImplementationOnce(async (_key: string, value: unknown) => {
+        await recoveryWrite.promise;
+        disk = structuredClone(value);
+      })
+      .mockImplementationOnce(async (_key: string, value: unknown) => {
+        await resetWrite.promise;
+        disk = structuredClone(value);
+      });
+    tauri.readAppData.mockImplementation(async () => structuredClone(disk));
+    const recoverySnapshot = {
+      ...emptyPersistedAgentState(),
+      draftText: "Explicit recovery",
+    };
+
+    const recovering = saveAgentState(root, recoverySnapshot);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    const resetting = resetAgentConversation(root);
+    const loading = transitionAgentProject(root);
+    const callsBeforeRecoveryCompletes = tauri.writeAppData.mock.calls.length;
+    const readsBeforeRecoveryCompletes = tauri.readAppData.mock.calls.length;
+    const transitionBeforeRecoveryCompletes =
+      useAgentConsoleStore.getState().persistenceTransition;
+    recoveryWrite.resolve(undefined);
+    await vi.waitFor(() =>
+      expect(tauri.writeAppData.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    const stateBeforeResetCompletes = useAgentConsoleStore.getState();
+    resetWrite.resolve(undefined);
+    await Promise.all([recovering, resetting, loading]);
+
+    expect(callsBeforeRecoveryCompletes).toBe(1);
+    expect(readsBeforeRecoveryCompletes).toBe(0);
+    expect(transitionBeforeRecoveryCompletes).toMatchObject({
+      kind: "load",
+      projectRoot: root,
+    });
+    expect(stateBeforeResetCompletes).toMatchObject({
+      draftText: "Retained recovery draft",
+      persistenceIssue: { kind: "save", projectRoot: root },
+      persistenceTransition: { kind: "load", projectRoot: root },
+    });
+    expect(disk).toEqual(emptyPersistedAgentState());
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: root,
+      draftText: "",
+      messages: [],
+      persistenceIssue: null,
+      persistenceTransition: null,
+    });
+  });
+
   it("does not hydrate a reset root after project ownership changes", async () => {
     const resetRoot = "/books/resetting";
     const nextRoot = "/books/next";
+    const nextMessages = [
+      textMessage("user-next", "user", "Keep the next project", "complete"),
+    ];
+    const persistedNextProposal = {
+      id: proposal.id,
+      kind: proposal.kind,
+      chapterId: proposal.chapterId,
+      summary: proposal.summary,
+      createdAt: proposal.createdAt,
+      originatingMessageId: proposal.originatingMessageId,
+      changes: proposal.changes,
+    };
     tauri.readAppData
       .mockResolvedValueOnce({
         ...emptyPersistedAgentState(),
         draftSourceLocators: undefined,
       })
-      .mockResolvedValueOnce(null);
+      .mockResolvedValueOnce({
+        ...emptyPersistedAgentState(),
+        mode: "edit",
+        messages: nextMessages,
+        draftText: "Next project draft",
+        pendingProposal: persistedNextProposal,
+      });
     await transitionAgentProject(resetRoot);
     expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
       kind: "corrupt",
@@ -1677,26 +1955,11 @@ describe("agent persistence", () => {
         emptyPersistedAgentState(),
       ),
     );
-    await transitionAgentProject(nextRoot);
-    const nextMessages = [
-      textMessage("user-next", "user", "Keep the next project", "complete"),
-    ];
+    const switching = transitionAgentProject(nextRoot);
     const nextProposal = { ...proposal, projectRoot: nextRoot };
-    const nextIssue = {
-      kind: "save" as const,
-      projectRoot: nextRoot,
-      message: "Next project save is pending",
-    };
-    useAgentConsoleStore.setState({
-      mode: "edit",
-      messages: nextMessages,
-      draftText: "Next project draft",
-      pendingProposal: nextProposal,
-      persistenceIssue: nextIssue,
-    });
 
     resetWrite.resolve(undefined);
-    await resetting;
+    await Promise.all([resetting, switching]);
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       hydratedProjectRoot: nextRoot,
@@ -1704,7 +1967,7 @@ describe("agent persistence", () => {
       messages: nextMessages,
       draftText: "Next project draft",
       pendingProposal: nextProposal,
-      persistenceIssue: nextIssue,
+      persistenceIssue: null,
     });
   });
 
@@ -1736,7 +1999,7 @@ describe("agent persistence", () => {
     });
   });
 
-  it("aborts app-exit work even when the corrupt root cannot be flushed", async () => {
+  it("rejects agent work when corrupt-root hydration never established ownership", async () => {
     tauri.readAppData.mockResolvedValue({
       ...emptyPersistedAgentState(),
       draftSourceLocators: undefined,
@@ -1754,8 +2017,6 @@ describe("agent persistence", () => {
         projectRoot: "/books/corrupt",
       }),
     );
-    const config = deferred<{ apiKey: string }>();
-    tauri.getAiConfig.mockReturnValue(config.promise);
     const submission = submitAgentRequest({
       kind: "run",
       mode: "writing",
@@ -1763,16 +2024,15 @@ describe("agent persistence", () => {
       refs: [],
       task: { kind: "conversation", targetChapterId: null },
     });
-    await vi.waitFor(() => expect(tauri.getAiConfig).toHaveBeenCalledTimes(1));
+    await expect(submission).rejects.toMatchObject({
+      name: "AgentConsoleProjectUnavailableError",
+    });
 
     window.dispatchEvent(new Event("pagehide"));
-    await vi.waitFor(() =>
-      expect(useAgentConsoleStore.getState().runStatus).toBe("idle"),
-    );
 
+    expect(tauri.getAiConfig).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
     expect(tauri.writeAppData).not.toHaveBeenCalled();
-    config.resolve({ apiKey: "test-key" });
-    await submission;
     persistence.unmount();
   });
 });

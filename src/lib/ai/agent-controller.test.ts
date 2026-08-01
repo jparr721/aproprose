@@ -48,6 +48,7 @@ import type {
   StreamAgentRunResult,
 } from "@/lib/ai/agent-runtime";
 import type {
+  AgentIntent,
   AgentMessageMetadata,
   AgentRun,
   AgentTask,
@@ -411,6 +412,32 @@ describe("dispatchAgentIntent", () => {
     });
   });
 
+  it("returns visible typed feedback instead of resolving context during a cross-root transition", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    const store = useAgentConsoleStore.getState();
+    store.resetProject();
+    const transition = store.beginPersistenceTransition("/book", "load");
+
+    const dispatching = controller.dispatchAgentIntent({
+      kind: "add-context",
+      refs: [blockRef("b1", "ch1")],
+    });
+    useAgentConsoleStore.getState().finishPersistenceTransition(transition);
+    await dispatching;
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftContextRefs: [],
+      draftContextSources: {},
+      runError: {
+        code: "transition",
+        message: expect.stringContaining("loading"),
+      },
+    });
+    expect(mocks.readTextFile).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
   it("resolves a message-wide finding index across multiple findings parts", async () => {
     const run: AgentRun = {
       id: "findings-run",
@@ -687,6 +714,102 @@ describe("frozen run preflight", () => {
     expect(input.instructions).toContain("Keep the clipped voice.");
   });
 
+  it("captures a composer click before text typed for the next turn", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("Captured request");
+
+    const submission = controller.submitAgentDraft(conversationTask("ch1"));
+    store.setDraftText("Next request");
+    await submission;
+
+    const input = dependencies.stream.mock.calls[0][0];
+    expect(input.messages.at(-1)?.parts[0]).toEqual({
+      type: "text",
+      text: "Captured request",
+    });
+    expect(useAgentConsoleStore.getState().draftText).toBe("Next request");
+  });
+
+  it("clones every external request input before the first await", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    const request: Extract<AgentIntent, { kind: "run" }> = {
+      kind: "run",
+      mode: "writing",
+      text: "Use the opening.",
+      refs: [blockRef("b1", "ch1")],
+      task: conversationTask("ch1"),
+    };
+
+    const submission = controller.submitAgentRequest(request);
+    request.mode = "edit";
+    request.text = "Mutated request";
+    const mutableRef = request.refs[0];
+    if (mutableRef.kind !== "block") {
+      throw new Error("Expected a block request reference");
+    }
+    mutableRef.blockId = "b2";
+    if (request.task.kind !== "conversation") {
+      throw new Error("Expected a conversation request task");
+    }
+    request.task.targetChapterId = "ch2";
+    await submission;
+
+    const input = dependencies.stream.mock.calls[0][0];
+    expect(input.run).toMatchObject({
+      mode: "writing",
+      task: conversationTask("ch1"),
+      attachments: [expect.objectContaining({ sourceId: "b1" })],
+    });
+    expect(input.messages.at(-1)?.parts[0]).toEqual({
+      type: "text",
+      text: "Use the opening.",
+    });
+  });
+
+  it("rejects submission immediately while persistence owns a transition", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    const transition = useAgentConsoleStore
+      .getState()
+      .beginPersistenceTransition("/book", "load");
+    useAgentConsoleStore.getState().setDraftText("Do not queue this request");
+
+    const submission = controller.submitAgentDraft(conversationTask("ch1"));
+    useAgentConsoleStore.getState().finishPersistenceTransition(transition);
+
+    await expect(submission).rejects.toMatchObject({
+      name: "AgentConsoleProjectTransitionError",
+      agentErrorCode: "transition",
+    });
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      runStatus: "idle",
+      draftText: "Do not queue this request",
+      messages: [],
+    });
+  });
+
+  it("rejects a root mismatch even when no transition token remains", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    useAgentConsoleStore.setState({ hydratedProjectRoot: "/other-book" });
+
+    await expect(
+      controller.submitAgentRequest({
+        kind: "run",
+        mode: "writing",
+        text: "Never run this against the wrong root.",
+        refs: [],
+        task: conversationTask("ch1"),
+      }),
+    ).rejects.toMatchObject({ name: "AgentConsoleProjectUnavailableError" });
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+  });
+
   it("relocates an inactive persisted block ref and snapshots current text", async () => {
     const parsed = parseChapter("Inactive first.\n\nInactive target.\n");
     const staleRef = blockRef("stale-id", "ch2");
@@ -716,6 +839,77 @@ describe("frozen run preflight", () => {
       "/book",
       "chapters/two.tex",
     );
+  });
+
+  it.each([
+    ["stale first", [blockRef("legacy-b1", "ch1"), blockRef("b1", "ch1")]],
+    ["current first", [blockRef("b1", "ch1"), blockRef("legacy-b1", "ch1")]],
+  ])(
+    "deduplicates a relocation collision with the current ref as survivor: %s",
+    async (_label, refs) => {
+      const dependencies = makeDependencies(null);
+      const controller = createAgentController(dependencies);
+      const store = useAgentConsoleStore.getState();
+      store.setDraftText("Use the opening once.");
+      store.setDraftContextRefs(refs);
+      useAgentConsoleStore.setState({
+        draftSourceLocators: {
+          "block:ch1:legacy-b1": {
+            order: 0,
+            sourceFingerprint: blockFingerprint(activeBlocks[0]),
+          },
+        },
+      });
+
+      await controller.submitAgentDraft(conversationTask("ch1"));
+
+      const input = dependencies.stream.mock.calls[0][0];
+      expect(input.run.attachments).toEqual([
+        expect.objectContaining({ sourceId: "b1" }),
+      ]);
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        draftContextRefs: [],
+      });
+      expect(useAgentConsoleStore.getState().draftContextSources).toEqual({});
+      expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({});
+    },
+  );
+
+  it("does not republish caches for an attachment removed during preflight", async () => {
+    const model = deferred<MockLanguageModelV3>();
+    let modelRequested = false;
+    const dependencies = makeDependencies(null);
+    dependencies.getModel = async () => {
+      modelRequested = true;
+      return model.promise;
+    };
+    const controller = createAgentController(dependencies);
+    const parsed = parseChapter("Inactive first.\n\nInactive target.\n");
+    const staleRef = blockRef("stale-id", "ch2");
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("Use the removed passage.");
+    store.setDraftContextRefs([staleRef]);
+    useAgentConsoleStore.setState({
+      draftSourceLocators: {
+        "block:ch2:stale-id": {
+          order: 1,
+          sourceFingerprint: blockFingerprint(parsed[1]),
+        },
+      },
+    });
+
+    const submission = controller.submitAgentDraft(conversationTask("ch1"));
+    await vi.waitFor(() => expect(modelRequested).toBe(true));
+    store.removeDraftContextRef(staleRef);
+    model.resolve(new MockLanguageModelV3());
+    await submission;
+
+    expect(dependencies.stream.mock.calls[0][0].run.attachments).toHaveLength(1);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftContextRefs: [],
+    });
+    expect(useAgentConsoleStore.getState().draftContextSources).toEqual({});
+    expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({});
   });
 
   it("retains an unavailable source and refuses to omit it from submission", async () => {
@@ -1148,8 +1342,8 @@ describe("project ownership", () => {
     };
     const delayedSource = deferred<string>();
     mocks.readTextFile.mockImplementationOnce(async () => delayedSource.promise);
+    useAgentConsoleStore.getState().setDraftContextRefs([staleRef]);
     useAgentConsoleStore.setState({
-      draftContextRefs: [staleRef],
       draftSourceLocators: { "block:ch2:stale-id": locator },
     });
 

@@ -53,6 +53,12 @@ export function AgentComposer() {
   const runStatus = useAgentConsoleStore((state) => state.runStatus);
   const runError = useAgentConsoleStore((state) => state.runError);
   const lastUsage = useAgentConsoleStore((state) => state.lastUsage);
+  const hydratedProjectRoot = useAgentConsoleStore(
+    (state) => state.hydratedProjectRoot,
+  );
+  const persistenceTransition = useAgentConsoleStore(
+    (state) => state.persistenceTransition,
+  );
 
   const status: ChatStatus =
     runStatus === "submitted"
@@ -77,9 +83,18 @@ export function AgentComposer() {
       : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
+  const blocksTargetEditing =
+    persistenceTransition !== null &&
+    hydratedProjectRoot !== persistenceTransition.projectRoot;
 
   const handleSubmit = async (): Promise<void> => {
-    if (runStatus !== "idle" || !hasMeaningfulDraft) return;
+    if (
+      runStatus !== "idle" ||
+      !hasMeaningfulDraft ||
+      persistenceTransition !== null
+    ) {
+      return;
+    }
     const consoleState = useAgentConsoleStore.getState();
     if (
       consoleState.activeRun !== null ||
@@ -115,6 +130,7 @@ export function AgentComposer() {
       <ButtonGroup aria-label="Agent mode">
         <Button
           aria-pressed={mode === "writing"}
+          disabled={blocksTargetEditing}
           onClick={() => setMode("writing")}
           type="button"
           variant={mode === "writing" ? "default" : "outline"}
@@ -123,6 +139,7 @@ export function AgentComposer() {
         </Button>
         <Button
           aria-pressed={mode === "edit"}
+          disabled={blocksTargetEditing}
           onClick={() => setMode("edit")}
           type="button"
           variant={mode === "edit" ? "default" : "outline"}
@@ -130,6 +147,9 @@ export function AgentComposer() {
           Edit
         </Button>
       </ButtonGroup>
+      {blocksTargetEditing ? (
+        <TypographyMuted>AI conversation is loading.</TypographyMuted>
+      ) : null}
       {runError === null ? null : (
         <div className="flex items-center justify-between gap-2">
           <TypographyMuted className="text-destructive" role="alert">
@@ -170,6 +190,7 @@ export function AgentComposer() {
         <PromptInputBody>
           <PromptInputTextarea
             aria-label="Message AI Console"
+            disabled={blocksTargetEditing}
             onChange={(event) => setDraftText(event.currentTarget.value)}
             placeholder="Ask about your manuscript"
             value={draftText}
@@ -201,7 +222,10 @@ export function AgentComposer() {
             )}
           </PromptInputTools>
           <PromptInputSubmit
-            disabled={runStatus === "idle" && !hasMeaningfulDraft}
+            disabled={
+              runStatus === "idle" &&
+              (!hasMeaningfulDraft || persistenceTransition !== null)
+            }
             onStop={stopAgentRun}
             status={status}
           />

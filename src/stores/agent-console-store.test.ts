@@ -264,6 +264,114 @@ describe("agent console store", () => {
     expect(useAgentConsoleStore.getState().draftRevision).toBeGreaterThan(0);
   });
 
+  it("reports stale transition completion without mutating current bookkeeping", () => {
+    const store = useAgentConsoleStore.getState();
+    store.hydrate("/book", {
+      v: 3,
+      mode: "writing",
+      messages: [],
+      summary: null,
+      draftText: "Current draft",
+      draftContextRefs: [],
+      draftSourceLocators: {},
+      pendingProposal: null,
+      lastUsage: null,
+      interruptedRun: null,
+    });
+    const stale = store.beginPersistenceTransition("/book", "load");
+    const current = store.beginPersistenceTransition("/book", "reset");
+    useAgentConsoleStore.setState({
+      persistenceIssue: {
+        kind: "save",
+        projectRoot: "/book",
+        message: "Keep the current issue",
+      },
+    });
+    const before = useAgentConsoleStore.getState();
+
+    const staleResult = store.completePersistenceTransition(stale, {
+      v: 3,
+      mode: "edit",
+      messages: [message("stale-message")],
+      summary: null,
+      draftText: "Stale draft",
+      draftContextRefs: [],
+      draftSourceLocators: {},
+      pendingProposal: null,
+      lastUsage: null,
+      interruptedRun: null,
+    });
+
+    expect(staleResult).toEqual({ status: "stale" });
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: before.hydratedProjectRoot,
+      draftRevision: before.draftRevision,
+      draftText: before.draftText,
+      messages: before.messages,
+      persistenceIssue: before.persistenceIssue,
+      persistenceTransition: before.persistenceTransition,
+    });
+
+    const currentResult = store.completePersistenceTransition(current, {
+      v: 3,
+      mode: "writing",
+      messages: [],
+      summary: null,
+      draftText: "Current draft",
+      draftContextRefs: [],
+      draftSourceLocators: {},
+      pendingProposal: null,
+      lastUsage: null,
+      interruptedRun: null,
+    });
+    expect(currentResult).toEqual({
+      status: "current",
+      rebasedMutation: false,
+    });
+  });
+
+  it("rejects draft mutations while a different project owns hydration", () => {
+    const store = useAgentConsoleStore.getState();
+    store.hydrate("/books/old", {
+      v: 3,
+      mode: "writing",
+      messages: [],
+      summary: null,
+      draftText: "Old draft",
+      draftContextRefs: [blockRef("old")],
+      draftSourceLocators: {},
+      pendingProposal: null,
+      lastUsage: null,
+      interruptedRun: null,
+    });
+    store.resetProject();
+    store.beginPersistenceTransition("/books/new", "load");
+    const mutationError = {
+      name: "AgentConsoleProjectTransitionError",
+      agentErrorCode: "transition",
+    };
+
+    expect(() => store.setDraftText("New text")).toThrowError(
+      expect.objectContaining(mutationError),
+    );
+    expect(() => store.setMode("edit")).toThrowError(
+      expect.objectContaining(mutationError),
+    );
+    expect(() => store.addDraftContextRefs([blockRef("new")])).toThrowError(
+      expect.objectContaining(mutationError),
+    );
+    expect(() => store.removeDraftContextRef(blockRef("old"))).toThrowError(
+      expect.objectContaining(mutationError),
+    );
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: null,
+      mode: "writing",
+      draftText: "",
+      draftContextRefs: [],
+      persistenceTransition: { projectRoot: "/books/new" },
+    });
+  });
+
   it("hydrates persisted fields while clearing transient and active run state", () => {
     const persisted: PersistedAgentState = {
       v: 3,
@@ -367,93 +475,6 @@ describe("agent console store", () => {
     expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([]);
     expect(useAgentConsoleStore.getState().draftContextSources).toEqual({});
     expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({});
-  });
-
-  it("rebases a reminted ref in place and moves its cached source metadata", () => {
-    const previous = blockRef("old-id");
-    const current = blockRef("new-id");
-    const leading: DraftContextRef = {
-      kind: "outline-card",
-      chapterId: "ch1",
-      cardId: "card-1",
-    };
-    const trailing: DraftContextRef = {
-      kind: "finding",
-      chapterId: "ch1",
-      findingId: "finding-1",
-    };
-    const store = useAgentConsoleStore.getState();
-    store.addDraftContextRefs([leading, previous, trailing]);
-    store.setDraftContextSources([source(previous, "old-id", 4, "fp-old")]);
-
-    store.rebaseDraftContextRef(previous, current);
-
-    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
-      leading,
-      current,
-      trailing,
-    ]);
-    expect(useAgentConsoleStore.getState().draftContextSources).toEqual({
-      "block:ch1:new-id": {
-        ...source(previous, "old-id", 4, "fp-old"),
-        ref: current,
-      },
-    });
-    expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({
-      "block:ch1:new-id": { order: 4, sourceFingerprint: "fp-old" },
-    });
-  });
-
-  it("collapses a rebase collision at the earliest attachment position", () => {
-    const previous = blockRef("old-id");
-    const current = blockRef("new-id");
-    const leading: DraftContextRef = {
-      kind: "outline-card",
-      chapterId: "ch1",
-      cardId: "card-1",
-    };
-    const middle = blockRef("middle-id");
-    const trailing: DraftContextRef = {
-      kind: "finding",
-      chapterId: "ch1",
-      findingId: "finding-1",
-    };
-    const leadingSource = source(leading, "card-1", 0, "fp-leading");
-    const staleCurrentSource = source(current, "new-id", 2, "fp-stale");
-    const livePreviousSource = source(previous, "new-id", 6, "fp-live");
-    const store = useAgentConsoleStore.getState();
-    store.addDraftContextRefs([
-      leading,
-      current,
-      middle,
-      previous,
-      trailing,
-    ]);
-    store.setDraftContextSources([
-      leadingSource,
-      staleCurrentSource,
-      livePreviousSource,
-    ]);
-
-    store.rebaseDraftContextRef(previous, current);
-
-    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
-      leading,
-      current,
-      middle,
-      trailing,
-    ]);
-    expect(useAgentConsoleStore.getState().draftContextSources).toEqual({
-      "outline-card:ch1:card-1": leadingSource,
-      "block:ch1:new-id": { ...livePreviousSource, ref: current },
-    });
-    expect(useAgentConsoleStore.getState().draftSourceLocators).toEqual({
-      "outline-card:ch1:card-1": {
-        order: 0,
-        sourceFingerprint: "fp-leading",
-      },
-      "block:ch1:new-id": { order: 6, sourceFingerprint: "fp-live" },
-    });
   });
 
   it("locks preflight without changing the draft or transcript", () => {

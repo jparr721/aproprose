@@ -50,7 +50,14 @@ const metadataSchema = z.object({
   createdAt: z.string(),
   error: z.string().nullable(),
   errorCode: z
-    .enum(["configuration", "transport", "tool", "compaction", "unknown"])
+    .enum([
+      "configuration",
+      "transport",
+      "tool",
+      "compaction",
+      "transition",
+      "unknown",
+    ])
     .nullable(),
   retryOf: z.string().nullable(),
   usage: z.unknown().nullable(),

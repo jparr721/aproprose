@@ -63,8 +63,9 @@ import type {
   ProjectMeta,
 } from "@/lib/types";
 import {
+  type AgentDraftContextResolution,
+  requireAgentConsoleProject,
   useAgentConsoleStore,
-  waitForAgentConsoleProject,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -101,10 +102,37 @@ interface LoadedChapter {
   blocks: LoadedChapterBlock[];
 }
 
+interface CapturedContextAttachment {
+  ref: DraftContextRef;
+  revision: number | null;
+}
+
+interface ResolvedContextAttachment {
+  attachment: CapturedContextAttachment;
+  ref: DraftContextRef;
+  source: DraftContextSource;
+  snapshot: ContextSnapshot | null;
+  inputIndex: number;
+}
+
 interface ResolvedDraftContext {
-  refs: DraftContextRef[];
-  sources: DraftContextSource[];
-  snapshots: ContextSnapshot[];
+  attachments: ResolvedContextAttachment[];
+}
+
+function storeContextResolutions(
+  resolved: ResolvedDraftContext,
+): AgentDraftContextResolution[] {
+  return resolved.attachments.map((attachment) => {
+    const revision = attachment.attachment.revision;
+    if (revision === null) {
+      throw new Error("Draft attachment identity is missing.");
+    }
+    return {
+      attachment: { ref: attachment.attachment.ref, revision },
+      ref: attachment.ref,
+      source: attachment.source,
+    };
+  });
 }
 
 interface SubmissionCapture {
@@ -133,7 +161,6 @@ interface SubmissionCapture {
   enterRun: (
     run: AgentRun,
     userMessage: AgentUIMessage,
-    resolvedRefs: DraftContextRef[],
   ) => void;
 }
 
@@ -319,12 +346,11 @@ function settledFindings(
 
 async function resolveDraftContext(args: {
   projectRoot: string;
-  refs: DraftContextRef[];
+  attachments: CapturedContextAttachment[];
   locators: Record<string, DraftSourceLocator>;
   meta: ProjectMeta;
   messages: AgentUIMessage[];
   makeId: () => string;
-  rebase: (previous: DraftContextRef, current: DraftContextRef) => void;
 }): Promise<ResolvedDraftContext> {
   const documents = new Map<string, Promise<LoadedChapter>>();
   const document = (chapterId: string): Promise<LoadedChapter> => {
@@ -334,11 +360,10 @@ async function resolveDraftContext(args: {
     documents.set(chapterId, loading);
     return loading;
   };
-  const refs: DraftContextRef[] = [];
-  const sources: DraftContextSource[] = [];
-  const snapshots: ContextSnapshot[] = [];
+  const resolvedAttachments: ResolvedContextAttachment[] = [];
 
-  for (const originalRef of args.refs) {
+  for (const [inputIndex, attachment] of args.attachments.entries()) {
+    const originalRef = attachment.ref;
     const locator = args.locators[draftContextRefKey(originalRef)] ?? null;
     if (originalRef.kind === "block") {
       const chapter = await document(originalRef.chapterId);
@@ -355,8 +380,16 @@ async function resolveDraftContext(args: {
             ? { order: locator.order, block: chapter.blocks[locator.order] }
             : null;
       if (relocated === null) {
-        refs.push(originalRef);
-        sources.push(unavailableSource(originalRef, "Unavailable manuscript block"));
+        resolvedAttachments.push({
+          attachment,
+          ref: originalRef,
+          source: unavailableSource(
+            originalRef,
+            "Unavailable manuscript block",
+          ),
+          snapshot: null,
+          inputIndex,
+        });
         continue;
       }
       const currentRef: DraftContextRef = {
@@ -364,9 +397,6 @@ async function resolveDraftContext(args: {
         chapterId: originalRef.chapterId,
         blockId: relocated.block.id,
       };
-      if (currentRef.blockId !== originalRef.blockId) {
-        args.rebase(originalRef, currentRef);
-      }
       const snapshot = snapshotForBlock(
         currentRef,
         chapter.chapterId,
@@ -374,9 +404,13 @@ async function resolveDraftContext(args: {
         relocated.block,
         args.makeId,
       );
-      refs.push(currentRef);
-      sources.push(sourceFromSnapshot(currentRef, snapshot));
-      snapshots.push(snapshot);
+      resolvedAttachments.push({
+        attachment,
+        ref: currentRef,
+        source: sourceFromSnapshot(currentRef, snapshot),
+        snapshot,
+        inputIndex,
+      });
       continue;
     }
 
@@ -384,8 +418,13 @@ async function resolveDraftContext(args: {
       const cards = args.meta.chapters[originalRef.chapterId]?.cards ?? [];
       const order = cards.findIndex((card) => card.id === originalRef.cardId);
       if (order < 0) {
-        refs.push(originalRef);
-        sources.push(unavailableSource(originalRef, "Unavailable outline card"));
+        resolvedAttachments.push({
+          attachment,
+          ref: originalRef,
+          source: unavailableSource(originalRef, "Unavailable outline card"),
+          snapshot: null,
+          inputIndex,
+        });
         continue;
       }
       const snapshot = snapshotForCard(
@@ -395,9 +434,13 @@ async function resolveDraftContext(args: {
         cards[order],
         args.makeId,
       );
-      refs.push(originalRef);
-      sources.push(sourceFromSnapshot(originalRef, snapshot));
-      snapshots.push(snapshot);
+      resolvedAttachments.push({
+        attachment,
+        ref: originalRef,
+        source: sourceFromSnapshot(originalRef, snapshot),
+        snapshot,
+        inputIndex,
+      });
       continue;
     }
 
@@ -414,23 +457,66 @@ async function resolveDraftContext(args: {
         ? findings[locator.order]
         : null);
     if (relocated === null) {
-      refs.push(originalRef);
-      sources.push(unavailableSource(originalRef, "Unavailable finding"));
+      resolvedAttachments.push({
+        attachment,
+        ref: originalRef,
+        source: unavailableSource(originalRef, "Unavailable finding"),
+        snapshot: null,
+        inputIndex,
+      });
       continue;
     }
+    const currentRef: DraftContextRef = {
+      kind: "finding",
+      chapterId: originalRef.chapterId,
+      findingId: relocated.id,
+    };
     const snapshot = snapshotForFinding(
-      originalRef,
+      currentRef,
       originalRef.chapterId,
       relocated.order,
       relocated.finding,
       args.makeId,
     );
-    refs.push(originalRef);
-    sources.push(sourceFromSnapshot(originalRef, snapshot));
-    snapshots.push(snapshot);
+    resolvedAttachments.push({
+      attachment,
+      ref: currentRef,
+      source: sourceFromSnapshot(currentRef, snapshot),
+      snapshot,
+      inputIndex,
+    });
   }
 
-  return { refs, sources, snapshots };
+  const winnerByKey = new Map<string, ResolvedContextAttachment>();
+  for (const candidate of resolvedAttachments) {
+    const key = draftContextRefKey(candidate.ref);
+    const current = winnerByKey.get(key);
+    if (current === undefined) {
+      winnerByKey.set(key, candidate);
+      continue;
+    }
+    const candidateIsExact =
+      draftContextRefKey(candidate.attachment.ref) === key;
+    const currentIsExact = draftContextRefKey(current.attachment.ref) === key;
+    const candidateRevision = candidate.attachment.revision ?? -1;
+    const currentRevision = current.attachment.revision ?? -1;
+    const candidateOriginalKey = draftContextRefKey(candidate.attachment.ref);
+    const currentOriginalKey = draftContextRefKey(current.attachment.ref);
+    if (
+      (candidateIsExact && !currentIsExact) ||
+      (candidateIsExact === currentIsExact &&
+        (candidateRevision > currentRevision ||
+          (candidateRevision === currentRevision &&
+            candidateOriginalKey.localeCompare(currentOriginalKey) < 0)))
+    ) {
+      winnerByKey.set(key, candidate);
+    }
+  }
+  return {
+    attachments: [...winnerByKey.values()].sort(
+      (left, right) => left.inputIndex - right.inputIndex,
+    ),
+  };
 }
 
 function targetChapterId(
@@ -772,8 +858,8 @@ export function createAgentController(
     if (project === null || project.root !== projectRoot) return false;
     const consoleState = useAgentConsoleStore.getState();
     if (
-      consoleState.hydratedProjectRoot !== null &&
-      consoleState.hydratedProjectRoot !== projectRoot
+      consoleState.hydratedProjectRoot !== projectRoot ||
+      consoleState.persistenceTransition !== null
     ) {
       return false;
     }
@@ -1094,7 +1180,7 @@ export function createAgentController(
         assistantMessageId,
         signal: abortController.signal,
       });
-      capture.enterRun(run, user, attachments.refs);
+      capture.enterRun(run, user);
       enteredRun = true;
       if (!ownsCurrentRun()) return;
       useAgentConsoleStore.getState().markStreaming();
@@ -1194,7 +1280,7 @@ export function createAgentController(
 
   const contextResolver = (args: {
     projectRoot: string;
-    refs: DraftContextRef[];
+    attachments: CapturedContextAttachment[];
     locators: Record<string, DraftSourceLocator>;
     meta: ProjectMeta;
     messages: AgentUIMessage[];
@@ -1206,20 +1292,19 @@ export function createAgentController(
     ): Promise<{ refs: DraftContextRef[]; snapshots: ContextSnapshot[] }> => {
       const resolved = await resolveDraftContext({
         projectRoot: args.projectRoot,
-        refs: args.refs,
+        attachments: args.attachments,
         locators: args.locators,
         meta: args.meta,
         messages: args.messages,
         makeId: dependencies.id,
-        rebase: (previous, current) => {
-          if (!ownsCurrentRun()) return;
-          useAgentConsoleStore
-            .getState()
-            .rebaseDraftContextRef(previous, current);
-        },
       });
       if (ownsCurrentRun()) args.publish(resolved);
-      return { refs: resolved.refs, snapshots: resolved.snapshots };
+      return {
+        refs: resolved.attachments.map((attachment) => attachment.ref),
+        snapshots: resolved.attachments.flatMap((attachment) =>
+          attachment.snapshot === null ? [] : [attachment.snapshot],
+        ),
+      };
     };
   };
 
@@ -1277,7 +1362,7 @@ export function createAgentController(
     if (requestedProject === null) {
       throw new Error("Open a project before running the agent.");
     }
-    await waitForAgentConsoleProject(requestedProject.root);
+    requireAgentConsoleProject(requestedProject.root);
     const projectState = useProjectStore.getState();
     const project = projectState.project;
     if (project === null || project.root !== requestedProject.root) {
@@ -1286,9 +1371,9 @@ export function createAgentController(
     const consoleState = useAgentConsoleStore.getState();
     const settings = useSettingsStore.getState();
     const submittedDraft = consoleState.captureDraft();
-    const refs = structuredClone(submittedDraft.refs);
+    const attachments = structuredClone(submittedDraft.attachments);
     const text = submittedDraft.text;
-    if (text.trim() === "" && refs.length === 0) return;
+    if (text.trim() === "" && attachments.length === 0) return;
     const frozenTask = structuredClone(task);
     const pendingProposal =
       consoleState.pendingProposal === null
@@ -1323,21 +1408,21 @@ export function createAgentController(
         }),
       resolveAttachments: contextResolver({
         projectRoot: project.root,
-        refs,
+        attachments,
         locators: structuredClone(consoleState.draftSourceLocators),
         meta: structuredClone(projectState.meta),
         messages: structuredClone(consoleState.messages),
         publish: (resolved) => {
-          useAgentConsoleStore
-            .getState()
-            .setDraftContextSources(resolved.sources);
+          useAgentConsoleStore.getState().applyDraftContextResolution(
+            submittedDraft.attachments,
+            storeContextResolutions(resolved),
+          );
         },
       }),
-      enterRun: (run, user, resolvedRefs) => {
-        useAgentConsoleStore.getState().beginDraftRun(run, user, {
-          ...submittedDraft,
-          refs: resolvedRefs,
-        });
+      enterRun: (run, user) => {
+        useAgentConsoleStore
+          .getState()
+          .beginDraftRun(run, user, submittedDraft);
       },
     };
     await runSubmission(capture);
@@ -1346,28 +1431,35 @@ export function createAgentController(
   const submitAgentRequest = async (
     request: Extract<AgentIntent, { kind: "run" }>,
   ): Promise<void> => {
-    if (request.text.trim() === "" && request.refs.length === 0) return;
+    const frozenRequest = structuredClone(request);
+    if (
+      frozenRequest.text.trim() === "" &&
+      frozenRequest.refs.length === 0
+    ) {
+      return;
+    }
     const project = useProjectStore.getState().project;
     if (project === null) {
       throw new Error("Open a project before running the agent.");
     }
-    await waitForAgentConsoleProject(project.root);
+    requireAgentConsoleProject(project.root);
     if (useProjectStore.getState().project?.root !== project.root) {
       throw new Error("The active project changed before the agent could run.");
     }
     const base = captureBase({
-      mode: request.mode,
-      text: request.text,
-      task: request.task,
+      mode: frozenRequest.mode,
+      text: frozenRequest.text,
+      task: frozenRequest.task,
       retryOf: null,
     });
     const consoleState = useAgentConsoleStore.getState();
-    const refs = structuredClone(request.refs);
+    const attachments: CapturedContextAttachment[] =
+      frozenRequest.refs.map((ref) => ({ ref, revision: null }));
     await runSubmission({
       ...base,
       resolveAttachments: contextResolver({
         projectRoot: base.projectRoot,
-        refs,
+        attachments,
         locators: structuredClone(consoleState.draftSourceLocators),
         meta: base.meta,
         messages: base.messages,
@@ -1393,7 +1485,7 @@ export function createAgentController(
     if (project === null) {
       throw new Error("Open a project before running the agent.");
     }
-    await waitForAgentConsoleProject(project.root);
+    requireAgentConsoleProject(project.root);
     if (useProjectStore.getState().project?.root !== project.root) {
       throw new Error("The active project changed before the agent could run.");
     }
@@ -1496,45 +1588,42 @@ export function createAgentController(
     if (requestedProject === null) {
       throw new Error("Open a project before adding agent context.");
     }
-    await waitForAgentConsoleProject(requestedProject.root);
+    requireAgentConsoleProject(requestedProject.root);
     const projectState = useProjectStore.getState();
     if (projectState.project?.root !== requestedProject.root) {
       throw new Error("The active project changed before context could load.");
     }
     const state = useAgentConsoleStore.getState();
+    const capturedDraft = state.captureDraft();
     const ownsContextProject = (): boolean => {
       const currentProject = useProjectStore.getState().project;
-      const hydratedRoot = useAgentConsoleStore.getState().hydratedProjectRoot;
+      const currentConsole = useAgentConsoleStore.getState();
       return (
         currentProject !== null &&
         currentProject.root === requestedProject.root &&
-        (hydratedRoot === null || hydratedRoot === requestedProject.root)
+        currentConsole.hydratedProjectRoot === requestedProject.root &&
+        currentConsole.persistenceTransition === null
       );
     };
     let resolved: ResolvedDraftContext;
     try {
       resolved = await resolveDraftContext({
         projectRoot: requestedProject.root,
-        refs: state.draftContextRefs,
+        attachments: capturedDraft.attachments,
         locators: state.draftSourceLocators,
         meta: structuredClone(projectState.meta),
         messages: structuredClone(state.messages),
         makeId: dependencies.id,
-        rebase: (previous, current) => {
-          if (!ownsContextProject()) return;
-          useAgentConsoleStore
-            .getState()
-            .rebaseDraftContextRef(previous, current);
-        },
       });
     } catch (error) {
       if (!ownsContextProject()) return;
       throw error;
     }
     if (ownsContextProject()) {
-      useAgentConsoleStore
-        .getState()
-        .setDraftContextSources(resolved.sources);
+      useAgentConsoleStore.getState().applyDraftContextResolution(
+        capturedDraft.attachments,
+        storeContextResolutions(resolved),
+      );
     }
   };
 
@@ -1611,6 +1700,7 @@ function ownsDraftSourceRefresh(
     project !== null &&
     project.root === ownership.projectRoot &&
     consoleState.hydratedProjectRoot === ownership.hydratedProjectRoot &&
+    consoleState.persistenceTransition === null &&
     consoleState.runStatus === "idle"
   );
 }
@@ -1624,42 +1714,31 @@ async function refreshAttachedDraftSources(): Promise<void> {
     project === null ||
     consoleState.runStatus !== "idle" ||
     consoleState.draftContextRefs.length === 0 ||
-    consoleState.hydratedProjectRoot !== project.root
+    consoleState.hydratedProjectRoot !== project.root ||
+    consoleState.persistenceTransition !== null
   ) {
     return;
   }
+  const capturedDraft = consoleState.captureDraft();
   const ownership: DraftSourceRefreshOwnership = {
     sequence,
     projectRoot: project.root,
     hydratedProjectRoot: consoleState.hydratedProjectRoot,
   };
-  const expectedRefs = consoleState.draftContextRefs.map(draftContextRefKey);
   try {
     const resolved = await resolveDraftContext({
       projectRoot: ownership.projectRoot,
-      refs: structuredClone(consoleState.draftContextRefs),
+      attachments: capturedDraft.attachments,
       locators: structuredClone(consoleState.draftSourceLocators),
       meta: structuredClone(projectState.meta),
       messages: structuredClone(consoleState.messages),
       makeId: () => uid("agent-source"),
-      rebase: (previous, current) => {
-        if (!ownsDraftSourceRefresh(ownership)) return;
-        useAgentConsoleStore
-          .getState()
-          .rebaseDraftContextRef(previous, current);
-      },
     });
-    const currentConsole = useAgentConsoleStore.getState();
-    const currentRefs = currentConsole.draftContextRefs.map(draftContextRefKey);
-    const resolvedRefs = resolved.refs.map(draftContextRefKey);
-    if (
-      !ownsDraftSourceRefresh(ownership) ||
-      (currentRefs.join("\n") !== expectedRefs.join("\n") &&
-        currentRefs.join("\n") !== resolvedRefs.join("\n"))
-    ) {
-      return;
-    }
-    currentConsole.setDraftContextSources(resolved.sources);
+    if (!ownsDraftSourceRefresh(ownership)) return;
+    useAgentConsoleStore.getState().applyDraftContextResolution(
+      capturedDraft.attachments,
+      storeContextResolutions(resolved),
+    );
   } catch (error) {
     if (!ownsDraftSourceRefresh(ownership)) return;
     console.error("Agent draft context refresh failed", {
@@ -1670,7 +1749,11 @@ async function refreshAttachedDraftSources(): Promise<void> {
 }
 
 useAgentConsoleStore.subscribe((state, previous) => {
-  if (state.hydratedProjectRoot !== previous.hydratedProjectRoot) {
+  if (
+    state.hydratedProjectRoot !== previous.hydratedProjectRoot ||
+    (previous.persistenceTransition !== null &&
+      state.persistenceTransition === null)
+  ) {
     invalidateDraftSourceRefreshes();
     void refreshAttachedDraftSources();
   }

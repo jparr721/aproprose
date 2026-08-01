@@ -16,7 +16,10 @@ import type {
 } from "@/lib/ai/agent-types";
 import { pathHash } from "@/lib/path-hash";
 import { readAppData, writeAppData } from "@/lib/tauri";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  type AgentPersistenceTransitionCapture,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 
 const agentModeSchema = z.enum(["writing", "edit"]);
@@ -300,7 +303,14 @@ const messageMetadataSchema = z
     createdAt: z.string(),
     error: z.string().nullable(),
     errorCode: z
-      .enum(["configuration", "transport", "tool", "compaction", "unknown"])
+      .enum([
+        "configuration",
+        "transport",
+        "tool",
+        "compaction",
+        "transition",
+        "unknown",
+      ])
       .nullable(),
     retryOf: z.string().nullable(),
     usage: persistedUsageSchema.nullable(),
@@ -630,6 +640,17 @@ function appendTransition(work: () => Promise<void>): Promise<void> {
   return pending;
 }
 
+function ownsPersistenceCapture(
+  capture: AgentPersistenceTransitionCapture,
+): boolean {
+  const transitionState =
+    useAgentConsoleStore.getState().persistenceTransition;
+  return (
+    transitionState?.generation === capture.generation &&
+    transitionState.projectRoot === capture.projectRoot
+  );
+}
+
 function clearSaveTimer(): void {
   if (saveTimer === null) return;
   clearTimeout(saveTimer);
@@ -774,35 +795,45 @@ export function emptyPersistedAgentState(): PersistedAgentSnapshot &
   };
 }
 
-export async function resetAgentConversation(root: string): Promise<void> {
+export function resetAgentConversation(root: string): Promise<void> {
   const empty = emptyPersistedAgentState();
+  clearSaveTimer();
+  if (activeRoot === root && requestedRoot === root) {
+    writableRoot = null;
+  }
   const capture = useAgentConsoleStore
     .getState()
     .beginPersistenceTransition(root, "reset");
-  try {
-    await writeAppData(agentStateKey(root), empty);
-  } catch (error) {
-    useAgentConsoleStore.getState().finishPersistenceTransition(capture);
-    throw error;
-  }
-  if (activeRoot !== root || requestedRoot !== root) {
-    useAgentConsoleStore.getState().finishPersistenceTransition(capture);
-    return;
-  }
-  const rebasedMutation = useAgentConsoleStore
-    .getState()
-    .completePersistenceTransition(capture, empty);
-  const resetRevision = nextRevision();
-  recoveryRoot = null;
-  writableRoot = root;
-  activeRevision = rebasedMutation ? nextRevision() : resetRevision;
-  persistedRevision = resetRevision;
-  if (rebasedMutation) scheduleAgentSave();
+  return appendTransition(async () => {
+    try {
+      await writeAppData(agentStateKey(root), empty);
+    } catch (error) {
+      useAgentConsoleStore.getState().finishPersistenceTransition(capture);
+      throw error;
+    }
+    failedSaves.delete(root);
+    if (activeRoot !== root || requestedRoot !== root) {
+      useAgentConsoleStore.getState().finishPersistenceTransition(capture);
+      return;
+    }
+    const completion = useAgentConsoleStore
+      .getState()
+      .completePersistenceTransition(capture, empty);
+    if (completion.status === "stale") return;
+    const resetRevision = nextRevision();
+    recoveryRoot = null;
+    writableRoot = root;
+    activeRevision = completion.rebasedMutation
+      ? nextRevision()
+      : resetRevision;
+    persistedRevision = resetRevision;
+    if (completion.rebasedMutation) scheduleAgentSave();
+  });
 }
 
 function captureAgentSnapshotSource(): AgentSnapshotSource {
   const state = useAgentConsoleStore.getState();
-  return {
+  return structuredClone({
     mode: state.mode,
     messages: state.messages,
     summary: state.summary,
@@ -812,7 +843,7 @@ function captureAgentSnapshotSource(): AgentSnapshotSource {
     pendingProposal: state.pendingProposal,
     lastUsage: state.lastUsage,
     interruptedRun: state.interruptedRun,
-  };
+  });
 }
 
 function toPersistedPendingProposal(
@@ -980,10 +1011,11 @@ export async function loadAgentState(
   return fromAgentSnapshot(root, raw);
 }
 
-export async function saveAgentState(
+export function saveAgentState(
   root: string,
   snapshot: PersistedAgentSnapshot,
 ): Promise<void> {
+  const frozenSnapshot = structuredClone(snapshot);
   const revision = nextRevision();
   const resetsActiveRecovery =
     recoveryRoot === root &&
@@ -994,67 +1026,80 @@ export async function saveAgentState(
         .getState()
         .beginPersistenceTransition(root, "recovery")
     : null;
-  let safeSnapshot: PersistedAgentSnapshot;
-  try {
-    safeSnapshot = await parseAgentSnapshot(structuredClone(snapshot));
-  } catch (error) {
-    if (recoveryCapture !== null) {
-      useAgentConsoleStore
-        .getState()
-        .finishPersistenceTransition(recoveryCapture);
-    }
-    throw saveIssue(root, error);
+  if (recoveryCapture !== null) {
+    clearSaveTimer();
+    writableRoot = null;
   }
-  try {
-    await writeAgentSnapshot(root, safeSnapshot, revision);
-  } catch (error) {
-    if (recoveryCapture !== null) {
-      useAgentConsoleStore
-        .getState()
-        .finishPersistenceTransition(recoveryCapture);
-    }
-    throw error;
-  }
-  if (resetsActiveRecovery && failedSaveForRoot(root) === null) {
-    if (
-      activeRoot !== root ||
-      requestedRoot !== root ||
-      recoveryCapture === null
-    ) {
+  return appendTransition(async () => {
+    const ownsBookkeeping = (): boolean =>
+      recoveryCapture === null || ownsPersistenceCapture(recoveryCapture);
+    let safeSnapshot: PersistedAgentSnapshot;
+    try {
+      safeSnapshot = await parseAgentSnapshot(frozenSnapshot);
+    } catch (error) {
+      const recordsFailure = ownsBookkeeping();
       if (recoveryCapture !== null) {
         useAgentConsoleStore
           .getState()
           .finishPersistenceTransition(recoveryCapture);
       }
+      throw recordsFailure
+        ? saveIssue(root, error)
+        : persistenceError("save", root, error);
+    }
+    try {
+      await writeAgentSnapshot(
+        root,
+        safeSnapshot,
+        revision,
+        ownsBookkeeping,
+      );
+    } catch (error) {
+      if (recoveryCapture !== null) {
+        useAgentConsoleStore
+          .getState()
+          .finishPersistenceTransition(recoveryCapture);
+      }
+      throw error;
+    }
+    if (recoveryCapture !== null) {
+      if (
+        !ownsPersistenceCapture(recoveryCapture) ||
+        activeRoot !== root ||
+        requestedRoot !== root ||
+        failedSaveForRoot(root) !== null
+      ) {
+        useAgentConsoleStore
+          .getState()
+          .finishPersistenceTransition(recoveryCapture);
+        return;
+      }
+      const completion = useAgentConsoleStore
+        .getState()
+        .completePersistenceTransition(
+          recoveryCapture,
+          restoreAgentSnapshot(root, safeSnapshot),
+        );
+      if (completion.status === "stale") return;
+      recoveryRoot = null;
+      writableRoot = root;
+      activeRevision = completion.rebasedMutation
+        ? nextRevision()
+        : revision;
+      persistedRevision = revision;
+      restoreFailedSaveIssue();
+      if (completion.rebasedMutation) scheduleAgentSave();
       return;
     }
-    const rebasedMutation = useAgentConsoleStore
-      .getState()
-      .completePersistenceTransition(
-        recoveryCapture,
-        restoreAgentSnapshot(root, safeSnapshot),
-      );
-    recoveryRoot = null;
-    writableRoot = root;
-    activeRevision = rebasedMutation ? nextRevision() : revision;
-    persistedRevision = revision;
-    restoreFailedSaveIssue();
-    if (rebasedMutation) scheduleAgentSave();
-    return;
-  }
-  if (recoveryCapture !== null) {
-    useAgentConsoleStore
-      .getState()
-      .finishPersistenceTransition(recoveryCapture);
-  }
-  if (
-    activeRoot === root &&
-    requestedRoot === root &&
-    failedSaveForRoot(root) === null
-  ) {
-    recoveryRoot = null;
-    writableRoot = root;
-  }
+    if (
+      activeRoot === root &&
+      requestedRoot === root &&
+      failedSaveForRoot(root) === null
+    ) {
+      recoveryRoot = null;
+      writableRoot = root;
+    }
+  });
 }
 
 function markRevisionPersisted(root: string, revision: number): void {
@@ -1071,21 +1116,28 @@ async function writeAgentSnapshot(
   root: string,
   snapshot: PersistedAgentSnapshot,
   revision: number,
+  ownsBookkeeping: () => boolean,
 ): Promise<void> {
   try {
     await writeAppData(agentStateKey(root), snapshot);
-    clearRecoveredFailure(root, revision);
-    markRevisionPersisted(root, revision);
+    if (ownsBookkeeping()) {
+      clearRecoveredFailure(root, revision);
+      markRevisionPersisted(root, revision);
+    }
   } catch (error) {
-    const failure = saveIssue(root, error);
-    recordFailedSave({
-      kind: "write",
-      root,
-      snapshot: structuredClone(snapshot),
-      issue: failure.issue,
-      revision,
-      recovery: null,
-    });
+    const failure = ownsBookkeeping()
+      ? saveIssue(root, error)
+      : persistenceError("save", root, error);
+    if (ownsBookkeeping()) {
+      recordFailedSave({
+        kind: "write",
+        root,
+        snapshot: structuredClone(snapshot),
+        issue: failure.issue,
+        revision,
+        recovery: null,
+      });
+    }
     throw failure;
   }
 }
@@ -1112,15 +1164,23 @@ async function persistSnapshotSource(
   root: string,
   source: AgentSnapshotSource,
   revision: number,
+  ownsBookkeeping: () => boolean,
 ): Promise<void> {
   let snapshot: PersistedAgentSnapshot;
   try {
     snapshot = await snapshotFromSource(source);
     snapshot = await parseAgentSnapshot(snapshot);
   } catch (error) {
-    throw recordSnapshotFailure(root, source, revision, error);
+    throw ownsBookkeeping()
+      ? recordSnapshotFailure(root, source, revision, error)
+      : persistenceError("save", root, error);
   }
-  await writeAgentSnapshot(root, snapshot, revision);
+  await writeAgentSnapshot(
+    root,
+    snapshot,
+    revision,
+    ownsBookkeeping,
+  );
 }
 
 function captureActiveSnapshot(root: string): Promise<void> {
@@ -1129,7 +1189,7 @@ function captureActiveSnapshot(root: string): Promise<void> {
   if (activeRoot === root) activeRevision = revision;
   return appendTransition(async () => {
     try {
-      await persistSnapshotSource(root, source, revision);
+      await persistSnapshotSource(root, source, revision, () => true);
     } catch (error) {
       logPersistenceFailure(root, error);
     }
@@ -1173,47 +1233,83 @@ function scheduleAgentSave(): void {
 }
 
 export function transitionAgentProject(nextRoot: string | null): Promise<void> {
-  requestedRoot = nextRoot;
   clearSaveTimer();
-  return appendTransition(async () => {
-    const oldRoot = activeRoot;
-    const keepsRootOwnership = oldRoot !== null && oldRoot === nextRoot;
-    let persistenceCapture =
-      keepsRootOwnership && nextRoot !== null
-        ? useAgentConsoleStore
-            .getState()
-            .beginPersistenceTransition(nextRoot, "load")
-        : null;
-    const oldRootWasWritable = oldRoot !== null && writableRoot === oldRoot;
-    const oldRootWasRecovering = oldRoot !== null && recoveryRoot === oldRoot;
-    writableRoot = null;
-    if (oldRoot !== null) {
-      abortAgentRunForProjectSwitch(oldRoot, "project-switch");
-    }
+  const oldRoot = activeRoot;
+  const consoleBeforeSwitch = useAgentConsoleStore.getState();
+  const ownsOldConsole =
+    oldRoot !== null &&
+    consoleBeforeSwitch.hydratedProjectRoot === oldRoot;
+  const oldRootWasWritable =
+    ownsOldConsole && writableRoot === oldRoot;
+  const resetOwnsOldRoot =
+    oldRoot !== null &&
+    consoleBeforeSwitch.persistenceTransition?.kind === "reset" &&
+    consoleBeforeSwitch.persistenceTransition.projectRoot === oldRoot;
+  const oldRootWasRecovering =
+    ownsOldConsole && recoveryRoot === oldRoot && !resetOwnsOldRoot;
+  writableRoot = null;
+  if (ownsOldConsole && oldRoot !== null) {
+    abortAgentRunForProjectSwitch(oldRoot, "project-switch");
+  }
+  const oldSource =
+    oldRootWasWritable || oldRootWasRecovering
+      ? captureAgentSnapshotSource()
+      : null;
+  const oldRevision = oldSource === null ? null : nextRevision();
+  if (oldRevision !== null) activeRevision = oldRevision;
+  requestedRoot = nextRoot;
+  const ownsTargetConsole =
+    nextRoot !== null &&
+    useAgentConsoleStore.getState().hydratedProjectRoot === nextRoot;
+  if (!ownsTargetConsole) {
+    useAgentConsoleStore.getState().resetProject();
+  }
+  const persistenceCapture =
+    nextRoot === null
+      ? null
+      : useAgentConsoleStore
+          .getState()
+          .beginPersistenceTransition(nextRoot, "load");
 
-    if (oldRoot !== null && oldRootWasWritable) {
-      const source = captureAgentSnapshotSource();
-      const revision = nextRevision();
-      activeRevision = revision;
+  return appendTransition(async () => {
+    if (
+      oldRoot !== null &&
+      oldRootWasWritable &&
+      oldSource !== null &&
+      oldRevision !== null
+    ) {
       try {
-        await persistSnapshotSource(oldRoot, source, revision);
+        await persistSnapshotSource(
+          oldRoot,
+          oldSource,
+          oldRevision,
+          () => true,
+        );
       } catch (error) {
         logPersistenceFailure(oldRoot, error);
       }
     }
 
-    if (oldRoot !== null && oldRootWasRecovering) {
-      const revision = nextRevision();
-      activeRevision = revision;
-      recordRecoveryState(
-        oldRoot,
-        captureAgentSnapshotSource(),
-        revision,
-      );
+    if (
+      oldRoot !== null &&
+      oldRootWasRecovering &&
+      oldSource !== null &&
+      oldRevision !== null
+    ) {
+      recordRecoveryState(oldRoot, oldSource, oldRevision);
     }
 
-    if (!keepsRootOwnership) {
-      useAgentConsoleStore.getState().resetProject();
+    if (
+      requestedRoot !== nextRoot ||
+      (persistenceCapture !== null &&
+        !ownsPersistenceCapture(persistenceCapture))
+    ) {
+      if (persistenceCapture !== null) {
+        useAgentConsoleStore
+          .getState()
+          .finishPersistenceTransition(persistenceCapture);
+      }
+      return;
     }
     activeRoot = nextRoot;
     recoveryRoot = null;
@@ -1227,23 +1323,19 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     const retainedFailure = failedSaveForRoot(nextRoot);
     if (retainedFailure !== null) {
       const retainedState = stateFromFailedSave(nextRoot, retainedFailure);
-      if (requestedRoot !== nextRoot) {
-        if (persistenceCapture !== null) {
-          useAgentConsoleStore
-            .getState()
-            .finishPersistenceTransition(persistenceCapture);
-        }
-        return;
-      }
       if (persistenceCapture === null) {
-        useAgentConsoleStore.getState().hydrate(nextRoot, retainedState);
-      } else {
-        useAgentConsoleStore
-          .getState()
-          .completePersistenceTransition(persistenceCapture, retainedState);
+        throw new Error(
+          `Agent persistence capture is missing for ${nextRoot}.`,
+        );
       }
+      const completion = useAgentConsoleStore
+        .getState()
+        .completePersistenceTransition(persistenceCapture, retainedState);
+      if (completion.status === "stale") return;
       recoveryRoot = nextRoot;
-      activeRevision = failedSaveRevision(retainedFailure);
+      activeRevision = completion.rebasedMutation
+        ? nextRevision()
+        : failedSaveRevision(retainedFailure);
       persistedRevision = 0;
       useAgentConsoleStore
         .getState()
@@ -1252,16 +1344,19 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     }
 
     if (persistenceCapture === null) {
-      persistenceCapture = useAgentConsoleStore
-        .getState()
-        .beginPersistenceTransition(nextRoot, "load");
+      throw new Error(
+        `Agent persistence capture is missing for ${nextRoot}.`,
+      );
     }
     const capture = persistenceCapture;
     let loaded: PersistedAgentState;
     try {
       loaded = await loadAgentState(nextRoot);
     } catch (error) {
-      if (requestedRoot === nextRoot) {
+      if (
+        requestedRoot === nextRoot &&
+        ownsPersistenceCapture(capture)
+      ) {
         const failure =
           error instanceof AgentPersistenceError
             ? error
@@ -1271,20 +1366,26 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       useAgentConsoleStore.getState().finishPersistenceTransition(capture);
       return;
     }
-    if (requestedRoot !== nextRoot) {
+    if (
+      requestedRoot !== nextRoot ||
+      !ownsPersistenceCapture(capture)
+    ) {
       useAgentConsoleStore.getState().finishPersistenceTransition(capture);
       return;
     }
 
-    const rebasedMutation = useAgentConsoleStore
+    const completion = useAgentConsoleStore
       .getState()
       .completePersistenceTransition(capture, loaded);
+    if (completion.status === "stale") return;
     const hydratedRevision = nextRevision();
-    activeRevision = rebasedMutation ? nextRevision() : hydratedRevision;
+    activeRevision = completion.rebasedMutation
+      ? nextRevision()
+      : hydratedRevision;
     persistedRevision = hydratedRevision;
     writableRoot = nextRoot;
     restoreFailedSaveIssue();
-    if (rebasedMutation) scheduleAgentSave();
+    if (completion.rebasedMutation) scheduleAgentSave();
   });
 }
 
@@ -1301,12 +1402,14 @@ export function retryAgentPersistence(): Promise<void> {
           retry.root,
           retry.snapshot,
           retry.revision,
+          () => true,
         );
       } else {
         await persistSnapshotSource(
           retry.root,
           retry.source,
           retry.revision,
+          () => true,
         );
       }
       if (retry.recovery !== null) {
@@ -1314,6 +1417,7 @@ export function retryAgentPersistence(): Promise<void> {
           retry.root,
           retry.recovery.source,
           retry.recovery.revision,
+          () => true,
         );
       }
       if (
@@ -1340,6 +1444,7 @@ export function retryAgentPersistence(): Promise<void> {
       root,
       captureAgentSnapshotSource(),
       revision,
+      () => true,
     );
   });
 }

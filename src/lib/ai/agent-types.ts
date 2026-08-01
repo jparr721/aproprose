@@ -41,11 +41,15 @@ export interface DraftContextSource {
   resolved: Omit<ContextSnapshot, "id"> | null;
 }
 
+export interface DraftContextAttachment {
+  ref: DraftContextRef;
+  revision: number;
+}
+
 export interface SubmittedAgentDraft {
   text: string;
   textRevision: number;
-  refs: DraftContextRef[];
-  refRevisions: number[];
+  attachments: DraftContextAttachment[];
 }
 
 export type AgentTask =
@@ -233,6 +237,7 @@ export type AgentErrorCode =
   | "transport"
   | "tool"
   | "compaction"
+  | "transition"
   | "unknown";
 
 export interface AgentRunError {

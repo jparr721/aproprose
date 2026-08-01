@@ -455,6 +455,65 @@ describe("agent persistence", () => {
     expect(snapshot).not.toHaveProperty("draftContextSources");
   });
 
+  it("round-trips edited proposal text", async () => {
+    const editableProposal: PendingProposal = {
+      id: "proposal-editable",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "chapter-1",
+      summary: "Soften the opening beat",
+      createdAt: "2026-07-30T12:01:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes: [
+        {
+          id: "rewrite-1",
+          change: {
+            kind: "rewrite",
+            blockId: "block-1",
+            afterId: null,
+            type: null,
+            speaker: null,
+            newText: "The rain struck against the glass.",
+            toIndex: null,
+            reason: "Temper the weather beat",
+          },
+          precondition: {
+            kind: "target",
+            target: {
+              sourceId: "block-1",
+              order: 0,
+              fingerprint: "rewrite-fingerprint",
+              sourceType: "narration",
+              label: "Opening narration",
+              exactText: "The rain hammered against the glass.",
+              previewText: "The rain hammered against the glass.",
+            },
+          },
+        },
+      ],
+    };
+    const store = useAgentConsoleStore.getState();
+    store.hydrate("/book", emptyPersistedAgentState());
+    store.replacePendingProposal(editableProposal);
+    store.updatePendingManuscriptText({
+      proposalId: "proposal-editable",
+      changeId: "rewrite-1",
+      newText: "The rain softened against the glass.",
+    });
+
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/book", snapshot);
+
+    const restoredProposal = restored.pendingProposal;
+    if (restoredProposal === null || restoredProposal.kind !== "manuscript") {
+      throw new Error("Expected a restored manuscript proposal.");
+    }
+    expect(restoredProposal.changes[0].change.newText).toBe(
+      "The rain softened against the glass.",
+    );
+    expect(restoredProposal.projectRoot).toBe("/book");
+  });
+
   it("round-trips explicit immediate and next-prose insert boundaries", async () => {
     const anchor = {
       sourceId: "block-1",

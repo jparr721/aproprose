@@ -8,15 +8,21 @@ import type {
   DraftContextRef,
   DraftContextSource,
   InterruptedRun,
+  ManuscriptPendingChange,
+  ManuscriptPendingProposal,
+  OutlinePendingProposal,
   PendingProposal,
   PersistedAgentState,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
+  AgentConsoleOwnershipError,
   EMPTY_AGENT_STATE,
+  PendingProposalEditError,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
+import { useProjectStore } from "@/stores/project-store";
 
 const run: AgentRun = {
   id: "run-1",
@@ -185,6 +191,173 @@ const proposalWithChanges: PendingProposal = {
     },
   ],
 };
+
+const rewritePendingChange: ManuscriptPendingChange = {
+  id: "rewrite-1",
+  change: {
+    kind: "rewrite",
+    blockId: "block-1",
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: "The rain struck against the glass.",
+    toIndex: null,
+    reason: "Temper the weather beat",
+  },
+  precondition: {
+    kind: "target",
+    target: {
+      sourceId: "block-1",
+      order: 0,
+      fingerprint: "rewrite-fingerprint",
+      sourceType: "narration",
+      label: "Opening narration",
+      exactText: "The rain hammered against the glass.",
+      previewText: "The rain hammered against the glass.",
+    },
+  },
+};
+
+const insertPendingChange: ManuscriptPendingChange = {
+  id: "insert-1",
+  change: {
+    kind: "insert",
+    blockId: null,
+    afterId: "block-1",
+    type: "narration",
+    speaker: null,
+    newText: "She listened.",
+    toIndex: null,
+    reason: "Hold the pause",
+  },
+  precondition: {
+    kind: "insert",
+    boundary: "immediate",
+    anchor: {
+      sourceId: "block-1",
+      order: 0,
+      fingerprint: "rewrite-fingerprint",
+      sourceType: "narration",
+      label: "Opening narration",
+      exactText: "The rain hammered against the glass.",
+      previewText: "The rain hammered against the glass.",
+    },
+    expectedNext: null,
+  },
+};
+
+const removePendingChange: ManuscriptPendingChange = {
+  id: "remove-1",
+  change: {
+    kind: "remove",
+    blockId: "block-2",
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: null,
+    toIndex: null,
+    reason: "Remove the repeated beat",
+  },
+  precondition: {
+    kind: "target",
+    target: {
+      sourceId: "block-2",
+      order: 1,
+      fingerprint: "remove-fingerprint",
+      sourceType: "narration",
+      label: "Repeated narration",
+      exactText: "She listened again.",
+      previewText: "She listened again.",
+    },
+  },
+};
+
+const movePendingChange: ManuscriptPendingChange = {
+  id: "move-1",
+  change: {
+    kind: "move",
+    blockId: "block-3",
+    afterId: null,
+    type: null,
+    speaker: null,
+    newText: null,
+    toIndex: 1,
+    reason: "Move the response earlier",
+  },
+  precondition: {
+    kind: "move",
+    target: {
+      sourceId: "block-3",
+      order: 2,
+      fingerprint: "move-fingerprint",
+      sourceType: "dialogue",
+      label: "Reply",
+      exactText: "I heard it too.",
+      previewText: "I heard it too.",
+    },
+    orderFingerprint: "chapter-order-fingerprint",
+  },
+};
+
+const manuscriptTextProposal: ManuscriptPendingProposal = {
+  id: "proposal-1",
+  kind: "manuscript",
+  projectRoot: "/book",
+  chapterId: "ch1",
+  summary: "Edit proposal text",
+  createdAt: "2026-07-30T12:00:00.000Z",
+  originatingMessageId: "assistant-1",
+  changes: [
+    rewritePendingChange,
+    insertPendingChange,
+    removePendingChange,
+    movePendingChange,
+  ],
+};
+
+const outlineTextProposal: OutlinePendingProposal = {
+  id: "outline-1",
+  kind: "outline",
+  projectRoot: "/book",
+  chapterId: "ch1",
+  summary: "Refine the opening card",
+  createdAt: "2026-07-30T12:00:00.000Z",
+  originatingMessageId: "assistant-1",
+  changes: [
+    {
+      id: "outline-change-1",
+      change: {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Arrival in rain",
+        intention: null,
+        toIndex: null,
+        reason: "Clarify the opening image",
+      },
+      precondition: {
+        kind: "card",
+        target: {
+          sourceId: "card-1",
+          order: 0,
+          fingerprint: "card-fingerprint",
+          sourceType: "outline-card",
+          label: "Arrival",
+          exactText: "Arrival\nSet the scene",
+          previewText: "Arrival\nSet the scene",
+        },
+      },
+    },
+  ],
+};
+
+function captureError(action: () => void): unknown {
+  try {
+    action();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
 
 describe("agent console store", () => {
   beforeEach(() => {
@@ -737,6 +910,304 @@ describe("agent console store", () => {
         error: "Network unavailable",
       },
     });
+  });
+
+  it("updates only a staged rewrite's text", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    if (pendingBefore === null || pendingBefore.kind !== "manuscript") {
+      throw new Error("Expected an editable manuscript proposal.");
+    }
+    const originalPrecondition = pendingBefore.changes[0].precondition;
+
+    store.updatePendingManuscriptText({
+      proposalId: "proposal-1",
+      changeId: "rewrite-1",
+      newText: "The rain softened against the glass.",
+    });
+
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null || pending.kind !== "manuscript") {
+      throw new Error("Expected an editable manuscript proposal.");
+    }
+    expect(pending).not.toBe(pendingBefore);
+    expect(pending.changes).not.toBe(pendingBefore.changes);
+    expect(pending.changes[0]).not.toBe(pendingBefore.changes[0]);
+    expect(pending.changes[0].change).not.toBe(
+      pendingBefore.changes[0].change,
+    );
+    expect(pending.changes[0]).toEqual({
+      id: "rewrite-1",
+      change: {
+        kind: "rewrite",
+        blockId: "block-1",
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: "The rain softened against the glass.",
+        toIndex: null,
+        reason: "Temper the weather beat",
+      },
+      precondition: originalPrecondition,
+    });
+    expect(pending.changes[0].precondition).toBe(originalPrecondition);
+    expect(pending.changes[1]).toBe(pendingBefore.changes[1]);
+    expect(pending.changes[2]).toBe(pendingBefore.changes[2]);
+    expect(pending.changes[3]).toBe(pendingBefore.changes[3]);
+    expect(pendingBefore.changes[0].change.newText).toBe(
+      "The rain struck against the glass.",
+    );
+    expect(pending).toMatchObject({
+      id: "proposal-1",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Edit proposal text",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "assistant-1",
+    });
+  });
+
+  it("updates a staged insert's text to the empty string", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    if (pendingBefore === null || pendingBefore.kind !== "manuscript") {
+      throw new Error("Expected an editable manuscript proposal.");
+    }
+    const originalPrecondition = pendingBefore.changes[1].precondition;
+
+    store.updatePendingManuscriptText({
+      proposalId: "proposal-1",
+      changeId: "insert-1",
+      newText: "",
+    });
+
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null || pending.kind !== "manuscript") {
+      throw new Error("Expected an editable manuscript proposal.");
+    }
+    expect(pending.changes[1]).toEqual({
+      id: "insert-1",
+      change: {
+        kind: "insert",
+        blockId: null,
+        afterId: "block-1",
+        type: "narration",
+        speaker: null,
+        newText: "",
+        toIndex: null,
+        reason: "Hold the pause",
+      },
+      precondition: originalPrecondition,
+    });
+    expect(pending.changes[1].precondition).toBe(originalPrecondition);
+    expect(pending.changes[0]).toBe(pendingBefore.changes[0]);
+    expect(pending.changes[2]).toBe(pendingBefore.changes[2]);
+    expect(pending.changes[3]).toBe(pendingBefore.changes[3]);
+    expect(pendingBefore.changes[1].change.newText).toBe("She listened.");
+  });
+
+  it.each([
+    { changeKind: "rewrite", changeId: "rewrite-1" },
+    { changeKind: "insert", changeId: "insert-1" },
+  ])(
+    "rejects a staged $changeKind without existing editable text",
+    ({ changeId }) => {
+      const proposalWithoutText = structuredClone(manuscriptTextProposal);
+      const change = proposalWithoutText.changes.find(
+        (item) => item.id === changeId,
+      );
+      if (change === undefined) {
+        throw new Error(`Expected manuscript change ${changeId}.`);
+      }
+      change.change.newText = null;
+      const store = useAgentConsoleStore.getState();
+      store.replacePendingProposal(proposalWithoutText);
+      const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+      const pendingSnapshot = structuredClone(pendingBefore);
+
+      const error = captureError(() => {
+        store.updatePendingManuscriptText({
+          proposalId: "proposal-1",
+          changeId,
+          newText: "Rejected text",
+        });
+      });
+
+      expect(error).toBeInstanceOf(PendingProposalEditError);
+      expect(error).toMatchObject({ code: "change-not-editable" });
+      expect(useAgentConsoleStore.getState().pendingProposal).toBe(
+        pendingBefore,
+      );
+      expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+        pendingSnapshot,
+      );
+    },
+  );
+
+  it.each([
+    { changeKind: "remove", changeId: "remove-1" },
+    { changeKind: "move", changeId: "move-1" },
+  ])("rejects a staged $changeKind text edit", ({ changeId }) => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    const pendingSnapshot = structuredClone(pendingBefore);
+
+    const error = captureError(() => {
+      store.updatePendingManuscriptText({
+        proposalId: "proposal-1",
+        changeId,
+        newText: "Rejected text",
+      });
+    });
+
+    expect(error).toBeInstanceOf(PendingProposalEditError);
+    expect(error).toMatchObject({ code: "change-not-editable" });
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingBefore);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+      pendingSnapshot,
+    );
+  });
+
+  it("rejects text edits for an outline proposal", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(outlineTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    const pendingSnapshot = structuredClone(pendingBefore);
+
+    const error = captureError(() => {
+      store.updatePendingManuscriptText({
+        proposalId: "outline-1",
+        changeId: "outline-change-1",
+        newText: "Rejected text",
+      });
+    });
+
+    expect(error).toBeInstanceOf(PendingProposalEditError);
+    expect(error).toMatchObject({ code: "wrong-kind" });
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingBefore);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+      pendingSnapshot,
+    );
+  });
+
+  it("rejects a mismatched proposal id", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    const pendingSnapshot = structuredClone(pendingBefore);
+
+    const error = captureError(() => {
+      store.updatePendingManuscriptText({
+        proposalId: "proposal-2",
+        changeId: "rewrite-1",
+        newText: "Rejected text",
+      });
+    });
+
+    expect(error).toBeInstanceOf(PendingProposalEditError);
+    expect(error).toMatchObject({ code: "proposal-mismatch" });
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingBefore);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+      pendingSnapshot,
+    );
+  });
+
+  it("rejects a missing manuscript change id", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+    const pendingSnapshot = structuredClone(pendingBefore);
+
+    const error = captureError(() => {
+      store.updatePendingManuscriptText({
+        proposalId: "proposal-1",
+        changeId: "rewrite-missing",
+        newText: "Rejected text",
+      });
+    });
+
+    expect(error).toBeInstanceOf(PendingProposalEditError);
+    expect(error).toMatchObject({ code: "change-missing" });
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingBefore);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+      pendingSnapshot,
+    );
+  });
+
+  it.each([
+    {
+      ownership: "transition",
+      relinquishOwnership: () => {
+        useAgentConsoleStore
+          .getState()
+          .beginPersistenceTransition("/book", "load");
+      },
+    },
+    {
+      ownership: "unavailable",
+      relinquishOwnership: () => {
+        useAgentConsoleStore.setState({ activeProjectRoot: null });
+      },
+    },
+  ])(
+    "checks $ownership ownership before proposal validation",
+    ({ relinquishOwnership }) => {
+      const store = useAgentConsoleStore.getState();
+      store.replacePendingProposal(manuscriptTextProposal);
+      const pendingBefore = useAgentConsoleStore.getState().pendingProposal;
+      const pendingSnapshot = structuredClone(pendingBefore);
+      relinquishOwnership();
+
+      const error = captureError(() => {
+        store.updatePendingManuscriptText({
+          proposalId: "proposal-mismatch",
+          changeId: "change-missing",
+          newText: "Rejected text",
+        });
+      });
+
+      expect(error).toBeInstanceOf(AgentConsoleOwnershipError);
+      expect(error).not.toBeInstanceOf(PendingProposalEditError);
+      expect(error).toMatchObject({ agentErrorCode: "transition" });
+      expect(useAgentConsoleStore.getState().pendingProposal).toBe(
+        pendingBefore,
+      );
+      expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+        pendingSnapshot,
+      );
+    },
+  );
+
+  it("keeps live project and editor history state isolated from proposal text", () => {
+    const store = useAgentConsoleStore.getState();
+    store.replacePendingProposal(manuscriptTextProposal);
+    const projectBefore = useProjectStore.getState();
+    const blocksBefore = projectBefore.blocks;
+    const pastBefore = projectBefore.past;
+    const futureBefore = projectBefore.future;
+    const dirtyBefore = projectBefore.chapterDirty;
+    const agentBefore = useAgentConsoleStore.getState();
+    const messagesBefore = agentBefore.messages;
+    const draftRevisionBefore = agentBefore.draftRevision;
+
+    store.updatePendingManuscriptText({
+      proposalId: "proposal-1",
+      changeId: "rewrite-1",
+      newText: "The rain softened against the glass.",
+    });
+
+    const projectAfter = useProjectStore.getState();
+    expect(projectAfter.blocks).toBe(blocksBefore);
+    expect(projectAfter.past).toBe(pastBefore);
+    expect(projectAfter.future).toBe(futureBefore);
+    expect(projectAfter.chapterDirty).toBe(dirtyBefore);
+    const agentAfter = useAgentConsoleStore.getState();
+    expect(agentAfter.messages).toBe(messagesBefore);
+    expect(agentAfter.draftRevision).toBe(draftRevisionBefore);
   });
 
   it("removes selected pending changes and clears an empty proposal", () => {

@@ -14,6 +14,8 @@ import type {
   DraftContextSource,
   DraftSourceLocator,
   InterruptedRun,
+  ManuscriptPendingChange,
+  ManuscriptPendingProposal,
   PendingProposal,
   PersistedAgentState,
   PersistedUsage,
@@ -43,6 +45,28 @@ export interface AgentDraftContextResolution {
   attachment: DraftContextAttachment;
   ref: DraftContextRef;
   source: DraftContextSource;
+}
+
+export interface PendingManuscriptTextEdit {
+  proposalId: string;
+  changeId: string;
+  newText: string;
+}
+
+export type PendingProposalEditErrorCode =
+  | "proposal-mismatch"
+  | "wrong-kind"
+  | "change-missing"
+  | "change-not-editable";
+
+export class PendingProposalEditError extends Error {
+  readonly code: PendingProposalEditErrorCode;
+
+  constructor(code: PendingProposalEditErrorCode, message: string) {
+    super(message);
+    this.name = "PendingProposalEditError";
+    this.code = code;
+  }
 }
 
 interface AgentConsoleData {
@@ -115,6 +139,7 @@ export interface AgentConsoleState extends AgentConsoleData {
   interruptRun: (interrupted: InterruptedRun) => void;
   failRun: (message: AgentUIMessage, error: string) => void;
   replacePendingProposal: (proposal: PendingProposal) => void;
+  updatePendingManuscriptText: (edit: PendingManuscriptTextEdit) => void;
   removePendingChanges: (changeIds: string[]) => void;
   clearPendingProposal: () => void;
   appendLocalMessage: (message: AgentUIMessage) => void;
@@ -271,6 +296,53 @@ function requireDraftMutationOwnership(state: AgentConsoleState): void {
   ) {
     throw new AgentConsoleOwnershipError();
   }
+}
+
+function editPendingManuscriptChange(
+  item: ManuscriptPendingChange,
+  edit: PendingManuscriptTextEdit,
+): ManuscriptPendingChange {
+  if (item.id !== edit.changeId) return item;
+  if (
+    (item.change.kind !== "rewrite" && item.change.kind !== "insert") ||
+    item.change.newText === null
+  ) {
+    throw new PendingProposalEditError(
+      "change-not-editable",
+      `Cannot edit pending change ${item.id}: ${item.change.kind} has no editable text.`,
+    );
+  }
+  if (item.change.segments === undefined) {
+    return {
+      id: item.id,
+      change: {
+        kind: item.change.kind,
+        blockId: item.change.blockId,
+        afterId: item.change.afterId,
+        type: item.change.type,
+        speaker: item.change.speaker,
+        newText: edit.newText,
+        toIndex: item.change.toIndex,
+        reason: item.change.reason,
+      },
+      precondition: item.precondition,
+    };
+  }
+  return {
+    id: item.id,
+    change: {
+      kind: item.change.kind,
+      blockId: item.change.blockId,
+      afterId: item.change.afterId,
+      type: item.change.type,
+      speaker: item.change.speaker,
+      segments: item.change.segments,
+      newText: edit.newText,
+      toIndex: item.change.toIndex,
+      reason: item.change.reason,
+    },
+    precondition: item.precondition,
+  };
 }
 
 export function requireAgentConsoleProject(projectRoot: string): void {
@@ -734,6 +806,45 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
     }),
   replacePendingProposal: (pendingProposal) =>
     set(() => ({ pendingProposal })),
+  updatePendingManuscriptText: (edit) =>
+    set((state) => {
+      requireDraftMutationOwnership(state);
+      const proposal = state.pendingProposal;
+      if (proposal === null || proposal.id !== edit.proposalId) {
+        throw new PendingProposalEditError(
+          "proposal-mismatch",
+          `Cannot edit pending proposal ${edit.proposalId}: it is not the staged proposal.`,
+        );
+      }
+      if (proposal.kind !== "manuscript") {
+        throw new PendingProposalEditError(
+          "wrong-kind",
+          `Cannot edit pending proposal ${edit.proposalId}: only manuscript text is editable.`,
+        );
+      }
+      const matchingChanges = proposal.changes.filter(
+        (item) => item.id === edit.changeId,
+      );
+      if (matchingChanges.length !== 1) {
+        throw new PendingProposalEditError(
+          "change-missing",
+          `Cannot edit pending proposal ${edit.proposalId}: change ${edit.changeId} was not found exactly once.`,
+        );
+      }
+      const updatedProposal: ManuscriptPendingProposal = {
+        id: proposal.id,
+        kind: proposal.kind,
+        projectRoot: proposal.projectRoot,
+        chapterId: proposal.chapterId,
+        summary: proposal.summary,
+        createdAt: proposal.createdAt,
+        originatingMessageId: proposal.originatingMessageId,
+        changes: proposal.changes.map((item) =>
+          editPendingManuscriptChange(item, edit),
+        ),
+      };
+      return { pendingProposal: updatedProposal };
+    }),
   removePendingChanges: (changeIds) =>
     set((state) => {
       requireDraftMutationOwnership(state);

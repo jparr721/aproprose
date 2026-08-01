@@ -1,6 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { pendingProposalForModel } from "@/lib/ai/agent-proposals";
+import {
+  assertProposalCorrelation,
+  pendingProposalForModel,
+} from "@/lib/ai/agent-proposals";
 import type {
   AgentRun,
   AgentToolOutput,
@@ -218,6 +221,7 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
       input: z.infer<typeof manuscriptStageSchema>,
     ) => {
       const proposal = env.buildManuscriptProposal(input);
+      assertProposalCorrelation(proposal);
       env.replacePendingProposal(proposal);
       return runtimeOutput(
         {
@@ -231,6 +235,7 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
     },
     stageOutline: async (input: z.infer<typeof outlineStageSchema>) => {
       const proposal = env.buildOutlineProposal(input);
+      assertProposalCorrelation(proposal);
       env.replacePendingProposal(proposal);
       return runtimeOutput(
         {

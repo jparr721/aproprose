@@ -5,6 +5,7 @@ import {
   sanitizeAgentMessages,
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
+import { invalidProposalCorrelationIds } from "@/lib/ai/agent-proposals";
 import type {
   AgentPersistenceIssue,
   PendingProposal,
@@ -208,38 +209,52 @@ const pendingProposalBase = {
   originatingMessageId: z.string(),
 };
 
-const pendingProposalSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      ...pendingProposalBase,
-      kind: z.literal("manuscript"),
-      changes: z.array(
-        z
-          .object({
-            id: z.string(),
-            change: blockChangeSchema,
-            precondition: manuscriptPreconditionSchema,
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-  z
-    .object({
-      ...pendingProposalBase,
-      kind: z.literal("outline"),
-      changes: z.array(
-        z
-          .object({
-            id: z.string(),
-            change: sculptChangeSchema,
-            precondition: outlinePreconditionSchema,
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-]);
+const pendingProposalSchema = z
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        ...pendingProposalBase,
+        kind: z.literal("manuscript"),
+        changes: z.array(
+          z
+            .object({
+              id: z.string(),
+              change: blockChangeSchema,
+              precondition: manuscriptPreconditionSchema,
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+    z
+      .object({
+        ...pendingProposalBase,
+        kind: z.literal("outline"),
+        changes: z.array(
+          z
+            .object({
+              id: z.string(),
+              change: sculptChangeSchema,
+              precondition: outlinePreconditionSchema,
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+  ])
+  .superRefine((proposal, context) => {
+    const invalidChangeIds = new Set(
+      invalidProposalCorrelationIds(proposal),
+    );
+    proposal.changes.forEach((change, index) => {
+      if (!invalidChangeIds.has(change.id)) return;
+      context.addIssue({
+        code: "custom",
+        message: "Proposal change and precondition kinds do not match.",
+        path: ["changes", index, "precondition"],
+      });
+    });
+  });
 
 const languageModelUsageSchema = z
   .object({

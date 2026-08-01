@@ -474,6 +474,55 @@ describe("ReviewTray manuscript decisions", () => {
 });
 
 describe("ReviewTray outline decisions", () => {
+  it("keeps a mismatched proposal open without writing or recording an event", () => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const addProposal = outlineProposal(cards, [
+      {
+        kind: "add",
+        cardId: null,
+        title: "The turn",
+        intention: "Force the final choice",
+        toIndex: null,
+        reason: "Complete the arc",
+      },
+    ]);
+    const targetProposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ]);
+    const mismatchedProposal = {
+      ...addProposal,
+      changes: [
+        {
+          ...addProposal.changes[0],
+          precondition: targetProposal.changes[0].precondition,
+        },
+      ],
+    };
+    const before = structuredClone(useProjectStore.getState().meta);
+    setPending(mismatchedProposal);
+    render(<ReviewTray />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
+
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(
+      mismatchedProposal,
+    );
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+    expect(recordProposalEvent).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Proposal couldn't be applied", {
+      description: "Keep this proposal open and ask the agent to replace it.",
+    });
+  });
+
   it("renders and accepts an add for a valid sparse empty outline", () => {
     useProjectStore.setState((state) => ({
       meta: { ...state.meta, chapters: {} },

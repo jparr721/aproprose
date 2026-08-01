@@ -44,6 +44,59 @@ export class AgentProposalError extends Error {
   }
 }
 
+const MANUSCRIPT_PRECONDITION_BY_CHANGE = {
+  rewrite: "target",
+  insert: "insert",
+  remove: "target",
+  move: "move",
+} as const satisfies Record<
+  BlockChange["kind"],
+  ManuscriptPendingChange["precondition"]["kind"]
+>;
+
+const OUTLINE_PRECONDITION_BY_CHANGE = {
+  rewrite: "card",
+  add: "outline-order",
+  move: "outline-move",
+  remove: "card",
+} as const satisfies Record<
+  SculptChange["kind"],
+  OutlinePendingChange["precondition"]["kind"]
+>;
+
+type ProposalCorrelationInput =
+  | Pick<ManuscriptPendingProposal, "kind" | "changes">
+  | Pick<OutlinePendingProposal, "kind" | "changes">;
+
+export function invalidProposalCorrelationIds(
+  proposal: ProposalCorrelationInput,
+): string[] {
+  if (proposal.kind === "manuscript") {
+    return proposal.changes.flatMap((item) =>
+      MANUSCRIPT_PRECONDITION_BY_CHANGE[item.change.kind] ===
+      item.precondition.kind
+        ? []
+        : [item.id],
+    );
+  }
+  return proposal.changes.flatMap((item) =>
+    OUTLINE_PRECONDITION_BY_CHANGE[item.change.kind] === item.precondition.kind
+      ? []
+      : [item.id],
+  );
+}
+
+export function assertProposalCorrelation(
+  proposal: ProposalCorrelationInput,
+): void {
+  const invalidChangeIds = invalidProposalCorrelationIds(proposal);
+  if (invalidChangeIds.length === 0) return;
+  throw new AgentProposalError(
+    "invalid-proposal",
+    `Proposal change and precondition kinds do not match: ${invalidChangeIds.join(", ")}.`,
+  );
+}
+
 export function conflictingTargetChangeIds(
   changes: readonly { changeId: string; targetId: string | null }[],
 ): string[] {
@@ -305,6 +358,7 @@ export function buildManuscriptPendingProposal(args: {
         ? bridgePrecondition(change, args.blocks, task.successorBlockId)
         : manuscriptPrecondition(change, args.blocks),
   }));
+  assertProposalCorrelation({ kind: "manuscript", changes });
   const conflicts = conflictingTargetChangeIds(
     changes.map((item) => ({
       changeId: item.id,
@@ -364,6 +418,7 @@ export function buildOutlinePendingProposal(args: {
     change,
     precondition: outlinePrecondition(change, args.cards),
   }));
+  assertProposalCorrelation({ kind: "outline", changes });
   const conflicts = conflictingTargetChangeIds(
     changes.map((item) => ({
       changeId: item.id,

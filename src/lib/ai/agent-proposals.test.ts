@@ -3,16 +3,24 @@ import {
   AgentProposalError,
   buildManuscriptPendingProposal,
   buildOutlinePendingProposal,
+  invalidProposalCorrelationIds,
   materializeManuscriptChanges,
   validateManuscriptChanges,
   validateOutlineChanges,
 } from "@/lib/ai/agent-proposals";
-import type { AgentRun, PendingProposal } from "@/lib/ai/agent-types";
+import type {
+  AgentRun,
+  ManuscriptPrecondition,
+  OutlinePrecondition,
+  PendingProposal,
+  SourceLocator,
+} from "@/lib/ai/agent-types";
 import type {
   Block,
   BlockChange,
   Card,
   ManuscriptProposal,
+  SculptChange,
   SculptProposal,
 } from "@/lib/types";
 
@@ -82,6 +90,183 @@ const buildManuscript = (
     now: "2026-07-30T00:01:00.000Z",
   });
 
+const locator: SourceLocator = {
+  sourceId: "source-1",
+  order: 0,
+  fingerprint: "source-fingerprint",
+  sourceType: "narration",
+  label: "Narration block",
+  exactText: "Frozen source.",
+  previewText: "Frozen source.",
+};
+
+describe("proposal change correlation", () => {
+  it("audits every manuscript change and precondition pair", () => {
+    const changeCases: Array<{
+      change: BlockChange;
+      expected: ManuscriptPrecondition["kind"];
+    }> = [
+      {
+        change: {
+          kind: "rewrite",
+          blockId: "source-1",
+          afterId: null,
+          type: null,
+          speaker: null,
+          newText: "Rewritten.",
+          toIndex: null,
+          reason: "Rewrite",
+        },
+        expected: "target",
+      },
+      {
+        change: insert(null, "Inserted."),
+        expected: "insert",
+      },
+      {
+        change: {
+          kind: "remove",
+          blockId: "source-1",
+          afterId: null,
+          type: null,
+          speaker: null,
+          newText: null,
+          toIndex: null,
+          reason: "Remove",
+        },
+        expected: "target",
+      },
+      {
+        change: {
+          kind: "move",
+          blockId: "source-1",
+          afterId: null,
+          type: null,
+          speaker: null,
+          newText: null,
+          toIndex: 0,
+          reason: "Move",
+        },
+        expected: "move",
+      },
+    ];
+    const preconditions: ManuscriptPrecondition[] = [
+      { kind: "target", target: locator },
+      { kind: "insert", anchor: null, expectedNext: null },
+      { kind: "move", target: locator, orderFingerprint: "block-order" },
+    ];
+    const changes = changeCases.flatMap(({ change, expected }) =>
+      preconditions.map((precondition) => ({
+        id: `${change.kind}:${precondition.kind}`,
+        change,
+        precondition,
+        expected,
+      })),
+    );
+    const proposal: PendingProposal = {
+      id: "proposal-correlation",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Audit manuscript pairs",
+      createdAt: "2026-07-30T00:01:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes,
+    };
+
+    expect(invalidProposalCorrelationIds(proposal)).toEqual(
+      changes
+        .filter((item) => item.precondition.kind !== item.expected)
+        .map((item) => item.id),
+    );
+  });
+
+  it("audits every outline change and precondition pair", () => {
+    const changeCases: Array<{
+      change: SculptChange;
+      expected: OutlinePrecondition["kind"];
+    }> = [
+      {
+        change: {
+          kind: "rewrite",
+          cardId: "source-1",
+          title: "Rewritten",
+          intention: null,
+          toIndex: null,
+          reason: "Rewrite",
+        },
+        expected: "card",
+      },
+      {
+        change: {
+          kind: "add",
+          cardId: null,
+          title: "Added",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add",
+        },
+        expected: "outline-order",
+      },
+      {
+        change: {
+          kind: "move",
+          cardId: "source-1",
+          title: null,
+          intention: null,
+          toIndex: 0,
+          reason: "Move",
+        },
+        expected: "outline-move",
+      },
+      {
+        change: {
+          kind: "remove",
+          cardId: "source-1",
+          title: null,
+          intention: null,
+          toIndex: null,
+          reason: "Remove",
+        },
+        expected: "card",
+      },
+    ];
+    const preconditions: OutlinePrecondition[] = [
+      { kind: "card", target: locator },
+      { kind: "outline-order", orderFingerprint: "outline-order" },
+      {
+        kind: "outline-move",
+        target: locator,
+        orderFingerprint: "outline-order",
+      },
+    ];
+    const changes = changeCases.flatMap(({ change, expected }) =>
+      preconditions.map((precondition) => ({
+        id: `${change.kind}:${precondition.kind}`,
+        change,
+        precondition,
+        expected,
+      })),
+    );
+    const proposal: PendingProposal = {
+      id: "proposal-correlation",
+      kind: "outline",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Audit outline pairs",
+      createdAt: "2026-07-30T00:01:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes,
+    };
+
+    expect(invalidProposalCorrelationIds(proposal)).toEqual(
+      changes
+        .filter((item) => item.precondition.kind !== item.expected)
+        .map((item) => item.id),
+    );
+  });
+});
+
 describe("proposal task boundaries", () => {
   it("rejects duplicate manuscript targets before creating pending changes", () => {
     const rewrite: BlockChange = {
@@ -137,6 +322,43 @@ describe("proposal task boundaries", () => {
         now: "2026-07-30T00:01:00.000Z",
       }),
     ).toThrow(/invalid outline change/);
+  });
+
+  it("rejects duplicate outline targets before creating a pending proposal", () => {
+    const raw: SculptProposal = {
+      chapterId: "ch1",
+      summary: "Conflicting card changes",
+      changes: [
+        {
+          kind: "rewrite",
+          cardId: "c1",
+          title: "Hard arrival",
+          intention: null,
+          toIndex: null,
+          reason: "Raise stakes",
+        },
+        {
+          kind: "remove",
+          cardId: "c1",
+          title: null,
+          intention: null,
+          toIndex: null,
+          reason: "Remove instead",
+        },
+      ],
+    };
+
+    expect(() =>
+      buildOutlinePendingProposal({
+        run: run({ kind: "outline-sculpt", chapterId: "ch1" }),
+        raw,
+        cards,
+        currentPending: null,
+        originatingMessageId: "assistant-1",
+        makeId: () => "generated-id",
+        now: "2026-07-30T00:01:00.000Z",
+      }),
+    ).toThrow(/same outline card/);
   });
 
   it("allows a bridge insert only after the frozen anchor", () => {

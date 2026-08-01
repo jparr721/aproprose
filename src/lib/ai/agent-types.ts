@@ -179,6 +179,7 @@ export type AgentProposalApplyResult =
 
 export type AgentProposalInvalidReason =
   | "unknown-selection"
+  | "mismatched-precondition"
   | "conflicting-changes"
   | "apply-failed";
 

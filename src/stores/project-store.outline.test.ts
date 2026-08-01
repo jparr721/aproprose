@@ -243,6 +243,45 @@ describe("agent outline proposals", () => {
     expect(useProjectStore.getState().meta).toEqual(before);
   });
 
+  it("rejects a mismatched outline precondition without writing metadata", () => {
+    const addProposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    const targetProposal = pendingOutlineFixture();
+    const mismatchedProposal = {
+      ...addProposal,
+      changes: [
+        {
+          ...addProposal.changes[0],
+          precondition: targetProposal.changes[0].precondition,
+        },
+      ],
+    };
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(mismatchedProposal, ["change-0"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "mismatched-precondition",
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
   it("rejects conflicting selected targets without a partial mutation", () => {
     const proposal = buildPendingOutlineFixture(
       [
@@ -286,6 +325,7 @@ describe("agent outline proposals", () => {
       reason: "conflicting-changes",
     });
     expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
   });
 
   it("rejects a legacy malformed add without writing metadata", () => {

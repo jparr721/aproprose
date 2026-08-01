@@ -66,6 +66,7 @@ import { structurePassage } from "@/lib/blocks/structure";
 import { projectMetaFingerprint } from "@/lib/ai/agent-context";
 import {
   conflictingTargetChangeIds,
+  invalidProposalCorrelationIds,
   materializeManuscriptChanges,
   validateManuscriptChanges,
   validateOutlineChanges,
@@ -959,6 +960,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     applyAgentManuscriptProposal: (proposal, changeIds) => {
+      const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);
+      if (mismatchedChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: mismatchedChangeIds,
+          reason: "mismatched-precondition",
+        };
+      }
       const state = get();
       if (
         state.project === null ||
@@ -1610,6 +1619,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }),
 
     applyAgentOutlineProposal: (proposal, changeIds) => {
+      const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);
+      if (mismatchedChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: mismatchedChangeIds,
+          reason: "mismatched-precondition",
+        };
+      }
       const state = get();
       if (
         state.project === null ||

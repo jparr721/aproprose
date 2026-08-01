@@ -399,6 +399,84 @@ describe("agent persistence", () => {
     });
   });
 
+  it("rejects persisted mismatched pairs for both proposal kinds", async () => {
+    const sourceLocator = {
+      sourceId: "source-1",
+      order: 0,
+      fingerprint: "source-fingerprint",
+      sourceType: "narration",
+      label: "Narration block",
+      exactText: "Frozen source.",
+      previewText: "Frozen source.",
+    };
+    const persistedBase = {
+      id: "proposal-mismatch",
+      chapterId: "chapter-1",
+      summary: "Malformed proposal",
+      createdAt: "2026-07-30T12:01:00.000Z",
+      originatingMessageId: "assistant-1",
+    };
+    const pendingProposals = [
+      {
+        ...persistedBase,
+        kind: "manuscript",
+        changes: [
+          {
+            id: "change-manuscript",
+            change: {
+              kind: "rewrite",
+              blockId: "source-1",
+              afterId: null,
+              type: null,
+              speaker: null,
+              newText: "Rewritten.",
+              toIndex: null,
+              reason: "Rewrite",
+            },
+            precondition: {
+              kind: "insert",
+              anchor: null,
+              expectedNext: null,
+            },
+          },
+        ],
+      },
+      {
+        ...persistedBase,
+        kind: "outline",
+        changes: [
+          {
+            id: "change-outline",
+            change: {
+              kind: "add",
+              cardId: null,
+              title: "New beat",
+              intention: "Escalate",
+              toIndex: null,
+              reason: "Add",
+            },
+            precondition: {
+              kind: "card",
+              target: sourceLocator,
+            },
+          },
+        ],
+      },
+    ];
+
+    for (const pendingProposal of pendingProposals) {
+      await expect(
+        fromAgentSnapshot("/books/one", {
+          ...emptyPersistedAgentState(),
+          pendingProposal,
+        }),
+      ).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    }
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+  });
+
   it("replaces runtime tool values with safe summaries before saving", async () => {
     const runtimeMessage: AgentUIMessage = {
       id: "assistant-tool",

@@ -33,6 +33,7 @@ import {
   readPdf,
   readTextFile,
   writeAppData,
+  writeTextFile,
 } from "@/lib/tauri";
 import type { Block, BlockChange, ManuscriptProposal, ProjectInfo } from "@/lib/types";
 
@@ -117,6 +118,7 @@ const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
   });
 
 beforeEach(() => {
+  vi.mocked(writeTextFile).mockClear();
   useProjectStore.setState({
     blocks: [],
     selectedId: null,
@@ -1320,6 +1322,60 @@ describe("applyAgentManuscriptProposal", () => {
     });
     expect(useProjectStore.getState().blocks).toEqual(blocks);
     expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("rejects a mismatched manuscript precondition without throwing or mutating", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
+    const mismatchedProposal = {
+      ...proposal,
+      changes: [
+        {
+          ...proposal.changes[0],
+          precondition: {
+            kind: "insert" as const,
+            anchor: null,
+            expectedNext: null,
+          },
+        },
+      ],
+    };
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      selectedId: "a",
+      chapterDirty: false,
+      past: [],
+      future: [],
+    } as never);
+    const before = {
+      blocks: structuredClone(useProjectStore.getState().blocks),
+      selectedId: useProjectStore.getState().selectedId,
+      chapterDirty: useProjectStore.getState().chapterDirty,
+      past: structuredClone(useProjectStore.getState().past),
+      future: structuredClone(useProjectStore.getState().future),
+    };
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(mismatchedProposal, ["change-0"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "mismatched-precondition",
+    });
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks: before.blocks,
+      selectedId: before.selectedId,
+      chapterDirty: before.chapterDirty,
+      past: before.past,
+      future: before.future,
+    });
+    expect(writeTextFile).not.toHaveBeenCalled();
   });
 
   it("rejects conflicting selected targets without a partial mutation", () => {

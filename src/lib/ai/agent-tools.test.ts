@@ -9,6 +9,7 @@ import type {
   AgentRun,
   ChapterToolValue,
   ManuscriptPendingProposal,
+  OutlinePendingProposal,
 } from "@/lib/ai/agent-types";
 
 const run: AgentRun = {
@@ -72,6 +73,33 @@ const pending: ManuscriptPendingProposal = {
   ],
 };
 
+const pendingOutline: OutlinePendingProposal = {
+  id: "outline-proposal-1",
+  kind: "outline",
+  projectRoot: "/book",
+  chapterId: "ch1",
+  summary: "Add a turn",
+  createdAt: "2026-07-30T00:01:00.000Z",
+  originatingMessageId: "assistant-1",
+  changes: [
+    {
+      id: "outline-change-1",
+      change: {
+        kind: "add",
+        cardId: null,
+        title: "The turn",
+        intention: "Force the choice",
+        toIndex: null,
+        reason: "Complete the arc",
+      },
+      precondition: {
+        kind: "outline-order",
+        orderFingerprint: "outline-order",
+      },
+    },
+  ],
+};
+
 function environment(): AgentToolEnvironment {
   return {
     run,
@@ -84,7 +112,7 @@ function environment(): AgentToolEnvironment {
     readConversationContext: vi.fn().mockReturnValue({ messages: [] }),
     getPendingProposal: vi.fn().mockReturnValue(null),
     buildManuscriptProposal: vi.fn().mockReturnValue(pending),
-    buildOutlineProposal: vi.fn(),
+    buildOutlineProposal: vi.fn().mockReturnValue(pendingOutline),
     replacePendingProposal: vi.fn(),
   };
 }
@@ -144,6 +172,64 @@ describe("stage tools", () => {
     await expect(
       handlers.stageManuscript({ summary: "Bad", changes: [] }),
     ).rejects.toThrow("task boundary failed");
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched change and precondition before staging", async () => {
+    const env = environment();
+    vi.mocked(env.buildManuscriptProposal).mockReturnValue({
+      ...pending,
+      changes: [
+        {
+          ...pending.changes[0],
+          change: {
+            ...pending.changes[0].change,
+            kind: "rewrite",
+            newText: "Rewritten prose.",
+          },
+          precondition: {
+            kind: "insert",
+            anchor: null,
+            expectedNext: null,
+          },
+        },
+      ],
+    });
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.stageManuscript({ summary: "Malformed", changes: [] }),
+    ).rejects.toThrow(/change and precondition/);
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched outline pair before staging", async () => {
+    const env = environment();
+    vi.mocked(env.buildOutlineProposal).mockReturnValue({
+      ...pendingOutline,
+      changes: [
+        {
+          ...pendingOutline.changes[0],
+          precondition: {
+            kind: "card",
+            target: {
+              sourceId: "card-1",
+              order: 0,
+              fingerprint: "card-fingerprint",
+              sourceType: "outline-card",
+              label: "Arrival",
+              exactText: "Arrival\nSet the stakes",
+              previewText: "Arrival\nSet the stakes",
+            },
+          },
+        },
+      ],
+    });
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.stageOutline({ summary: "Malformed", changes: [] }),
+    ).rejects.toThrow(/change and precondition/);
     expect(env.replacePendingProposal).not.toHaveBeenCalled();
   });
 

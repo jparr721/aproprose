@@ -895,9 +895,9 @@ describe("agent persistence", () => {
 
     expect(immediateState).toMatchObject({
       hydratedProjectRoot: null,
-      mode: "writing",
-      draftText: "",
-      draftContextRefs: [],
+      mode: "edit",
+      draftText: "Frozen old draft",
+      draftContextRefs: [oldRef],
       persistenceTransition: { projectRoot: nextRoot },
     });
     for (const error of mutationErrors) {

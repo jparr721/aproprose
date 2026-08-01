@@ -1017,8 +1017,8 @@ describe("agent console authoring flows", () => {
 
     expect(events).toEqual([
       "abort",
-      "reset",
       "write-a",
+      "reset",
       "read-b",
       "hydrate-b",
     ]);

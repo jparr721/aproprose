@@ -1312,9 +1312,6 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     nextRoot,
     "load",
   );
-  if (!ownsTargetConsole) {
-    useAgentConsoleStore.getState().resetProject();
-  }
 
   return appendTransition(async () => {
     if (
@@ -1346,6 +1343,9 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
 
     if (!ownsPersistenceCapture(persistenceCapture)) {
       return;
+    }
+    if (!ownsTargetConsole) {
+      useAgentConsoleStore.getState().resetProject();
     }
     if (
       !useAgentConsoleStore

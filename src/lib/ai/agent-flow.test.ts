@@ -585,12 +585,17 @@ describe("agent console authoring flows", () => {
         }
 
         expect(input.run.attachments).toEqual([
-          expect.objectContaining({
+          {
+            id: "flow-10",
             kind: "block",
             chapterId: "ch1",
             sourceId: "later",
+            order: 2,
+            sourceType: "narration",
+            label: "Narration block",
             exactText: "She found the summons under the door.",
-          }),
+            sourceFingerprint: "bd042c29",
+          },
         ]);
         await handlers.stageManuscript({
           summary: "Replacement revision",

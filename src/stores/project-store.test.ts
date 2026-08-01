@@ -894,6 +894,69 @@ describe("multi-selection stays live across structural edits (selectedIds invari
     expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
   });
 
+  it("moves selected blocks together and records one undo step", () => {
+    const d = mkBlock({ id: "d", text: "dd" });
+    useProjectStore.setState({
+      blocks: [a, b, c, d],
+      selectedId: "d",
+      selectedIds: ["b", "d"],
+      past: [],
+    });
+
+    useProjectStore.getState().moveBlocks(["b", "d"], -1);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "b",
+      "a",
+      "d",
+      "c",
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["b", "d"]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("moves selected blocks down together", () => {
+    const d = mkBlock({ id: "d", text: "dd" });
+    useProjectStore.setState({
+      blocks: [a, b, c, d],
+      selectedId: "d",
+      selectedIds: ["b", "d"],
+    });
+
+    useProjectStore.getState().moveBlocks(["b", "d"], 1);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "a",
+      "c",
+      "b",
+      "d",
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["b", "d"]);
+  });
+
+  it("deletes selected blocks together and records one undo step", () => {
+    useProjectStore.setState({
+      selectedId: "c",
+      selectedIds: ["a", "c"],
+      past: [],
+    });
+
+    useProjectStore.getState().deleteBlocks(["a", "c"]);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual(["b"]);
+    expect(useProjectStore.getState().selectedId).toBe("b");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+  });
+
   it("reorderBlock preserves a live multi-selection (ids unchanged)", () => {
     useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
     useProjectStore.getState().reorderBlock("a", "c");

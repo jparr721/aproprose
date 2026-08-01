@@ -260,7 +260,9 @@ interface ProjectState {
    */
   mergeWithPrevious: (id: string) => void;
   deleteBlock: (id: string) => void;
+  deleteBlocks: (ids: string[]) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
+  moveBlocks: (ids: string[], dir: -1 | 1) => void;
   /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
   reorderBlock: (fromId: string, toId: string) => void;
 
@@ -1191,18 +1193,24 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    deleteBlock: (id) =>
+    deleteBlocks: (ids) =>
       set((s) => {
-        const idx = s.blocks.findIndex((b) => b.id === id);
-        const blocks = s.blocks.filter((b) => b.id !== id);
+        const deletedIds = new Set(ids);
+        const firstDeletedIndex = s.blocks.findIndex((block) =>
+          deletedIds.has(block.id),
+        );
+        if (firstDeletedIndex < 0) return {};
+        const blocks = s.blocks.filter((block) => !deletedIds.has(block.id));
         // Keep the multi-selection in lockstep with the block list: drop the
         // deleted id so the set never references a block that no longer exists.
-        const selectedIds = s.selectedIds.filter((x) => x !== id);
+        const selectedIds = s.selectedIds.filter((id) => !deletedIds.has(id));
         const selectedId =
-          s.selectedId === id
+          s.selectedId !== null && deletedIds.has(s.selectedId)
             ? // Deleting the active block: keep the active pointer on a surviving
               // member of the set if one remains, else the document neighbour.
-              (selectedIds[selectedIds.length - 1] ?? blocks[Math.max(0, idx - 1)]?.id ?? null)
+              (selectedIds[selectedIds.length - 1] ??
+                blocks[Math.max(0, firstDeletedIndex - 1)]?.id ??
+                null)
             : s.selectedId;
         return {
           blocks,
@@ -1218,14 +1226,37 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    moveBlock: (id, dir) =>
+    deleteBlock: (id) => get().deleteBlocks([id]),
+
+    moveBlocks: (ids, dir) =>
       set((s) => {
-        const idx = s.blocks.findIndex((b) => b.id === id);
-        const to = idx + dir;
-        if (idx < 0 || to < 0 || to >= s.blocks.length) return {};
         const next = [...s.blocks];
-        const [moved] = next.splice(idx, 1);
-        next.splice(to, 0, moved);
+        const selectedIds = new Set(ids);
+        let moved = false;
+
+        if (dir === -1) {
+          for (let index = 1; index < next.length; index += 1) {
+            if (
+              selectedIds.has(next[index].id) &&
+              !selectedIds.has(next[index - 1].id)
+            ) {
+              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+              moved = true;
+            }
+          }
+        } else {
+          for (let index = next.length - 2; index >= 0; index -= 1) {
+            if (
+              selectedIds.has(next[index].id) &&
+              !selectedIds.has(next[index + 1].id)
+            ) {
+              [next[index], next[index + 1]] = [next[index + 1], next[index]];
+              moved = true;
+            }
+          }
+        }
+
+        if (!moved) return {};
         // Reordering changes emitted output even for clean blocks; mark them so
         // serialization uses positions consistently.
         return {
@@ -1236,6 +1267,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: null,
         };
       }),
+
+    moveBlock: (id, dir) => get().moveBlocks([id], dir),
 
     // Drag-reorder via @dnd-kit: drop `fromId` onto `toId`'s slot. Mirrors
     // arrayMove (remove, then insert at the target's original index) and keeps

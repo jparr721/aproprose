@@ -43,7 +43,9 @@ const blockRefs = (
  *  call keeps both menus in sync. */
 export function useBlockActions(block: BlockT): BlockAction[][] {
   const moveBlock = useProjectStore((s) => s.moveBlock);
+  const moveBlocks = useProjectStore((s) => s.moveBlocks);
   const deleteBlock = useProjectStore((s) => s.deleteBlock);
+  const deleteBlocks = useProjectStore((s) => s.deleteBlocks);
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const updateBlock = useProjectStore((s) => s.updateBlock);
   const structureBlock = useProjectStore((s) => s.structureBlock);
@@ -75,9 +77,32 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     });
   };
 
+  const addToChatLabel =
+    selectedBlockIds().length > 1 ? "Add all to Chat" : "Add to Chat";
+  const multiSelection = selectedBlockIds().length > 1;
+
+  const onMove = (dir: -1 | 1) => {
+    const blockIds = selectedBlockIds();
+    if (blockIds.length > 1) moveBlocks(blockIds, dir);
+    else moveBlock(block.id, dir);
+  };
+
+  const onDelete = () => {
+    const blockIds = selectedBlockIds();
+    if (blockIds.length > 1) deleteBlocks(blockIds);
+    else deleteBlock(block.id);
+  };
+
+  const selectedBlocksHaveText = () => {
+    const blockIds = new Set(selectedBlockIds());
+    return useProjectStore
+      .getState()
+      .blocks.some((candidate) => blockIds.has(candidate.id) && candidate.text.trim());
+  };
+
   const onClean = () => {
     const chapterId = useProjectStore.getState().activeChapterId;
-    if (chapterId === null || !block.text.trim()) return;
+    if (chapterId === null || !selectedBlocksHaveText()) return;
     const blockIds = selectedBlockIds();
     void dispatchAgentIntent({
       kind: "run",
@@ -145,63 +170,73 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
     });
   };
 
+  const singleBlockStructuralActions: BlockAction[] = [
+    { icon: IconSquareRoundedPlus, label: "Insert block above", onSelect: insertAbove },
+    { icon: IconSquareRoundedPlus, label: "Insert block below", onSelect: () => insertAfter(block.id) },
+    // Strict alternation means the next segment's kind is always forced, so
+    // the label and appended kind both come from nextSegmentKind - giving a
+    // dialogue its first beat (or a beat its reply) is an explicit action.
+    ...(block.type === "dialogue"
+      ? [
+          {
+            icon: IconTextPlus,
+            label: nextSegmentKind(block) === "beat" ? "Add action beat" : "Add spoken line",
+            onSelect: () => {
+              const seg: DialogueSegment = { kind: nextSegmentKind(block), text: "" };
+              updateBlock(block.id, { tail: [...(block.tail ?? []), seg] });
+              select(block.id);
+              beginEdit();
+            },
+          },
+        ]
+      : []),
+    // Remove the trailing segment only when it is empty (nothing to lose), so a
+    // mis-added beat/line has an explicit way back out (parity with the old
+    // "Remove action beat").
+    ...(block.type === "dialogue" &&
+    block.tail &&
+    block.tail.length > 0 &&
+    block.tail[block.tail.length - 1].text.trim() === ""
+      ? [
+          {
+            icon: IconTextPlus,
+            label: "Remove last segment",
+            onSelect: () => {
+              const next = block.tail!.slice(0, -1);
+              updateBlock(block.id, { tail: next.length > 0 ? next : undefined });
+            },
+          },
+        ]
+      : []),
+  ];
+
   return [
     [
-      { icon: IconArrowUp, label: "Move up", onSelect: () => moveBlock(block.id, -1) },
-      { icon: IconArrowDown, label: "Move down", onSelect: () => moveBlock(block.id, 1) },
+      {
+        icon: IconArrowUp,
+        label: multiSelection ? "Move selected blocks up" : "Move up",
+        onSelect: () => onMove(-1),
+      },
+      {
+        icon: IconArrowDown,
+        label: multiSelection ? "Move selected blocks down" : "Move down",
+        onSelect: () => onMove(1),
+      },
     ],
-    [
-      { icon: IconSquareRoundedPlus, label: "Insert block above", onSelect: insertAbove },
-      { icon: IconSquareRoundedPlus, label: "Insert block below", onSelect: () => insertAfter(block.id) },
-      // Strict alternation means the next segment's kind is always forced, so
-      // the label and appended kind both come from nextSegmentKind - giving a
-      // dialogue its first beat (or a beat its reply) is an explicit action.
-      ...(block.type === "dialogue"
-        ? [
-            {
-              icon: IconTextPlus,
-              label: nextSegmentKind(block) === "beat" ? "Add action beat" : "Add spoken line",
-              onSelect: () => {
-                const seg: DialogueSegment = { kind: nextSegmentKind(block), text: "" };
-                updateBlock(block.id, { tail: [...(block.tail ?? []), seg] });
-                select(block.id);
-                beginEdit();
-              },
-            },
-          ]
-        : []),
-      // Remove the trailing segment only when it is empty (nothing to lose), so a
-      // mis-added beat/line has an explicit way back out (parity with the old
-      // "Remove action beat").
-      ...(block.type === "dialogue" &&
-      block.tail &&
-      block.tail.length > 0 &&
-      block.tail[block.tail.length - 1].text.trim() === ""
-        ? [
-            {
-              icon: IconTextPlus,
-              label: "Remove last segment",
-              onSelect: () => {
-                const next = block.tail!.slice(0, -1);
-                updateBlock(block.id, { tail: next.length > 0 ? next : undefined });
-              },
-            },
-          ]
-        : []),
-    ],
+    ...(multiSelection ? [] : [singleBlockStructuralActions]),
     [
       {
         icon: IconMessagePlus,
-        label: "Add to Chat",
+        label: addToChatLabel,
         onSelect: onAddToChat,
       },
       {
         icon: IconWand,
         label: "Clean up with AI",
         onSelect: onClean,
-        disabled: !block.text.trim(),
+        disabled: !selectedBlocksHaveText(),
       },
-      ...(prose
+      ...(!multiSelection && prose
         ? [
             {
               icon: IconWand,
@@ -210,14 +245,21 @@ export function useBlockActions(block: BlockT): BlockAction[][] {
             },
           ]
         : []),
-      ...(structurable
+      ...(!multiSelection && structurable
         ? [{ icon: IconTextPlus, label: "Structure into blocks", onSelect: () => structureBlock(block.id) }]
         : []),
       ...(structurable
         ? [{ icon: IconWand, label: "Structure with AI", onSelect: onStructureAi }]
         : []),
     ],
-    [{ icon: IconTrash, label: "Delete block", onSelect: () => deleteBlock(block.id), destructive: true }],
+    [
+      {
+        icon: IconTrash,
+        label: multiSelection ? "Delete selected blocks" : "Delete block",
+        onSelect: onDelete,
+        destructive: true,
+      },
+    ],
   ];
 }
 

@@ -101,13 +101,13 @@ describe("Agent block actions", () => {
     expect(useAgentConsoleStore.getState().activeRun).toBeNull();
   });
 
-  it("adds a clicked multi-selection in selection order", () => {
+  it("labels a clicked multi-selection and adds it in selection order", () => {
     useProjectStore.setState({ selectedId: "A", selectedIds: ["B", "A"] });
     const { result } = renderHook(() =>
       useBlockActions(block("A", "narration")),
     );
 
-    act(() => findAction(result.current, "Add to Chat").onSelect());
+    act(() => findAction(result.current, "Add all to Chat").onSelect());
 
     expect(controller.dispatchAgentIntent).toHaveBeenCalledWith({
       kind: "add-context",
@@ -116,6 +116,19 @@ describe("Agent block actions", () => {
         { kind: "block", chapterId: "ch1", blockId: "A" },
       ],
     });
+  });
+
+  it("replaces single-block structural actions with selected-block actions", () => {
+    useProjectStore.setState({ selectedId: "A", selectedIds: ["A", "B"] });
+    const { result } = renderHook(() =>
+      useBlockActions(block("A", "narration")),
+    );
+
+    expect(labels(result.current)).toContain("Move selected blocks up");
+    expect(labels(result.current)).toContain("Move selected blocks down");
+    expect(labels(result.current)).toContain("Delete selected blocks");
+    expect(labels(result.current)).not.toContain("Insert block above");
+    expect(labels(result.current)).not.toContain("Pick up from here");
   });
 
   it("deduplicates repeated Add to Chat context in the console store", () => {

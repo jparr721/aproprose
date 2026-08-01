@@ -55,6 +55,12 @@ function unavailableSource(ref: DraftContextRef): DraftContextSource {
   };
 }
 
+function draftAttachmentLabel(source: DraftContextSource): string {
+  if (source.ref.kind !== "block" || !source.available) return source.label;
+  const words = source.preview.trim().split(/\s+/).slice(0, 3).join(" ");
+  return words === "" ? source.label : words;
+}
+
 export function DraftContextAttachments({
   refs,
   sources,
@@ -74,34 +80,29 @@ export function DraftContextAttachments({
       {uniqueRefs.map((ref) => {
         const key = draftContextRefKey(ref);
         const source = sources[key] ?? unavailableSource(ref);
-        const data = draftContextSourceToSourcePart(source);
+        const data = {
+          ...draftContextSourceToSourcePart(source),
+          title: draftAttachmentLabel(source),
+        };
         return (
-          <AttachmentHoverCard key={key}>
-            <AttachmentHoverCardTrigger asChild>
-              <Attachment
-                aria-label={`${source.label} context`}
-                data={data}
-                onRemove={() => onRemove(ref)}
-                role="group"
-              >
-                <AttachmentPreview />
-                <AttachmentInfo />
-                {source.available ? null : (
-                  <TypographyMuted>Unavailable</TypographyMuted>
-                )}
-                <AttachmentRemove
-                  className="focus-visible:opacity-100 group-focus-within:opacity-100"
-                  disabled={disabled}
-                  label={`Remove ${source.label}`}
-                />
-              </Attachment>
-            </AttachmentHoverCardTrigger>
-            <AttachmentHoverCardContent>
-              <TypographyP className="whitespace-pre-wrap">
-                {source.available ? source.preview : "Unavailable"}
-              </TypographyP>
-            </AttachmentHoverCardContent>
-          </AttachmentHoverCard>
+          <Attachment
+            key={key}
+            aria-label={`${source.label} context`}
+            data={data}
+            onRemove={() => onRemove(ref)}
+            role="group"
+          >
+            <AttachmentPreview />
+            <AttachmentInfo />
+            {source.available ? null : (
+              <TypographyMuted>Unavailable</TypographyMuted>
+            )}
+            <AttachmentRemove
+              className="focus-visible:opacity-100 group-focus-within:opacity-100"
+              disabled={disabled}
+              label={`Remove ${source.label}`}
+            />
+          </Attachment>
         );
       })}
     </Attachments>

@@ -93,7 +93,8 @@ describe("DraftContextAttachments", () => {
       />,
     );
 
-    expect(screen.getByText("Narration block")).toBeTruthy();
+    expect(screen.getByText("The rain crossed")).toBeTruthy();
+    expect(screen.queryByText("The rain crossed the window.")).toBeNull();
     expect(screen.getByText("The door opens")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(2);
   });
@@ -169,7 +170,7 @@ describe("DraftContextAttachments", () => {
     expect(remove.className.split(" ")).toContain("focus-visible:opacity-100");
   });
 
-  it("keeps an unavailable draft source visible, previewable, and removable", async () => {
+  it("keeps an unavailable draft source visible and removable", () => {
     const onRemove = vi.fn();
     const unavailable: DraftContextSource = {
       ref: narrationRef,
@@ -189,10 +190,6 @@ describe("DraftContextAttachments", () => {
     );
 
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    fireEvent.pointerEnter(screen.getByRole("group", { name: "Narration block context" }));
-    await waitFor(() =>
-      expect(screen.getAllByText("Unavailable")).toHaveLength(2),
-    );
     fireEvent.click(screen.getByRole("button", { name: "Remove Narration block" }));
     expect(onRemove).toHaveBeenCalledWith(narrationRef);
   });

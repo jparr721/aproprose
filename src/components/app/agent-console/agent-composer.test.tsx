@@ -292,11 +292,14 @@ describe("AgentComposer mode controls", () => {
 
 describe("AgentComposer draft behavior", () => {
   it("exposes the empty composer as the named AI Console textbox", () => {
-    render(<AgentComposer />);
+    const { container } = render(<AgentComposer />);
 
     expect(
       screen.getByRole("textbox", { name: "Message AI Console" }),
     ).toBeTruthy();
+    expect(
+      container.querySelectorAll("[data-slot=input-group-addon]"),
+    ).toHaveLength(1);
   });
 
   it("keeps the AI Console textbox name when it contains text", () => {

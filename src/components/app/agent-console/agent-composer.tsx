@@ -180,14 +180,16 @@ export function AgentComposer() {
         )}
         onSubmit={handleSubmit}
       >
-        <PromptInputHeader>
-          <DraftContextAttachments
-            disabled={blocksTargetEditing}
-            onRemove={removeDraftContextRef}
-            refs={draftContextRefs}
-            sources={draftContextSources}
-          />
-        </PromptInputHeader>
+        {draftContextRefs.length === 0 ? null : (
+          <PromptInputHeader>
+            <DraftContextAttachments
+              disabled={blocksTargetEditing}
+              onRemove={removeDraftContextRef}
+              refs={draftContextRefs}
+              sources={draftContextSources}
+            />
+          </PromptInputHeader>
+        )}
         <PromptInputBody>
           <PromptInputTextarea
             aria-label="Message AI Console"

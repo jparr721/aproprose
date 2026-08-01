@@ -289,6 +289,24 @@ describe("AgentComposer mode controls", () => {
 });
 
 describe("AgentComposer draft behavior", () => {
+  it("exposes the empty composer as the named AI Console textbox", () => {
+    render(<AgentComposer />);
+
+    expect(
+      screen.getByRole("textbox", { name: "Message AI Console" }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the AI Console textbox name when it contains text", () => {
+    useAgentConsoleStore.getState().setDraftText("Ask about the crossing");
+    render(<AgentComposer />);
+
+    const textbox = screen.getByRole("textbox", {
+      name: "Message AI Console",
+    }) as HTMLTextAreaElement;
+    expect(textbox.value).toBe("Ask about the crossing");
+  });
+
   it("keeps textarea text controlled by the console store", () => {
     useAgentConsoleStore.getState().setDraftText("Ask about the crossing");
     render(<AgentComposer />);
@@ -333,10 +351,12 @@ describe("AgentComposer draft behavior", () => {
       const state = useAgentConsoleStore.getState();
       const submittedText = state.draftText;
       const run = activeRun(state.mode);
-      state.beginDraftRun(run, userMessage(run, submittedText), {
-        text: submittedText,
-        refs: [],
-      });
+      const submittedDraft = state.captureDraft();
+      state.beginDraftRun(
+        run,
+        userMessage(run, submittedText),
+        submittedDraft,
+      );
       await completion.promise;
     });
     render(<AgentComposer />);
@@ -374,9 +394,37 @@ describe("AgentComposer draft behavior", () => {
     expect(useAgentConsoleStore.getState().draftText).toBe("Keep drafting");
     expect(controller.submitAgentDraft).not.toHaveBeenCalled();
     const stop = screen.getByRole("button", { name: "Stop" });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
     fireEvent.click(stop);
     expect(controller.stopAgentRun).toHaveBeenCalledOnce();
+  });
+
+  it("blocks blank submissions and accepts an attachment-only draft", async () => {
+    render(<AgentComposer />);
+    const textarea = screen.getByRole("textbox");
+    const form = textarea.closest("form");
+    if (form === null) throw new Error("PromptInput form is missing");
+    const submit = screen.getByRole("button", {
+      name: "Submit",
+    }) as HTMLButtonElement;
+
+    expect(submit.disabled).toBe(true);
+    fireEvent.submit(form);
+    fireEvent.change(textarea, { target: { value: "   \n\t" } });
+    expect(submit.disabled).toBe(true);
+    fireEvent.submit(form);
+    expect(controller.submitAgentDraft).not.toHaveBeenCalled();
+
+    act(() => {
+      useAgentConsoleStore.getState().addDraftContextRefs([firstRef]);
+    });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(controller.submitAgentDraft).toHaveBeenCalledOnce(),
+    );
   });
 
   it("renders safe preflight copy inline and leaves the draft unchanged", async () => {

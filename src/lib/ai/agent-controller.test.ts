@@ -692,9 +692,9 @@ describe("frozen run preflight", () => {
     const staleRef = blockRef("stale-id", "ch2");
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
+    useAgentConsoleStore.getState().setDraftText("Use the attached passage.");
+    useAgentConsoleStore.getState().setDraftContextRefs([staleRef]);
     useAgentConsoleStore.setState({
-      draftText: "Use the attached passage.",
-      draftContextRefs: [staleRef],
       draftSourceLocators: {
         "block:ch2:stale-id": {
           order: 1,
@@ -814,6 +814,36 @@ describe("frozen run preflight", () => {
       targetChapterId: "ch1",
     });
   });
+
+  it("preserves same-valued text and attachment replacements during preflight", async () => {
+    const model = deferred<MockLanguageModelV3>();
+    let modelRequested = false;
+    const dependencies = makeDependencies(null);
+    dependencies.getModel = async () => {
+      modelRequested = true;
+      return model.promise;
+    };
+    const controller = createAgentController(dependencies);
+    const submittedRef = blockRef("b1", "ch1");
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("First request");
+    store.addDraftContextRefs([submittedRef]);
+
+    const submission = controller.submitAgentDraft(conversationTask("ch1"));
+    await vi.waitFor(() => expect(modelRequested).toBe(true));
+    store.setDraftText("Temporary request");
+    store.setDraftText("First request");
+    store.removeDraftContextRef(submittedRef);
+    store.addDraftContextRefs([submittedRef]);
+    model.resolve(new MockLanguageModelV3());
+    await submission;
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftText: "First request",
+      draftContextRefs: [submittedRef],
+      runStatus: "idle",
+    });
+  });
 });
 
 describe("run settlement and cancellation", () => {
@@ -830,6 +860,10 @@ describe("run settlement and cancellation", () => {
 
     const submission = controller.submitAgentDraft(conversationTask("ch1"));
     await vi.waitFor(() => expect(captured).not.toBeNull());
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      draftText: "",
+      draftContextRefs: [],
+    });
     useAgentConsoleStore.getState().setDraftText("Next request");
     useAgentConsoleStore.getState().addDraftContextRefs([blockRef("b2", "ch1")]);
     if (captured === null) throw new Error("Expected captured stream input");

@@ -189,22 +189,43 @@ describe("AgentConsole shell", () => {
     expect(screen.queryByText(project.root)).toBeNull();
   });
 
-  it("allows only the conversation viewport to scroll", async () => {
-    useAgentConsoleStore.setState({ pendingProposal: proposal });
+  it("keeps header, banner, tray, and composer outside the scroll contract", () => {
+    useAgentConsoleStore.setState({
+      pendingProposal: proposal,
+      persistenceIssue: {
+        kind: "save",
+        projectRoot: project.root,
+        message: "disk full",
+      },
+    });
     render(<AgentConsole />);
 
+    const shell = screen.getByRole("region", { name: "AI Console" });
+    const conversation = screen.getByRole("log");
     const viewport = screen.getByRole("region", {
       name: "Conversation messages",
     });
+    const header = screen.getByText("AI Console").closest("header");
+    const banner = screen.getByRole("alert");
+    const tray = shell.querySelector<HTMLElement>("[data-agent-review-tray]");
+    const composer = screen.getByRole("region", { name: "Agent composer" });
+    if (header === null || tray === null) {
+      throw new Error("Agent console regions are missing");
+    }
+
+    expect(conversation.parentElement).toBe(shell);
+    expect(conversation.className.split(" ")).toEqual(
+      expect.arrayContaining(["min-h-0", "overflow-y-hidden"]),
+    );
     expect(viewport.className.split(" ")).toContain("overflow-y-auto");
 
-    const shell = screen.getByRole("region", { name: "AI Console" });
-    const nonConversationRegions = Array.from(shell.children).filter(
-      (child) => child !== screen.getByRole("log"),
-    ) as HTMLElement[];
-    expect(nonConversationRegions.every((region) => region.style.overflow === "")).toBe(
-      true,
-    );
+    for (const region of [header, banner, tray, composer]) {
+      expect(region.parentElement).toBe(shell);
+      expect(region.className.split(" ")).not.toContain("overflow-y-auto");
+      expect(region.className.split(" ")).not.toContain("overflow-y-scroll");
+      expect(getComputedStyle(region).overflowY).not.toBe("auto");
+      expect(getComputedStyle(region).overflowY).not.toBe("scroll");
+    }
   });
 
   it("hides and reopens the same conversation, draft, mode, attachments, and proposal", () => {

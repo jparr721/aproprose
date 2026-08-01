@@ -192,10 +192,8 @@ describe("agent console store", () => {
     store.addDraftContextRefs([
       { kind: "block", chapterId: "ch1", blockId: "b1" },
     ]);
-    store.beginDraftRun(run, message("user-1"), {
-      text: "First request",
-      refs: [{ kind: "block", chapterId: "ch1", blockId: "b1" }],
-    });
+    const submittedDraft = store.captureDraft();
+    store.beginDraftRun(run, message("user-1"), submittedDraft);
     useAgentConsoleStore.getState().setDraftText("Next request");
     useAgentConsoleStore.getState().addDraftContextRefs([
       { kind: "block", chapterId: "ch1", blockId: "b2" },
@@ -245,7 +243,25 @@ describe("agent console store", () => {
     store.setDraftText("Unsaved prompt");
     store.replacePendingProposal(proposal);
     store.resetProject();
-    expect(useAgentConsoleStore.getState()).toMatchObject(EMPTY_AGENT_STATE);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      mode: "writing",
+      messages: [],
+      summary: null,
+      draftText: "",
+      draftContextRefs: [],
+      draftContextSources: {},
+      draftSourceLocators: {},
+      pendingProposal: null,
+      lastUsage: null,
+      interruptedRun: null,
+      activeRun: null,
+      runStatus: "idle",
+      runError: null,
+      persistenceIssue: null,
+      hydratedProjectRoot: null,
+      persistenceTransition: null,
+    });
+    expect(useAgentConsoleStore.getState().draftRevision).toBeGreaterThan(0);
   });
 
   it("hydrates persisted fields while clearing transient and active run state", () => {
@@ -482,15 +498,13 @@ describe("agent console store", () => {
     store.setDraftText("First request");
     store.addDraftContextRefs([firstRef]);
     store.setDraftContextSources([source(firstRef, "b1", 0, "fp-1")]);
+    const submittedDraft = store.captureDraft();
     store.beginPreflight();
     store.setDraftText("Revised next request");
     store.addDraftContextRefs([nextRef]);
     store.setDraftContextSources([source(nextRef, "b2", 1, "fp-2")]);
 
-    store.beginDraftRun(run, message("user-1"), {
-      text: "First request",
-      refs: [firstRef],
-    });
+    store.beginDraftRun(run, message("user-1"), submittedDraft);
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       draftText: "Revised next request",
@@ -505,6 +519,35 @@ describe("agent console store", () => {
       runStatus: "submitted",
       messages: [message("user-1")],
     });
+  });
+
+  it("preserves text edited away and back after draft capture", () => {
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("First request");
+    const submittedDraft = store.captureDraft();
+    store.beginPreflight();
+
+    store.setDraftText("Temporary request");
+    store.setDraftText("First request");
+    store.beginDraftRun(run, message("user-1"), submittedDraft);
+
+    expect(useAgentConsoleStore.getState().draftText).toBe("First request");
+  });
+
+  it("preserves a removed and re-added attachment after draft capture", () => {
+    const submittedRef = blockRef("b1");
+    const store = useAgentConsoleStore.getState();
+    store.addDraftContextRefs([submittedRef]);
+    const submittedDraft = store.captureDraft();
+    store.beginPreflight();
+
+    store.removeDraftContextRef(submittedRef);
+    store.addDraftContextRefs([submittedRef]);
+    store.beginDraftRun(run, message("user-1"), submittedDraft);
+
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
+      submittedRef,
+    ]);
   });
 
   it("upserts one streaming assistant message by stable id", () => {

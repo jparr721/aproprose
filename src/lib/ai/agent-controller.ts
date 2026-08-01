@@ -62,7 +62,10 @@ import type {
   ProjectInfo,
   ProjectMeta,
 } from "@/lib/types";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  useAgentConsoleStore,
+  waitForAgentConsoleProject,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -1270,13 +1273,22 @@ export function createAgentController(
   };
 
   const submitAgentDraft = async (task: AgentTask): Promise<void> => {
+    const requestedProject = useProjectStore.getState().project;
+    if (requestedProject === null) {
+      throw new Error("Open a project before running the agent.");
+    }
+    await waitForAgentConsoleProject(requestedProject.root);
     const projectState = useProjectStore.getState();
     const project = projectState.project;
-    if (project === null) throw new Error("Open a project before running the agent.");
+    if (project === null || project.root !== requestedProject.root) {
+      throw new Error("The active project changed before the agent could run.");
+    }
     const consoleState = useAgentConsoleStore.getState();
     const settings = useSettingsStore.getState();
-    const refs = structuredClone(consoleState.draftContextRefs);
-    const text = consoleState.draftText;
+    const submittedDraft = consoleState.captureDraft();
+    const refs = structuredClone(submittedDraft.refs);
+    const text = submittedDraft.text;
+    if (text.trim() === "" && refs.length === 0) return;
     const frozenTask = structuredClone(task);
     const pendingProposal =
       consoleState.pendingProposal === null
@@ -1323,7 +1335,7 @@ export function createAgentController(
       }),
       enterRun: (run, user, resolvedRefs) => {
         useAgentConsoleStore.getState().beginDraftRun(run, user, {
-          text,
+          ...submittedDraft,
           refs: resolvedRefs,
         });
       },
@@ -1334,6 +1346,15 @@ export function createAgentController(
   const submitAgentRequest = async (
     request: Extract<AgentIntent, { kind: "run" }>,
   ): Promise<void> => {
+    if (request.text.trim() === "" && request.refs.length === 0) return;
+    const project = useProjectStore.getState().project;
+    if (project === null) {
+      throw new Error("Open a project before running the agent.");
+    }
+    await waitForAgentConsoleProject(project.root);
+    if (useProjectStore.getState().project?.root !== project.root) {
+      throw new Error("The active project changed before the agent could run.");
+    }
     const base = captureBase({
       mode: request.mode,
       text: request.text,
@@ -1368,6 +1389,14 @@ export function createAgentController(
   };
 
   const retryAgentTurn = async (userMessageId: string): Promise<void> => {
+    const project = useProjectStore.getState().project;
+    if (project === null) {
+      throw new Error("Open a project before running the agent.");
+    }
+    await waitForAgentConsoleProject(project.root);
+    if (useProjectStore.getState().project?.root !== project.root) {
+      throw new Error("The active project changed before the agent could run.");
+    }
     const consoleState = useAgentConsoleStore.getState();
     const original = consoleState.messages.find(
       (message) => message.id === userMessageId && message.role === "user",
@@ -1463,25 +1492,29 @@ export function createAgentController(
   };
 
   const resolveAgentDraftContext = async (): Promise<void> => {
-    const state = useAgentConsoleStore.getState();
-    const projectState = useProjectStore.getState();
-    const project = projectState.project;
-    if (project === null) {
+    const requestedProject = useProjectStore.getState().project;
+    if (requestedProject === null) {
       throw new Error("Open a project before adding agent context.");
     }
+    await waitForAgentConsoleProject(requestedProject.root);
+    const projectState = useProjectStore.getState();
+    if (projectState.project?.root !== requestedProject.root) {
+      throw new Error("The active project changed before context could load.");
+    }
+    const state = useAgentConsoleStore.getState();
     const ownsContextProject = (): boolean => {
       const currentProject = useProjectStore.getState().project;
       const hydratedRoot = useAgentConsoleStore.getState().hydratedProjectRoot;
       return (
         currentProject !== null &&
-        currentProject.root === project.root &&
-        (hydratedRoot === null || hydratedRoot === project.root)
+        currentProject.root === requestedProject.root &&
+        (hydratedRoot === null || hydratedRoot === requestedProject.root)
       );
     };
     let resolved: ResolvedDraftContext;
     try {
       resolved = await resolveDraftContext({
-        projectRoot: project.root,
+        projectRoot: requestedProject.root,
         refs: state.draftContextRefs,
         locators: state.draftSourceLocators,
         meta: structuredClone(projectState.meta),

@@ -75,12 +75,21 @@ export function AgentComposer() {
     lastUsage === null
       ? null
       : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
+  const hasMeaningfulDraft =
+    draftText.trim().length > 0 || draftContextRefs.length > 0;
 
   const handleSubmit = async (): Promise<void> => {
+    if (runStatus !== "idle" || !hasMeaningfulDraft) return;
     const consoleState = useAgentConsoleStore.getState();
     if (
       consoleState.activeRun !== null ||
       consoleState.runStatus !== "idle"
+    ) {
+      return;
+    }
+    if (
+      consoleState.draftText.trim().length === 0 &&
+      consoleState.draftContextRefs.length === 0
     ) {
       return;
     }
@@ -160,6 +169,7 @@ export function AgentComposer() {
         </PromptInputHeader>
         <PromptInputBody>
           <PromptInputTextarea
+            aria-label="Message AI Console"
             onChange={(event) => setDraftText(event.currentTarget.value)}
             placeholder="Ask about your manuscript"
             value={draftText}
@@ -191,6 +201,7 @@ export function AgentComposer() {
             )}
           </PromptInputTools>
           <PromptInputSubmit
+            disabled={runStatus === "idle" && !hasMeaningfulDraft}
             onStop={stopAgentRun}
             status={status}
           />

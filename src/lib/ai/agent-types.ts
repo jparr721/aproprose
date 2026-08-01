@@ -43,7 +43,9 @@ export interface DraftContextSource {
 
 export interface SubmittedAgentDraft {
   text: string;
+  textRevision: number;
   refs: DraftContextRef[];
+  refRevisions: number[];
 }
 
 export type AgentTask =

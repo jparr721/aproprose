@@ -19,6 +19,19 @@ import type {
   SubmittedAgentDraft,
 } from "@/lib/ai/agent-types";
 
+export type AgentPersistenceTransitionKind = "load" | "recovery" | "reset";
+
+export interface AgentPersistenceTransition {
+  generation: number;
+  kind: AgentPersistenceTransitionKind;
+  projectRoot: string;
+}
+
+export interface AgentPersistenceTransitionCapture
+  extends AgentPersistenceTransition {
+  draftRevision: number;
+}
+
 interface AgentConsoleData {
   mode: AgentMode;
   messages: AgentUIMessage[];
@@ -35,10 +48,29 @@ interface AgentConsoleData {
   runError: AgentRunError | null;
   persistenceIssue: AgentPersistenceIssue | null;
   hydratedProjectRoot: string | null;
+  draftRevision: number;
+  modeRevision: number;
+  draftTextRevision: number;
+  draftContextVersions: Record<string, number>;
+  draftContextMutationRevisions: Record<string, number>;
+  draftContextReplacementRevision: number;
+  persistenceTransition: AgentPersistenceTransition | null;
+  persistenceTransitionSequence: number;
 }
 
 export interface AgentConsoleState extends AgentConsoleData {
   hydrate: (projectRoot: string, state: PersistedAgentState) => void;
+  beginPersistenceTransition: (
+    projectRoot: string,
+    kind: AgentPersistenceTransitionKind,
+  ) => AgentPersistenceTransitionCapture;
+  completePersistenceTransition: (
+    capture: AgentPersistenceTransitionCapture,
+    state: PersistedAgentState,
+  ) => boolean;
+  finishPersistenceTransition: (
+    capture: AgentPersistenceTransitionCapture,
+  ) => void;
   resetProject: () => void;
   setMode: (mode: AgentMode) => void;
   setDraftText: (text: string) => void;
@@ -50,6 +82,7 @@ export interface AgentConsoleState extends AgentConsoleData {
     current: DraftContextRef,
   ) => void;
   setDraftContextSources: (sources: DraftContextSource[]) => void;
+  captureDraft: () => SubmittedAgentDraft;
   beginPreflight: () => void;
   failPreflight: (error: AgentRunError) => void;
   beginRun: (run: AgentRun, userMessage: AgentUIMessage) => void;
@@ -90,6 +123,14 @@ export const EMPTY_AGENT_STATE: AgentConsoleData = {
   runError: null,
   persistenceIssue: null,
   hydratedProjectRoot: null,
+  draftRevision: 0,
+  modeRevision: 0,
+  draftTextRevision: 0,
+  draftContextVersions: {},
+  draftContextMutationRevisions: {},
+  draftContextReplacementRevision: 0,
+  persistenceTransition: null,
+  persistenceTransitionSequence: 0,
 };
 
 const ACTIVE_RUN_ERROR = "An agent run is already active";
@@ -114,48 +155,305 @@ function requireAgentMetadata(message: AgentUIMessage): AgentMessageMetadata {
   return message.metadata;
 }
 
-export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
+interface RebasedDraftState {
+  mode: AgentMode;
+  draftText: string;
+  draftContextRefs: DraftContextRef[];
+  draftContextSources: Record<string, DraftContextSource>;
+  draftSourceLocators: Record<string, DraftSourceLocator>;
+  draftRevision: number;
+  modeRevision: number;
+  draftTextRevision: number;
+  draftContextVersions: Record<string, number>;
+  draftContextMutationRevisions: Record<string, number>;
+  draftContextReplacementRevision: number;
+}
+
+interface RebasedDraftResult {
+  draft: RebasedDraftState;
+  rebasedMutation: boolean;
+}
+
+function dedupeDraftContextRefs(refs: DraftContextRef[]): DraftContextRef[] {
+  const keys = new Set<string>();
+  return refs.filter((ref) => {
+    const key = draftContextRefKey(ref);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+}
+
+function rebaseDraftState(
+  current: AgentConsoleData,
+  persisted: PersistedAgentState,
+  capturedRevision: number,
+): RebasedDraftResult {
+  let draftRevision = current.draftRevision;
+  const nextRevision = (): number => {
+    draftRevision += 1;
+    return draftRevision;
+  };
+  const preserveMode = current.modeRevision > capturedRevision;
+  const preserveText = current.draftTextRevision > capturedRevision;
+  const replaceContext =
+    current.draftContextReplacementRevision > capturedRevision;
+  const mutatedKeys = new Set(
+    Object.entries(current.draftContextMutationRevisions)
+      .filter(([, revision]) => revision > capturedRevision)
+      .map(([key]) => key),
+  );
+  const persistedRefs = dedupeDraftContextRefs(persisted.draftContextRefs);
+  const draftContextRefs = replaceContext
+    ? [...current.draftContextRefs]
+    : [
+        ...persistedRefs.filter(
+          (ref) => !mutatedKeys.has(draftContextRefKey(ref)),
+        ),
+        ...current.draftContextRefs.filter((ref) =>
+          mutatedKeys.has(draftContextRefKey(ref)),
+        ),
+      ];
+  const currentKeys = new Set(
+    current.draftContextRefs.map(draftContextRefKey),
+  );
+  const draftContextSources: Record<string, DraftContextSource> = {};
+  const draftSourceLocators: Record<string, DraftSourceLocator> = {};
+  const draftContextVersions: Record<string, number> = {};
+  const draftContextMutationRevisions: Record<string, number> = {};
+
+  for (const ref of draftContextRefs) {
+    const key = draftContextRefKey(ref);
+    const preserveCurrentRef =
+      currentKeys.has(key) && (replaceContext || mutatedKeys.has(key));
+    const version = preserveCurrentRef
+      ? current.draftContextVersions[key]
+      : nextRevision();
+    if (version === undefined) {
+      throw new Error(`Draft attachment identity is missing: ${key}`);
+    }
+    draftContextVersions[key] = version;
+    draftContextMutationRevisions[key] = version;
+    if (preserveCurrentRef) {
+      const source = current.draftContextSources[key];
+      if (source !== undefined) draftContextSources[key] = source;
+      const locator = current.draftSourceLocators[key];
+      if (locator !== undefined) draftSourceLocators[key] = locator;
+    } else {
+      const locator = persisted.draftSourceLocators[key];
+      if (locator !== undefined) draftSourceLocators[key] = locator;
+    }
+  }
+
+  const modeRevision = preserveMode ? current.modeRevision : nextRevision();
+  const draftTextRevision = preserveText
+    ? current.draftTextRevision
+    : nextRevision();
+  const draftContextReplacementRevision = nextRevision();
+  return {
+    draft: {
+      mode: preserveMode ? current.mode : persisted.mode,
+      draftText: preserveText ? current.draftText : persisted.draftText,
+      draftContextRefs,
+      draftContextSources,
+      draftSourceLocators,
+      draftRevision,
+      modeRevision,
+      draftTextRevision,
+      draftContextVersions,
+      draftContextMutationRevisions,
+      draftContextReplacementRevision,
+    },
+    rebasedMutation:
+      preserveMode || preserveText || replaceContext || mutatedKeys.size > 0,
+  };
+}
+
+function unavailableProjectError(): AgentConsoleProjectUnavailableError {
+  return new AgentConsoleProjectUnavailableError(
+    "AI conversation is unavailable. Resolve the storage error and retry.",
+  );
+}
+
+export class AgentConsoleProjectUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentConsoleProjectUnavailableError";
+  }
+}
+
+type AgentConsoleReadiness = "pending" | "ready" | "unavailable";
+
+function projectReadiness(
+  state: AgentConsoleState,
+  projectRoot: string,
+): AgentConsoleReadiness {
+  if (state.persistenceTransition?.projectRoot === projectRoot) {
+    return "pending";
+  }
+  if (state.persistenceTransition !== null) return "unavailable";
+  return "ready";
+}
+
+export function waitForAgentConsoleProject(
+  projectRoot: string,
+): Promise<void> {
+  const readiness = projectReadiness(
+    useAgentConsoleStore.getState(),
+    projectRoot,
+  );
+  if (readiness === "ready") return Promise.resolve();
+  if (readiness === "unavailable") {
+    return Promise.reject(unavailableProjectError());
+  }
+  return new Promise<void>((resolve, reject) => {
+    const unsubscribe = useAgentConsoleStore.subscribe((state) => {
+      const nextReadiness = projectReadiness(state, projectRoot);
+      if (nextReadiness === "pending") return;
+      unsubscribe();
+      if (nextReadiness === "ready") {
+        resolve();
+      } else {
+        reject(unavailableProjectError());
+      }
+    });
+  });
+}
+
+export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
   ...EMPTY_AGENT_STATE,
   hydrate: (projectRoot, state) =>
-    set(() => ({
-      mode: state.mode,
-      messages: [...state.messages],
-      summary: state.summary,
-      draftText: state.draftText,
-      draftContextRefs: [...state.draftContextRefs],
-      draftContextSources: {},
-      draftSourceLocators: { ...state.draftSourceLocators },
-      pendingProposal: state.pendingProposal,
-      lastUsage: state.lastUsage,
-      interruptedRun: state.interruptedRun,
-      activeRun: null,
-      runStatus: "idle",
-      runError: null,
-      persistenceIssue: null,
-      hydratedProjectRoot: projectRoot,
-    })),
+    set((current) => {
+      const result = rebaseDraftState(current, state, current.draftRevision);
+      return {
+        ...result.draft,
+        messages: [...state.messages],
+        summary: state.summary,
+        pendingProposal: state.pendingProposal,
+        lastUsage: state.lastUsage,
+        interruptedRun: state.interruptedRun,
+        activeRun: null,
+        runStatus: "idle",
+        runError: null,
+        persistenceIssue: null,
+        hydratedProjectRoot: projectRoot,
+        persistenceTransition: null,
+      };
+    }),
+  beginPersistenceTransition: (projectRoot, kind) => {
+    const state = get();
+    const generation = state.persistenceTransitionSequence + 1;
+    const capture: AgentPersistenceTransitionCapture = {
+      generation,
+      kind,
+      projectRoot,
+      draftRevision: state.draftRevision,
+    };
+    set({
+      persistenceTransitionSequence: generation,
+      persistenceTransition: { generation, kind, projectRoot },
+    });
+    return capture;
+  },
+  completePersistenceTransition: (capture, state) => {
+    const transition = get().persistenceTransition;
+    if (
+      transition?.generation !== capture.generation ||
+      transition.projectRoot !== capture.projectRoot
+    ) {
+      return false;
+    }
+    let rebasedMutation = false;
+    set((current) => {
+      const result = rebaseDraftState(current, state, capture.draftRevision);
+      rebasedMutation = result.rebasedMutation;
+      return {
+        ...result.draft,
+        messages: [...state.messages],
+        summary: state.summary,
+        pendingProposal: state.pendingProposal,
+        lastUsage: state.lastUsage,
+        interruptedRun: state.interruptedRun,
+        activeRun: null,
+        runStatus: "idle",
+        runError: null,
+        persistenceIssue: null,
+        hydratedProjectRoot: capture.projectRoot,
+        persistenceTransition: null,
+      };
+    });
+    return rebasedMutation;
+  },
+  finishPersistenceTransition: (capture) => {
+    const transition = get().persistenceTransition;
+    if (
+      transition?.generation !== capture.generation ||
+      transition.projectRoot !== capture.projectRoot
+    ) {
+      return;
+    }
+    set({ persistenceTransition: null });
+  },
   resetProject: () =>
-    set(() => ({
-      ...EMPTY_AGENT_STATE,
-      messages: [],
-      draftContextRefs: [],
-      draftContextSources: {},
-      draftSourceLocators: {},
-    })),
-  setMode: (mode) => set(() => ({ mode })),
-  setDraftText: (draftText) => set(() => ({ draftText })),
+    set((state) => {
+      const empty = {
+        v: 3 as const,
+        mode: "writing" as const,
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      };
+      const result = rebaseDraftState(state, empty, state.draftRevision);
+      return {
+        ...EMPTY_AGENT_STATE,
+        ...result.draft,
+        messages: [],
+        draftContextRefs: [],
+        draftContextSources: {},
+        draftSourceLocators: {},
+        persistenceTransitionSequence: state.persistenceTransitionSequence,
+      };
+    }),
+  setMode: (mode) =>
+    set((state) => {
+      const revision = state.draftRevision + 1;
+      return { mode, modeRevision: revision, draftRevision: revision };
+    }),
+  setDraftText: (draftText) =>
+    set((state) => {
+      const revision = state.draftRevision + 1;
+      return {
+        draftText,
+        draftTextRevision: revision,
+        draftRevision: revision,
+      };
+    }),
   setDraftContextRefs: (refs) =>
     set((state) => {
-      const keys = new Set<string>();
-      const draftContextRefs = refs.filter((ref) => {
-        const key = draftContextRefKey(ref);
-        if (keys.has(key)) return false;
-        keys.add(key);
-        return true;
-      });
+      const draftContextRefs = dedupeDraftContextRefs(refs);
+      const keys = new Set(draftContextRefs.map(draftContextRefKey));
       const draftContextSources: Record<string, DraftContextSource> = {};
       const draftSourceLocators: Record<string, DraftSourceLocator> = {};
+      const draftContextVersions: Record<string, number> = {};
+      const draftContextMutationRevisions = {
+        ...state.draftContextMutationRevisions,
+      };
+      let draftRevision = state.draftRevision + 1;
+      const draftContextReplacementRevision = draftRevision;
+      for (const current of state.draftContextRefs) {
+        draftRevision += 1;
+        draftContextMutationRevisions[draftContextRefKey(current)] =
+          draftRevision;
+      }
       for (const key of keys) {
+        draftRevision += 1;
+        draftContextVersions[key] = draftRevision;
+        draftContextMutationRevisions[key] = draftRevision;
         const source = state.draftContextSources[key];
         if (source !== undefined) draftContextSources[key] = source;
         const locator = state.draftSourceLocators[key];
@@ -165,47 +463,82 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
         draftContextRefs,
         draftContextSources,
         draftSourceLocators,
+        draftRevision,
+        draftContextVersions,
+        draftContextMutationRevisions,
+        draftContextReplacementRevision,
       };
     }),
   addDraftContextRefs: (refs) =>
     set((state) => {
       const keys = new Set(state.draftContextRefs.map(draftContextRefKey));
       const additions: DraftContextRef[] = [];
+      const draftContextVersions = { ...state.draftContextVersions };
+      const draftContextMutationRevisions = {
+        ...state.draftContextMutationRevisions,
+      };
+      let draftRevision = state.draftRevision;
       for (const ref of refs) {
         const key = draftContextRefKey(ref);
         if (!keys.has(key)) {
           keys.add(key);
           additions.push(ref);
+          draftRevision += 1;
+          draftContextVersions[key] = draftRevision;
+          draftContextMutationRevisions[key] = draftRevision;
         }
       }
       return additions.length === 0
         ? { draftContextRefs: state.draftContextRefs }
-        : { draftContextRefs: [...state.draftContextRefs, ...additions] };
+        : {
+            draftContextRefs: [...state.draftContextRefs, ...additions],
+            draftRevision,
+            draftContextVersions,
+            draftContextMutationRevisions,
+          };
     }),
   removeDraftContextRef: (ref) =>
     set((state) => {
       const key = draftContextRefKey(ref);
       const draftContextSources = { ...state.draftContextSources };
       const draftSourceLocators = { ...state.draftSourceLocators };
+      const draftContextVersions = { ...state.draftContextVersions };
+      const draftContextMutationRevisions = {
+        ...state.draftContextMutationRevisions,
+      };
+      const draftRevision = state.draftRevision + 1;
       delete draftContextSources[key];
       delete draftSourceLocators[key];
+      delete draftContextVersions[key];
+      draftContextMutationRevisions[key] = draftRevision;
       return {
         draftContextRefs: state.draftContextRefs.filter(
           (current) => draftContextRefKey(current) !== key,
         ),
         draftContextSources,
         draftSourceLocators,
+        draftRevision,
+        draftContextVersions,
+        draftContextMutationRevisions,
       };
     }),
   rebaseDraftContextRef: (previous, current) =>
     set((state) => {
       const previousKey = draftContextRefKey(previous);
       const currentKey = draftContextRefKey(current);
+      const draftRevision = state.draftRevision + 1;
+      const draftContextMutationRevisions = {
+        ...state.draftContextMutationRevisions,
+        [previousKey]: draftRevision,
+        [currentKey]: draftRevision,
+      };
       if (previousKey === currentKey) {
         return {
           draftContextRefs: state.draftContextRefs.map((ref) =>
             draftContextRefKey(ref) === previousKey ? current : ref,
           ),
+          draftRevision,
+          draftContextMutationRevisions,
         };
       }
 
@@ -237,10 +570,28 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
         draftSourceLocators[currentKey] = previousLocator;
       }
 
+      const draftContextVersions = { ...state.draftContextVersions };
+      const attachmentRevision =
+        draftContextVersions[previousKey] ??
+        draftContextVersions[currentKey];
+      if (hasRebasedRef && attachmentRevision === undefined) {
+        throw new Error(
+          `Draft attachment identity is missing: ${previousKey}`,
+        );
+      }
+      delete draftContextVersions[previousKey];
+      delete draftContextVersions[currentKey];
+      if (hasRebasedRef && attachmentRevision !== undefined) {
+        draftContextVersions[currentKey] = attachmentRevision;
+      }
+
       return {
         draftContextRefs,
         draftContextSources,
         draftSourceLocators,
+        draftRevision,
+        draftContextVersions,
+        draftContextMutationRevisions,
       };
     }),
   setDraftContextSources: (sources) =>
@@ -259,6 +610,22 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
       }
       return { draftContextSources, draftSourceLocators };
     }),
+  captureDraft: () => {
+    const state = get();
+    return {
+      text: state.draftText,
+      textRevision: state.draftTextRevision,
+      refs: structuredClone(state.draftContextRefs),
+      refRevisions: state.draftContextRefs.map((ref) => {
+        const key = draftContextRefKey(ref);
+        const revision = state.draftContextVersions[key];
+        if (revision === undefined) {
+          throw new Error(`Draft attachment identity is missing: ${key}`);
+        }
+        return revision;
+      }),
+    };
+  },
   beginPreflight: () =>
     set((state) => {
       if (state.runStatus !== "idle" || state.activeRun !== null) {
@@ -285,21 +652,56 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set) => ({
       if (state.activeRun !== null) {
         throw new Error(ACTIVE_RUN_ERROR);
       }
-      const submittedKeys = new Set(submitted.refs.map(draftContextRefKey));
+      if (submitted.refs.length !== submitted.refRevisions.length) {
+        throw new Error("Submitted attachment identities are incomplete.");
+      }
+      const submittedVersions = new Map<string, number>();
+      submitted.refs.forEach((ref, index) => {
+        const revision = submitted.refRevisions[index];
+        if (revision === undefined) {
+          throw new Error("Submitted attachment identity is missing.");
+        }
+        submittedVersions.set(draftContextRefKey(ref), revision);
+      });
       const draftContextSources = { ...state.draftContextSources };
       const draftSourceLocators = { ...state.draftSourceLocators };
-      for (const key of submittedKeys) {
+      const draftContextVersions = { ...state.draftContextVersions };
+      const draftContextMutationRevisions = {
+        ...state.draftContextMutationRevisions,
+      };
+      let draftRevision = state.draftRevision;
+      const draftContextRefs = state.draftContextRefs.filter((ref) => {
+        const key = draftContextRefKey(ref);
+        const submittedVersion = submittedVersions.get(key);
+        if (
+          submittedVersion === undefined ||
+          state.draftContextVersions[key] !== submittedVersion
+        ) {
+          return true;
+        }
+        draftRevision += 1;
+        draftContextMutationRevisions[key] = draftRevision;
         delete draftContextSources[key];
         delete draftSourceLocators[key];
+        delete draftContextVersions[key];
+        return false;
+      });
+      const clearsText = state.draftTextRevision === submitted.textRevision;
+      let draftTextRevision = state.draftTextRevision;
+      if (clearsText) {
+        draftRevision += 1;
+        draftTextRevision = draftRevision;
       }
       return {
         messages: [...state.messages, userMessage],
-        draftText: state.draftText === submitted.text ? "" : state.draftText,
-        draftContextRefs: state.draftContextRefs.filter(
-          (ref) => !submittedKeys.has(draftContextRefKey(ref)),
-        ),
+        draftText: clearsText ? "" : state.draftText,
+        draftContextRefs,
         draftContextSources,
         draftSourceLocators,
+        draftRevision,
+        draftTextRevision,
+        draftContextVersions,
+        draftContextMutationRevisions,
         activeRun,
         runStatus: "submitted",
         runError: null,

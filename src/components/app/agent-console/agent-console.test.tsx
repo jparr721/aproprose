@@ -279,6 +279,62 @@ describe("AgentConsole shell", () => {
     ).toBe("true");
     expect(screen.getByText("Tighten the crossing")).toBeTruthy();
   });
+
+  it("hides the old project conversation while the next project is loading", async () => {
+    await transitionAgentProject(project.root);
+    useAgentConsoleStore.setState({
+      mode: "edit",
+      messages: [message],
+      summary: {
+        text: "Book A compacted context",
+        throughMessageId: message.id,
+      },
+      draftText: "Book A draft",
+      pendingProposal: proposal,
+      persistenceIssue: {
+        kind: "save",
+        projectRoot: project.root,
+        message: "Book A save failed",
+      },
+    });
+    const bookB: ProjectInfo = {
+      ...project,
+      root: "/private/books/second-novel",
+      name: "Second Novel",
+      title: "Second Novel",
+      metadata: { ...project.metadata, title: "Second Novel" },
+    };
+    let releaseWrite!: () => void;
+    const slowWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    tauri.writeAppData.mockReturnValueOnce(slowWrite);
+    useProjectStore.setState({ project: bookB });
+    const switching = transitionAgentProject(bookB.root);
+
+    try {
+      await waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+      render(<AgentConsole />);
+
+      expect(screen.getByText("Second Novel / 1. The Crossing")).toBeTruthy();
+      expect(screen.queryByText("The bridge can stay quiet.")).toBeNull();
+      expect(screen.queryByText("Older context compacted")).toBeNull();
+      expect(screen.queryByText("Tighten the crossing")).toBeNull();
+      expect(screen.queryByDisplayValue("Book A draft")).toBeNull();
+      expect(screen.queryByRole("log")).toBeNull();
+      expect(
+        screen.queryByRole("region", { name: "Agent composer" }),
+      ).toBeNull();
+      expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Close AI Console" }),
+      ).toBeTruthy();
+    } finally {
+      releaseWrite();
+      await switching;
+    }
+  });
 });
 
 describe("AgentConsole persistence banner", () => {

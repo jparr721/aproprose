@@ -21,6 +21,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   TypographyLarge,
   TypographyMuted,
@@ -28,7 +29,10 @@ import {
 import { retryAgentTurn } from "@/lib/ai/agent-controller";
 import { navigateToContextSnapshot } from "@/lib/ai/agent-navigation";
 import type { AgentPersistenceIssue } from "@/lib/ai/agent-types";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentConsoleOwnershipStatus,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import {
   resetAgentConversation,
   retryAgentPersistence,
@@ -136,6 +140,9 @@ export function AgentConsole() {
   );
   const project = useProjectStore((state) => state.project);
   const activeChapterId = useProjectStore((state) => state.activeChapterId);
+  const ownershipStatus = useAgentConsoleStore((state) =>
+    agentConsoleOwnershipStatus(state, project?.root ?? null),
+  );
   const setAiOpen = useViewStore((state) => state.setAiOpen);
   const chapter =
     project === null || activeChapterId === null
@@ -175,15 +182,28 @@ export function AgentConsole() {
       {persistenceIssue === null ? null : (
         <AgentPersistenceBanner issue={persistenceIssue} />
       )}
-      <AgentConversation
-        messages={messages}
-        onNavigateSnapshot={navigateToContextSnapshot}
-        onOpenSettings={openAiSettings}
-        onRetry={retryAgentTurn}
-        summary={summary}
-      />
-      {pendingProposal === null ? null : <ReviewTray />}
-      <AgentComposer />
+      {ownershipStatus === "ready" ? (
+        <>
+          <AgentConversation
+            messages={messages}
+            onNavigateSnapshot={navigateToContextSnapshot}
+            onOpenSettings={openAiSettings}
+            onRetry={retryAgentTurn}
+            summary={summary}
+          />
+          {pendingProposal === null ? null : <ReviewTray />}
+          <AgentComposer />
+        </>
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2">
+          {project === null ? null : <Spinner />}
+          <TypographyMuted>
+            {project === null
+              ? "Open a project to use AI Console."
+              : "Loading AI conversation"}
+          </TypographyMuted>
+        </div>
+      )}
     </section>
   );
 }

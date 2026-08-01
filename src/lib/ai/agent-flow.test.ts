@@ -990,6 +990,92 @@ describe("agent console authoring flows", () => {
       task: { kind: "conversation", targetChapterId: "ch1" },
     });
     await vi.waitFor(() => expect(liveInput).not.toBeNull());
+    const bookATranscriptBeforeSwitch = structuredClone(
+      useAgentConsoleStore.getState().messages,
+    );
+    const [
+      stagedUserBeforeSwitch,
+      stagedAssistantBeforeSwitch,
+      interruptedUserBeforeSwitch,
+      completedToolBeforeSwitch,
+    ] = bookATranscriptBeforeSwitch;
+    if (
+      bookATranscriptBeforeSwitch.length !== 4 ||
+      stagedUserBeforeSwitch.role !== "user" ||
+      stagedAssistantBeforeSwitch.role !== "assistant" ||
+      interruptedUserBeforeSwitch.role !== "user" ||
+      completedToolBeforeSwitch.role !== "assistant" ||
+      completedToolBeforeSwitch.metadata === undefined
+    ) {
+      throw new Error("Expected Book A's complete pre-switch transcript.");
+    }
+    expect(interruptedUserBeforeSwitch.parts).toEqual([
+      { type: "text", text: "Read Book A before the next revision." },
+      { type: "data-context", data: { snapshots: [] } },
+    ]);
+    expect(completedToolBeforeSwitch.parts).toEqual([
+      expect.objectContaining({
+        type: "dynamic-tool",
+        toolName: "read_chapter",
+        toolCallId: "book-a-read",
+        state: "output-available",
+      }),
+    ]);
+    const expectedBookATranscript: AgentUIMessage[] = [
+      {
+        ...stagedUserBeforeSwitch,
+        parts: [
+          {
+            type: "text",
+            text: "Revise the final beat in Book A.",
+            state: "done",
+          },
+          { type: "data-context", data: { snapshots: [] } },
+        ],
+      },
+      {
+        ...stagedAssistantBeforeSwitch,
+        parts: [{ type: "text", text: "Proposal ready.", state: "done" }],
+      },
+      {
+        ...interruptedUserBeforeSwitch,
+        parts: [
+          {
+            type: "text",
+            text: "Read Book A before the next revision.",
+            state: "done",
+          },
+          { type: "data-context", data: { snapshots: [] } },
+        ],
+      },
+      {
+        ...completedToolBeforeSwitch,
+        metadata: {
+          ...completedToolBeforeSwitch.metadata,
+          state: "stopped",
+          error: null,
+          errorCode: null,
+        },
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "read_chapter",
+            toolCallId: "book-a-read",
+            state: "output-available",
+            input: { chapterId: "ch1" },
+            output: {
+              kind: "summary",
+              summary: {
+                label: "Read chapter",
+                target: "Chapter One",
+                detail: "3 blocks",
+                itemCount: 3,
+              },
+            },
+          },
+        ],
+      },
+    ];
 
     let recordedReset = false;
     let recordedHydration = false;
@@ -1031,6 +1117,7 @@ describe("agent console authoring flows", () => {
       draftText: "Book A draft",
       interruptedRun: { reason: "project-switch" },
     });
+    expect(persistedA.messages).toEqual(expectedBookATranscript);
     expect(persistedA.pendingProposal).toEqual({
       id: bookAProposal.id,
       kind: bookAProposal.kind,
@@ -1067,7 +1154,7 @@ describe("agent console authoring flows", () => {
     expect(restoredA).toMatchObject({
       mode: "edit",
       draftText: "Book A draft",
-      messages: persistedA.messages,
+      messages: expectedBookATranscript,
       pendingProposal: bookAProposal,
       interruptedRun: { reason: "project-switch" },
       hydratedProjectRoot: bookA,

@@ -255,18 +255,19 @@ export function createAgentTools(env: AgentToolEnvironment) {
   return {
     read_chapter: tool({
       description:
-        "Read ordered blocks and fingerprints for a chapter before making source-specific claims or changes.",
+        "Read ordered blocks and fingerprints for any chapter in the novel before making source-specific claims. Use read_outline first to discover chapter ids. Changes remain limited to the frozen task target.",
       inputSchema: chapterInputSchema,
       execute: handlers.readChapter,
     }),
     read_outline: tool({
       description:
-        "Read the project outline or one chapter's cards and fingerprints.",
+        "Read the whole-novel outline or one chapter's complete planning data, including chapter ids, cast, acts, plot points, goals, conflicts, turns, cards, and lore links.",
       inputSchema: outlineInputSchema,
       execute: handlers.readOutline,
     }),
     read_lore: tool({
-      description: "Read relevant project lore without changing it.",
+      description:
+        "Read all or filtered project lore, including linked character ids, without changing it.",
       inputSchema: loreInputSchema,
       execute: handlers.readLore,
     }),

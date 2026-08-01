@@ -73,7 +73,12 @@ import type {
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
-import { readAppData, writeAppData, writeProjectMeta } from "@/lib/tauri";
+import {
+  readAppData,
+  readTextFile,
+  writeAppData,
+  writeProjectMeta,
+} from "@/lib/tauri";
 import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
 import {
   agentStateKey,
@@ -236,6 +241,7 @@ beforeEach(() => {
     return `${key}-test-${next}`;
   });
   vi.mocked(readAppData).mockReset().mockResolvedValue(null);
+  vi.mocked(readTextFile).mockReset();
   vi.mocked(writeAppData).mockReset().mockResolvedValue(undefined);
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
@@ -406,6 +412,140 @@ describe("agent console authoring flows", () => {
 
     useProjectStore.getState().undo();
     expect(useProjectStore.getState().blocks).toEqual(before);
+  });
+
+  it("fetches the whole novel and complete planning data on demand without widening writes", async () => {
+    const currentProject = useProjectStore.getState().project;
+    if (currentProject === null) throw new Error("Expected the test project.");
+    useProjectStore.setState((state) => ({
+      project: {
+        ...currentProject,
+        chapters: [
+          ...currentProject.chapters,
+          {
+            id: "ch2",
+            label: "2",
+            title: "Chapter Two",
+            file: "chapters/two.tex",
+            wordCount: 4,
+          },
+        ],
+      },
+      meta: {
+        ...state.meta,
+        outline: { premise: "A ledger pulls Mara toward the harbor." },
+        characters: [
+          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+        ],
+        lore: [
+          {
+            id: "harbor",
+            title: "Harbor",
+            description: "The old trade harbor.",
+            characterIds: ["mara"],
+            tags: ["place"],
+          },
+        ],
+        chapters: {
+          ...state.meta.chapters,
+          ch2: {
+            act: "confrontation",
+            plotPoint: "midpoint",
+            premise: "Mara reaches the harbor.",
+            goal: "Find the ship.",
+            conflict: "The manifest is missing.",
+            turn: "The ship belongs to her father.",
+            characterIds: ["mara"],
+            cards: [
+              {
+                id: "harbor-turn",
+                title: "The manifest",
+                intention: "Reveal the family connection.",
+                characterIds: ["mara"],
+                loreIds: ["harbor"],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+      },
+    }));
+    vi.mocked(readTextFile).mockResolvedValue(
+      "Mara crossed the empty harbor.\n\nThe manifest bore her father's name.\n",
+    );
+    const controller = createAgentController(
+      dependencies(async (input) => {
+        const handlers = createAgentToolHandlers(input.environment);
+        const outline = await handlers.readOutline({ chapterId: null });
+        if (outline.kind !== "runtime") {
+          throw new Error("Expected complete outline data.");
+        }
+        expect(outline.value.characters).toEqual([
+          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+        ]);
+        expect(outline.value.chapters[1]).toMatchObject({
+          chapterId: "ch2",
+          plotPoint: "midpoint",
+          goal: "Find the ship.",
+          characterIds: ["mara"],
+          cards: [
+            {
+              id: "harbor-turn",
+              characterIds: ["mara"],
+              loreIds: ["harbor"],
+            },
+          ],
+        });
+
+        const chapter = await handlers.readChapter({ chapterId: "ch2" });
+        if (chapter.kind !== "runtime") {
+          throw new Error("Expected complete chapter data.");
+        }
+        expect(chapter.value.blocks.map((item) => item.text)).toEqual([
+          "Mara crossed the empty harbor.",
+          "The manifest bore her father's name.",
+        ]);
+
+        const lore = await handlers.readLore({ query: null });
+        if (lore.kind !== "runtime") {
+          throw new Error("Expected complete lore data.");
+        }
+        expect(lore.value.entries[0]).toMatchObject({
+          id: "harbor",
+          characterIds: ["mara"],
+        });
+
+        await expect(
+          handlers.stageManuscript({
+            summary: "Attempt a cross-chapter write",
+            changes: [
+              {
+                kind: "rewrite",
+                blockId: chapter.value.blocks[0].id,
+                afterId: null,
+                type: null,
+                speaker: null,
+                newText: "This must not stage.",
+                toIndex: null,
+                reason: "Cross the frozen task boundary",
+              },
+            ],
+          }),
+        ).rejects.toThrow("invalid manuscript change");
+        return { message: completeAssistant(input), usage };
+      }),
+    );
+
+    await controller.submitAgentRequest({
+      kind: "run",
+      mode: "writing",
+      text: "Use the whole novel to answer, but only edit chapter one.",
+      refs: [],
+      task: { kind: "conversation", targetChapterId: "ch1" },
+    });
+
+    expect(readTextFile).toHaveBeenCalledWith("/book", "chapters/two.tex");
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
   });
 
   it("appends only after a final prose anchor", async () => {
@@ -931,16 +1071,27 @@ describe("agent console authoring flows", () => {
           },
           value: {
             premise: "",
+            characters: [],
             chapters: [
               {
                 chapterId: "ch1",
                 title: "Chapter One",
+                act: "setup",
+                plotPoint: null,
+                premise: "",
+                goal: "",
+                conflict: "",
+                turn: "",
+                characterIds: [],
                 cards: [
                   {
                     id: "card-1",
                     order: 0,
                     title: "The ledger closes",
                     intention: "End the night scene",
+                    characterIds: [],
+                    loreIds: [],
+                    continuityFlags: [],
                     fingerprint: "ed97ddf8",
                   },
                 ],

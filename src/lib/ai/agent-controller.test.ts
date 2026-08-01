@@ -1957,7 +1957,7 @@ describe("run settlement and cancellation", () => {
 
   it("classifies frozen tool environment failures as tool errors", async () => {
     const dependencies = makeDependencies(async (input) => {
-      await input.environment.readChapter("ch2");
+      await input.environment.readChapter("ch3");
       return successfulResult(input, "Unreachable");
     });
     const controller = createAgentController(dependencies);
@@ -1970,7 +1970,7 @@ describe("run settlement and cancellation", () => {
         refs: [],
         task: conversationTask("ch1"),
       }),
-    ).rejects.toThrow("Chapter is outside the frozen run target: ch2");
+    ).rejects.toThrow("Chapter does not belong to the frozen project: ch3");
 
     expect(useAgentConsoleStore.getState().runError).toMatchObject({
       code: "tool",

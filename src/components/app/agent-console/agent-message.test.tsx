@@ -248,6 +248,7 @@ describe("AgentMessage content", () => {
 
     renderAgentMessage(message);
 
+    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
     expect(screen.getByText("Completed")).toBeTruthy();
     expect(screen.getByRole("group", { name: "Pacing finding" })).toBeTruthy();
     expect(screen.getByText("The middle stalls.")).toBeTruthy();
@@ -410,7 +411,7 @@ describe("AgentMessage content", () => {
 });
 
 describe("AgentMessage safe tool activity", () => {
-  it("shows pending and running tool states with target IDs only", () => {
+  it("groups pending and running tools into one open activity task", () => {
     renderAgentMessage(
       assistantMessage(
         "assistant-tools",
@@ -435,16 +436,18 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
+    const trigger = screen.getByRole("button", { name: /Using tools/ });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Read chapter")).toBeTruthy();
+    expect(screen.getByText("Run critique")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
     expect(screen.getByText("Running")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Run critique/ }));
-    expect(screen.getByText("chapter-pending")).toBeTruthy();
-    expect(screen.getByText("chapter-running")).toBeTruthy();
+    expect(screen.queryByText("chapter-pending")).toBeNull();
+    expect(screen.queryByText("chapter-running")).toBeNull();
     expect(screen.queryByText("Never render this model instruction")).toBeNull();
   });
 
-  it("never renders an absolute path supplied as a tool target", () => {
+  it("never renders a tool input", () => {
     renderAgentMessage(
       assistantMessage(
         "assistant-path-tool",
@@ -460,12 +463,11 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-    expect(screen.getByText("Chapter")).toBeTruthy();
+    expect(screen.getByText("Read chapter")).toBeTruthy();
     expect(document.body.textContent).not.toContain("/Users/author");
   });
 
-  it("renders only a completed tool summary and never its runtime value", () => {
+  it("renders only a completed tool name and state", () => {
     renderAgentMessage(
       assistantMessage(
         "assistant-complete-tool",
@@ -503,10 +505,13 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
+    const trigger = screen.getByRole("button", { name: /Tool activity/ });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    expect(screen.getByText("Read chapter")).toBeTruthy();
     expect(screen.getByText("Completed")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-    expect(screen.getByText("Chapter One")).toBeTruthy();
-    expect(screen.getByText("2 blocks")).toBeTruthy();
+    expect(screen.queryByText("Chapter One")).toBeNull();
+    expect(screen.queryByText("2 blocks")).toBeNull();
     expect(screen.queryByText("RAW PRIVATE CHAPTER BODY")).toBeNull();
     expect(document.body.textContent).not.toContain("fingerprint-1");
   });
@@ -536,10 +541,10 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
     expect(screen.getByText("Read chapter")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-    expect(screen.getByText("Chapter")).toBeTruthy();
-    expect(screen.getByText("1 block")).toBeTruthy();
+    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.queryByText("1 block")).toBeNull();
     expect(document.body.textContent).not.toContain("APICallError");
     expect(document.body.textContent).not.toContain("/Users/author");
     expect(document.body.textContent).not.toContain("C:\\Users\\author");
@@ -564,11 +569,12 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
-    expect(screen.getByText("Error")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
     expect(
-      screen.getByText("Read chapter could not be completed. Retry the request."),
+      screen.getByRole("button", { name: /Tool activity needs attention/ }),
     ).toBeTruthy();
+    expect(screen.getByText("Read chapter")).toBeTruthy();
+    expect(screen.getByText("Error")).toBeTruthy();
+    expect(screen.queryByText("chapter-1")).toBeNull();
     expect(document.body.textContent).not.toContain(rawError);
     expect(document.body.textContent).not.toContain("/Users/author");
     expect(document.body.textContent).not.toContain("C:\\Users\\author");
@@ -598,18 +604,12 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
-    expect(screen.getByRole("button", { name: /Check continuity/ })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Stage outline proposal/ }),
-    ).toBeTruthy();
+    expect(screen.getByText("Check continuity")).toBeTruthy();
+    expect(screen.getByText("Stage outline proposal")).toBeTruthy();
     expect(screen.getByText("Error")).toBeTruthy();
     expect(screen.getByText("Denied")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Check continuity/ }));
-    fireEvent.click(
-      screen.getByRole("button", { name: /Stage outline proposal/ }),
-    );
-    expect(screen.getByText("Chapter")).toBeTruthy();
-    expect(screen.getByText("Outline proposal")).toBeTruthy();
+    expect(screen.queryByText("Chapter")).toBeNull();
+    expect(screen.queryByText("Outline proposal")).toBeNull();
   });
 
   it("renders only generic targets after unsafe failed and denied inputs settle", () => {
@@ -658,12 +658,9 @@ describe("AgentMessage safe tool activity", () => {
     ]);
 
     renderAgentMessage(settled);
-    fireEvent.click(screen.getByRole("button", { name: /Run critique/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Read outline/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
-
-    expect(screen.getAllByText("Chapter")).toHaveLength(2);
-    expect(screen.getByText("Outline")).toBeTruthy();
+    expect(screen.getByText("Run critique")).toBeTruthy();
+    expect(screen.getByText("Read outline")).toBeTruthy();
+    expect(screen.getByText("Read chapter")).toBeTruthy();
     for (const marker of [
       "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
       "RELATIVE-TRAVERSAL-PRIVATE-TEXT",
@@ -680,7 +677,7 @@ describe("AgentMessage safe tool activity", () => {
     }
   });
 
-  it("uses safe copy when a production tool projection throws", () => {
+  it("does not inspect a tool output while rendering activity", () => {
     vi.stubEnv("DEV", false);
     const rawError = "ENOENT /Users/author/private/chapter.tex";
     const output = {} as {
@@ -708,9 +705,10 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
-    expect(screen.getByRole("alert").textContent).toBe(
-      "Tool activity could not be displayed.",
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
+    expect(screen.getByText("Read chapter")).toBeTruthy();
+    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(document.body.textContent).not.toContain(rawError);
   });
 
@@ -730,8 +728,9 @@ describe("AgentMessage safe tool activity", () => {
       ),
     );
 
-    expect(screen.getByText("Read chapter - Stopped")).toBeTruthy();
-    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
+    expect(screen.getByText("Read chapter")).toBeTruthy();
+    expect(screen.getAllByText("Stopped")).toHaveLength(2);
     expect(screen.queryByText("Completed")).toBeNull();
   });
 });

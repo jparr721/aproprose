@@ -1,5 +1,7 @@
 import type { LanguageModelUsage, UIMessage } from "ai";
 import type {
+  ActKind,
+  BeatType,
   Block,
   BlockChange,
   Card,
@@ -307,14 +309,30 @@ export interface ChapterToolValue {
 
 export interface OutlineToolValue {
   premise: string;
+  characters: Array<{
+    id: string;
+    name: string;
+    color: string;
+    role: string;
+  }>;
   chapters: Array<{
     chapterId: string;
     title: string;
+    act: ActKind | null;
+    plotPoint: BeatType | null;
+    premise: string;
+    goal: string;
+    conflict: string;
+    turn: string;
+    characterIds: string[];
     cards: Array<{
       id: string;
       order: number;
       title: string;
       intention: string;
+      characterIds: string[];
+      loreIds: string[];
+      continuityFlags: ContinuityFlag[];
       fingerprint: string;
     }>;
   }>;
@@ -325,6 +343,7 @@ export interface LoreToolValue {
     id: string;
     title: string;
     description: string;
+    characterIds: string[];
     tags: string[];
   }>;
 }

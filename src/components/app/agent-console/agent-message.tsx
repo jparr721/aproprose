@@ -18,10 +18,10 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-} from "@/components/ai-elements/tool";
+  ChainOfThought,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -30,10 +30,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { TypographyMuted } from "@/components/ui/typography";
+import { Spinner } from "@/components/ui/spinner";
 import {
-  TypographyMuted,
-  TypographySmall,
-} from "@/components/ui/typography";
+  IconCheck,
+  IconChevronDown,
+  IconExclamationCircle,
+} from "@tabler/icons-react";
 import {
   flattenMessageFindings,
   type FlattenedMessageFinding,
@@ -59,13 +62,6 @@ export interface AgentMessageProps {
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>;
   onRetry: (userMessageId: string) => Promise<void>;
   onOpenSettings: () => void;
-}
-
-interface SafeToolView {
-  title: string;
-  target: string;
-  detail: string;
-  itemCount: number;
 }
 
 type AgentMessagePart = AgentUIMessage["parts"][number];
@@ -96,142 +92,6 @@ function toolTitle(type: string): string {
   }
 }
 
-function toolTargetFallback(type: StaticAgentToolPart["type"]): string {
-  switch (type) {
-    case "tool-read_chapter":
-    case "tool-run_critique":
-    case "tool-run_continuity":
-      return "Chapter";
-    case "tool-read_outline":
-      return "Outline";
-    case "tool-read_lore":
-      return "Lore";
-    case "tool-read_conversation_context":
-      return "Conversation";
-    case "tool-read_pending_proposal":
-      return "Proposal";
-    case "tool-stage_manuscript_proposal":
-      return "Manuscript proposal";
-    case "tool-stage_outline_proposal":
-      return "Outline proposal";
-  }
-}
-
-function toolItemName(type: StaticAgentToolPart["type"]): string {
-  switch (type) {
-    case "tool-read_chapter":
-      return "block";
-    case "tool-read_outline":
-      return "card";
-    case "tool-read_lore":
-      return "entry";
-    case "tool-run_critique":
-    case "tool-run_continuity":
-      return "finding";
-    case "tool-read_conversation_context":
-      return "message";
-    case "tool-read_pending_proposal":
-    case "tool-stage_manuscript_proposal":
-    case "tool-stage_outline_proposal":
-      return "change";
-  }
-}
-
-function toolCountDetail(
-  type: StaticAgentToolPart["type"],
-  count: number,
-): string {
-  const itemName = toolItemName(type);
-  return `${count} ${itemName}${count === 1 ? "" : "s"}`;
-}
-
-function safeTargetValue(value: unknown, unavailableLabel: string): string {
-  if (typeof value !== "string") return unavailableLabel;
-  const isAbsolutePath =
-    /(^|[\s("'=])\/(?!\/)\S+/.test(value) ||
-    /(^|[\s("'=])[A-Za-z]:[\\/]\S+/.test(value) ||
-    /(^|[\s("'=])\\\\[^\\\s]+\\/.test(value);
-  return isAbsolutePath ? unavailableLabel : value;
-}
-
-function targetId(part: StaticAgentToolPart): string {
-  switch (part.type) {
-    case "tool-read_chapter":
-    case "tool-run_critique":
-    case "tool-run_continuity":
-      return safeTargetValue(part.input?.chapterId, "Chapter");
-    case "tool-read_outline":
-      return safeTargetValue(part.input?.chapterId, "Outline");
-    case "tool-read_lore":
-      return "Lore";
-    case "tool-read_conversation_context": {
-      if (part.input === undefined || !Array.isArray(part.input.messageIds)) {
-        return "Conversation";
-      }
-      const messageIds = part.input.messageIds.filter(
-        (messageId): messageId is string => typeof messageId === "string",
-      );
-      if (messageIds.length === 0) return "Conversation";
-      const safeMessageIds = messageIds.map((messageId) =>
-        safeTargetValue(messageId, "Conversation"),
-      );
-      return safeMessageIds.includes("Conversation")
-        ? "Conversation"
-        : safeMessageIds.join(", ");
-    }
-    case "tool-read_pending_proposal":
-      return safeTargetValue(part.input?.proposalId, "Proposal");
-    case "tool-stage_manuscript_proposal":
-      return "Manuscript proposal";
-    case "tool-stage_outline_proposal":
-      return "Outline proposal";
-  }
-}
-
-function safeToolView(part: AgentMessagePart): SafeToolView | null {
-  if (!isStaticToolUIPart(part)) return null;
-  const title = toolTitle(part.type);
-  if (part.state === "output-available") {
-    const summary = part.output.summary;
-    return {
-      title,
-      target: safeTargetValue(summary.target, toolTargetFallback(part.type)),
-      detail: toolCountDetail(part.type, summary.itemCount),
-      itemCount: summary.itemCount,
-    };
-  }
-  if (part.state === "output-error") {
-    return {
-      title,
-      target: targetId(part),
-      detail: `${title} could not be completed. Retry the request.`,
-      itemCount: 0,
-    };
-  }
-  if (part.state === "output-denied") {
-    return {
-      title,
-      target: targetId(part),
-      detail: "Denied",
-      itemCount: 0,
-    };
-  }
-  const detail =
-    part.state === "input-streaming"
-      ? "Waiting for input"
-      : part.state === "input-available"
-        ? "Working"
-        : part.state === "approval-requested"
-          ? "Awaiting approval"
-          : "Approval received";
-  return {
-    title,
-    target: targetId(part),
-    detail,
-    itemCount: 0,
-  };
-}
-
 function isUnfinishedTool(part: StaticAgentToolPart): boolean {
   return (
     part.state === "input-streaming" ||
@@ -239,6 +99,31 @@ function isUnfinishedTool(part: StaticAgentToolPart): boolean {
     part.state === "approval-requested" ||
     part.state === "approval-responded"
   );
+}
+
+function toolStatus(
+  part: StaticAgentToolPart,
+  messageState: AgentMessageMetadata["state"],
+): { label: string; status: "complete" | "active" | "pending" } {
+  if (messageState === "stopped" && isUnfinishedTool(part)) {
+    return { label: "Stopped", status: "complete" };
+  }
+  switch (part.state) {
+    case "input-streaming":
+      return { label: "Pending", status: "pending" };
+    case "input-available":
+      return { label: "Running", status: "active" };
+    case "approval-requested":
+      return { label: "Awaiting approval", status: "active" };
+    case "approval-responded":
+      return { label: "Approval received", status: "active" };
+    case "output-available":
+      return { label: "Completed", status: "complete" };
+    case "output-denied":
+      return { label: "Denied", status: "complete" };
+    case "output-error":
+      return { label: "Error", status: "complete" };
+  }
 }
 
 function InlineMessageError({ message }: { message: string }) {
@@ -255,35 +140,55 @@ function unsupportedPart(part: AgentMessagePart, key: string): ReactNode {
   return <InlineMessageError key={key} message={error.message} />;
 }
 
-function ToolPart({
-  part,
+function ToolActivity({
+  parts,
   messageState,
 }: {
-  part: StaticAgentToolPart;
+  parts: StaticAgentToolPart[];
   messageState: AgentMessageMetadata["state"];
 }) {
-  try {
-    const view = safeToolView(part);
-    if (view === null) {
-      throw new Error(`Agent tool projection failed: ${part.type}`);
-    }
-    const title =
-      messageState === "stopped" && isUnfinishedTool(part)
-        ? `${view.title} - Stopped`
-        : view.title;
-    return (
-      <Tool>
-        <ToolHeader state={part.state} title={title} type={part.type} />
-        <ToolContent>
-          <TypographyMuted>{view.target}</TypographyMuted>
-          <TypographySmall>{view.detail}</TypographySmall>
-        </ToolContent>
-      </Tool>
-    );
-  } catch (error) {
-    if (import.meta.env.DEV) throw error;
-    return <InlineMessageError message="Tool activity could not be displayed." />;
-  }
+  const statuses = parts.map((part) => toolStatus(part, messageState));
+  const isActive = statuses.some((status) => status.status === "active");
+  const needsAttention = statuses.some(
+    (status) => status.label === "Error" || status.label === "Denied",
+  );
+  const title = isActive
+    ? "Using tools"
+    : needsAttention
+      ? "Tool activity needs attention"
+      : "Tool activity";
+  const HeaderIcon = needsAttention ? IconExclamationCircle : IconCheck;
+  return (
+    <Task defaultOpen={isActive || needsAttention}>
+      <TaskTrigger title={title}>
+        <Button
+          className="w-full justify-start text-muted-foreground"
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {isActive ? <Spinner /> : <HeaderIcon className="size-4" />}
+          <span className="flex-1 text-left">{title}</span>
+          <IconChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </Button>
+      </TaskTrigger>
+      <TaskContent>
+        <ChainOfThought>
+          {parts.map((part, index) => {
+            const status = statuses[index];
+            return (
+              <ChainOfThoughtStep
+                description={status.label}
+                key={part.toolCallId}
+                label={toolTitle(part.type)}
+                status={status.status}
+              />
+            );
+          })}
+        </ChainOfThought>
+      </TaskContent>
+    </Task>
+  );
 }
 
 function Findings({
@@ -346,13 +251,7 @@ function renderPart(
 ): ReactNode {
   const key = `${message.id}:part:${index}`;
   if (isStaticToolUIPart(part)) {
-    return (
-      <ToolPart
-        key={key}
-        messageState={messageMetadata.state}
-        part={part}
-      />
-    );
+    return null;
   }
   switch (part.type) {
     case "text":
@@ -461,6 +360,12 @@ export function AgentMessage({
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
   }
   const findings = flattenMessageFindings(message);
+  const toolParts = message.parts.filter((part): part is StaticAgentToolPart =>
+    isStaticToolUIPart(part),
+  );
+  const firstToolIndex = message.parts.findIndex((part) =>
+    isStaticToolUIPart(part),
+  );
   const error =
     messageMetadata.state === "error"
       ? safeAgentErrorText(messageMetadata.errorCode)
@@ -479,14 +384,22 @@ export function AgentMessage({
     <Message from={message.role}>
       <MessageContent>
         {message.parts.map((part, index) =>
-          renderPart(
-            part,
-            index,
-            message,
-            messageMetadata,
-            findings,
-            authorMutationsDisabled,
-            onNavigateSnapshot,
+          index === firstToolIndex ? (
+            <ToolActivity
+              key={`${message.id}:tools`}
+              messageState={messageMetadata.state}
+              parts={toolParts}
+            />
+          ) : (
+            renderPart(
+              part,
+              index,
+              message,
+              messageMetadata,
+              findings,
+              authorMutationsDisabled,
+              onNavigateSnapshot,
+            )
           ),
         )}
         {messageMetadata.state === "stopped" ? (

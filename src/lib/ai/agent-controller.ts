@@ -37,6 +37,7 @@ import type {
   AgentRunError,
   AgentTask,
   AgentUIMessage,
+  ChapterToolValue,
   ContextSnapshot,
   ConversationContextToolValue,
   DraftContextRef,
@@ -685,16 +686,27 @@ function outlineValue(
   }
   return {
     premise: meta.outline.premise,
+    characters: meta.characters.map((character) => ({ ...character })),
     chapters: selected.map((chapter) => {
-      const cards = meta.chapters[chapter.id]?.cards ?? [];
+      const outline = getChapterOutline(meta.chapters, chapter.id);
       return {
         chapterId: chapter.id,
         title: chapter.title,
-        cards: cards.map((card, order) => ({
+        act: outline.act,
+        plotPoint: outline.plotPoint,
+        premise: outline.premise,
+        goal: outline.goal,
+        conflict: outline.conflict,
+        turn: outline.turn,
+        characterIds: [...outline.characterIds],
+        cards: outline.cards.map((card, order) => ({
           id: card.id,
           order,
           title: card.title,
           intention: card.intention,
+          characterIds: [...card.characterIds],
+          loreIds: [...card.loreIds],
+          continuityFlags: structuredClone(card.continuityFlags),
           fingerprint: cardFingerprint(card),
         })),
       };
@@ -717,6 +729,7 @@ function loreValue(meta: ProjectMeta, query: string | null): LoreToolValue {
       id: entry.id,
       title: entry.title,
       description: entry.description,
+      characterIds: [...entry.characterIds],
       tags: [...entry.tags],
     })),
   };
@@ -990,20 +1003,20 @@ export function createAgentController(
     assistantMessageId: string;
     signal: AbortSignal;
   }): AgentToolEnvironment => {
-    const targetSnapshot =
-      args.targetChapter === null
-        ? null
-        : {
-            chapterId: args.targetChapter.chapterId,
-            title: args.targetChapter.title,
-            blocks: args.targetChapter.blocks.map((block, order) => ({
-              id: block.id,
-              order,
-              type: block.type,
-              text: block.text,
-              fingerprint: blockFingerprint(block),
-            })),
-          };
+    const chapterSnapshots = new Map<string, ChapterToolValue>();
+    if (args.targetChapter !== null) {
+      chapterSnapshots.set(args.targetChapter.chapterId, {
+        chapterId: args.targetChapter.chapterId,
+        title: args.targetChapter.title,
+        blocks: args.targetChapter.blocks.map((block, order) => ({
+          id: block.id,
+          order,
+          type: block.type,
+          text: block.text,
+          fingerprint: blockFingerprint(block),
+        })),
+      });
+    }
     const requireTarget = (chapterId: string): LoadedChapter => {
       checkToolRun(args.run.projectRoot, args.run.id);
       if (
@@ -1025,14 +1038,33 @@ export function createAgentController(
       run: args.run,
       signal: args.signal,
       readChapter: async (chapterId) => {
-        requireTarget(chapterId);
-        if (targetSnapshot === null) {
-          throw taggedError(
-            "tool",
-            new Error(`Chapter snapshot is unavailable: ${chapterId}`),
+        checkToolRun(args.run.projectRoot, args.run.id);
+        const cached = chapterSnapshots.get(chapterId);
+        if (cached !== undefined) return structuredClone(cached);
+        try {
+          const chapter = await loadChapterSnapshot(
+            args.project,
+            chapterId,
+            args.targetChapter,
           );
+          checkToolRun(args.run.projectRoot, args.run.id);
+          const snapshot: ChapterToolValue = {
+            chapterId: chapter.chapterId,
+            title: chapter.title,
+            blocks: chapter.blocks.map((block, order) => ({
+              id: block.id,
+              order,
+              type: block.type,
+              text: block.text,
+              fingerprint: blockFingerprint(block),
+            })),
+          };
+          chapterSnapshots.set(chapterId, snapshot);
+          return structuredClone(snapshot);
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          throw taggedError("tool", error);
         }
-        return structuredClone(targetSnapshot);
       },
       readOutline: async (chapterId) => {
         checkToolRun(args.run.projectRoot, args.run.id);

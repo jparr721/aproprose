@@ -1,6 +1,6 @@
 // settings-dialog-store.ts -- open state + active tab for the settings dialog.
 //
-// One store, one concern (per CLAUDE.md). Ephemeral: the dialog is not persisted,
+// One store, one concern. Ephemeral: the dialog is not persisted,
 // so it always reopens closed. Lifted into a store so the sidebar button, the
 // Cmd/Ctrl+, keybinding, the command palette, and the AI panel can all open it
 // (and deep-link to a tab via openWithTab).

@@ -201,11 +201,7 @@ beforeEach(() => {
   useOutlineBoardStore.setState({
     openChapterId: null,
     highlightedCardId: null,
-    proposal: null,
-    decisions: {},
-    sculptingChapterId: null,
-    sculptError: null,
-  } as never);
+  });
   useViewStore.setState({
     outlineOpen: false,
     focus: false,

@@ -14,7 +14,7 @@ export type BlockType =
   | "narration" // a prose paragraph
   | "dialogue" // a quoted utterance (+ optional action beat)
   | "lore" // worldbuilding note — never rendered (stored as a LaTeX comment)
-  | "scratchpad" // brainstorm note — never rendered (stored as a LaTeX comment)
+  | "scratchpad" // scratch note - never rendered (stored as a LaTeX comment)
   | "latex"; // raw LaTeX escape hatch — edited and emitted verbatim
 
 /** A chapter sub-kind for `chapter` blocks. */
@@ -297,21 +297,6 @@ export interface CompileResult {
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 
-/** A single continuation the AI proposes for the cursor position. */
-export interface Suggestion {
-  type: "dialogue" | "narration";
-  /** Display name of the speaker, for dialogue suggestions. */
-  speaker?: string;
-  text: string;
-  rationale: string;
-}
-
-export interface SuggestResult {
-  suggestions: Suggestion[];
-  /** Short "after this, you could…" follow-up prompts. */
-  followups: string[];
-}
-
 export type CritiqueKind = "strength" | "watch" | "idea";
 export interface CritiqueNote {
   kind: CritiqueKind;
@@ -329,11 +314,6 @@ export interface ContinuityFlag {
   text: string;
   /** Ids of the blocks this flag is about; [] for a scene-level flag. */
   blockIds: string[];
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
 }
 
 // ── Outline Sculpt ────────────────────────────────────────────────────────────
@@ -366,7 +346,7 @@ export interface BlockTextEdit {
 
 // -- Manuscript proposals ------------------------------------------------------
 // A reviewable set of structural changes to ONE chapter's block list - the
-// shared envelope every AI write path stages for review behind the Edit tab.
+// shared envelope every AI write path stages for review in the proposal tray.
 
 export type BlockChangeKind = "rewrite" | "insert" | "remove" | "move";
 

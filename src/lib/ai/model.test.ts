@@ -60,7 +60,7 @@ describe("getModel", () => {
     const legacyState = {
       ...current,
       aiModel: "gpt-4.1-mini",
-      aiProvider: "codex" as const,
+      aiProvider: "retired" as const,
     };
     useSettingsStore.setState(legacyState);
 

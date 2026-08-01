@@ -2,12 +2,12 @@
 //
 // Panel visibility (AI / PDF / focus) is read+written by the top bar, the editor
 // layout, and the command palette,
-// so per CLAUDE.md it's a store rather than a context. It also owns the
+// so it belongs in a shared store rather than a context. It also owns the
 // "discard unsaved edits?" guard: any state-wiping action (open project, switch
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// The right-panel width and PDF / Outline open flags are persisted to the app
+// The right dock width and PDF / Outline open flags are persisted to the app
 // config dir through the Tauri-backed storage adapter. The rest of the state is
 // ephemeral and the pending guarded action is not serializable.
 
@@ -151,7 +151,7 @@ export const useViewStore = create<ViewState>()(
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // Persisted so a relaunch lands back in the same layout: the right-panel
+      // Persisted so a relaunch lands back in the same layout: the right dock
       // width and whether the PDF / Outline surfaces were open. AI visibility
       // stays ephemeral and `pending` is not serializable.
       partialize: ({ rightPanelWidth, pdfOpen, outlineOpen }) => ({

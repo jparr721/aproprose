@@ -58,7 +58,7 @@ describe("settings-store provider migration", () => {
     }
     const current = useSettingsStore.getState();
     const merged = options.merge(
-      { aiProvider: "claude", aiModel: "gpt-4.1-mini" },
+      { aiProvider: "retired", aiModel: "gpt-4.1-mini" },
       current,
     );
     expect(merged).not.toHaveProperty("aiProvider");

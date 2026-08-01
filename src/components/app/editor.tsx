@@ -52,19 +52,15 @@ import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/hooks/use-dictation";
 import type { Block as BlockT, BlockType } from "@/lib/types";
 
-// Editor history defers to native undo/redo while the AI panel or a dialog holds
+// Editor history defers to native undo/redo while the AI console or a dialog holds
 // focus, so those inputs keep their own history.
 const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
   enabled: true,
   ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
 };
 
-// Re-exported for the right-panel jump affordances (the helper itself lives in
-// lib/dom so non-component modules can share it).
-export { scrollBlockIntoView };
-
 // After a nav-key move, bring the newly-selected block into view.
-export function scrollSelectedIntoView() {
+function scrollSelectedIntoView() {
   const id = useProjectStore.getState().selectedId;
   if (!id) return;
   scrollBlockIntoView(id);

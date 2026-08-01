@@ -25,8 +25,6 @@ import {
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
-import { useAiCacheStore } from "@/stores/ai-cache-store";
-import { useAiIntentStore } from "@/stores/ai-intent-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Block } from "@/lib/types";
@@ -72,8 +70,6 @@ beforeEach(() => {
     activeProjectRoot: "/book",
     hydratedProjectRoot: "/book",
   });
-  useAiCacheStore.getState().reset();
-  useAiIntentStore.setState({ pending: null });
   useViewStore.setState({ aiOpen: false, focus: false });
   useProjectStore.setState({
     activeChapterId: "ch1",
@@ -199,8 +195,6 @@ describe("Agent block actions", () => {
         operation: "structure",
       },
     });
-    expect(useAiCacheStore.getState().entries).toEqual({});
-    expect(useAiIntentStore.getState().pending).toBeNull();
   });
 
   it("keeps deterministic Structure into blocks as a local action", () => {

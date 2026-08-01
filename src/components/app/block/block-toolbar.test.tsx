@@ -23,8 +23,6 @@ vi.mock("@/lib/tauri", () => ({
 
 import { BlockToolbar } from "@/components/app/block/block-toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useAiCacheStore } from "@/stores/ai-cache-store";
-import { useAiIntentStore } from "@/stores/ai-intent-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Block } from "@/lib/types";
@@ -43,8 +41,6 @@ beforeEach(() => {
   controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
     useViewStore.getState().openAiConsole();
   });
-  useAiCacheStore.getState().reset();
-  useAiIntentStore.setState({ pending: null });
   useViewStore.setState({ aiOpen: false, focus: false });
   useProjectStore.setState({
     activeChapterId: "chapter-1",
@@ -83,7 +79,5 @@ describe("BlockToolbar Suggest", () => {
     });
     expect(useProjectStore.getState().selectedId).toBe("block-1");
     expect(useViewStore.getState().aiOpen).toBe(true);
-    expect(useAiIntentStore.getState().pending).toBeNull();
-    expect(useAiCacheStore.getState().entries).toEqual({});
   });
 });

@@ -27,10 +27,6 @@ beforeEach(() => {
   useOutlineBoardStore.setState({
     openChapterId: null,
     highlightedCardId: null,
-    proposal: null,
-    decisions: {},
-    sculptingChapterId: null,
-    sculptError: null,
   });
   useProjectStore.setState({
     project: {
@@ -78,34 +74,6 @@ describe("BoardChapterColumn Sculpt", () => {
     expect(screen.getByText("Quiet Town")).toBeTruthy();
   });
 
-  it("does not render the legacy full-board proposal overlay", () => {
-    useOutlineBoardStore.setState({
-      sculptingChapterId: "ch1",
-      proposal: {
-        chapterId: "ch1",
-        summary: "Legacy overlay",
-        changes: [],
-      },
-    });
-
-    render(<OutlineBoard />);
-
-    expect(screen.queryByText("Legacy overlay")).toBeNull();
-    expect(screen.queryByText("Reshape Quiet Town")).toBeNull();
-    expect(screen.getByText("Quiet Town")).toBeTruthy();
-  });
-
-  it("does not render legacy per-column model errors or refresh controls", () => {
-    useOutlineBoardStore.setState({
-      sculptingChapterId: "ch1",
-      sculptError: "HTTP 401 bad key",
-    });
-
-    render(<OutlineBoard />);
-
-    expect(screen.queryByText("HTTP 401 bad key")).toBeNull();
-    expect(screen.queryByText("Try again")).toBeNull();
-  });
 });
 
 describe("BoardCard agent navigation highlight", () => {

@@ -174,9 +174,9 @@ describe("AI command catalog", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("contains no legacy provider, screen, or tab language", () => {
+  it("contains no screen terminology", () => {
     for (const entry of aiCommands) {
-      expect(entry.title).not.toMatch(/Muse|Brainstorm|tab|Codex|Claude/i);
+      expect(entry.title).not.toMatch(/tab/i);
     }
   });
 
@@ -357,16 +357,4 @@ describe("AI run commands", () => {
     },
   );
 
-  it("never calls the removed openAiTab API", async () => {
-    const openAiTab = vi.fn();
-    useViewStore.setState({ openAiTab } as never);
-
-    for (const entry of aiCommands) {
-      if (entry.run !== undefined) {
-        await entry.run({ toggleSidebar: () => undefined });
-      }
-    }
-
-    expect(openAiTab).not.toHaveBeenCalled();
-  });
 });

@@ -311,7 +311,6 @@ interface ProjectState {
   setChapterAct: (chapterId: string, act: ActKind | null) => void;
   setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
   setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
-  applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
   applyAgentOutlineProposal: (
     proposal: OutlinePendingProposal,
     changeIds: string[],
@@ -1611,13 +1610,6 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
-    applySculpt: (chapterId, proposal, kept) =>
-      set((s) => {
-        const meta = { ...s.meta, chapters: applySculptModel(s.meta.chapters, chapterId, proposal, kept) };
-        persistMeta(meta);
-        return { meta };
-      }),
-
     applyAgentOutlineProposal: (proposal, changeIds) => {
       const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);
       if (mismatchedChangeIds.length > 0) {
@@ -1726,8 +1718,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 /**
  * The blocks a `"block"`-scoped operation acts on: the multi-selection set when
  * one is active, otherwise the single selected block (empty when nothing is
- * selected). The single definition of the selection-precedence rule, shared by
- * `buildEditRequest` and the Edit-tab cache key so they cannot drift.
+ * selected). This is the single definition of the selection-precedence rule
+ * shared by agent entry points.
  */
 export function selectionTargetIds(
   selectedIds: string[],

@@ -46,16 +46,13 @@ describe("AiTab", () => {
     expect(screen.getByText("OpenAI key")).toBeTruthy();
     expect(screen.getByText("AI model")).toBeTruthy();
     expect(screen.queryByText("AI provider")).toBeNull();
-    expect(screen.queryByText(/Codex CLI/)).toBeNull();
-    expect(screen.queryByText(/Claude Code/)).toBeNull();
   });
 
-  it("describes standing instructions for both modes without Muse copy", async () => {
+  it("describes standing instructions for both modes", async () => {
     render(<AiTab />);
 
     await waitFor(() => expect(mocks.hasOpenAiKey).toHaveBeenCalledOnce());
     expect(screen.getByText("Writing and editing instructions")).toBeTruthy();
     expect(screen.getByText("Applies to Writing and Edit.")).toBeTruthy();
-    expect(screen.queryByText(/Muse/)).toBeNull();
   });
 });

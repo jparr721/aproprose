@@ -155,7 +155,7 @@ export function AgentConsole() {
     <section
       aria-label="AI Console"
       className="flex h-full min-h-0 min-w-0 flex-col bg-background"
-      data-right-panel
+      data-agent-console
     >
       <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <div className="min-w-0">

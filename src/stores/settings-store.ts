@@ -1,6 +1,6 @@
 // settings-store.ts - user preferences: appearance and AI model.
 //
-// One store, one concern (per CLAUDE.md). Persisted to the app config dir via the
+// One store, one concern. Persisted to the app config dir via the
 // Tauri-backed storage adapter. The ThemeController subscribes to apply the theme
 // to <html> and drive the prose-size CSS variable.
 

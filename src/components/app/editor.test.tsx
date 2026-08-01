@@ -53,8 +53,6 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { Editor } from "@/components/app/editor";
-import { useAiCacheStore } from "@/stores/ai-cache-store";
-import { useAiIntentStore } from "@/stores/ai-intent-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
@@ -127,8 +125,6 @@ beforeEach(() => {
   controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
     useViewStore.getState().openAiConsole();
   });
-  useAiCacheStore.getState().reset();
-  useAiIntentStore.setState({ pending: null });
   useViewStore.setState({ aiOpen: false, focus: false });
   useSyncStore.setState({ conflictedFiles: [] });
   useProjectStore.setState({
@@ -174,8 +170,6 @@ describe("Editor Suggest from context", () => {
       task: { kind: "conversation", targetChapterId: "chapter-1" },
     });
     expect(useViewStore.getState().aiOpen).toBe(true);
-    expect(useAiIntentStore.getState().pending).toBeNull();
-    expect(useAiCacheStore.getState().entries).toEqual({});
   });
 
   it("still submits a chapter-targeted conversation without a selection", () => {
@@ -192,7 +186,5 @@ describe("Editor Suggest from context", () => {
       refs: [],
       task: { kind: "conversation", targetChapterId: "chapter-1" },
     });
-    expect(useAiIntentStore.getState().pending).toBeNull();
-    expect(useAiCacheStore.getState().entries).toEqual({});
   });
 });

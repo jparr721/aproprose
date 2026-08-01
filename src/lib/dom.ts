@@ -4,7 +4,7 @@
 // any subtree marked `[data-capture-keyboard]` (e.g. a future code editor that
 // owns its own keymap) suppresses every app shortcut. `isInAuxSurface` is the
 // narrower guard editor history uses so undo/redo keep native behavior inside the
-// right panel and dialogs.
+// agent console and dialogs.
 
 export function isKeyboardCaptured(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;
@@ -12,7 +12,7 @@ export function isKeyboardCaptured(element: Element | null): boolean {
 }
 
 const AUX_SURFACE_SELECTOR =
-  '[data-right-panel],[data-find-widget],[role="dialog"],[role="alertdialog"]';
+  '[data-agent-console],[data-find-widget],[role="dialog"],[role="alertdialog"]';
 
 export function isInAuxSurface(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;

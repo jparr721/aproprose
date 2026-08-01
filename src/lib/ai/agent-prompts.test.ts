@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTINUITY_SYSTEM,
+  CRITIQUE_SYSTEM,
   EDIT_MODE_MARKER,
   WRITING_MODE_MARKER,
   buildAgentInstructions,
@@ -33,6 +35,24 @@ describe("buildAgentInstructions", () => {
       expect(instructions).toContain("Close third person.");
       expect(instructions).toContain("AUTHOR EDITING RULES");
       expect(instructions).toContain("No throat-clearing.");
+    }
+  });
+});
+
+describe("analysis prompts", () => {
+  it("preserves manuscript emphasis markers", () => {
+    for (const prompt of [CRITIQUE_SYSTEM, CONTINUITY_SYSTEM]) {
+      expect(prompt).toContain("_italics_");
+      expect(prompt).toContain("**bold**");
+      expect(prompt.toLowerCase()).toContain("formatting");
+    }
+  });
+
+  it("requires findings to cite supplied block ids", () => {
+    for (const prompt of [CRITIQUE_SYSTEM, CONTINUITY_SYSTEM]) {
+      expect(prompt).toContain("SCENE BLOCKS");
+      expect(prompt).toContain("blockIds");
+      expect(prompt).toContain("[id]");
     }
   });
 });

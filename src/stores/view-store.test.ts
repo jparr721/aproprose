@@ -34,16 +34,6 @@ beforeEach(() => {
 });
 
 describe("view-store AI console", () => {
-  it("removes the obsolete tab and rail state", () => {
-    const state = useViewStore.getState();
-
-    expect(state).not.toHaveProperty("aiTab");
-    expect(state).not.toHaveProperty("aiCollapsed");
-    expect(state).not.toHaveProperty("setAiTab");
-    expect(state).not.toHaveProperty("setAiCollapsed");
-    expect(state).not.toHaveProperty("openAiTab");
-  });
-
   it("sets AI visibility explicitly without changing neighboring panes", () => {
     useViewStore.setState({ pdfOpen: true, outlineOpen: true });
 
@@ -133,7 +123,7 @@ describe("view-store layout persistence", () => {
     expect(persisted).toMatchObject({ pdfOpen: true, outlineOpen: true });
   });
 
-  it("hydrates only current layout fields from legacy saved state", async () => {
+  it("hydrates only current layout fields from a saved state with unknown fields", async () => {
     useViewStore.setState({ aiOpen: false, focus: true });
     storage.getItem.mockResolvedValueOnce(
       JSON.stringify({
@@ -141,8 +131,7 @@ describe("view-store layout persistence", () => {
           rightPanelWidth: 488,
           pdfOpen: true,
           outlineOpen: true,
-          aiTab: "edit",
-          aiCollapsed: true,
+          obsoleteLayout: true,
         },
         version: 0,
       }),
@@ -158,8 +147,7 @@ describe("view-store layout persistence", () => {
       aiOpen: false,
       focus: true,
     });
-    expect(state).not.toHaveProperty("aiTab");
-    expect(state).not.toHaveProperty("aiCollapsed");
+    expect(state).not.toHaveProperty("obsoleteLayout");
     expect(state).not.toHaveProperty("sidebarOpen");
     expect(state.toggleAi).toBeTypeOf("function");
     expect(state.openAiConsole).toBeTypeOf("function");

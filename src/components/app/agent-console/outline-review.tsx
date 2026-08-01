@@ -33,6 +33,7 @@ import { useProjectStore } from "@/stores/project-store";
 export interface OutlineReviewProps {
   proposal: OutlinePendingProposal;
   staleChangeIds: Set<string>;
+  disabled: boolean;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
   onNavigate: (changeId: string) => void;
@@ -200,11 +201,20 @@ function OutlineChangeCard(props: {
   cards: OutlineCard[] | null;
   change: OutlinePendingChange;
   stale: boolean;
+  disabled: boolean;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
   onNavigate: (changeId: string) => void;
 }) {
-  const { cards, change, stale, onAccept, onReject, onNavigate } = props;
+  const {
+    cards,
+    change,
+    stale,
+    disabled,
+    onAccept,
+    onReject,
+    onNavigate,
+  } = props;
   if (!stale && cards === null) {
     throw new Error("Live outline chapter could not be resolved.");
   }
@@ -252,7 +262,7 @@ function OutlineChangeCard(props: {
         ) : null}
         <div className="flex items-center justify-end gap-2">
           <Button
-            disabled={stale}
+            disabled={disabled || stale}
             onClick={() => onAccept(change.id)}
             size="sm"
           >
@@ -260,6 +270,7 @@ function OutlineChangeCard(props: {
             Accept
           </Button>
           <Button
+            disabled={disabled}
             onClick={() => onReject(change.id)}
             size="sm"
             variant="outline"
@@ -276,6 +287,7 @@ function OutlineChangeCard(props: {
 export function OutlineReview({
   proposal,
   staleChangeIds,
+  disabled,
   onAccept,
   onReject,
   onNavigate,
@@ -298,6 +310,7 @@ export function OutlineReview({
         <OutlineChangeCard
           cards={cards}
           change={change}
+          disabled={disabled}
           key={change.id}
           onAccept={onAccept}
           onNavigate={onNavigate}

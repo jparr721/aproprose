@@ -202,6 +202,7 @@ describe("ManuscriptReview", () => {
   it("renders every change from live source and destination context", () => {
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set<string>()}
         onAccept={vi.fn()}
@@ -250,6 +251,7 @@ describe("ManuscriptReview", () => {
     const onNavigate = vi.fn();
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set<string>()}
         onAccept={onAccept}
@@ -287,6 +289,7 @@ describe("ManuscriptReview", () => {
     });
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set(["remove-1"])}
         onAccept={vi.fn()}
@@ -335,6 +338,7 @@ describe("ManuscriptReview", () => {
 
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={liveProposal}
         staleChangeIds={new Set<string>()}
         onAccept={vi.fn()}
@@ -369,6 +373,7 @@ describe("ManuscriptReview", () => {
 
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={{
           ...proposal,
           changes: [
@@ -416,6 +421,7 @@ describe("ManuscriptReview", () => {
 
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={{
           ...proposal,
           changes: [
@@ -473,6 +479,7 @@ describe("ManuscriptReview", () => {
 
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={{
           ...proposal,
           changes: [removeChange(frozenDialogue, 0, "stale-dialogue-remove")],
@@ -536,6 +543,7 @@ describe("ManuscriptReview", () => {
 
     const { container } = render(
       <ManuscriptReview
+        disabled={false}
         proposal={{ ...proposal, changes: [move] }}
         staleChangeIds={new Set(["stale-lore-move"])}
         onAccept={vi.fn()}

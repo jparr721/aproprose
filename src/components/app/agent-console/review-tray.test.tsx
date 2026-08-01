@@ -288,6 +288,8 @@ beforeEach(() => {
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
     messages: [],
+    requestedProjectRoot: "/book",
+    activeProjectRoot: "/book",
     hydratedProjectRoot: "/book",
   });
 });
@@ -346,6 +348,60 @@ describe("ReviewTray summary and expansion", () => {
     expect(screen.getByText("Revise the opening")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+  });
+
+  it.each([
+    {
+      name: "a same-project persistence transition",
+      state: {
+        hydratedProjectRoot: "/book",
+        persistenceTransition: {
+          generation: 9,
+          kind: "load" as const,
+          projectRoot: "/book",
+        },
+      },
+    },
+    {
+      name: "a failed load with mismatched hydration",
+      state: {
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+      },
+    },
+  ])("disables all proposal decisions during $name", ({ state }) => {
+    const blocks = useProjectStore.getState().blocks;
+    setPending(
+      manuscriptProposal(blocks, [
+        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+      ]),
+    );
+    useAgentConsoleStore.setState(state);
+    const { container } = render(<ReviewTray />);
+    expandReview();
+
+    expect(
+      (screen.getByRole("button", { name: "Accept All" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Reject All" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    const change = container.querySelector(
+      '[data-agent-change-id="change-0"]',
+    );
+    if (!(change instanceof HTMLElement)) throw new Error("Missing change");
+    expect(
+      (within(change).getByRole("button", {
+        name: "Accept",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (within(change).getByRole("button", {
+        name: "Reject",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 

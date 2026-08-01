@@ -194,6 +194,8 @@ beforeEach(() => {
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
     messages: [],
+    requestedProjectRoot: "/book",
+    activeProjectRoot: "/book",
     hydratedProjectRoot: "/book",
   });
   useOutlineBoardStore.setState({

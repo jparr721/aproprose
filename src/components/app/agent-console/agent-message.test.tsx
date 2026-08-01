@@ -69,6 +69,22 @@ const snapshot: ContextSnapshot = {
   sourceFingerprint: "fingerprint-1",
 };
 
+const messageProject = {
+  root: "/book",
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [],
+};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -82,8 +98,11 @@ beforeEach(() => {
     draftContextRefs: [],
     draftContextSources: {},
     draftSourceLocators: {},
+    requestedProjectRoot: "/book",
+    activeProjectRoot: "/book",
+    hydratedProjectRoot: "/book",
   });
-  useProjectStore.setState({ project: null, meta: EMPTY_META });
+  useProjectStore.setState({ project: messageProject, meta: EMPTY_META });
 });
 
 describe("AgentMessage content", () => {
@@ -226,23 +245,51 @@ describe("AgentMessage content", () => {
     expect(useAgentConsoleStore.getState().messages).toEqual([message]);
   });
 
+  it("disables Add to Chat while same-project persistence is transitioning", () => {
+    useProjectStore.setState({
+      project: messageProject,
+    });
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: "/book",
+      persistenceTransition: {
+        generation: 3,
+        kind: "load",
+        projectRoot: "/book",
+      },
+    });
+    const message = assistantMessage(
+      "assistant-locked-finding",
+      [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch1",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The middle stalls.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+      metadata({}),
+    );
+
+    renderAgentMessage(message);
+
+    expect(
+      (screen.getByRole("button", { name: "Add to Chat" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
   it("uses one finding index across every findings part in a message", async () => {
     useProjectStore.setState({
-      project: {
-        root: "/book",
-        name: "Book",
-        mainFile: "main.tex",
-        title: "Book",
-        author: "Author",
-        metadata: {
-          title: "Book",
-          subtitle: "",
-          author: "Author",
-          publisher: "",
-          isbn: "",
-        },
-        chapters: [],
-      },
+      project: messageProject,
     });
     useAgentConsoleStore.setState({ hydratedProjectRoot: "/book" });
     const message = assistantMessage(

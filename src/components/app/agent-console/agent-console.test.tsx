@@ -127,6 +127,8 @@ function resetConsoleState(): void {
     draftContextRefs: [],
     draftContextSources: {},
     draftSourceLocators: {},
+    requestedProjectRoot: project.root,
+    activeProjectRoot: project.root,
     hydratedProjectRoot: project.root,
   });
 }

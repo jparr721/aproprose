@@ -46,7 +46,11 @@ import type {
   ContextSnapshot,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentConsoleOwnershipStatus,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
+import { useProjectStore } from "@/stores/project-store";
 
 export interface AgentMessageProps {
   message: AgentUIMessage;
@@ -280,7 +284,13 @@ function ToolPart({
   }
 }
 
-function Findings({ entries }: { entries: FlattenedMessageFinding[] }) {
+function Findings({
+  entries,
+  disabled,
+}: {
+  entries: FlattenedMessageFinding[];
+  disabled: boolean;
+}) {
   return entries.map((entry) => {
     const finding = entry.finding;
     return (
@@ -294,6 +304,7 @@ function Findings({ entries }: { entries: FlattenedMessageFinding[] }) {
           <CardTitle>{finding.tag}</CardTitle>
           <CardAction>
             <Button
+              disabled={disabled}
               onClick={() => {
                 void dispatchAgentIntent({
                   kind: "add-context",
@@ -328,6 +339,7 @@ function renderPart(
   message: AgentUIMessage,
   messageMetadata: AgentMessageMetadata,
   findings: FlattenedMessageFinding[],
+  authorMutationsDisabled: boolean,
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>,
 ): ReactNode {
   const key = `${message.id}:part:${index}`;
@@ -361,6 +373,7 @@ function renderPart(
     case "data-findings":
       return (
         <Findings
+          disabled={authorMutationsDisabled}
           entries={findings.filter((entry) => entry.partIndex === index)}
           key={key}
         />
@@ -433,6 +446,12 @@ export function AgentMessage({
   onRetry,
   onOpenSettings,
 }: AgentMessageProps) {
+  const projectRoot = useProjectStore(
+    (state) => state.project?.root ?? null,
+  );
+  const authorMutationsDisabled = useAgentConsoleStore(
+    (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
+  );
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
@@ -452,6 +471,7 @@ export function AgentMessage({
             message,
             messageMetadata,
             findings,
+            authorMutationsDisabled,
             onNavigateSnapshot,
           ),
         )}

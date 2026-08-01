@@ -175,6 +175,7 @@ describe("OutlineReview", () => {
 
     render(
       <OutlineReview
+        disabled={false}
         proposal={{ ...proposal, changes: [changes[1]] }}
         staleChangeIds={new Set<string>()}
         onAccept={vi.fn()}
@@ -193,6 +194,7 @@ describe("OutlineReview", () => {
   it("renders every change from live source and destination context", () => {
     const { container } = render(
       <OutlineReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set<string>()}
         onAccept={vi.fn()}
@@ -243,6 +245,7 @@ describe("OutlineReview", () => {
     const onNavigate = vi.fn();
     const { container } = render(
       <OutlineReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set<string>()}
         onAccept={onAccept}
@@ -289,6 +292,7 @@ describe("OutlineReview", () => {
     }));
     const { container } = render(
       <OutlineReview
+        disabled={false}
         proposal={proposal}
         staleChangeIds={new Set(["remove-1"])}
         onAccept={vi.fn()}
@@ -347,6 +351,7 @@ describe("OutlineReview", () => {
 
     const { container } = render(
       <OutlineReview
+        disabled={false}
         proposal={{ ...proposal, changes: [liveMove] }}
         staleChangeIds={new Set<string>()}
         onAccept={vi.fn()}

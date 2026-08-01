@@ -13,6 +13,7 @@ import type {
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import {
+  agentConsoleOwnershipStatus,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -116,6 +117,19 @@ const interrupted: InterruptedRun = {
   interruptedAt: "2026-07-30T12:01:00.000Z",
 };
 
+const emptyPersistedState = (): PersistedAgentState => ({
+  v: 3,
+  mode: "writing",
+  messages: [],
+  summary: null,
+  draftText: "",
+  draftContextRefs: [],
+  draftSourceLocators: {},
+  pendingProposal: null,
+  lastUsage: null,
+  interruptedRun: null,
+});
+
 const proposalWithChanges: PendingProposal = {
   ...proposal,
   changes: [
@@ -175,6 +189,7 @@ const proposalWithChanges: PendingProposal = {
 describe("agent console store", () => {
   beforeEach(() => {
     useAgentConsoleStore.setState(EMPTY_AGENT_STATE);
+    useAgentConsoleStore.getState().hydrate("/book", emptyPersistedState());
   });
 
   it("freezes the active run while later mode changes prepare the next turn", () => {
@@ -326,49 +341,114 @@ describe("agent console store", () => {
     });
     expect(currentResult).toEqual({
       status: "current",
-      rebasedMutation: false,
     });
   });
 
-  it("rejects draft mutations while a different project owns hydration", () => {
+  it("requires exact requested, active, and hydrated ownership", () => {
+    expect(
+      agentConsoleOwnershipStatus(
+        useAgentConsoleStore.getState(),
+        "/book",
+      ),
+    ).toBe("ready");
+    expect(
+      agentConsoleOwnershipStatus(
+        useAgentConsoleStore.getState(),
+        "/books/other",
+      ),
+    ).toBe("unavailable");
+
     const store = useAgentConsoleStore.getState();
-    store.hydrate("/books/old", {
-      v: 3,
-      mode: "writing",
-      messages: [],
-      summary: null,
-      draftText: "Old draft",
-      draftContextRefs: [blockRef("old")],
-      draftSourceLocators: {},
-      pendingProposal: null,
-      lastUsage: null,
-      interruptedRun: null,
-    });
-    store.resetProject();
-    store.beginPersistenceTransition("/books/new", "load");
+    const transition = store.beginPersistenceTransition("/book", "load");
+    expect(
+      agentConsoleOwnershipStatus(
+        useAgentConsoleStore.getState(),
+        "/book",
+      ),
+    ).toBe("transition");
+
+    store.finishPersistenceTransition(transition);
+    expect(
+      agentConsoleOwnershipStatus(
+        useAgentConsoleStore.getState(),
+        "/book",
+      ),
+    ).toBe("unavailable");
+  });
+
+  it.each([
+    {
+      name: "a same-root load is active",
+      arrange: () => {
+        useAgentConsoleStore
+          .getState()
+          .beginPersistenceTransition("/book", "load");
+      },
+    },
+    {
+      name: "a failed load leaves hydration ownership mismatched",
+      arrange: () => {
+        const store = useAgentConsoleStore.getState();
+        const transition = store.beginPersistenceTransition(
+          "/books/new",
+          "load",
+        );
+        store.activatePersistenceTransition(transition);
+        store.finishPersistenceTransition(transition);
+      },
+    },
+  ])("rejects every author mutation when $name", ({ arrange }) => {
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("Owned draft");
+    store.addDraftContextRefs([blockRef("old")]);
+    store.replacePendingProposal(proposalWithChanges);
+    const submittedDraft = store.captureDraft();
+    const attachment = submittedDraft.attachments[0];
+    arrange();
     const mutationError = {
-      name: "AgentConsoleProjectTransitionError",
+      name: "AgentConsoleOwnershipError",
       agentErrorCode: "transition",
     };
+    const authorMutations = [
+      () => store.setMode("edit"),
+      () => store.setDraftText("Rejected draft"),
+      () => store.setDraftContextRefs([blockRef("replacement")]),
+      () => store.addDraftContextRefs([blockRef("new")]),
+      () => store.removeDraftContextRef(blockRef("old")),
+      () =>
+        store.setDraftContextSources([
+          source(blockRef("old"), "old", 0, "fp-old"),
+        ]),
+      () =>
+        store.applyDraftContextResolution(
+          [attachment],
+          [
+            {
+              attachment,
+              ref: blockRef("old"),
+              source: source(blockRef("old"), "old", 0, "fp-old"),
+            },
+          ],
+        ),
+      () => store.removePendingChanges(["change-1"]),
+      () => store.clearPendingProposal(),
+      () => store.appendLocalMessage(message("local-message")),
+      () => store.beginPreflight(),
+      () => store.beginRun(run, message("user-1")),
+      () => store.beginDraftRun(run, message("user-1"), submittedDraft),
+    ];
 
-    expect(() => store.setDraftText("New text")).toThrowError(
-      expect.objectContaining(mutationError),
-    );
-    expect(() => store.setMode("edit")).toThrowError(
-      expect.objectContaining(mutationError),
-    );
-    expect(() => store.addDraftContextRefs([blockRef("new")])).toThrowError(
-      expect.objectContaining(mutationError),
-    );
-    expect(() => store.removeDraftContextRef(blockRef("old"))).toThrowError(
-      expect.objectContaining(mutationError),
-    );
+    for (const mutate of authorMutations) {
+      expect(mutate).toThrowError(expect.objectContaining(mutationError));
+    }
+
     expect(useAgentConsoleStore.getState()).toMatchObject({
-      hydratedProjectRoot: null,
       mode: "writing",
-      draftText: "",
-      draftContextRefs: [],
-      persistenceTransition: { projectRoot: "/books/new" },
+      draftText: "Owned draft",
+      draftContextRefs: [blockRef("old")],
+      pendingProposal: proposalWithChanges,
+      messages: [],
+      runStatus: "idle",
     });
   });
 

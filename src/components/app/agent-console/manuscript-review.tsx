@@ -32,6 +32,7 @@ import { useProjectStore } from "@/stores/project-store";
 export interface ManuscriptReviewProps {
   proposal: ManuscriptPendingProposal;
   staleChangeIds: Set<string>;
+  disabled: boolean;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
   onNavigate: (changeId: string) => void;
@@ -237,11 +238,20 @@ function ManuscriptChangeCard(props: {
   blocks: Block[];
   change: ManuscriptPendingChange;
   stale: boolean;
+  disabled: boolean;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
   onNavigate: (changeId: string) => void;
 }) {
-  const { blocks, change, stale, onAccept, onReject, onNavigate } = props;
+  const {
+    blocks,
+    change,
+    stale,
+    disabled,
+    onAccept,
+    onReject,
+    onNavigate,
+  } = props;
   const resolveDisplay: ResolveBlockDisplay = stale
     ? frozenBlockDisplay
     : (locator) => liveBlockDisplay(locator, blocks);
@@ -281,7 +291,7 @@ function ManuscriptChangeCard(props: {
         ) : null}
         <div className="flex items-center justify-end gap-2">
           <Button
-            disabled={stale}
+            disabled={disabled || stale}
             onClick={() => onAccept(change.id)}
             size="sm"
           >
@@ -289,6 +299,7 @@ function ManuscriptChangeCard(props: {
             Accept
           </Button>
           <Button
+            disabled={disabled}
             onClick={() => onReject(change.id)}
             size="sm"
             variant="outline"
@@ -305,6 +316,7 @@ function ManuscriptChangeCard(props: {
 export function ManuscriptReview({
   proposal,
   staleChangeIds,
+  disabled,
   onAccept,
   onReject,
   onNavigate,
@@ -316,6 +328,7 @@ export function ManuscriptReview({
         <ManuscriptChangeCard
           blocks={blocks}
           change={change}
+          disabled={disabled}
           key={change.id}
           onAccept={onAccept}
           onNavigate={onNavigate}

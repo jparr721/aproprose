@@ -366,6 +366,8 @@ beforeEach(() => {
     draftContextRefs: [],
     draftContextSources: {},
     draftSourceLocators: {},
+    requestedProjectRoot: "/book",
+    activeProjectRoot: "/book",
     hydratedProjectRoot: "/book",
   });
   useProjectStore.setState({
@@ -435,6 +437,49 @@ describe("dispatchAgentIntent", () => {
       },
     });
     expect(mocks.readTextFile).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "focus",
+      intent: { kind: "focus", mode: "edit" } as const,
+    },
+    {
+      name: "add-context",
+      intent: {
+        kind: "add-context",
+        refs: [blockRef("b2", "ch1")],
+      } as const,
+    },
+    {
+      name: "prefill",
+      intent: {
+        kind: "prefill",
+        mode: "edit",
+        text: "Rejected prefill",
+        refs: [blockRef("b2", "ch1")],
+      } as const,
+    },
+  ])("rejects $name author mutations during a same-root transition", async ({ intent }) => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    const store = useAgentConsoleStore.getState();
+    store.setDraftText("Owned draft");
+    store.addDraftContextRefs([blockRef("b1", "ch1")]);
+    store.beginPersistenceTransition("/book", "load");
+
+    await controller.dispatchAgentIntent(intent);
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      mode: "writing",
+      draftText: "Owned draft",
+      draftContextRefs: [blockRef("b1", "ch1")],
+      runError: {
+        code: "transition",
+        message: expect.stringContaining("loading"),
+      },
+    });
     expect(dependencies.stream).not.toHaveBeenCalled();
   });
 
@@ -772,16 +817,18 @@ describe("frozen run preflight", () => {
   it("rejects submission immediately while persistence owns a transition", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
+    useAgentConsoleStore
+      .getState()
+      .setDraftText("Do not queue this request");
     const transition = useAgentConsoleStore
       .getState()
       .beginPersistenceTransition("/book", "load");
-    useAgentConsoleStore.getState().setDraftText("Do not queue this request");
 
     const submission = controller.submitAgentDraft(conversationTask("ch1"));
     useAgentConsoleStore.getState().finishPersistenceTransition(transition);
 
     await expect(submission).rejects.toMatchObject({
-      name: "AgentConsoleProjectTransitionError",
+      name: "AgentConsoleOwnershipError",
       agentErrorCode: "transition",
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
@@ -805,7 +852,7 @@ describe("frozen run preflight", () => {
         refs: [],
         task: conversationTask("ch1"),
       }),
-    ).rejects.toMatchObject({ name: "AgentConsoleProjectUnavailableError" });
+    ).rejects.toMatchObject({ name: "AgentConsoleOwnershipError" });
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
   });
@@ -1328,6 +1375,29 @@ describe("retry and local events", () => {
       ],
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
+  it("rejects proposal events during a same-root transition", () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    useAgentConsoleStore
+      .getState()
+      .beginPersistenceTransition("/book", "load");
+
+    expect(() =>
+      controller.recordProposalEvent({
+        proposalId: "proposal-1",
+        action: "rejected",
+        changeCount: 1,
+        text: "Rejected one manuscript change.",
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "AgentConsoleOwnershipError",
+        agentErrorCode: "transition",
+      }),
+    );
+    expect(useAgentConsoleStore.getState().messages).toEqual([]);
   });
 });
 

@@ -39,7 +39,11 @@ import type {
   ProposalEventData,
 } from "@/lib/ai/agent-types";
 import { getChapterOutline } from "@/lib/outline/model";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentConsoleOwnershipStatus,
+  requireAgentConsoleProject,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
 
@@ -152,7 +156,12 @@ export function ReviewTray() {
   const clearPendingProposal = useAgentConsoleStore(
     (state) => state.clearPendingProposal,
   );
-  useProjectStore((state) => state.project);
+  const projectRoot = useProjectStore(
+    (state) => state.project?.root ?? null,
+  );
+  const authorMutationsDisabled = useAgentConsoleStore(
+    (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
+  );
   useProjectStore((state) => state.activeChapterId);
   useProjectStore((state) => state.blocks);
   useProjectStore((state) => state.meta);
@@ -172,6 +181,7 @@ export function ReviewTray() {
   };
 
   const acceptOne = (changeId: string): void => {
+    requireAgentConsoleProject(proposal.projectRoot);
     const change = proposal.changes.find((item) => item.id === changeId);
     if (change === undefined) {
       throw new Error(`Pending proposal change not found: ${changeId}`);
@@ -199,6 +209,7 @@ export function ReviewTray() {
   };
 
   const acceptAll = (): void => {
+    requireAgentConsoleProject(proposal.projectRoot);
     const changeIds = proposal.changes.map((change) => change.id);
     if (proposal.kind === "manuscript") {
       const result = useProjectStore
@@ -223,6 +234,7 @@ export function ReviewTray() {
   };
 
   const rejectOne = (changeId: string): void => {
+    requireAgentConsoleProject(proposal.projectRoot);
     if (!proposal.changes.some((change) => change.id === changeId)) {
       throw new Error(`Pending proposal change not found: ${changeId}`);
     }
@@ -231,6 +243,7 @@ export function ReviewTray() {
   };
 
   const rejectAll = (): void => {
+    requireAgentConsoleProject(proposal.projectRoot);
     clearPendingProposal();
     record("rejected-all", remaining);
   };
@@ -276,20 +289,32 @@ export function ReviewTray() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {remaining === 0 ? (
-            <Button onClick={rejectAll} size="sm" variant="outline">
+            <Button
+              disabled={authorMutationsDisabled}
+              onClick={rejectAll}
+              size="sm"
+              variant="outline"
+            >
               Dismiss
             </Button>
           ) : (
             <div className="flex items-center gap-2">
               <Button
-                disabled={staleChangeIds.size > 0}
+                disabled={
+                  authorMutationsDisabled || staleChangeIds.size > 0
+                }
                 onClick={acceptAll}
                 size="sm"
               >
                 <IconCheck data-icon="inline-start" />
                 Accept All
               </Button>
-              <Button onClick={rejectAll} size="sm" variant="outline">
+              <Button
+                disabled={authorMutationsDisabled}
+                onClick={rejectAll}
+                size="sm"
+                variant="outline"
+              >
                 <IconX data-icon="inline-start" />
                 Reject All
               </Button>
@@ -299,6 +324,7 @@ export function ReviewTray() {
             <ScrollArea className="h-80 pr-3">
               {proposal.kind === "manuscript" ? (
                 <ManuscriptReview
+                  disabled={authorMutationsDisabled}
                   onAccept={acceptOne}
                   onNavigate={navigate}
                   onReject={rejectOne}
@@ -307,6 +333,7 @@ export function ReviewTray() {
                 />
               ) : (
                 <OutlineReview
+                  disabled={authorMutationsDisabled}
                   onAccept={acceptOne}
                   onNavigate={navigate}
                   onReject={rejectOne}

@@ -29,7 +29,10 @@ import {
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import type { AgentTask } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentConsoleOwnershipStatus,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
   SETTINGS_TABS,
@@ -53,11 +56,11 @@ export function AgentComposer() {
   const runStatus = useAgentConsoleStore((state) => state.runStatus);
   const runError = useAgentConsoleStore((state) => state.runError);
   const lastUsage = useAgentConsoleStore((state) => state.lastUsage);
-  const hydratedProjectRoot = useAgentConsoleStore(
-    (state) => state.hydratedProjectRoot,
+  const projectRoot = useProjectStore(
+    (state) => state.project?.root ?? null,
   );
-  const persistenceTransition = useAgentConsoleStore(
-    (state) => state.persistenceTransition,
+  const ownershipStatus = useAgentConsoleStore((state) =>
+    agentConsoleOwnershipStatus(state, projectRoot),
   );
 
   const status: ChatStatus =
@@ -83,15 +86,12 @@ export function AgentComposer() {
       : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
-  const blocksTargetEditing =
-    persistenceTransition !== null &&
-    hydratedProjectRoot !== persistenceTransition.projectRoot;
+  const blocksTargetEditing = ownershipStatus !== "ready";
 
   const handleSubmit = async (): Promise<void> => {
     if (
       runStatus !== "idle" ||
-      !hasMeaningfulDraft ||
-      persistenceTransition !== null
+      !hasMeaningfulDraft
     ) {
       return;
     }
@@ -182,6 +182,7 @@ export function AgentComposer() {
       >
         <PromptInputHeader>
           <DraftContextAttachments
+            disabled={blocksTargetEditing}
             onRemove={removeDraftContextRef}
             refs={draftContextRefs}
             sources={draftContextSources}
@@ -224,7 +225,7 @@ export function AgentComposer() {
           <PromptInputSubmit
             disabled={
               runStatus === "idle" &&
-              (!hasMeaningfulDraft || persistenceTransition !== null)
+              (!hasMeaningfulDraft || blocksTargetEditing)
             }
             onStop={stopAgentRun}
             status={status}

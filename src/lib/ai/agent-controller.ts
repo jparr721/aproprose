@@ -64,6 +64,7 @@ import type {
 } from "@/lib/types";
 import {
   type AgentDraftContextResolution,
+  agentConsoleOwnershipStatus,
   requireAgentConsoleProject,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -171,8 +172,6 @@ interface ErrorWithDetails extends Error {
   cause?: unknown;
   agentErrorCode?: AgentErrorCode;
 }
-
-const ACTIVE_RUN_ERROR = "An agent run is already active";
 
 function cloneBlock(block: Block): Block {
   return {
@@ -858,8 +857,7 @@ export function createAgentController(
     if (project === null || project.root !== projectRoot) return false;
     const consoleState = useAgentConsoleStore.getState();
     if (
-      consoleState.hydratedProjectRoot !== projectRoot ||
-      consoleState.persistenceTransition !== null
+      agentConsoleOwnershipStatus(consoleState, projectRoot) !== "ready"
     ) {
       return false;
     }
@@ -1081,7 +1079,7 @@ export function createAgentController(
     try {
       useAgentConsoleStore.getState().beginPreflight();
     } catch (error) {
-      const refusal = { code: "unknown" as const, message: ACTIVE_RUN_ERROR };
+      const refusal = runError(error, null);
       useAgentConsoleStore.setState({ runError: refusal });
       throw error;
     }
@@ -1545,6 +1543,11 @@ export function createAgentController(
   };
 
   const recordProposalEvent = (event: ProposalEventData): void => {
+    const project = useProjectStore.getState().project;
+    if (project === null) {
+      throw new Error("Open a project before recording a proposal decision.");
+    }
+    requireAgentConsoleProject(project.root);
     const mode = useAgentConsoleStore.getState().mode;
     const createdAt = dependencies.now();
     const message: AgentUIMessage = {
@@ -1601,8 +1604,10 @@ export function createAgentController(
       return (
         currentProject !== null &&
         currentProject.root === requestedProject.root &&
-        currentConsole.hydratedProjectRoot === requestedProject.root &&
-        currentConsole.persistenceTransition === null
+        agentConsoleOwnershipStatus(
+          currentConsole,
+          requestedProject.root,
+        ) === "ready"
       );
     };
     let resolved: ResolvedDraftContext;
@@ -1645,6 +1650,11 @@ export function createAgentController(
   const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
     useViewStore.getState().openAiConsole();
     try {
+      const project = useProjectStore.getState().project;
+      if (project === null) {
+        throw new Error("Open a project before using the agent console.");
+      }
+      requireAgentConsoleProject(project.root);
       if (intent.kind === "focus") {
         useAgentConsoleStore.getState().setMode(intent.mode);
         return;
@@ -1683,7 +1693,6 @@ let draftSourceRefreshSequence = 0;
 interface DraftSourceRefreshOwnership {
   sequence: number;
   projectRoot: string;
-  hydratedProjectRoot: string;
 }
 
 function invalidateDraftSourceRefreshes(): void {
@@ -1699,8 +1708,8 @@ function ownsDraftSourceRefresh(
     ownership.sequence === draftSourceRefreshSequence &&
     project !== null &&
     project.root === ownership.projectRoot &&
-    consoleState.hydratedProjectRoot === ownership.hydratedProjectRoot &&
-    consoleState.persistenceTransition === null &&
+    agentConsoleOwnershipStatus(consoleState, ownership.projectRoot) ===
+      "ready" &&
     consoleState.runStatus === "idle"
   );
 }
@@ -1714,8 +1723,7 @@ async function refreshAttachedDraftSources(): Promise<void> {
     project === null ||
     consoleState.runStatus !== "idle" ||
     consoleState.draftContextRefs.length === 0 ||
-    consoleState.hydratedProjectRoot !== project.root ||
-    consoleState.persistenceTransition !== null
+    agentConsoleOwnershipStatus(consoleState, project.root) !== "ready"
   ) {
     return;
   }
@@ -1723,7 +1731,6 @@ async function refreshAttachedDraftSources(): Promise<void> {
   const ownership: DraftSourceRefreshOwnership = {
     sequence,
     projectRoot: project.root,
-    hydratedProjectRoot: consoleState.hydratedProjectRoot,
   };
   try {
     const resolved = await resolveDraftContext({

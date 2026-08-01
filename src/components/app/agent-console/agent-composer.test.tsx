@@ -207,6 +207,8 @@ function resetConsoleState(): void {
     draftContextRefs: [],
     draftContextSources: {},
     draftSourceLocators: {},
+    requestedProjectRoot: project.root,
+    activeProjectRoot: project.root,
     hydratedProjectRoot: project.root,
   });
 }
@@ -354,6 +356,57 @@ describe("AgentComposer draft behavior", () => {
     expect(screen.getByText("AI conversation is loading.")).toBeTruthy();
   });
 
+  it.each([
+    {
+      name: "a same-project persistence transition",
+      state: {
+        hydratedProjectRoot: project.root,
+        persistenceTransition: {
+          generation: 5,
+          kind: "load" as const,
+          projectRoot: project.root,
+        },
+      },
+    },
+    {
+      name: "a completed failed load with mismatched hydration",
+      state: {
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+      },
+    },
+  ])("locks every idle composer mutation during $name", ({ state }) => {
+    useAgentConsoleStore.setState({
+      ...state,
+      draftText: "Owned draft",
+      draftContextRefs: [firstRef],
+      draftContextSources: sources,
+    });
+    render(<AgentComposer />);
+
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Writing" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", {
+        name: "Remove Opening paragraph",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.getByText("AI conversation is loading.")).toBeTruthy();
+  });
+
   it("removes one of multiple live attachments without submitting", () => {
     useAgentConsoleStore.setState({
       draftText: "Compare these",
@@ -408,7 +461,7 @@ describe("AgentComposer draft behavior", () => {
     expect(textarea.value).toBe("Next turn");
   });
 
-  it("keeps typing enabled, changes Submit to Stop, and blocks Enter during a run", () => {
+  it("locks typing but keeps Stop enabled during an ownership transition", () => {
     useAgentConsoleStore.setState({
       draftText: "Next turn",
       activeRun: activeRun("writing"),
@@ -422,11 +475,8 @@ describe("AgentComposer draft behavior", () => {
     render(<AgentComposer />);
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
 
-    expect(textarea.disabled).toBe(false);
-    fireEvent.change(textarea, { target: { value: "Keep drafting" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
-
-    expect(useAgentConsoleStore.getState().draftText).toBe("Keep drafting");
+    expect(textarea.disabled).toBe(true);
+    expect(useAgentConsoleStore.getState().draftText).toBe("Next turn");
     expect(controller.submitAgentDraft).not.toHaveBeenCalled();
     const stop = screen.getByRole("button", { name: "Stop" });
     expect((stop as HTMLButtonElement).disabled).toBe(false);

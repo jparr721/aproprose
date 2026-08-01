@@ -86,6 +86,7 @@ describe("DraftContextAttachments", () => {
   it("renders one removable inline attachment for each draft reference", () => {
     render(
       <DraftContextAttachments
+        disabled={false}
         refs={[narrationRef, outlineRef]}
         sources={sources}
         onRemove={vi.fn()}
@@ -110,6 +111,7 @@ describe("DraftContextAttachments", () => {
       return (
         <form onSubmit={onSubmit}>
           <DraftContextAttachments
+            disabled={false}
             refs={refs}
             sources={sources}
             onRemove={(removed) => {
@@ -136,6 +138,7 @@ describe("DraftContextAttachments", () => {
   it("renders duplicate draft references once", () => {
     render(
       <DraftContextAttachments
+        disabled={false}
         refs={[narrationRef, { ...narrationRef }]}
         sources={sources}
         onRemove={vi.fn()}
@@ -150,6 +153,7 @@ describe("DraftContextAttachments", () => {
   it("keeps the draft remove action visible to keyboard focus", () => {
     render(
       <DraftContextAttachments
+        disabled={false}
         refs={[narrationRef]}
         sources={sources}
         onRemove={vi.fn()}
@@ -177,6 +181,7 @@ describe("DraftContextAttachments", () => {
 
     render(
       <DraftContextAttachments
+        disabled={false}
         refs={[narrationRef]}
         sources={{ [draftContextRefKey(narrationRef)]: unavailable }}
         onRemove={onRemove}

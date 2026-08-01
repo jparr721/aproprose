@@ -31,6 +31,7 @@ export interface DraftContextAttachmentsProps {
   refs: DraftContextRef[];
   sources: Record<string, DraftContextSource>;
   onRemove: (ref: DraftContextRef) => void;
+  disabled: boolean;
 }
 
 export interface SentContextAttachmentsProps {
@@ -58,6 +59,7 @@ export function DraftContextAttachments({
   refs,
   sources,
   onRemove,
+  disabled,
 }: DraftContextAttachmentsProps) {
   const seen = new Set<string>();
   const uniqueRefs = refs.filter((ref) => {
@@ -89,6 +91,7 @@ export function DraftContextAttachments({
                 )}
                 <AttachmentRemove
                   className="focus-visible:opacity-100 group-focus-within:opacity-100"
+                  disabled={disabled}
                   label={`Remove ${source.label}`}
                 />
               </Attachment>

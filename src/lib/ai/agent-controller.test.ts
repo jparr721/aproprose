@@ -582,6 +582,40 @@ describe("dispatchAgentIntent", () => {
     expect(dependencies.stream).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "Add to Chat",
+      intent: {
+        kind: "add-context",
+        refs: [blockRef("inactive", "ch2")],
+      } as const,
+    },
+    {
+      name: "prefill",
+      intent: {
+        kind: "prefill",
+        mode: "edit",
+        text: "Review the inactive passage.",
+        refs: [blockRef("inactive", "ch2")],
+      } as const,
+    },
+  ])("replaces a stale run error when a later $name fails", async ({ intent }) => {
+    mocks.readTextFile.mockRejectedValueOnce(
+      new Error("Current context resolution failed"),
+    );
+    useAgentConsoleStore.setState({
+      runError: { code: "transport", message: "Stale run failure" },
+    });
+    const controller = createAgentController(makeDependencies(null));
+
+    await controller.dispatchAgentIntent(intent);
+
+    expect(useAgentConsoleStore.getState().runError).toEqual({
+      code: "unknown",
+      message: "Current context resolution failed",
+    });
+  });
+
   it("resolves a message-wide finding index across multiple findings parts", async () => {
     const run: AgentRun = {
       id: "findings-run",

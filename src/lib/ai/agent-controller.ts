@@ -1808,6 +1808,7 @@ export function createAgentController(
   const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
     const frozenIntent = structuredClone(intent);
     useViewStore.getState().openAiConsole();
+    useAgentConsoleStore.setState({ runError: null });
     try {
       const project = useProjectStore.getState().project;
       if (project === null) {

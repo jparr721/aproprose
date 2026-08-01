@@ -121,8 +121,23 @@ function createFakePdfRuntime({ pages }: { pages: number }) {
   }
 
   class FakePDFFindController {
-    constructor(_options: unknown) {
+    private document: FakePdfDocument | null = null;
+
+    readonly setDocument = vi.fn(
+      (document: FakePdfDocument | null): void => {
+        this.document = document;
+      },
+    );
+
+    constructor({ eventBus }: { eventBus: FakeEventBus }) {
       findController = this;
+      eventBus.on("find", (event) => {
+        if (!this.document || event.query !== "chapter") return;
+        eventBus.emit("updatefindcontrolstate", {
+          state: 0,
+          matchesCount: { current: 1, total: 1 },
+        });
+      });
     }
   }
 
@@ -261,6 +276,28 @@ describe("PDF viewer adapter", () => {
     harness.eventBus.emit("scalechanging", { scale: 1.5 });
     expect(onPageChange).toHaveBeenCalledWith(6);
     expect(onScaleChange).toHaveBeenCalledWith(1.5);
+  });
+
+  it("centers the PDF in the scroll viewport after initialization", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const options = createAdapterOptions(
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    );
+    Object.defineProperties(options.container, {
+      clientWidth: { value: 400 },
+      scrollWidth: { value: 800 },
+    });
+    const adapter = await createPdfViewerAdapter(options);
+
+    await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
+
+    expect(options.container.scrollLeft).toBe(200);
   });
 
   // Mutation caught: resolving loadDocument before pagesinit.
@@ -540,6 +577,30 @@ describe("PDF viewer adapter", () => {
       "findbarclose",
       expect.any(Object),
     );
+  });
+
+  it("makes the loaded PDF document searchable", async () => {
+    const harness = createFakePdfRuntime({ pages: 2 });
+    runtime.loadViewerModule.mockResolvedValue(harness.module);
+    runtime.getDocument.mockReturnValue(harness.loadingTask);
+    const onFindResult = vi.fn();
+    const adapter = await createPdfViewerAdapter(
+      createAdapterOptions(vi.fn(), vi.fn(), vi.fn(), onFindResult, vi.fn()),
+    );
+    await adapter.loadDocument(new Uint8Array([1]), { page: 1, scale: 1 });
+
+    adapter.search({
+      query: "chapter",
+      caseSensitive: false,
+      wholeWord: false,
+    });
+
+    expect(onFindResult).toHaveBeenLastCalledWith({
+      status: "found",
+      current: 1,
+      total: 1,
+      error: null,
+    });
   });
 
   it("maps PDF.js state and progressive count events into strict results", async () => {

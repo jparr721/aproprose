@@ -1,5 +1,5 @@
 import { clamp } from "es-toolkit";
-import type { PDFDocumentLoadingTask } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import {
   EMPTY_PDF_FIND_RESULT,
   type PdfFindQuery,
@@ -123,6 +123,13 @@ function runCleanupOperations(
   return errors;
 }
 
+function centerViewer(container: HTMLDivElement): void {
+  container.scrollLeft = Math.max(
+    0,
+    (container.scrollWidth - container.clientWidth) / 2,
+  );
+}
+
 function findStatus(
   module: PdfViewerModule,
   state: number,
@@ -155,6 +162,13 @@ export async function createPdfViewerAdapter(
       eventBus,
       linkService,
     });
+    const setFindDocument = findController.setDocument.bind(findController);
+    let findDocument: PDFDocumentProxy | null = null;
+    findController.setDocument = (document: PDFDocumentProxy | null): void => {
+      if (document === findDocument) return;
+      findDocument = document;
+      setFindDocument(document);
+    };
     const viewerOptions: PdfViewerOptionsWithAbortSignal = {
       container: options.container,
       viewer: options.viewer,
@@ -213,6 +227,7 @@ export async function createPdfViewerAdapter(
         pdfViewer.pagesCount,
       );
       pdfViewer.currentScale = pendingView.scale;
+      centerViewer(options.container);
       pendingView = null;
       options.onReady({
         page: pdfViewer.currentPageNumber,
@@ -334,6 +349,7 @@ export async function createPdfViewerAdapter(
         const initialization = new Promise<void>((resolve, reject) => {
           pendingInitialization = { revision, reject, resolve };
         });
+        findController.setDocument(document);
         linkService.setDocument(document, null);
         pdfViewer.setDocument(document);
         const pagesPromise: Promise<unknown> | null =
@@ -398,6 +414,7 @@ export async function createPdfViewerAdapter(
       },
       setScale: (scale: number): void => {
         pdfViewer.currentScale = scale;
+        centerViewer(options.container);
       },
       search: (query: PdfFindQuery): void => {
         latestQuery = { ...query };

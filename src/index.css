@@ -290,9 +290,11 @@
     --page-margin: 1rem auto 0;
     --page-border: 1px solid var(--border);
     --page-bg-color: var(--sheet);
+    padding-inline: 1rem;
   }
 
   .aproprose-pdf-viewer .page {
+    margin: var(--page-margin);
     border-radius: 2px;
     box-shadow: 0 10px 15px -3px
       color-mix(in oklch, var(--foreground) 12%, transparent);

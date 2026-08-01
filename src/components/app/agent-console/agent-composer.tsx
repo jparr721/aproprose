@@ -26,6 +26,7 @@ import {
   stopAgentRun,
   submitAgentDraft,
 } from "@/lib/ai/agent-controller";
+import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import type { AgentTask } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
@@ -123,7 +124,7 @@ export function AgentComposer() {
       {runError === null ? null : (
         <div className="flex items-center justify-between gap-2">
           <TypographyMuted className="text-destructive" role="alert">
-            {runError.message}
+            {safeAgentErrorText(runError.code)}
           </TypographyMuted>
           {runError.code === "configuration" ? (
             <Button

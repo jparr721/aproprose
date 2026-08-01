@@ -379,14 +379,15 @@ describe("AgentComposer draft behavior", () => {
     expect(controller.stopAgentRun).toHaveBeenCalledOnce();
   });
 
-  it("renders a preflight failure inline and leaves the draft unchanged", async () => {
+  it("renders safe preflight copy inline and leaves the draft unchanged", async () => {
     useAgentConsoleStore.getState().setDraftText("Keep this draft");
     controller.submitAgentDraft.mockImplementation(async () => {
       const state = useAgentConsoleStore.getState();
       state.beginPreflight();
       state.failPreflight({
         code: "compaction",
-        message: "Conversation context could not be compacted.",
+        message:
+          "Compaction failed at /Users/author/private/book with internal detail.",
       });
     });
     render(<AgentComposer />);
@@ -397,8 +398,10 @@ describe("AgentComposer draft behavior", () => {
     const form = screen.getByRole("textbox").closest("form");
     if (form === null) throw new Error("PromptInput form is missing");
     expect(error.textContent).toBe(
-      "Conversation context could not be compacted.",
+      "Older conversation context could not be prepared. Retry the request.",
     );
+    expect(document.body.textContent).not.toContain("/Users/author");
+    expect(document.body.textContent).not.toContain("internal detail");
     const promptFileInput = error.parentElement?.nextElementSibling;
     expect(promptFileInput?.getAttribute("aria-label")).toBe("Upload files");
     expect(promptFileInput?.nextElementSibling?.tagName).toBe("FORM");
@@ -406,14 +409,46 @@ describe("AgentComposer draft behavior", () => {
     expect(useAgentConsoleStore.getState().draftText).toBe("Keep this draft");
   });
 
+  it("hides provider response details and absolute paths from transport errors", () => {
+    const rawError =
+      "AI_APICallError responseBody {\"error\":\"private provider detail\"} at /Users/author/.config/key from C:\\Users\\author\\.config\\key raw errorText";
+    useAgentConsoleStore.setState({
+      draftText: "Keep this transport draft",
+      runError: {
+        code: "transport",
+        message: rawError,
+      },
+    });
+    render(<AgentComposer />);
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The AI request could not be completed. Check your connection and retry.",
+    );
+    expect(document.body.textContent).not.toContain(rawError);
+    expect(document.body.textContent).not.toContain("/Users/author");
+    expect(document.body.textContent).not.toContain("C:\\Users\\author");
+    expect(document.body.textContent).not.toContain("responseBody");
+    expect(document.body.textContent).not.toContain("raw errorText");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Keep this transport draft",
+    );
+  });
+
   it("opens AI Settings from a preflight configuration error", () => {
     useAgentConsoleStore.setState({
       runError: {
         code: "configuration",
-        message: "Choose an OpenAI model before submitting.",
+        message:
+          "Missing key at /private/book/.env with raw provider response.",
       },
     });
     render(<AgentComposer />);
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "AI is not configured. Open AI Settings to continue.",
+    );
+    expect(document.body.textContent).not.toContain("/private/book");
+    expect(document.body.textContent).not.toContain("raw provider response");
 
     fireEvent.click(
       screen.getByRole("button", { name: "Open AI Settings" }),

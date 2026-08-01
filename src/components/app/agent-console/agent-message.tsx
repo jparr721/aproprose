@@ -39,8 +39,8 @@ import {
   type FlattenedMessageFinding,
 } from "@/lib/ai/agent-context";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
+import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import type {
-  AgentErrorCode,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
@@ -380,20 +380,6 @@ function renderPart(
   }
 }
 
-const runErrorText: Record<AgentErrorCode, string> = {
-  configuration: "AI is not configured. Open AI Settings to continue.",
-  transport:
-    "The AI request could not be completed. Check your connection and retry.",
-  tool: "A project action could not be completed. Retry the request.",
-  compaction:
-    "Older conversation context could not be prepared. Retry the request.",
-  unknown: "The AI request could not be completed. Retry the request.",
-};
-
-function safeRunErrorText(errorCode: AgentErrorCode | null): string {
-  return runErrorText[errorCode ?? "unknown"];
-}
-
 function MessageUsage({ usage }: { usage: PersistedUsage }) {
   const displayUsage = {
     ...usage.raw,
@@ -454,7 +440,7 @@ export function AgentMessage({
   const findings = flattenMessageFindings(message);
   const error =
     messageMetadata.state === "error"
-      ? safeRunErrorText(messageMetadata.errorCode)
+      ? safeAgentErrorText(messageMetadata.errorCode)
       : null;
   return (
     <Message from={message.role}>

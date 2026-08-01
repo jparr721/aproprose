@@ -286,6 +286,7 @@ describe("AgentConsole persistence banner", () => {
   });
 
   it("requires destructive confirmation before resetting malformed v3 state", async () => {
+    await transitionAgentProject(project.root);
     const issue: AgentPersistenceIssue = {
       kind: "corrupt",
       projectRoot: project.root,

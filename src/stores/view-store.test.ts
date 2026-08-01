@@ -1,17 +1,26 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+const storage = vi.hoisted(() => ({
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+}));
+
 vi.mock("@/lib/storage", () => ({
-  tauriStateStorage: {
-    getItem: async () => null,
-    setItem: async () => {},
-    removeItem: async () => {},
-  },
+  tauriStateStorage: storage,
 }));
 
 import { useViewStore } from "@/stores/view-store";
 import { useProjectStore } from "@/stores/project-store";
 
 beforeEach(() => {
+  storage.getItem.mockReset();
+  storage.getItem.mockResolvedValue(null);
+  storage.setItem.mockReset();
+  storage.setItem.mockResolvedValue(undefined);
+  storage.removeItem.mockReset();
+  storage.removeItem.mockResolvedValue(undefined);
+  useViewStore.setState(useViewStore.getInitialState(), true);
   useViewStore.setState({
     aiOpen: true,
     pdfOpen: false,
@@ -122,6 +131,64 @@ describe("view-store layout persistence", () => {
       ? opts.partialize(useViewStore.getState())
       : {};
     expect(persisted).toMatchObject({ pdfOpen: true, outlineOpen: true });
+  });
+
+  it("hydrates only current layout fields from legacy saved state", async () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+    storage.getItem.mockResolvedValueOnce(
+      JSON.stringify({
+        state: {
+          rightPanelWidth: 488,
+          pdfOpen: true,
+          outlineOpen: true,
+          aiTab: "edit",
+          aiCollapsed: true,
+        },
+        version: 0,
+      }),
+    );
+
+    await useViewStore.persist.rehydrate();
+
+    const state = useViewStore.getState();
+    expect(state).toMatchObject({
+      rightPanelWidth: 488,
+      pdfOpen: true,
+      outlineOpen: true,
+      aiOpen: false,
+      focus: true,
+    });
+    expect(state).not.toHaveProperty("aiTab");
+    expect(state).not.toHaveProperty("aiCollapsed");
+    expect(state).not.toHaveProperty("sidebarOpen");
+    expect(state.toggleAi).toBeTypeOf("function");
+    expect(state.openAiConsole).toBeTypeOf("function");
+  });
+
+  it("rejects malformed required persisted layout values as one state", async () => {
+    useViewStore.setState({
+      rightPanelWidth: 401,
+      pdfOpen: false,
+      outlineOpen: false,
+    });
+    storage.getItem.mockResolvedValueOnce(
+      JSON.stringify({
+        state: {
+          rightPanelWidth: "wide",
+          pdfOpen: true,
+          outlineOpen: true,
+        },
+        version: 0,
+      }),
+    );
+
+    await useViewStore.persist.rehydrate();
+
+    expect(useViewStore.getState()).toMatchObject({
+      rightPanelWidth: 401,
+      pdfOpen: false,
+      outlineOpen: false,
+    });
   });
 });
 

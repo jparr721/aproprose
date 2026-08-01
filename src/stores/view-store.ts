@@ -13,6 +13,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { z } from "zod";
 import type { LayoutMode } from "@/lib/types";
 import { tauriStateStorage } from "@/lib/storage";
 import { useProjectStore } from "@/stores/project-store";
@@ -57,6 +58,26 @@ interface ViewState {
   ) => Promise<GuardedActionResult<Awaited<Result>>>;
   confirmPending: () => void;
   cancelPending: () => void;
+}
+
+const persistedViewStateSchema = z.object({
+  rightPanelWidth: z.number().finite(),
+  pdfOpen: z.boolean(),
+  outlineOpen: z.boolean(),
+});
+
+function mergePersistedViewState(
+  persistedState: unknown,
+  currentState: ViewState,
+): ViewState {
+  if (persistedState === undefined) return currentState;
+  const parsed = persistedViewStateSchema.parse(persistedState);
+  return {
+    ...currentState,
+    rightPanelWidth: parsed.rightPanelWidth,
+    pdfOpen: parsed.pdfOpen,
+    outlineOpen: parsed.outlineOpen,
+  };
 }
 
 export const useViewStore = create<ViewState>()(
@@ -138,6 +159,7 @@ export const useViewStore = create<ViewState>()(
         pdfOpen,
         outlineOpen,
       }),
+      merge: mergePersistedViewState,
     },
   ),
 );

@@ -1429,6 +1429,7 @@ describe("agent persistence", () => {
 
   it("resets a malformed conversation to empty v3 state after an explicit action", async () => {
     const root = "/books/corrupt";
+    await transitionAgentProject(root);
     const issue = {
       kind: "corrupt" as const,
       projectRoot: root,
@@ -1438,7 +1439,7 @@ describe("agent persistence", () => {
       mode: "edit",
       messages: [textMessage("user-corrupt", "user", "Keep me", "complete")],
       draftText: "Unreadable draft",
-      pendingProposal: proposal,
+      pendingProposal: { ...proposal, projectRoot: root },
       persistenceIssue: issue,
     });
 
@@ -1487,6 +1488,61 @@ describe("agent persistence", () => {
 
     vi.useRealTimers();
     persistence.unmount();
+  });
+
+  it("does not hydrate a reset root after project ownership changes", async () => {
+    const resetRoot = "/books/resetting";
+    const nextRoot = "/books/next";
+    tauri.readAppData
+      .mockResolvedValueOnce({
+        ...emptyPersistedAgentState(),
+        draftSourceLocators: undefined,
+      })
+      .mockResolvedValueOnce(null);
+    await transitionAgentProject(resetRoot);
+    expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
+      kind: "corrupt",
+      projectRoot: resetRoot,
+    });
+    const resetWrite = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(resetWrite.promise);
+
+    const resetting = resetAgentConversation(resetRoot);
+    await vi.waitFor(() =>
+      expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentStateKey(resetRoot),
+        emptyPersistedAgentState(),
+      ),
+    );
+    await transitionAgentProject(nextRoot);
+    const nextMessages = [
+      textMessage("user-next", "user", "Keep the next project", "complete"),
+    ];
+    const nextProposal = { ...proposal, projectRoot: nextRoot };
+    const nextIssue = {
+      kind: "save" as const,
+      projectRoot: nextRoot,
+      message: "Next project save is pending",
+    };
+    useAgentConsoleStore.setState({
+      mode: "edit",
+      messages: nextMessages,
+      draftText: "Next project draft",
+      pendingProposal: nextProposal,
+      persistenceIssue: nextIssue,
+    });
+
+    resetWrite.resolve(undefined);
+    await resetting;
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      hydratedProjectRoot: nextRoot,
+      mode: "edit",
+      messages: nextMessages,
+      draftText: "Next project draft",
+      pendingProposal: nextProposal,
+      persistenceIssue: nextIssue,
+    });
   });
 
   it("retains the malformed conversation and issue when reset cannot be written", async () => {

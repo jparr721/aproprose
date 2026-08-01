@@ -114,6 +114,7 @@ const changes: ManuscriptPendingChange[] = [
     },
     precondition: {
       kind: "insert",
+      boundary: "next-prose",
       anchor: locator(frozenBlocks[0], 0),
       expectedNext: locator(frozenBlocks[1], 1),
     },

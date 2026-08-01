@@ -229,6 +229,7 @@ function bridgePrecondition(
   }
   return {
     kind: "insert",
+    boundary: "next-prose",
     anchor:
       change.afterId === null ? null : blockLocator(blocks, change.afterId),
     expectedNext:
@@ -263,6 +264,7 @@ function manuscriptPrecondition(
     const nextBlock = blocks[anchorOrder + 1];
     return {
       kind: "insert",
+      boundary: "immediate",
       anchor,
       expectedNext:
         nextBlock === undefined ? null : blockLocator(blocks, nextBlock.id),
@@ -514,9 +516,7 @@ function validateManuscriptChange(
   const anchorOrder =
     anchor === null ? blocks.length - 1 : blocks.findIndex((block) => block.id === anchor.id);
   const next =
-    precondition.expectedNext === null ||
-    precondition.expectedNext.sourceType === "narration" ||
-    precondition.expectedNext.sourceType === "dialogue"
+    precondition.boundary === "next-prose"
       ? blocks
           .slice(anchorOrder + 1)
           .find((block) => block.type === "narration" || block.type === "dialogue")

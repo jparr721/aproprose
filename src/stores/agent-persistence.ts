@@ -171,6 +171,7 @@ const manuscriptPreconditionSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("insert"),
+      boundary: z.enum(["immediate", "next-prose"]),
       anchor: sourceLocatorSchema.nullable(),
       expectedNext: sourceLocatorSchema.nullable(),
     })

@@ -117,6 +117,7 @@ export type ManuscriptPrecondition =
   | { kind: "target"; target: SourceLocator }
   | {
       kind: "insert";
+      boundary: "immediate" | "next-prose";
       anchor: SourceLocator | null;
       expectedNext: SourceLocator | null;
     }

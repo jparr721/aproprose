@@ -402,6 +402,85 @@ describe("agent persistence", () => {
     expect(snapshot).not.toHaveProperty("draftContextSources");
   });
 
+  it("round-trips explicit immediate and next-prose insert boundaries", async () => {
+    const anchor = {
+      sourceId: "block-1",
+      order: 0,
+      fingerprint: "anchor-fingerprint",
+      sourceType: "narration",
+      label: "Narration block",
+      exactText: "Left boundary.",
+      previewText: "Left boundary.",
+    };
+    const expectedNext = {
+      sourceId: "block-2",
+      order: 1,
+      fingerprint: "successor-fingerprint",
+      sourceType: "narration",
+      label: "Narration block",
+      exactText: "Right boundary.",
+      previewText: "Right boundary.",
+    };
+    const pendingProposal = {
+      id: "proposal-insert-boundaries",
+      kind: "manuscript" as const,
+      chapterId: "chapter-1",
+      summary: "Insert at both boundary kinds",
+      createdAt: "2026-07-30T12:01:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes: [
+        {
+          id: "change-immediate",
+          change: {
+            kind: "insert" as const,
+            blockId: null,
+            afterId: "block-1",
+            type: "narration" as const,
+            speaker: null,
+            newText: "Immediate insertion.",
+            toIndex: null,
+            reason: "Keep the physical boundary",
+          },
+          precondition: {
+            kind: "insert" as const,
+            boundary: "immediate" as const,
+            anchor,
+            expectedNext,
+          },
+        },
+        {
+          id: "change-next-prose",
+          change: {
+            kind: "insert" as const,
+            blockId: null,
+            afterId: "block-1",
+            type: "narration" as const,
+            speaker: null,
+            newText: "Bridge insertion.",
+            toIndex: null,
+            reason: "Bridge across non-prose",
+          },
+          precondition: {
+            kind: "insert" as const,
+            boundary: "next-prose" as const,
+            anchor,
+            expectedNext,
+          },
+        },
+      ],
+    };
+
+    const restored = await fromAgentSnapshot("/books/reopened", {
+      ...emptyPersistedAgentState(),
+      pendingProposal,
+    });
+
+    expect(restored.pendingProposal).toEqual({
+      ...pendingProposal,
+      projectRoot: "/books/reopened",
+    });
+  });
+
   it("rejects a persisted proposal that claims its own project root", async () => {
     const unsafeProposal = {
       ...proposal,
@@ -488,6 +567,7 @@ describe("agent persistence", () => {
             },
             precondition: {
               kind: "insert",
+              boundary: "immediate",
               anchor: null,
               expectedNext: null,
             },

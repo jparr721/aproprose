@@ -340,6 +340,7 @@ describe("agent console authoring flows", () => {
           },
           precondition: {
             kind: "insert",
+            boundary: "next-prose",
             anchor: {
               sourceId: "anchor",
               order: 0,
@@ -473,6 +474,7 @@ describe("agent console authoring flows", () => {
           },
           precondition: {
             kind: "insert",
+            boundary: "next-prose",
             anchor: {
               sourceId: "later",
               order: 2,

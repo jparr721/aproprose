@@ -189,6 +189,7 @@ describe("stage tools", () => {
           },
           precondition: {
             kind: "insert",
+            boundary: "immediate",
             anchor: null,
             expectedNext: null,
           },

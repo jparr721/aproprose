@@ -152,7 +152,12 @@ describe("proposal change correlation", () => {
     ];
     const preconditions: ManuscriptPrecondition[] = [
       { kind: "target", target: locator },
-      { kind: "insert", anchor: null, expectedNext: null },
+      {
+        kind: "insert",
+        boundary: "immediate",
+        anchor: null,
+        expectedNext: null,
+      },
       { kind: "move", target: locator, orderFingerprint: "block-order" },
     ];
     const changes = changeCases.flatMap(({ change, expected }) =>
@@ -551,6 +556,45 @@ describe("proposal preconditions", () => {
     expect(
       validateManuscriptChanges(proposal, [block("a", "Left."), block("x", "New.")]),
     ).toEqual([{ changeId: "generated-id", reason: "successor-changed" }]);
+  });
+
+  it("keeps ordinary insert boundaries immediate while bridges skip non-prose", () => {
+    const frozen = [block("a", "Left."), block("b", "Right.")];
+    const changed = [
+      block("a", "Left."),
+      scratchpad("note", "Inserted note."),
+      block("b", "Right."),
+    ];
+    const ordinary = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [insert("a", "Ordinary insertion.")],
+      frozen,
+    );
+    const bridge = buildManuscript(
+      {
+        kind: "bridge",
+        chapterId: "ch1",
+        anchorBlockId: "a",
+        successorBlockId: "b",
+      },
+      [insert("a", "Bridge insertion.")],
+      frozen,
+    );
+
+    expect(ordinary.changes[0].precondition).toMatchObject({
+      kind: "insert",
+      boundary: "immediate",
+      expectedNext: { sourceId: "b" },
+    });
+    expect(bridge.changes[0].precondition).toMatchObject({
+      kind: "insert",
+      boundary: "next-prose",
+      expectedNext: { sourceId: "b" },
+    });
+    expect(validateManuscriptChanges(ordinary, changed)).toEqual([
+      { changeId: "generated-id", reason: "successor-changed" },
+    ]);
+    expect(validateManuscriptChanges(bridge, changed)).toEqual([]);
   });
 
   it("marks a changed frozen prose successor stale across a scratchpad", () => {

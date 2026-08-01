@@ -1325,6 +1325,7 @@ describe("applyAgentManuscriptProposal", () => {
           ...proposal.changes[0],
           precondition: {
             kind: "insert" as const,
+            boundary: "immediate" as const,
             anchor: null,
             expectedNext: null,
           },

@@ -136,6 +136,7 @@ const appendChange = (): ManuscriptPendingChange => ({
   },
   precondition: {
     kind: "insert",
+    boundary: "immediate",
     anchor: null,
     expectedNext: null,
   },

@@ -175,6 +175,46 @@ function makeRuntimeInput(model: LanguageModel): StreamAgentRunInput {
 }
 
 describe("streamAgentRun", () => {
+  it("rejects provider stream errors instead of completing an empty message", async () => {
+    const providerError = new Error("You have no credits remaining.");
+    providerError.name = "AI_RetryError";
+    const input = makeRuntimeInput(
+      new MockLanguageModelV3({
+        doStream: async () =>
+          streamResult([{ type: "error", error: providerError }]),
+      }),
+    );
+
+    await expect(streamAgentRun(input)).rejects.toBe(providerError);
+  });
+
+  it("rejects successful streams that contain no assistant output", async () => {
+    const input = makeRuntimeInput(
+      new MockLanguageModelV3({
+        doStream: async () =>
+          streamResult([
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: "stop" },
+              usage: {
+                inputTokens: {
+                  total: 0,
+                  noCache: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                },
+                outputTokens: { total: 0, text: 0, reasoning: 0 },
+              },
+            },
+          ]),
+      }),
+    );
+
+    await expect(streamAgentRun(input)).rejects.toThrow(
+      "Agent run emitted no assistant output: run-1",
+    );
+  });
+
   it("streams an assistant UI message without reasoning parts", async () => {
     const updates = vi.fn();
     const input = makeRuntimeInput(

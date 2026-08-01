@@ -54,6 +54,7 @@ const metadataSchema = z.object({
   errorCode: z
     .enum([
       "configuration",
+      "quota",
       "transport",
       "tool",
       "compaction",
@@ -477,6 +478,14 @@ export function sanitizeAgentMessages(
         return [{ ...part }];
       }),
     }];
+  });
+}
+
+export function hasAssistantOutput(message: AgentUIMessage): boolean {
+  if (message.role !== "assistant") return false;
+  return message.parts.some((part) => {
+    if (part.type === "step-start" || part.type === "reasoning") return false;
+    return part.type !== "text" || part.text.trim().length > 0;
   });
 }
 

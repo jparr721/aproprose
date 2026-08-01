@@ -3,6 +3,7 @@ import { isEqual } from "es-toolkit";
 import { z } from "zod";
 import { abortAgentRunForProjectSwitch } from "@/lib/ai/agent-controller";
 import {
+  hasAssistantOutput,
   sanitizeAgentMessages,
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
@@ -309,6 +310,7 @@ const messageMetadataSchema = z
     errorCode: z
       .enum([
         "configuration",
+        "quota",
         "transport",
         "tool",
         "compaction",
@@ -941,7 +943,23 @@ async function parseAgentSnapshot(
   }));
   validatePersistedParts(normalizedMessages);
   const messages = await validateAgentMessages(normalizedMessages);
-  const sanitizedMessages = sanitizeAgentMessages(messages);
+  const recoveredMessages = messages.map((message) =>
+    message.role === "assistant" &&
+    message.metadata?.state === "complete" &&
+    !hasAssistantOutput(message)
+      ? {
+          ...message,
+          metadata: {
+            ...message.metadata,
+            state: "error" as const,
+            error: "The AI response did not contain any output.",
+            errorCode: "unknown" as const,
+            usage: null,
+          },
+        }
+      : message,
+  );
+  const sanitizedMessages = sanitizeAgentMessages(recoveredMessages);
   const persistedToolParts = messages.flatMap((message) =>
     message.parts.filter(
       (part) => part.type === "dynamic-tool" || part.type.startsWith("tool-"),
@@ -958,14 +976,16 @@ async function parseAgentSnapshot(
   return {
     v: 3,
     mode: parsed.mode,
-    messages,
+    messages: recoveredMessages,
     summary: parsed.summary,
     draftText: parsed.draftText,
     draftContextRefs: parsed.draftContextRefs,
     draftSourceLocators: parsed.draftSourceLocators,
     pendingProposal: parsed.pendingProposal,
     lastUsage:
-      parsed.lastUsage === null ? null : normalizedUsage(parsed.lastUsage),
+      recoveredMessages.at(-1) !== messages.at(-1) || parsed.lastUsage === null
+        ? null
+        : normalizedUsage(parsed.lastUsage),
     interruptedRun: parsed.interruptedRun,
   };
 }

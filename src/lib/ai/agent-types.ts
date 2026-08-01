@@ -237,6 +237,7 @@ export type AgentMessageState =
 
 export type AgentErrorCode =
   | "configuration"
+  | "quota"
   | "transport"
   | "tool"
   | "compaction"

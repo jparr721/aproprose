@@ -269,6 +269,50 @@ afterEach(() => {
 });
 
 describe("agent persistence", () => {
+  it("recovers a completed outputless assistant run as a retryable error", async () => {
+    const zeroUsage: PersistedUsage = {
+      modelId: "gpt-5.6-luna",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      contextWindow: 1_050_000,
+      raw: {
+        inputTokens: 0,
+        inputTokenDetails: {
+          noCacheTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        outputTokens: 0,
+        outputTokenDetails: { textTokens: 0, reasoningTokens: 0 },
+        totalTokens: 0,
+      },
+    };
+    const raw = persistedState("", [
+      textMessage("user-empty", "user", "Continue the scene.", "complete"),
+      {
+        id: "assistant-empty",
+        role: "assistant",
+        metadata: { ...metadata, usage: zeroUsage },
+        parts: [{ type: "step-start" }],
+      },
+    ]);
+    raw.lastUsage = zeroUsage;
+
+    const restored = await fromAgentSnapshot("/books/one", raw);
+
+    expect(restored.messages.at(-1)).toMatchObject({
+      id: "assistant-empty",
+      metadata: {
+        state: "error",
+        error: "The AI response did not contain any output.",
+        errorCode: "unknown",
+        usage: null,
+      },
+    });
+    expect(restored.lastUsage).toBeNull();
+  });
+
   it("round-trips a sanitized v3 transcript, draft, mode, and proposal", async () => {
     const messages = [
       textMessage("user-1", "user", "Tighten this scene.", "complete"),

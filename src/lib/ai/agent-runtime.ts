@@ -8,6 +8,7 @@ import {
 } from "ai";
 import {
   convertAgentMessagesToModel,
+  hasAssistantOutput,
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
 import {
@@ -142,10 +143,18 @@ export async function streamAgentRun(
     prompt: modelMessages,
     abortSignal: input.signal,
   });
+  const streamErrors = new Map<string, unknown>();
+  let streamErrorId = 0;
   const stream = result.toUIMessageStream<AgentUIMessage>({
     originalMessages: validated,
     generateMessageId: input.generateMessageId,
     sendReasoning: false,
+    onError: (error) => {
+      streamErrorId += 1;
+      const errorToken = `Agent stream error ${streamErrorId}`;
+      streamErrors.set(errorToken, error);
+      return errorToken;
+    },
     messageMetadata: ({ part }) =>
       messageMetadata(
         input.run,
@@ -154,12 +163,25 @@ export async function streamAgentRun(
   });
 
   let latest: AgentUIMessage | null = null;
-  for await (const message of readUIMessageStream<AgentUIMessage>({ stream })) {
-    latest = projectAnalysisFindings(message);
-    input.onMessage(latest);
+  try {
+    for await (const message of readUIMessageStream<AgentUIMessage>({
+      stream,
+      terminateOnError: true,
+    })) {
+      latest = projectAnalysisFindings(message);
+      input.onMessage(latest);
+    }
+  } catch (error) {
+    if (error instanceof Error && streamErrors.has(error.message)) {
+      throw streamErrors.get(error.message);
+    }
+    throw error;
   }
   if (latest === null) {
     throw new Error(`Agent run emitted no assistant message: ${input.run.id}`);
+  }
+  if (!hasAssistantOutput(latest)) {
+    throw new Error(`Agent run emitted no assistant output: ${input.run.id}`);
   }
   const usage = await result.totalUsage;
   return {

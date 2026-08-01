@@ -857,6 +857,15 @@ function errorCode(error: unknown, phase: AgentErrorCode | null): AgentErrorCode
     return (error as ErrorWithDetails).agentErrorCode as AgentErrorCode;
   }
   if (!(error instanceof Error)) return "unknown";
+  const normalizedMessage = error.message.toLowerCase();
+  if (
+    (error.name.includes("APICallError") || error.name.includes("RetryError")) &&
+    (normalizedMessage.includes("credit_balance_exhausted") ||
+      normalizedMessage.includes("insufficient_quota") ||
+      normalizedMessage.includes("no credits remaining"))
+  ) {
+    return "quota";
+  }
   if (
     error.name.includes("APICallError") ||
     error.name.includes("RetryError") ||

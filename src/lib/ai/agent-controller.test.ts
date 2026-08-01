@@ -1915,6 +1915,31 @@ describe("run settlement and cancellation", () => {
     });
   });
 
+  it("classifies exhausted OpenAI credits as a quota failure", async () => {
+    const quota = new Error(
+      "Failed after 3 attempts. Last error: You have no credits remaining.",
+    );
+    quota.name = "AI_RetryError";
+    const dependencies = makeDependencies(async () => {
+      throw quota;
+    });
+    const controller = createAgentController(dependencies);
+    useAgentConsoleStore.getState().setDraftText("Send this request");
+
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toBe(
+      quota,
+    );
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      runStatus: "idle",
+      runError: { code: "quota" },
+    });
+    expect(useAgentConsoleStore.getState().messages.at(-1)).toMatchObject({
+      role: "assistant",
+      metadata: { state: "error", errorCode: "quota" },
+    });
+  });
+
   it("settles a failed tool row safely when streaming rejects", async () => {
     const transport = new Error("Network unavailable");
     transport.name = "AI_APICallError";

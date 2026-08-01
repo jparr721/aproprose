@@ -34,10 +34,14 @@ import {
   TypographyMuted,
   TypographyMutedSpan,
 } from "@/components/ui/typography";
-import { useProjectStore } from "@/stores/project-store";
+import {
+  selectionTargetIds,
+  useProjectStore,
+} from "@/stores/project-store";
 import { useFindStore } from "@/stores/find-store";
 import { useSyncStore } from "@/stores/sync-store";
-import { dispatchAiIntent } from "@/stores/ai-intent-store";
+import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
+import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
@@ -88,6 +92,21 @@ function AddBlockRow() {
   const selectedId = useProjectStore((s) => s.selectedId);
 
   const add = (type: BlockType) => insertAfter(selectedId, { type });
+  const suggest = () => {
+    const state = useProjectStore.getState();
+    const chapterId = state.activeChapterId;
+    if (chapterId === null) return;
+    const refs = selectionTargetIds(state.selectedIds, state.selectedId).map(
+      (blockId) => ({ kind: "block" as const, chapterId, blockId }),
+    );
+    void dispatchAgentIntent({
+      kind: "run",
+      mode: "writing",
+      text: SUGGEST_DIRECTIVE,
+      refs,
+      task: { kind: "conversation", targetChapterId: chapterId },
+    });
+  };
 
   return (
     <div className="mt-2 flex flex-wrap gap-1.5 py-4">
@@ -106,7 +125,7 @@ function AddBlockRow() {
       <Button
         size="sm"
         className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-edge/60"
-        onClick={() => dispatchAiIntent({ tab: "suggest" })}
+        onClick={suggest}
       >
         <IconSparkles className="size-3.5" />
         Suggest from context

@@ -38,7 +38,7 @@ export const viewCommands: Command[] = [
   {
     id: "view.toggle-ai",
     group: "View",
-    title: "Toggle AI panel",
+    title: "Toggle AI Console",
     icon: IconSparkles,
     keybindingId: "TOGGLE_AI",
     run: () => useViewStore.getState().toggleAi(),

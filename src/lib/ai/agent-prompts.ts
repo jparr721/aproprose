@@ -7,6 +7,21 @@ import {
 export const WRITING_MODE_MARKER = "APROPROSE WRITING MODE";
 export const EDIT_MODE_MARKER = "APROPROSE EDIT MODE";
 
+export const CLEAN_DIRECTIVE =
+  "Clean the selected prose conservatively. Preserve meaning, voice, and structure unless a change is required.";
+export const STRUCTURE_DIRECTIVE =
+  "Structure the selected passage into appropriate narration and dialogue blocks. Preserve wording unless structure requires a minimal edit.";
+export const PICK_UP_DIRECTIVE =
+  "Continue from the anchor. If later prose exists, propose only the minimum bridge into it and preserve that later prose. If the anchor is final prose, continue after it.";
+export const SUGGEST_DIRECTIVE =
+  "Suggest what should come next from the selected context.";
+export const CRITIQUE_DIRECTIVE =
+  "Critique this chapter with concrete, block-linked craft notes.";
+export const CONTINUITY_DIRECTIVE =
+  "Check this chapter for continuity issues with concrete, block-linked findings.";
+export const OUTLINE_SCULPT_DIRECTIVE =
+  "Review and reshape this chapter outline for clarity, causality, pacing, and escalation.";
+
 const BASE_AGENT_INSTRUCTIONS = `You are the agent inside aproprose. Work only on the open project represented by the supplied conversation, immutable attachments, and tools.
 
 Use tools to inspect source before making source-specific claims. Show useful conclusions in concise prose. Never expose chain-of-thought or hidden reasoning.

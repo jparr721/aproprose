@@ -1,14 +1,29 @@
 // @vitest-environment happy-dom
 //
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentIntent } from "@/lib/ai/agent-types";
+
+const controller = vi.hoisted(() => ({
+  dispatchAgentIntent: vi.fn<(intent: AgentIntent) => Promise<void>>(),
+}));
+
+vi.mock("@/lib/ai/agent-controller", () => ({
+  dispatchAgentIntent: controller.dispatchAgentIntent,
+}));
+
 import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
+import { useViewStore } from "@/stores/view-store";
 
 afterEach(() => cleanup());
 
 beforeEach(() => {
+  controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
+    useViewStore.getState().openAiConsole();
+  });
+  useViewStore.setState({ aiOpen: false, focus: false });
   useOutlineBoardStore.setState({
     openChapterId: null,
     highlightedCardId: null,
@@ -46,26 +61,49 @@ describe("OutlineBoard", () => {
   });
 });
 
-describe("BoardChapterColumn sculpt states", () => {
-  it("renders the sculpt error next to the failed chapter's Sculpt trigger", () => {
-    useOutlineBoardStore.setState({ sculptingChapterId: "ch1", sculptError: "HTTP 401 bad key" });
+describe("BoardChapterColumn Sculpt", () => {
+  it("dispatches an immediate Edit run and keeps the board visible", () => {
     render(<OutlineBoard />);
-    expect(screen.getByText("HTTP 401 bad key")).toBeTruthy();
-    expect(screen.getByText("Try again")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Sculpt" })[0]);
+
+    expect(controller.dispatchAgentIntent).toHaveBeenCalledWith({
+      kind: "run",
+      mode: "edit",
+      text: "Review and reshape this chapter outline for clarity, causality, pacing, and escalation.",
+      refs: [],
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+    });
+    expect(useViewStore.getState().aiOpen).toBe(true);
+    expect(screen.getByText("Quiet Town")).toBeTruthy();
   });
 
-  it("shows a spinner and disables only the sculpting chapter's button while in flight", () => {
-    useOutlineBoardStore.setState({ sculptingChapterId: "ch1", proposal: null, sculptError: null });
-    const { container } = render(<OutlineBoard />);
-    const sculptButtons = screen.getAllByRole("button", { name: /Sculpt/ });
-    expect(sculptButtons[0].hasAttribute("disabled")).toBe(true);
-    expect(sculptButtons[1].hasAttribute("disabled")).toBe(false);
-    expect(container.querySelector('svg[data-slot="spinner"]')).toBeTruthy();
+  it("does not render the legacy full-board proposal overlay", () => {
+    useOutlineBoardStore.setState({
+      sculptingChapterId: "ch1",
+      proposal: {
+        chapterId: "ch1",
+        summary: "Legacy overlay",
+        changes: [],
+      },
+    });
+
+    render(<OutlineBoard />);
+
+    expect(screen.queryByText("Legacy overlay")).toBeNull();
+    expect(screen.queryByText("Reshape Quiet Town")).toBeNull();
+    expect(screen.getByText("Quiet Town")).toBeTruthy();
   });
 
-  it("shows neither spinner nor error when idle", () => {
-    const { container } = render(<OutlineBoard />);
-    expect(container.querySelector('svg[data-slot="spinner"]')).toBeNull();
+  it("does not render legacy per-column model errors or refresh controls", () => {
+    useOutlineBoardStore.setState({
+      sculptingChapterId: "ch1",
+      sculptError: "HTTP 401 bad key",
+    });
+
+    render(<OutlineBoard />);
+
+    expect(screen.queryByText("HTTP 401 bad key")).toBeNull();
     expect(screen.queryByText("Try again")).toBeNull();
   });
 });

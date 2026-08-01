@@ -22,12 +22,10 @@ import type {
   CompileError,
   ContinuityFlag,
   LoreEntry,
-  ManuscriptProposal,
   NovelMetadata,
   Outline,
   ProjectInfo,
   ProjectMeta,
-  ProposalApplyResult,
   RecentProject,
   SkeletonModel,
   SculptProposal,
@@ -241,9 +239,6 @@ interface ProjectState {
   formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: BlockTextEdit[]) => void;
-  /** Apply the kept changes of a reviewed proposal as ONE undo step. Returns
-   *  counts so the caller can warn about skipped (vanished-target) changes. */
-  applyManuscriptProposal: (proposal: ManuscriptProposal, kept: number[]) => ProposalApplyResult;
   applyAgentManuscriptProposal: (
     proposal: ManuscriptPendingProposal,
     changeIds: string[],
@@ -940,23 +935,6 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: null,
         };
       }),
-
-    // Apply the author-kept changes of a reviewed ManuscriptProposal as ONE undo
-    // step. The pure fold lives in lib/blocks/proposal.ts; this wraps it with
-    // history, selection pruning, and the meta-backed speaker resolver.
-    applyManuscriptProposal: (proposal, kept) => {
-      if (kept.length === 0) return { applied: 0, skipped: 0 };
-      const s = get();
-      const resolveSpeakerId = (name: string): string | undefined =>
-        s.meta.characters.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id;
-      const changes = kept.map((i) => proposal.changes[i]).filter((c) => c !== undefined);
-      const outcome = applyProposal(s.blocks, changes, resolveSpeakerId);
-      // Nothing landed (every kept change targeted a vanished block): report the
-      // skips without burning an undo step on an identical snapshot.
-      if (outcome.applied === 0) return { applied: 0, skipped: outcome.skipped };
-      set(manuscriptProposalMutation(s, outcome.blocks));
-      return { applied: outcome.applied, skipped: outcome.skipped };
-    },
 
     applyAgentManuscriptProposal: (proposal, changeIds) => {
       const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);

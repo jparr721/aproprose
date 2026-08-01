@@ -20,7 +20,6 @@ import {
 } from "@/lib/ai/operations";
 
 const ctx: AnchoredContext = {
-  blocksText: 'One.\n\n"Two."',
   blocks: [
     { id: "b1", type: "narration", text: "One." },
     { id: "b2", type: "dialogue", text: "Two." },

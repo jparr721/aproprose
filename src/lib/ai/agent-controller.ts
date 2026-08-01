@@ -777,7 +777,6 @@ function anchoredContext(
   });
   return {
     chapterTitle: chapter.title,
-    blocksText: prose.map((block) => block.text).join("\n\n"),
     cursorSummary: "Reviewing the frozen chapter.",
     characters: meta.characters.map((character) => ({
       name: character.name,

@@ -24,7 +24,6 @@ export interface AiOpOptions {
 
 export interface AnchoredContext {
   chapterTitle?: string;
-  blocksText: string;
   cursorSummary?: string;
   characters?: { name: string; role?: string }[];
   instruction?: string;

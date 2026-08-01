@@ -380,13 +380,6 @@ export interface ManuscriptProposal {
   changes: BlockChange[];
 }
 
-/** Counts returned by applyManuscriptProposal so the caller can warn about
- *  skipped (vanished-target) changes instead of silently dropping them. */
-export interface ProposalApplyResult {
-  applied: number;
-  skipped: number;
-}
-
 // ── Backup / sync ─────────────────────────────────────────────────────────────
 
 export interface ToolingStatus {

@@ -74,7 +74,7 @@ import { useViewStore } from "@/stores/view-store";
 export interface AgentControllerDependencies {
   now: () => string;
   id: () => string;
-  getModel: () => Promise<LanguageModel>;
+  getModel: (modelId: string) => Promise<LanguageModel>;
   summarize: (
     model: LanguageModel,
     source: string,
@@ -972,6 +972,9 @@ export function createAgentController(
 
   const toolEnvironment = (args: {
     run: AgentRun;
+    model: LanguageModel;
+    styleGuide: string;
+    editingRules: string;
     project: ProjectInfo;
     meta: ProjectMeta;
     targetChapter: LoadedChapter | null;
@@ -1036,7 +1039,14 @@ export function createAgentController(
         try {
           const result = await critique(
             anchoredContext(chapter, args.meta, focus),
-            { signal },
+            {
+              signal,
+              model: args.model,
+              preferences: {
+                styleGuide: args.styleGuide,
+                editingRules: args.editingRules,
+              },
+            },
           );
           checkToolRun(args.run.projectRoot, args.run.id);
           return result;
@@ -1050,7 +1060,14 @@ export function createAgentController(
         try {
           const result = await continuityCheck(
             anchoredContext(chapter, args.meta, focus),
-            { signal },
+            {
+              signal,
+              model: args.model,
+              preferences: {
+                styleGuide: args.styleGuide,
+                editingRules: args.editingRules,
+              },
+            },
           );
           checkToolRun(args.run.projectRoot, args.run.id);
           return result;
@@ -1217,7 +1234,7 @@ export function createAgentController(
       const frozen = targetResult.value;
 
       failurePhase = "configuration";
-      const model = await dependencies.getModel();
+      const model = await dependencies.getModel(capture.modelId);
       if (!ownsCurrentRun()) return;
       const contextWindow = modelContextWindow(capture.modelId);
       failurePhase = null;
@@ -1271,6 +1288,9 @@ export function createAgentController(
       });
       const environment = toolEnvironment({
         run,
+        model,
+        styleGuide: capture.styleGuide,
+        editingRules: capture.editingRules,
         project: capture.project,
         meta: capture.meta,
         targetChapter: frozen.chapter,

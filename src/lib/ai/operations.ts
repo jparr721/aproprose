@@ -1,15 +1,17 @@
 // operations.ts - retained structured analysis and proposal sanitizers.
 
-import { generateText, Output } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 
-import { authorSystem } from "@/lib/ai/author-preferences";
+import {
+  authorSystem,
+  type AuthorPreferences,
+} from "@/lib/ai/author-preferences";
 import {
   CONTINUITY_SYSTEM,
   CRITIQUE_SYSTEM,
 } from "@/lib/ai/agent-prompts";
 import { renderGrounding } from "@/lib/ai/grounding-render";
-import { getModel } from "@/lib/ai/model";
 import type {
   BlockType,
   ContinuityFlag,
@@ -19,7 +21,9 @@ import type {
 } from "@/lib/types";
 
 export interface AiOpOptions {
-  signal?: AbortSignal;
+  signal: AbortSignal | undefined;
+  model: LanguageModel;
+  preferences: AuthorPreferences;
 }
 
 export interface AnchoredContext {
@@ -112,15 +116,14 @@ export function sanitizeFindingIds<T extends { blockIds: string[] }>(
 
 export async function critique(
   ctx: AnchoredContext,
-  opts?: AiOpOptions,
+  opts: AiOpOptions,
 ): Promise<CritiqueNote[]> {
-  const model = await getModel();
   const { output } = await generateText({
-    model,
+    model: opts.model,
     output: Output.object({ schema: critiqueResultSchema }),
-    system: authorSystem(CRITIQUE_SYSTEM, "voice"),
+    system: authorSystem(CRITIQUE_SYSTEM, "voice", opts.preferences),
     prompt: buildAnchoredGrounding(ctx),
-    abortSignal: opts?.signal,
+    abortSignal: opts.signal,
   });
   return sanitizeFindingIds(
     output.notes.map((note) => ({
@@ -133,15 +136,14 @@ export async function critique(
 
 export async function continuityCheck(
   ctx: AnchoredContext,
-  opts?: AiOpOptions,
+  opts: AiOpOptions,
 ): Promise<ContinuityFlag[]> {
-  const model = await getModel();
   const { output } = await generateText({
-    model,
+    model: opts.model,
     output: Output.object({ schema: continuityResultSchema }),
-    system: authorSystem(CONTINUITY_SYSTEM, "voice"),
+    system: authorSystem(CONTINUITY_SYSTEM, "voice", opts.preferences),
     prompt: buildAnchoredGrounding(ctx),
-    abortSignal: opts?.signal,
+    abortSignal: opts.signal,
   });
   return sanitizeFindingIds(
     output.flags.map((flag) => ({

@@ -1,10 +1,14 @@
 // author-preferences.ts - renders and applies the author's global preferences.
 
 import { PREFERENCE_MAX_CHARS } from "@/lib/types";
-import { useSettingsStore } from "@/stores/settings-store";
 
 /** Voice reaches every operation; editing rules reach Writing and Edit. */
 export type PreferenceScope = "voice" | "voice+editing";
+
+export interface AuthorPreferences {
+  styleGuide: string;
+  editingRules: string;
+}
 
 function renderLabeledPreference(label: string, value: string): string {
   const text = value.trim().slice(0, PREFERENCE_MAX_CHARS);
@@ -33,11 +37,14 @@ export function renderEditingPreference(editing: string): string {
  * (when set); editing rules are added only for the "voice+editing" scope. Empty
  * preferences contribute nothing, so an unset install returns `base` verbatim.
  */
-export function authorSystem(base: string, scope: PreferenceScope): string {
-  const { styleGuide, editingRules } = useSettingsStore.getState();
-  const parts = [base, renderVoicePreference(styleGuide)];
+export function authorSystem(
+  base: string,
+  scope: PreferenceScope,
+  preferences: AuthorPreferences,
+): string {
+  const parts = [base, renderVoicePreference(preferences.styleGuide)];
   if (scope === "voice+editing") {
-    parts.push(renderEditingPreference(editingRules));
+    parts.push(renderEditingPreference(preferences.editingRules));
   }
   return parts.filter(Boolean).join("\n\n");
 }

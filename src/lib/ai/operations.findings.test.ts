@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MockLanguageModelV3 } from "ai/test";
 
-// Stub the model layer so importing operations.ts does not pull the Tauri stack,
-// and stub the SDK so normalization/sanitizing runs against a canned output.
-vi.mock("@/lib/ai/model", () => ({ getModel: vi.fn().mockResolvedValue({}) }));
+// Stub the SDK so normalization/sanitizing runs against a canned output.
 vi.mock("ai", () => ({
   generateText: vi.fn(),
   Output: {
@@ -17,6 +16,7 @@ import {
   sanitizeFindingIds,
   critiqueResultSchema,
   continuityResultSchema,
+  type AiOpOptions,
   type AnchoredContext,
 } from "@/lib/ai/operations";
 
@@ -27,7 +27,21 @@ const ctx: AnchoredContext = {
   ],
 };
 
+const analysisModel = new MockLanguageModelV3();
+
+function analysisOptions(signal: AbortSignal | undefined): AiOpOptions {
+  return {
+    signal,
+    model: analysisModel,
+    preferences: {
+      styleGuide: "Frozen analysis voice.",
+      editingRules: "Frozen analysis editing rules.",
+    },
+  };
+}
+
 interface CapturedGeneration<Schema> {
+  model: unknown;
   system: string;
   prompt: string;
   output: { schema: Schema };
@@ -126,7 +140,7 @@ describe("critique anchoring", () => {
         ],
       },
     } as never);
-    expect(await critique(ctx)).toEqual([
+    expect(await critique(ctx, analysisOptions(undefined))).toEqual([
       { kind: "watch", tag: "Pacing", text: "Slow.", blockIds: [] },
       { kind: "idea", tag: "Voice", text: "Push.", blockIds: ["b2"] },
     ]);
@@ -135,7 +149,7 @@ describe("critique anchoring", () => {
   it("grounds on id-labeled SCENE BLOCKS and forwards the abort signal", async () => {
     vi.mocked(generateText).mockResolvedValue({ output: { notes: [] } } as never);
     const ac = new AbortController();
-    await critique(ctx, { signal: ac.signal });
+    await critique(ctx, analysisOptions(ac.signal));
     const call = vi.mocked(generateText).mock.calls[0][0] as unknown as {
       prompt: string;
       abortSignal?: AbortSignal;
@@ -148,9 +162,11 @@ describe("critique anchoring", () => {
   it("passes the complete retained critique system contract to generateText", async () => {
     vi.mocked(generateText).mockResolvedValue({ output: { notes: [] } } as never);
 
-    await critique(ctx);
+    await critique(ctx, analysisOptions(undefined));
 
     const call = capturedGeneration<typeof critiqueResultSchema>();
+    expect(call.system).toContain("Frozen analysis voice.");
+    expect(call.model).toBe(analysisModel);
     expectClauses(call.system, sharedAnalysisClauses);
     expectClauses(call.system, critiqueClauses);
   });
@@ -158,7 +174,7 @@ describe("critique anchoring", () => {
   it("passes the fully described critique schema to generateText", async () => {
     vi.mocked(generateText).mockResolvedValue({ output: { notes: [] } } as never);
 
-    await critique(ctx);
+    await critique(ctx, analysisOptions(undefined));
 
     const schema = capturedGeneration<typeof critiqueResultSchema>().output.schema;
     const notes = schema.shape.notes;
@@ -186,7 +202,7 @@ describe("continuityCheck anchoring", () => {
     vi.mocked(generateText).mockResolvedValue({
       output: { flags: [{ sev: "warn", tag: "Cast", text: "Who?", blockIds: ["ghost", "b1"] }] },
     } as never);
-    expect(await continuityCheck(ctx)).toEqual([
+    expect(await continuityCheck(ctx, analysisOptions(undefined))).toEqual([
       { sev: "warn", tag: "Cast", text: "Who?", blockIds: ["b1"] },
     ]);
   });
@@ -194,9 +210,11 @@ describe("continuityCheck anchoring", () => {
   it("passes the complete retained continuity system contract to generateText", async () => {
     vi.mocked(generateText).mockResolvedValue({ output: { flags: [] } } as never);
 
-    await continuityCheck(ctx);
+    await continuityCheck(ctx, analysisOptions(undefined));
 
     const call = capturedGeneration<typeof continuityResultSchema>();
+    expect(call.system).toContain("Frozen analysis voice.");
+    expect(call.model).toBe(analysisModel);
     expectClauses(call.system, sharedAnalysisClauses);
     expectClauses(call.system, continuityClauses);
   });
@@ -204,7 +222,7 @@ describe("continuityCheck anchoring", () => {
   it("passes the fully described continuity schema to generateText", async () => {
     vi.mocked(generateText).mockResolvedValue({ output: { flags: [] } } as never);
 
-    await continuityCheck(ctx);
+    await continuityCheck(ctx, analysisOptions(undefined));
 
     const schema = capturedGeneration<typeof continuityResultSchema>().output.schema;
     const flags = schema.shape.flags;

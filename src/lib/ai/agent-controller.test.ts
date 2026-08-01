@@ -833,6 +833,109 @@ describe("frozen run preflight", () => {
     expect(input.instructions).toContain("Keep the clipped voice.");
   });
 
+  it.each(["critique", "continuity"] as const)(
+    "freezes the outer and nested %s model and preferences across preflight races",
+    async (analysis) => {
+      const source = deferred<string>();
+      mocks.readTextFile.mockImplementationOnce(async () => source.promise);
+      mocks.generateText.mockResolvedValue(
+        analysis === "critique"
+          ? { output: { notes: [] } }
+          : { output: { flags: [] } },
+      );
+      const frozenModel = new MockLanguageModelV3();
+      const dependencies = makeDependencies(async (input) => {
+        useSettingsStore.setState({
+          aiModel: "gpt-5-mini",
+          styleGuide: "Changed immediately before analysis.",
+          editingRules: "Changed nested editing rules.",
+        });
+        if (analysis === "critique") {
+          await input.environment.runCritique("ch2", null, input.signal);
+        } else {
+          await input.environment.runContinuity("ch2", null, input.signal);
+        }
+        return successfulResult(input, "Analysis complete");
+      });
+      const getModel = vi.fn(async (_modelId?: string) => frozenModel);
+      dependencies.getModel = getModel;
+      const controller = createAgentController(dependencies);
+
+      const submission = controller.submitAgentRequest({
+        kind: "run",
+        mode: "edit",
+        text: `Run ${analysis}.`,
+        refs: [],
+        task: { kind: "chapter-analysis", chapterId: "ch2", analysis },
+      });
+      await vi.waitFor(() => expect(mocks.readTextFile).toHaveBeenCalledOnce());
+      useSettingsStore.setState({
+        aiModel: "gpt-5",
+        styleGuide: "Changed during preflight.",
+        editingRules: "Changed preflight editing rules.",
+      });
+      source.resolve("Frozen first.\n\nFrozen target.\n");
+      await submission;
+
+      expect(getModel).toHaveBeenCalledExactlyOnceWith("gpt-4.1");
+      const input = dependencies.stream.mock.calls[0][0];
+      expect(input.model).toBe(frozenModel);
+      expect(input.modelId).toBe("gpt-4.1");
+      expect(input.contextWindow).toBe(1_047_576);
+      expect(input.instructions).toContain("Keep the clipped voice.");
+      expect(input.instructions).toContain("Preserve intentional fragments.");
+      expect(input.instructions).not.toContain("Changed during preflight.");
+      expect(input.instructions).not.toContain(
+        "Changed immediately before analysis.",
+      );
+      const generation = mocks.generateText.mock.calls[0][0] as unknown as {
+        model: unknown;
+        system: string;
+      };
+      expect(generation.model).toBe(frozenModel);
+      expect(generation.system).toContain("Keep the clipped voice.");
+      expect(generation.system).not.toContain("Changed during preflight.");
+      expect(generation.system).not.toContain(
+        "Changed immediately before analysis.",
+      );
+    },
+  );
+
+  it("freezes retry model and preferences before deferred model construction", async () => {
+    const frozenModel = new MockLanguageModelV3();
+    const model = deferred<MockLanguageModelV3>();
+    const turn = originalTurn([]);
+    useAgentConsoleStore.setState({ messages: turn.messages });
+    useSettingsStore.setState({
+      aiModel: "gpt-4.1",
+      styleGuide: "Retry captured voice.",
+      editingRules: "Retry captured editing rules.",
+    });
+    const dependencies = makeDependencies(null);
+    const getModel = vi.fn(async (_modelId?: string) => model.promise);
+    dependencies.getModel = getModel;
+    const controller = createAgentController(dependencies);
+
+    const retrying = controller.retryAgentTurn("original-user");
+    await vi.waitFor(() => expect(getModel).toHaveBeenCalled());
+    useSettingsStore.setState({
+      aiModel: "gpt-5",
+      styleGuide: "Changed retry voice.",
+      editingRules: "Changed retry editing rules.",
+    });
+    model.resolve(frozenModel);
+    await retrying;
+
+    expect(getModel).toHaveBeenCalledExactlyOnceWith("gpt-4.1");
+    const input = dependencies.stream.mock.calls[0][0];
+    expect(input.model).toBe(frozenModel);
+    expect(input.modelId).toBe("gpt-4.1");
+    expect(input.instructions).toContain("Retry captured voice.");
+    expect(input.instructions).toContain("Retry captured editing rules.");
+    expect(input.instructions).not.toContain("Changed retry voice.");
+    expect(input.instructions).not.toContain("Changed retry editing rules.");
+  });
+
   it("captures a composer click before text typed for the next turn", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);

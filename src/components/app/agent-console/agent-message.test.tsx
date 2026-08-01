@@ -205,6 +205,21 @@ describe("AgentMessage content", () => {
       "assistant-findings",
       [
         {
+          type: "tool-run_critique",
+          toolCallId: "call-critique",
+          state: "output-available",
+          input: { chapterId: "ch1", focus: null },
+          output: {
+            kind: "summary",
+            summary: {
+              label: "Run critique",
+              target: "ch1",
+              detail: "2 findings",
+              itemCount: 2,
+            },
+          },
+        },
+        {
           type: "data-findings",
           data: {
             kind: "critique",
@@ -232,6 +247,7 @@ describe("AgentMessage content", () => {
 
     renderAgentMessage(message);
 
+    expect(screen.getByText("Completed")).toBeTruthy();
     expect(screen.getByRole("group", { name: "Pacing finding" })).toBeTruthy();
     expect(screen.getByText("The middle stalls.")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Add to Chat" })).toHaveLength(2);
@@ -247,6 +263,7 @@ describe("AgentMessage content", () => {
       ]),
     );
     expect(useAgentConsoleStore.getState().messages).toEqual([message]);
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
   });
 
   it("disables Add to Chat while same-project persistence is transitioning", () => {

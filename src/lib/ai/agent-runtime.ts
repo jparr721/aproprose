@@ -15,6 +15,7 @@ import {
   type AgentToolEnvironment,
 } from "@/lib/ai/agent-tools";
 import type {
+  AgentDataParts,
   AgentMessageMetadata,
   AgentRun,
   AgentUIMessage,
@@ -73,6 +74,54 @@ function normalizeUsage(
   };
 }
 
+function findingsDataFromToolPart(
+  part: AgentUIMessage["parts"][number],
+): AgentDataParts["findings"] | null {
+  if (
+    part.type === "tool-run_critique" &&
+    part.state === "output-available" &&
+    part.output.kind === "runtime"
+  ) {
+    return {
+      kind: "critique",
+      chapterId: part.input.chapterId,
+      items: part.output.value.findings,
+    };
+  }
+  if (
+    part.type === "tool-run_continuity" &&
+    part.state === "output-available" &&
+    part.output.kind === "runtime"
+  ) {
+    return {
+      kind: "continuity",
+      chapterId: part.input.chapterId,
+      items: part.output.value.findings,
+    };
+  }
+  return null;
+}
+
+function projectAnalysisFindings(message: AgentUIMessage): AgentUIMessage {
+  const existing = new Set(
+    message.parts.flatMap((part) =>
+      part.type === "data-findings" ? [JSON.stringify(part.data)] : [],
+    ),
+  );
+  const additions: AgentUIMessage["parts"] = [];
+  for (const part of message.parts) {
+    const data = findingsDataFromToolPart(part);
+    if (data === null) continue;
+    const key = JSON.stringify(data);
+    if (existing.has(key)) continue;
+    existing.add(key);
+    additions.push({ type: "data-findings", data });
+  }
+  return additions.length === 0
+    ? message
+    : { ...message, parts: [...message.parts, ...additions] };
+}
+
 export async function streamAgentRun(
   input: StreamAgentRunInput,
 ): Promise<StreamAgentRunResult> {
@@ -106,8 +155,8 @@ export async function streamAgentRun(
 
   let latest: AgentUIMessage | null = null;
   for await (const message of readUIMessageStream<AgentUIMessage>({ stream })) {
-    latest = message;
-    input.onMessage(message);
+    latest = projectAnalysisFindings(message);
+    input.onMessage(latest);
   }
   if (latest === null) {
     throw new Error(`Agent run emitted no assistant message: ${input.run.id}`);

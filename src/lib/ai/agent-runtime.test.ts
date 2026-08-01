@@ -5,6 +5,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
+import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import type { AgentToolEnvironment } from "@/lib/ai/agent-tools";
 import type {
   AgentRun,
@@ -14,6 +15,10 @@ import {
   streamAgentRun,
   type StreamAgentRunInput,
 } from "@/lib/ai/agent-runtime";
+import {
+  emptyPersistedAgentState,
+  fromAgentSnapshot,
+} from "@/stores/agent-persistence";
 
 const usage = {
   inputTokens: {
@@ -99,6 +104,24 @@ function toolCallResult(index: number): LanguageModelV3StreamResult {
       toolCallId: `call-${index}`,
       toolName: "read_chapter",
       input: JSON.stringify({ chapterId: "ch1" }),
+    },
+    {
+      type: "finish",
+      finishReason: { unified: "tool-calls", raw: "tool_calls" },
+      usage,
+    },
+  ]);
+}
+
+function analysisToolCallResult(
+  toolName: "run_critique" | "run_continuity",
+): LanguageModelV3StreamResult {
+  return streamResult([
+    {
+      type: "tool-call",
+      toolCallId: `call-${toolName}`,
+      toolName,
+      input: JSON.stringify({ chapterId: "ch1", focus: null }),
     },
     {
       type: "finish",
@@ -210,4 +233,111 @@ describe("streamAgentRun", () => {
 
     expect(calls).toBe(8);
   });
+
+  it.each([
+    {
+      toolName: "run_critique" as const,
+      kind: "critique" as const,
+      task: "critique" as const,
+      item: {
+        kind: "watch" as const,
+        tag: "Pacing",
+        text: "The middle stalls.",
+        blockIds: ["block-2"],
+      },
+    },
+    {
+      toolName: "run_continuity" as const,
+      kind: "continuity" as const,
+      task: "continuity" as const,
+      item: {
+        sev: "warn" as const,
+        tag: "Timeline",
+        text: "The bell rings twice.",
+        blockIds: ["block-1", "block-2"],
+      },
+    },
+  ])(
+    "projects successful $kind SDK tool output into one typed findings part",
+    async ({ toolName, kind, task, item }) => {
+      let calls = 0;
+      const model = new MockLanguageModelV3({
+        doStream: async () => {
+          calls += 1;
+          return calls === 1
+            ? analysisToolCallResult(toolName)
+            : textResult("Analysis complete.");
+        },
+      });
+      const base = makeRuntimeInput(model);
+      const analysisRun: AgentRun = {
+        ...run,
+        task: { kind: "chapter-analysis", chapterId: "ch1", analysis: task },
+      };
+      const environment: AgentToolEnvironment = {
+        ...makeEnvironment(),
+        run: analysisRun,
+        signal: base.signal,
+        runCritique: async () =>
+          kind === "critique" ? [item] : [],
+        runContinuity: async () =>
+          kind === "continuity" ? [item] : [],
+      };
+
+      const result = await streamAgentRun({
+        ...base,
+        run: analysisRun,
+        environment,
+      });
+
+      expect(
+        result.message.parts.filter((part) => part.type === "data-findings"),
+      ).toEqual([
+        {
+          type: "data-findings",
+          data: { kind, chapterId: "ch1", items: [item] },
+        },
+      ]);
+      const settled = sanitizeAgentMessages([result.message]);
+      expect(
+        settled[0].parts.filter(
+          (part) =>
+            part.type === "tool-run_critique" ||
+            part.type === "tool-run_continuity",
+        ),
+      ).toEqual([
+        {
+          type: `tool-${toolName}`,
+          toolCallId: `call-${toolName}`,
+          state: "output-available",
+          input: { chapterId: "ch1", focus: null },
+          output: {
+            kind: "summary",
+            summary: {
+              label: kind === "critique" ? "Run critique" : "Check continuity",
+              target: "ch1",
+              detail: "1 finding",
+              itemCount: 1,
+            },
+          },
+        },
+      ]);
+      expect(
+        settled[0].parts.filter((part) => part.type === "data-findings"),
+      ).toEqual([
+        {
+          type: "data-findings",
+          data: { kind, chapterId: "ch1", items: [item] },
+        },
+      ]);
+      expect(JSON.stringify(settled)).not.toContain('"kind":"runtime"');
+      expect(JSON.stringify(settled)).not.toContain("Hidden chain of thought");
+
+      const restored = await fromAgentSnapshot("/book", {
+        ...emptyPersistedAgentState(),
+        messages: settled,
+      });
+      expect(restored.messages).toEqual(settled);
+    },
+  );
 });

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentMessage } from "@/components/app/agent-console/agent-message";
+import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import type {
   AgentMessageMetadata,
   AgentUIMessage,
@@ -609,6 +610,74 @@ describe("AgentMessage safe tool activity", () => {
     );
     expect(screen.getByText("Chapter")).toBeTruthy();
     expect(screen.getByText("Outline proposal")).toBeTruthy();
+  });
+
+  it("renders only generic targets after unsafe failed and denied inputs settle", () => {
+    const unicodeControlTarget = [
+      "UNICODE-CONTROL-PRIVATE-TEXT",
+      String.fromCodePoint(0x2603),
+      String.fromCharCode(0),
+    ].join("");
+    const [settled] = sanitizeAgentMessages([
+      assistantMessage(
+        "assistant-unsafe-target-lifecycle",
+        [
+          {
+            type: "tool-run_critique",
+            toolCallId: "call-instruction",
+            state: "output-error",
+            input: {
+              chapterId: "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+              focus: "RAW-ERROR-PRIVATE-TEXT",
+            },
+            errorText: "RAW-ERROR-PRIVATE-TEXT",
+          },
+          {
+            type: "tool-read_outline",
+            toolCallId: "call-traversal",
+            state: "output-denied",
+            input: {
+              chapterId: "../../RELATIVE-TRAVERSAL-PRIVATE-TEXT",
+            },
+            approval: {
+              id: "RAW-APPROVAL-PRIVATE-ID",
+              approved: false,
+            },
+          },
+          {
+            type: "tool-read_chapter",
+            toolCallId: "call-unicode-control",
+            state: "output-error",
+            input: { chapterId: unicodeControlTarget },
+            errorText:
+              "ENOENT /Users/author/private/ABSOLUTE-PATH-PRIVATE-TEXT",
+          },
+        ] as AgentUIMessage["parts"],
+        metadata({ state: "error", errorCode: "tool" }),
+      ),
+    ]);
+
+    renderAgentMessage(settled);
+    fireEvent.click(screen.getByRole("button", { name: /Run critique/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Read outline/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Read chapter/ }));
+
+    expect(screen.getAllByText("Chapter")).toHaveLength(2);
+    expect(screen.getByText("Outline")).toBeTruthy();
+    for (const marker of [
+      "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+      "RELATIVE-TRAVERSAL-PRIVATE-TEXT",
+      "UNICODE-CONTROL-PRIVATE-TEXT",
+      "ABSOLUTE-PATH-PRIVATE-TEXT",
+      "RAW-APPROVAL-PRIVATE-ID",
+      "RAW-ERROR-PRIVATE-TEXT",
+      "../../",
+      "/Users/author/private/",
+      String.fromCodePoint(0x2603),
+      String.fromCharCode(0),
+    ]) {
+      expect(document.body.textContent).not.toContain(marker);
+    }
   });
 
   it("uses safe copy when a production tool projection throws", () => {

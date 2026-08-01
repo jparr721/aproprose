@@ -15,6 +15,7 @@ import {
   dispatchAgentIntent,
   submitAgentRequest,
 } from "@/lib/ai/agent-controller";
+import { convertAgentMessagesToModel } from "@/lib/ai/agent-messages";
 import { resetAiProvider } from "@/lib/ai/model";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
@@ -657,6 +658,25 @@ describe("agent persistence", () => {
   });
 
   it("round-trips safe failed and denied tool lifecycle rows", async () => {
+    const untrustedMarkers = [
+      "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+      "RELATIVE-TRAVERSAL-PRIVATE-TEXT",
+      "UNICODE-CONTROL-PRIVATE-TEXT",
+      "ABSOLUTE-PATH-PRIVATE-TEXT",
+      "RAW-APPROVAL-PRIVATE-ID",
+      "RAW-ERROR-PRIVATE-TEXT",
+      "../../",
+      "/Users/author/private/",
+      String.fromCodePoint(0x2603),
+      String.fromCharCode(0),
+      "\\u0000",
+    ];
+    const untrustedProposalId = [
+      "../../RELATIVE-TRAVERSAL-PRIVATE-TEXT/",
+      "UNICODE-CONTROL-PRIVATE-TEXT",
+      String.fromCodePoint(0x2603),
+      String.fromCharCode(0),
+    ].join("");
     const unsafeLifecycleMessage = {
       id: "assistant-tool-lifecycle",
       role: "assistant",
@@ -672,33 +692,22 @@ describe("agent persistence", () => {
           toolCallId: "call-error",
           state: "output-error",
           input: {
-            chapterId: "/Users/author/private/chapter.tex",
-            focus: "PRIVATE ERROR FOCUS",
+            chapterId: "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+            focus: "RAW-ERROR-PRIVATE-TEXT",
           },
-          rawInput: "PRIVATE RAW INPUT",
-          errorText: "ENOENT /Users/author/private/chapter.tex PRIVATE ERROR",
+          rawInput: "../../RELATIVE-TRAVERSAL-PRIVATE-TEXT",
+          errorText:
+            "ENOENT /Users/author/private/ABSOLUTE-PATH-PRIVATE-TEXT RAW-ERROR-PRIVATE-TEXT",
         },
         {
-          type: "tool-stage_outline_proposal",
+          type: "tool-read_pending_proposal",
           toolCallId: "call-denied",
           state: "output-denied",
-          input: {
-            summary: "PRIVATE DENIED SUMMARY",
-            changes: [
-              {
-                kind: "add",
-                cardId: null,
-                title: "PRIVATE DENIED TITLE",
-                intention: "PRIVATE DENIED INTENTION",
-                toIndex: null,
-                reason: "PRIVATE DENIED REASON",
-              },
-            ],
-          },
+          input: { proposalId: untrustedProposalId },
           approval: {
-            id: "PRIVATE APPROVAL ID",
+            id: "RAW-APPROVAL-PRIVATE-ID",
             approved: false,
-            reason: "PRIVATE APPROVAL REASON",
+            reason: "RAW-ERROR-PRIVATE-TEXT",
           },
         },
       ],
@@ -717,15 +726,26 @@ describe("agent persistence", () => {
         errorText: "Tool execution failed.",
       },
       {
-        type: "tool-stage_outline_proposal",
+        type: "tool-read_pending_proposal",
         toolCallId: "call-denied",
         state: "output-denied",
-        input: { summary: "", changes: [] },
+        input: { proposalId: "Proposal" },
         approval: { id: "call-denied", approved: false },
       },
     ]);
-    expect(JSON.stringify(snapshot)).not.toMatch(/PRIVATE|\/Users\/author/);
-    expect(JSON.stringify(restored)).not.toMatch(/PRIVATE|\/Users\/author/);
+    const modelMessages = await convertAgentMessagesToModel(
+      restored.messages,
+      {},
+    );
+    for (const serialized of [
+      JSON.stringify(snapshot),
+      JSON.stringify(restored),
+      JSON.stringify(modelMessages),
+    ]) {
+      for (const marker of untrustedMarkers) {
+        expect(serialized).not.toContain(marker);
+      }
+    }
   });
 
   it.each([

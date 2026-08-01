@@ -98,6 +98,81 @@ function assistantWithUnsafeToolFailures(): AgentUIMessage {
   } as AgentUIMessage;
 }
 
+const untrustedTargetMarkers = [
+  "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+  "RELATIVE-TRAVERSAL-PRIVATE-TEXT",
+  "UNICODE-CONTROL-PRIVATE-TEXT",
+  "ABSOLUTE-PATH-PRIVATE-TEXT",
+  "RAW-APPROVAL-PRIVATE-ID",
+  "RAW-ERROR-PRIVATE-TEXT",
+  "../../",
+  "/Users/author/private/",
+  String.fromCodePoint(0x2603),
+  String.fromCharCode(0),
+  "\\u0000",
+];
+
+function assistantWithUntrustedToolTargets(): AgentUIMessage {
+  const unicodeControlTarget = [
+    "UNICODE-CONTROL-PRIVATE-TEXT",
+    String.fromCodePoint(0x2603),
+    String.fromCharCode(0),
+  ].join("");
+  return {
+    id: "assistant-untrusted-tool-targets",
+    role: "assistant",
+    metadata: {
+      ...metadata,
+      state: "error",
+      error: "Tool failed",
+      errorCode: "tool",
+    },
+    parts: [
+      {
+        type: "tool-run_critique",
+        toolCallId: "call-instruction",
+        state: "output-error",
+        input: {
+          chapterId: "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
+          focus: "RAW-ERROR-PRIVATE-TEXT",
+        },
+        errorText: "RAW-ERROR-PRIVATE-TEXT",
+      },
+      {
+        type: "tool-read_outline",
+        toolCallId: "call-traversal",
+        state: "output-denied",
+        input: { chapterId: "../../RELATIVE-TRAVERSAL-PRIVATE-TEXT" },
+        approval: {
+          id: "RAW-APPROVAL-PRIVATE-ID",
+          approved: false,
+          reason: "RAW-ERROR-PRIVATE-TEXT",
+        },
+      },
+      {
+        type: "tool-read_chapter",
+        toolCallId: "call-unicode-control",
+        state: "output-error",
+        input: { chapterId: unicodeControlTarget },
+        errorText: "RAW-ERROR-PRIVATE-TEXT",
+      },
+      {
+        type: "tool-read_pending_proposal",
+        toolCallId: "call-absolute-path",
+        state: "output-denied",
+        input: {
+          proposalId:
+            "/Users/author/private/ABSOLUTE-PATH-PRIVATE-TEXT",
+        },
+        approval: {
+          id: "RAW-APPROVAL-PRIVATE-ID",
+          approved: false,
+        },
+      },
+    ],
+  } as AgentUIMessage;
+}
+
 describe("sanitizeAgentMessages", () => {
   it("removes reasoning and replaces runtime tool values with summaries", () => {
     const messages: AgentUIMessage[] = [
@@ -259,6 +334,47 @@ describe("sanitizeAgentMessages", () => {
       },
     ]);
     expect(JSON.stringify(sanitized)).not.toMatch(/PRIVATE|\/Users\/author/);
+  });
+
+  it("replaces every untrusted failed or denied target with its generic descriptor", () => {
+    const sanitized = sanitizeAgentMessages([
+      assistantWithUntrustedToolTargets(),
+    ]);
+
+    expect(sanitized[0].parts).toEqual([
+      {
+        type: "tool-run_critique",
+        toolCallId: "call-instruction",
+        state: "output-error",
+        input: { chapterId: "Chapter", focus: null },
+        errorText: "Tool execution failed.",
+      },
+      {
+        type: "tool-read_outline",
+        toolCallId: "call-traversal",
+        state: "output-denied",
+        input: { chapterId: "Outline" },
+        approval: { id: "call-traversal", approved: false },
+      },
+      {
+        type: "tool-read_chapter",
+        toolCallId: "call-unicode-control",
+        state: "output-error",
+        input: { chapterId: "Chapter" },
+        errorText: "Tool execution failed.",
+      },
+      {
+        type: "tool-read_pending_proposal",
+        toolCallId: "call-absolute-path",
+        state: "output-denied",
+        input: { proposalId: "Proposal" },
+        approval: { id: "call-absolute-path", approved: false },
+      },
+    ]);
+    const serialized = JSON.stringify(sanitized);
+    for (const marker of untrustedTargetMarkers) {
+      expect(serialized).not.toContain(marker);
+    }
   });
 
   it("projects completed tool input and summaries into safe canonical fields", () => {
@@ -502,5 +618,20 @@ describe("convertAgentMessagesToModel", () => {
     expect(serialized).toContain("Tool execution failed.");
     expect(serialized).toContain("Tool execution denied.");
     expect(serialized).not.toMatch(/PRIVATE|\/Users\/author/);
+  });
+
+  it("never replays untrusted failed or denied target identifiers", async () => {
+    const modelMessages = await convertAgentMessagesToModel(
+      [assistantWithUntrustedToolTargets()],
+      {},
+    );
+    const serialized = JSON.stringify(modelMessages);
+
+    for (const marker of untrustedTargetMarkers) {
+      expect(serialized).not.toContain(marker);
+    }
+    expect(serialized).toContain("Chapter");
+    expect(serialized).toContain("Outline");
+    expect(serialized).toContain("Proposal");
   });
 });

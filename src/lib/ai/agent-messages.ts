@@ -199,7 +199,7 @@ function inputValue(input: unknown, key: string): unknown {
   return isRecord(input) ? input[key] : undefined;
 }
 
-function safeToolInput(name: AgentToolName, input: unknown): unknown {
+function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
   const descriptor = agentToolDescriptors[name];
   switch (name) {
     case "read_chapter":
@@ -238,6 +238,30 @@ function safeToolInput(name: AgentToolName, input: unknown): unknown {
           descriptor.targetFallback,
         ),
       };
+    case "stage_manuscript_proposal":
+    case "stage_outline_proposal":
+      return { summary: "", changes: [] };
+  }
+}
+
+function genericFailedToolInput(name: AgentToolName): unknown {
+  const descriptor = agentToolDescriptors[name];
+  switch (name) {
+    case "read_chapter":
+    case "read_outline":
+      return { chapterId: descriptor.targetFallback };
+    case "read_lore":
+      return { query: null };
+    case "run_critique":
+    case "run_continuity":
+      return {
+        chapterId: descriptor.targetFallback,
+        focus: null,
+      };
+    case "read_conversation_context":
+      return { messageIds: [] };
+    case "read_pending_proposal":
+      return { proposalId: descriptor.targetFallback };
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
@@ -374,15 +398,15 @@ function settledToolProjection(
           type: `tool-${name}` as const,
           toolCallId: part.toolCallId,
         };
-  const input = safeToolInput(name, part.input);
   if (part.state === "output-available") {
     return {
       ...identity,
       state: "output-available",
-      input,
+      input: safeCompletedToolInput(name, part.input),
       output: summaryOnly(name, part.output),
     } as AgentUIMessage["parts"][number];
   }
+  const input = genericFailedToolInput(name);
   if (part.state === "output-error") {
     return {
       ...identity,

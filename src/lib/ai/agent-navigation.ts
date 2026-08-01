@@ -146,6 +146,7 @@ export async function navigateToContextSnapshot(
       sourceType: snapshot.sourceType,
       label: snapshot.label,
       exactText: snapshot.exactText,
+      previewText: snapshot.exactText,
     });
   }
   const blockIds = findingBlockIds(snapshot);

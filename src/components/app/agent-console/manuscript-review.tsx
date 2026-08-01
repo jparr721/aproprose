@@ -47,7 +47,7 @@ function requiredText(value: string | null, field: string): string {
 interface BlockDisplay {
   sourceId: string;
   label: string;
-  exactText: string;
+  previewText: string;
   mutableText: string;
 }
 
@@ -67,7 +67,7 @@ function frozenBlockDisplay(locator: SourceLocator): BlockDisplay {
   return {
     sourceId: locator.sourceId,
     label: locator.label,
-    exactText: locator.exactText,
+    previewText: locator.previewText,
     mutableText: locator.exactText,
   };
 }
@@ -93,7 +93,7 @@ function displayLiveBlock(block: Block, blocks: Block[]): BlockDisplay {
   return {
     sourceId: block.id,
     label: `${typeLabel} block ${order + 1}`,
-    exactText: blockSnapshotText(block),
+    previewText: blockSnapshotText(block),
     mutableText: block.text,
   };
 }
@@ -190,7 +190,7 @@ function ManuscriptPreview(props: {
           <TypographyMuted>{location?.label ?? "End of chapter"}</TypographyMuted>
           {location === null ? null : (
             <TypographyP className="whitespace-pre-wrap">
-              {location.exactText}
+              {location.previewText}
             </TypographyP>
           )}
         </div>
@@ -199,7 +199,7 @@ function ManuscriptPreview(props: {
             <TypographyEyebrow>Right boundary</TypographyEyebrow>
             <TypographyMuted>Before {rightBoundary.label}</TypographyMuted>
             <TypographyP className="whitespace-pre-wrap">
-              {rightBoundary.exactText}
+              {rightBoundary.previewText}
             </TypographyP>
           </div>
         )}
@@ -216,7 +216,7 @@ function ManuscriptPreview(props: {
   if (proposalChange.kind === "remove") {
     return (
       <TypographyP className="whitespace-pre-wrap">
-        {source.exactText}
+        {source.previewText}
       </TypographyP>
     );
   }
@@ -242,7 +242,7 @@ function ManuscriptPreview(props: {
       <div className="flex flex-col gap-1">
         <TypographyEyebrow>Source</TypographyEyebrow>
         <TypographyP className="whitespace-pre-wrap">
-          {source.exactText}
+          {source.previewText}
         </TypographyP>
       </div>
       <div className="flex flex-col gap-1">
@@ -256,7 +256,7 @@ function ManuscriptPreview(props: {
         </TypographyMuted>
         {destination === null ? null : (
           <TypographyP className="whitespace-pre-wrap">
-            {destination.exactText}
+            {destination.previewText}
           </TypographyP>
         )}
       </div>

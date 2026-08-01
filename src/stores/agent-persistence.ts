@@ -117,6 +117,7 @@ const sourceLocatorSchema = z
     sourceType: z.string(),
     label: z.string(),
     exactText: z.string(),
+    previewText: z.string(),
   })
   .strict();
 

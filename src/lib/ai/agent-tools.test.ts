@@ -43,7 +43,33 @@ const pending: ManuscriptPendingProposal = {
   summary: "Bridge",
   createdAt: "2026-07-30T00:01:00.000Z",
   originatingMessageId: "assistant-1",
-  changes: [],
+  changes: [
+    {
+      id: "change-1",
+      change: {
+        kind: "remove",
+        blockId: "dialogue-1",
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: null,
+        toIndex: null,
+        reason: "Remove the repeated line",
+      },
+      precondition: {
+        kind: "target",
+        target: {
+          sourceId: "dialogue-1",
+          order: 0,
+          fingerprint: "dialogue-fingerprint",
+          sourceType: "dialogue",
+          label: "dialogue block",
+          exactText: "The bell rang hard.",
+          previewText: "The bell rang hard.\nShe gripped the rope.",
+        },
+      },
+    },
+  ],
 };
 
 function environment(): AgentToolEnvironment {
@@ -128,5 +154,21 @@ describe("stage tools", () => {
     await expect(
       handlers.readPendingProposal({ proposalId: "wrong" }),
     ).rejects.toThrow("Pending proposal not found: wrong");
+  });
+
+  it("returns both mutable and frozen preview locator text to follow-up tools", async () => {
+    const env = environment();
+    vi.mocked(env.getPendingProposal).mockReturnValue(pending);
+    const handlers = createAgentToolHandlers(env);
+    const output = await handlers.readPendingProposal({
+      proposalId: pending.id,
+    });
+
+    expect(output.value.changes[0].precondition).toMatchObject({
+      target: {
+        exactText: "The bell rang hard.",
+        previewText: "The bell rang hard.\nShe gripped the rope.",
+      },
+    });
   });
 });

@@ -192,6 +192,70 @@ describe("proposal task boundaries", () => {
 });
 
 describe("proposal preconditions", () => {
+  it("separates mutable locator text from complete frozen manuscript previews", () => {
+    const dialogue: Block = {
+      id: "dialogue-1",
+      type: "dialogue",
+      text: "The bell rang hard.",
+      raw: "The bell rang hard.\n",
+      dirty: false,
+      tail: [
+        { kind: "beat", text: "She gripped the rope." },
+        { kind: "quote", text: "We leave now." },
+      ],
+    };
+    const lore: Block = {
+      id: "lore-1",
+      type: "lore",
+      title: "Harbor law",
+      text: "The tide was mild.",
+      raw: "% lore\n",
+      dirty: false,
+    };
+    const remove = (source: Block): BlockChange => ({
+      kind: "remove",
+      blockId: source.id,
+      afterId: null,
+      type: null,
+      speaker: null,
+      newText: null,
+      toIndex: null,
+      reason: "Remove the source",
+    });
+    const proposal = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [remove(dialogue), remove(lore)],
+      [dialogue, lore],
+    );
+    const targets = proposal.changes.map((item) => {
+      if (item.precondition.kind !== "target") {
+        throw new Error("Expected target precondition.");
+      }
+      return item.precondition.target;
+    });
+
+    expect(targets[0]).toMatchObject({
+      exactText: "The bell rang hard.",
+      previewText: "The bell rang hard.\nShe gripped the rope.\nWe leave now.",
+    });
+    expect(targets[1]).toMatchObject({
+      exactText: "The tide was mild.",
+      previewText: "Harbor law\nThe tide was mild.",
+    });
+    expect(
+      validateManuscriptChanges(proposal, [
+        {
+          ...dialogue,
+          tail: [{ kind: "beat", text: "She released the rope." }],
+        },
+        { ...lore, title: "Revised law" },
+      ]),
+    ).toEqual([
+      { changeId: "generated-id", reason: "target-changed" },
+      { changeId: "generated-id", reason: "target-changed" },
+    ]);
+  });
+
   it("marks changed text and changed insert successors stale", () => {
     const proposal = buildManuscript(
       {

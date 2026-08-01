@@ -40,6 +40,7 @@ const locator = (
   sourceType: "outline-card",
   label: "outline card",
   exactText: `${source.title}\n${source.intention}`,
+  previewText: `${source.title}\n${source.intention}`,
 });
 
 const changes: OutlinePendingChange[] = [

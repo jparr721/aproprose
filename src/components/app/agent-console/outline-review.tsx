@@ -41,7 +41,7 @@ interface CardDisplay {
   sourceId: string;
   title: string;
   intention: string;
-  exactText: string;
+  mutableText: string;
 }
 
 type ResolveCardDisplay = (locator: SourceLocator) => CardDisplay;
@@ -63,16 +63,16 @@ function changeTitle(
 }
 
 function frozenCardDisplay(locator: SourceLocator): CardDisplay {
-  const separator = locator.exactText.indexOf("\n");
+  const separator = locator.previewText.indexOf("\n");
   const title =
-    separator < 0 ? locator.exactText : locator.exactText.slice(0, separator);
+    separator < 0 ? locator.previewText : locator.previewText.slice(0, separator);
   const intention =
-    separator < 0 ? "" : locator.exactText.slice(separator + 1);
+    separator < 0 ? "" : locator.previewText.slice(separator + 1);
   return {
     sourceId: locator.sourceId,
     title,
     intention,
-    exactText: locator.exactText,
+    mutableText: locator.exactText,
   };
 }
 
@@ -81,7 +81,7 @@ function displayLiveCard(card: OutlineCard): CardDisplay {
     sourceId: card.id,
     title: card.title,
     intention: card.intention,
-    exactText: cardSnapshotText(card),
+    mutableText: cardSnapshotText(card),
   };
 }
 
@@ -141,7 +141,7 @@ function OutlinePreview(props: {
     return (
       <DiffPreview
         after={`${nextTitle}\n${nextIntention}`}
-        before={source.exactText}
+        before={source.mutableText}
       />
     );
   }

@@ -141,6 +141,7 @@ const proposal: PendingProposal = {
           sourceType: "narration",
           label: "Narration block",
           exactText: "The settled proposal precondition.",
+          previewText: "The settled proposal precondition.\nA frozen tail beat.",
         },
       },
     },
@@ -356,6 +357,41 @@ describe("agent persistence", () => {
     const raw = {
       ...emptyPersistedAgentState(),
       pendingProposal: unsafeProposal,
+    };
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: "/books/one" },
+    });
+  });
+
+  it("rejects a persisted proposal locator without its frozen preview", async () => {
+    const raw = {
+      ...emptyPersistedAgentState(),
+      pendingProposal: {
+        id: "proposal-without-preview",
+        kind: "manuscript",
+        chapterId: "chapter-1",
+        summary: "Remove the repeated beat",
+        createdAt: "2026-07-30T12:01:00.000Z",
+        originatingMessageId: "assistant-1",
+        changes: [
+          {
+            id: "change-1",
+            change: proposal.changes[0].change,
+            precondition: {
+              kind: "target",
+              target: {
+                sourceId: "block-1",
+                order: 3,
+                fingerprint: "fingerprint-1",
+                sourceType: "narration",
+                label: "Narration block",
+                exactText: "The settled proposal precondition.",
+              },
+            },
+          },
+        ],
+      },
     };
 
     await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({

@@ -11,7 +11,9 @@ import type {
 import {
   blockFingerprint,
   blockOrderFingerprint,
+  blockSnapshotText,
   cardFingerprint,
+  cardSnapshotText,
   outlineOrderFingerprint,
 } from "@/lib/ai/agent-context";
 import { sanitizeProposal, sanitizeSculpt } from "@/lib/ai/operations";
@@ -53,6 +55,7 @@ function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
     sourceType: blocks[order].type,
     label: `${blocks[order].type} block`,
     exactText: blocks[order].text,
+    previewText: blockSnapshotText(blocks[order]),
   };
 }
 
@@ -68,6 +71,7 @@ function cardLocator(cards: Card[], sourceId: string): SourceLocator {
     sourceType: "outline-card",
     label: cards[order].title,
     exactText: `${cards[order].title}\n${cards[order].intention}`.trim(),
+    previewText: cardSnapshotText(cards[order]),
   };
 }
 

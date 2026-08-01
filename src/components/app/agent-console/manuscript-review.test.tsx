@@ -6,6 +6,7 @@ import { ManuscriptReview } from "@/components/app/agent-console/manuscript-revi
 import {
   blockFingerprint,
   blockOrderFingerprint,
+  blockSnapshotText,
 } from "@/lib/ai/agent-context";
 import type {
   ManuscriptPendingChange,
@@ -39,6 +40,7 @@ const locator = (
   sourceType: source.type,
   label: `${source.type} block`,
   exactText: source.text,
+  previewText: blockSnapshotText(source),
 });
 
 const rewriteChange = (
@@ -445,5 +447,112 @@ describe("ManuscriptReview", () => {
     expect(rewriteCard.textContent).not.toContain("Harbor law");
     expect(removeCard.textContent).toContain("Harbor law");
     expect(removeCard.textContent).toContain("The tide was mild.");
+  });
+
+  it("keeps the complete sent-time dialogue preview on a stale remove", () => {
+    const frozenDialogue: Block = {
+      id: "dialogue-stale",
+      type: "dialogue",
+      text: "The bell rang hard.",
+      raw: "The bell rang hard.\n",
+      dirty: false,
+      tail: [
+        { kind: "beat", text: "She gripped the rope." },
+        { kind: "quote", text: "We leave now." },
+      ],
+    };
+    const liveDialogue: Block = {
+      ...frozenDialogue,
+      text: "The bell fell silent.",
+      tail: [
+        { kind: "beat", text: "She released the rope." },
+        { kind: "quote", text: "We stay here." },
+      ],
+    };
+    useProjectStore.setState({ blocks: [liveDialogue] });
+
+    const { container } = render(
+      <ManuscriptReview
+        proposal={{
+          ...proposal,
+          changes: [removeChange(frozenDialogue, 0, "stale-dialogue-remove")],
+        }}
+        staleChangeIds={new Set(["stale-dialogue-remove"])}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const card = container.querySelector(
+      '[data-agent-change-id="stale-dialogue-remove"]',
+    );
+    if (!(card instanceof HTMLElement)) {
+      throw new Error("Missing stale dialogue review card.");
+    }
+
+    expect(card.textContent).toContain("The bell rang hard.");
+    expect(card.textContent).toContain("She gripped the rope.");
+    expect(card.textContent).toContain("We leave now.");
+    expect(card.textContent).not.toContain("The bell fell silent.");
+    expect(card.textContent).not.toContain("She released the rope.");
+    expect(card.textContent).not.toContain("We stay here.");
+  });
+
+  it("keeps the complete sent-time titled lore preview on a stale move", () => {
+    const frozenLore: Block = {
+      id: "lore-stale",
+      type: "lore",
+      title: "Harbor law",
+      text: "The tide was mild.",
+      raw: "% lore\n",
+      dirty: false,
+    };
+    const destination = block("destination", "The harbor emptied.");
+    const frozenOrder = [frozenLore, destination];
+    useProjectStore.setState({
+      blocks: [
+        { ...frozenLore, title: "Revised law", text: "The tide was wild." },
+        destination,
+      ],
+    });
+    const move: ManuscriptPendingChange = {
+      id: "stale-lore-move",
+      change: {
+        kind: "move",
+        blockId: frozenLore.id,
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: null,
+        toIndex: 1,
+        reason: "Move the reference later",
+      },
+      precondition: {
+        kind: "move",
+        target: locator(frozenLore, 0),
+        orderFingerprint: blockOrderFingerprint(frozenOrder),
+      },
+    };
+
+    const { container } = render(
+      <ManuscriptReview
+        proposal={{ ...proposal, changes: [move] }}
+        staleChangeIds={new Set(["stale-lore-move"])}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    const card = container.querySelector(
+      '[data-agent-change-id="stale-lore-move"]',
+    );
+    if (!(card instanceof HTMLElement)) {
+      throw new Error("Missing stale lore review card.");
+    }
+
+    expect(card.textContent).toContain("Harbor law");
+    expect(card.textContent).toContain("The tide was mild.");
+    expect(card.textContent).not.toContain("Revised law");
+    expect(card.textContent).not.toContain("The tide was wild.");
   });
 });

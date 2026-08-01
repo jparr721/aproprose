@@ -34,7 +34,9 @@ vi.mock("sonner", () => ({
 
 import {
   blockFingerprint,
+  blockSnapshotText,
   cardFingerprint,
+  cardSnapshotText,
   findingFingerprint,
 } from "@/lib/ai/agent-context";
 import {
@@ -114,6 +116,7 @@ const blockLocator = (block: Block, order: number): SourceLocator => ({
   sourceType: block.type,
   label: "Narration block",
   exactText: block.text,
+  previewText: blockSnapshotText(block),
 });
 
 const snapshotFixture = (
@@ -386,6 +389,7 @@ describe("navigateToProposalChange", () => {
       sourceType: "outline-card",
       label: card.title,
       exactText: `${card.title}\n${card.intention}`,
+      previewText: cardSnapshotText(card),
     };
     const change: OutlinePendingChange = {
       id: "outline-change-1",
@@ -440,6 +444,7 @@ describe("navigateToProposalChange", () => {
           sourceType: "outline-card",
           label: frozen.title,
           exactText: `${frozen.title}\n${frozen.intention}`,
+          previewText: cardSnapshotText(frozen),
         },
       },
     };

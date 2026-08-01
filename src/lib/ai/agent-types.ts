@@ -104,6 +104,7 @@ export interface SourceLocator {
   sourceType: string;
   label: string;
   exactText: string;
+  previewText: string;
 }
 
 export type ManuscriptPrecondition =

@@ -570,8 +570,9 @@ describe("AgentComposer draft behavior", () => {
     );
   });
 
-  it("opens AI Settings from a preflight configuration error", () => {
+  it("opens AI Settings from a preflight configuration error", async () => {
     useAgentConsoleStore.setState({
+      draftText: "Retry this request",
       runError: {
         code: "configuration",
         message:
@@ -594,6 +595,15 @@ describe("AgentComposer draft behavior", () => {
       open: true,
       tab: SETTINGS_TABS.AI,
     });
+
+    const submit = screen.getByRole("button", { name: "Submit" });
+    expect(
+      submit.querySelector(".lucide-corner-down-left"),
+    ).toBeTruthy();
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(controller.submitAgentDraft).toHaveBeenCalledOnce(),
+    );
   });
 });
 

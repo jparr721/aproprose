@@ -68,9 +68,7 @@ export function AgentComposer() {
       ? "submitted"
       : runStatus === "streaming"
         ? "streaming"
-        : runError === null
-          ? "ready"
-          : "error";
+        : "ready";
   const displayUsage: LanguageModelUsage | null =
     lastUsage === null
       ? null

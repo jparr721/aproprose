@@ -1,7 +1,7 @@
 // errors.ts — turn an unknown thrown value into the most informative string we
 // can, without losing detail.
 //
-// AI calls (Vercel `ai` + `@ai-sdk/openai`, routed through Tauri's HTTP plugin)
+// AI calls (Vercel `ai` providers routed through Tauri's HTTP plugin)
 // reject with errors that carry an HTTP status code, the upstream response body,
 // and a cause chain. A bare `String(e)` collapses those to just the top-line
 // message, hiding whether a failure was auth (401), rate limit (429), a malformed

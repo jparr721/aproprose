@@ -242,13 +242,21 @@ export interface RecentProject {
 
 export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
+export type AiProvider = "openai" | "openrouter";
+
+export function isAiProvider(value: unknown): value is AiProvider {
+  return value === "openai" || value === "openrouter";
+}
+
 export interface Settings {
   theme: Theme;
   /** Editor prose font-size in px. */
   proseSize: number;
   /** PDF preview zoom as a scale factor (1 = 100%). */
   pdfZoom: number;
-  /** OpenAI model id chosen in Settings. Null until the user picks one - no default. */
+  /** Active AI provider. */
+  aiProvider: AiProvider;
+  /** Provider model id chosen in Settings. Null until the user picks one - no default. */
   aiModel: string | null;
   /** Global tag list for lore entries. */
   loreTags: string[];
@@ -270,6 +278,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
   proseSize: 17.5,
   pdfZoom: 1.1,
+  aiProvider: "openai",
   aiModel: null,
   loreTags: [],
   styleGuide: "",

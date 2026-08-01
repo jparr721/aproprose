@@ -35,16 +35,32 @@ import {
 } from "@/components/ui/typography";
 import { Field } from "@/components/app/settings/field";
 import { useSettingsStore } from "@/stores/settings-store";
-import { hasOpenAiKey, setOpenAiKey } from "@/lib/tauri";
+import { hasAiKey, setAiKey } from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
-import { listTextModels } from "@/lib/ai/models";
+import { listTextModels, resetModelMetadata } from "@/lib/ai/models";
 import { describeAiError } from "@/lib/ai/errors";
-import { PREFERENCE_MAX_CHARS } from "@/lib/types";
+import {
+  isAiProvider,
+  PREFERENCE_MAX_CHARS,
+  type AiProvider,
+} from "@/lib/types";
 
-function OpenAiKeyField({
+const providerLabels: Record<AiProvider, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+};
+
+const providerKeyPlaceholders: Record<AiProvider, string> = {
+  openai: "sk-",
+  openrouter: "sk-or-v1-",
+};
+
+function ApiKeyField({
+  provider,
   configured,
   onConfiguredChange,
 }: {
+  provider: AiProvider;
   configured: boolean;
   onConfiguredChange: (configured: boolean) => void;
 }) {
@@ -57,12 +73,13 @@ function OpenAiKeyField({
     if (!key || saving) return;
     setSaving(true);
     try {
-      await setOpenAiKey(key);
+      await setAiKey(provider, key);
       resetAiProvider();
+      resetModelMetadata();
       setDraft("");
       setShow(false);
       onConfiguredChange(true);
-      toast.success("OpenAI key saved");
+      toast.success(`${providerLabels[provider]} key saved`);
     } catch (e) {
       toast.error(`Couldn't save key: ${String(e)}`);
     } finally {
@@ -72,17 +89,18 @@ function OpenAiKeyField({
 
   const clear = async () => {
     try {
-      await setOpenAiKey("");
+      await setAiKey(provider, "");
       resetAiProvider();
+      resetModelMetadata();
       onConfiguredChange(false);
-      toast.success("OpenAI key removed");
+      toast.success(`${providerLabels[provider]} key removed`);
     } catch (e) {
       toast.error(`Couldn't remove key: ${String(e)}`);
     }
   };
 
   return (
-    <Field label="OpenAI key">
+    <Field label={`${providerLabels[provider]} key`}>
       <div className="flex items-center gap-2">
         <InputGroup className="flex-1">
           <InputGroupInput
@@ -95,7 +113,11 @@ function OpenAiKeyField({
                 void save();
               }
             }}
-            placeholder={configured ? "Replace stored key" : "sk-"}
+            placeholder={
+              configured
+                ? "Replace stored key"
+                : providerKeyPlaceholders[provider]
+            }
             autoComplete="off"
             spellCheck={false}
           />
@@ -133,10 +155,12 @@ function OpenAiKeyField({
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  Remove the {providerLabels[provider]} key?
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  The stored key is deleted from this machine. AI features stop working
-                  until you add a key again.
+                  The stored key is deleted from this machine. This provider stops
+                  working until you add a key again.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -158,7 +182,42 @@ function OpenAiKeyField({
   );
 }
 
-function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
+function ProviderField() {
+  const aiProvider = useSettingsStore((state) => state.aiProvider);
+  const setAiProvider = useSettingsStore((state) => state.setAiProvider);
+
+  return (
+    <Field label="AI provider">
+      <Select
+        value={aiProvider}
+        onValueChange={(value) => {
+          if (!isAiProvider(value)) {
+            throw new Error(`Unsupported AI provider: ${value}`);
+          }
+          setAiProvider(value);
+          resetAiProvider();
+          resetModelMetadata();
+        }}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="openai">OpenAI</SelectItem>
+          <SelectItem value="openrouter">OpenRouter</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function AiModelField({
+  provider,
+  keyConfigured,
+}: {
+  provider: AiProvider;
+  keyConfigured: boolean;
+}) {
   const aiModel = useSettingsStore((s) => s.aiModel);
   const setAiModel = useSettingsStore((s) => s.setAiModel);
   const [models, setModels] = useState<string[]>([]);
@@ -175,7 +234,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
     let active = true;
     setLoading(true);
     setError(null);
-    listTextModels()
+    listTextModels(provider)
       .then((m) => {
         if (active) setModels(m);
       })
@@ -188,7 +247,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
     return () => {
       active = false;
     };
-  }, [keyConfigured]);
+  }, [keyConfigured, provider]);
 
   const options = aiModel && !models.includes(aiModel) ? [aiModel, ...models] : models;
 
@@ -276,24 +335,44 @@ function PreferencesFields() {
 }
 
 export function AiTab() {
-  const [keyConfigured, setKeyConfigured] = useState(false);
+  const aiProvider = useSettingsStore((state) => state.aiProvider);
+  const [keyStatus, setKeyStatus] = useState<{
+    provider: AiProvider;
+    configured: boolean;
+  } | null>(null);
+  const keyConfigured =
+    keyStatus?.provider === aiProvider && keyStatus.configured;
 
   useEffect(() => {
-    void hasOpenAiKey()
-      .then(setKeyConfigured)
+    let active = true;
+    void hasAiKey(aiProvider)
+      .then((configured) => {
+        if (active) setKeyStatus({ provider: aiProvider, configured });
+      })
       .catch((error) => {
-        console.error("hasOpenAiKey failed:", error);
-        setKeyConfigured(false);
+        console.error("AI key presence check failed", {
+          error,
+          provider: aiProvider,
+        });
+        if (active) setKeyStatus({ provider: aiProvider, configured: false });
       });
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [aiProvider]);
 
   return (
     <div className="flex flex-col gap-6">
-      <OpenAiKeyField
+      <ProviderField />
+      <ApiKeyField
+        key={aiProvider}
+        provider={aiProvider}
         configured={keyConfigured}
-        onConfiguredChange={setKeyConfigured}
+        onConfiguredChange={(configured) =>
+          setKeyStatus({ provider: aiProvider, configured })
+        }
       />
-      <AiModelField keyConfigured={keyConfigured} />
+      <AiModelField provider={aiProvider} keyConfigured={keyConfigured} />
       <PreferencesFields />
     </div>
   );

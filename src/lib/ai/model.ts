@@ -1,36 +1,70 @@
-// model.ts - resolves the selected OpenAI model.
+// model.ts - resolves the selected model through its configured provider.
 //
 // The API key is read from Rust at runtime, HTTP egress uses the Tauri HTTP
-// plugin to avoid webview CORS. Callers provide the frozen model id.
+// plugin to avoid webview CORS. Callers provide the frozen provider and model id.
 
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
+import {
+  createOpenRouter,
+  type OpenRouterProvider,
+} from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getAiConfig } from "@/lib/tauri";
+import type { AiProvider } from "@/lib/types";
 
-let providerPromise: Promise<OpenAIProvider> | null = null;
+let openAiProviderPromise: Promise<OpenAIProvider> | null = null;
+let openRouterProviderPromise: Promise<OpenRouterProvider> | null = null;
 
-function getProvider(): Promise<OpenAIProvider> {
-  if (providerPromise === null) {
-    providerPromise = (async () => {
-      const { apiKey } = await getAiConfig();
+function getOpenAiProvider(): Promise<OpenAIProvider> {
+  if (openAiProviderPromise === null) {
+    openAiProviderPromise = (async () => {
+      const { apiKey } = await getAiConfig("openai");
       return createOpenAI({
         apiKey,
         fetch: tauriFetch as unknown as typeof globalThis.fetch,
       });
     })().catch((error: unknown) => {
-      providerPromise = null;
+      openAiProviderPromise = null;
       throw error;
     });
   }
-  return providerPromise;
+  return openAiProviderPromise;
+}
+
+function getOpenRouterProvider(): Promise<OpenRouterProvider> {
+  if (openRouterProviderPromise === null) {
+    openRouterProviderPromise = (async () => {
+      const { apiKey } = await getAiConfig("openrouter");
+      return createOpenRouter({
+        apiKey,
+        compatibility: "strict",
+        fetch: tauriFetch as unknown as typeof globalThis.fetch,
+      });
+    })().catch((error: unknown) => {
+      openRouterProviderPromise = null;
+      throw error;
+    });
+  }
+  return openRouterProviderPromise;
 }
 
 export function resetAiProvider(): void {
-  providerPromise = null;
+  openAiProviderPromise = null;
+  openRouterProviderPromise = null;
 }
 
-export async function getModel(modelId: string): Promise<LanguageModel> {
-  const provider = await getProvider();
-  return provider(modelId);
+const modelFactories: Record<
+  AiProvider,
+  (modelId: string) => Promise<LanguageModel>
+> = {
+  openai: async (modelId) => (await getOpenAiProvider())(modelId),
+  openrouter: async (modelId) => (await getOpenRouterProvider())(modelId),
+};
+
+export function getModel(
+  provider: AiProvider,
+  modelId: string,
+): Promise<LanguageModel> {
+  return modelFactories[provider](modelId);
 }

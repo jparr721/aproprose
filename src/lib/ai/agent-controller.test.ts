@@ -271,7 +271,7 @@ function makeDependencies(
     now: () => "2026-07-30T12:00:00.000Z",
     id: () => `agent-${++nextId}`,
     getModel: async () => new MockLanguageModelV3(),
-    getContextWindow: async (modelId) => {
+    getContextWindow: async (_provider, modelId) => {
       const contextWindow = modelContextWindow(modelId, null);
       if (contextWindow === null) {
         throw new Error(`Missing test context metadata: ${modelId}`);
@@ -417,6 +417,7 @@ beforeEach(() => {
     chapterDirty: true,
   });
   useSettingsStore.setState({
+    aiProvider: "openai",
     aiModel: "gpt-4.1",
     styleGuide: "Keep the clipped voice.",
     editingRules: "Preserve intentional fragments.",
@@ -964,6 +965,7 @@ describe("frozen run preflight", () => {
       const frozenModel = new MockLanguageModelV3();
       const dependencies = makeDependencies(async (input) => {
         useSettingsStore.setState({
+          aiProvider: "openrouter",
           aiModel: "gpt-5-mini",
           styleGuide: "Changed immediately before analysis.",
           editingRules: "Changed nested editing rules.",
@@ -988,6 +990,7 @@ describe("frozen run preflight", () => {
       });
       await vi.waitFor(() => expect(mocks.readTextFile).toHaveBeenCalledOnce());
       useSettingsStore.setState({
+        aiProvider: "openrouter",
         aiModel: "gpt-5",
         styleGuide: "Changed during preflight.",
         editingRules: "Changed preflight editing rules.",
@@ -995,7 +998,7 @@ describe("frozen run preflight", () => {
       source.resolve("Frozen first.\n\nFrozen target.\n");
       await submission;
 
-      expect(getModel).toHaveBeenCalledExactlyOnceWith("gpt-4.1");
+      expect(getModel).toHaveBeenCalledExactlyOnceWith("openai", "gpt-4.1");
       const input = dependencies.stream.mock.calls[0][0];
       expect(input.model).toBe(frozenModel);
       expect(input.modelId).toBe("gpt-4.1");
@@ -1025,6 +1028,7 @@ describe("frozen run preflight", () => {
     const turn = originalTurn([]);
     useAgentConsoleStore.setState({ messages: turn.messages });
     useSettingsStore.setState({
+      aiProvider: "openai",
       aiModel: "gpt-4.1",
       styleGuide: "Retry captured voice.",
       editingRules: "Retry captured editing rules.",
@@ -1037,6 +1041,7 @@ describe("frozen run preflight", () => {
     const retrying = controller.retryAgentTurn("original-user");
     await vi.waitFor(() => expect(getModel).toHaveBeenCalled());
     useSettingsStore.setState({
+      aiProvider: "openrouter",
       aiModel: "gpt-5",
       styleGuide: "Changed retry voice.",
       editingRules: "Changed retry editing rules.",
@@ -1044,7 +1049,7 @@ describe("frozen run preflight", () => {
     model.resolve(frozenModel);
     await retrying;
 
-    expect(getModel).toHaveBeenCalledExactlyOnceWith("gpt-4.1");
+    expect(getModel).toHaveBeenCalledExactlyOnceWith("openai", "gpt-4.1");
     const input = dependencies.stream.mock.calls[0][0];
     expect(input.model).toBe(frozenModel);
     expect(input.modelId).toBe("gpt-4.1");
@@ -1937,6 +1942,28 @@ describe("run settlement and cancellation", () => {
     expect(useAgentConsoleStore.getState().messages.at(-1)).toMatchObject({
       role: "assistant",
       metadata: { state: "error", errorCode: "quota" },
+    });
+  });
+
+  it("classifies an OpenRouter payment-required response as a quota failure", async () => {
+    const quota = new Error("Insufficient credits") as Error & {
+      statusCode: number;
+    };
+    quota.name = "AI_APICallError";
+    quota.statusCode = 402;
+    const dependencies = makeDependencies(async () => {
+      throw quota;
+    });
+    const controller = createAgentController(dependencies);
+    useAgentConsoleStore.getState().setDraftText("Send this request");
+
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toBe(
+      quota,
+    );
+
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      runStatus: "idle",
+      runError: { code: "quota" },
     });
   });
 

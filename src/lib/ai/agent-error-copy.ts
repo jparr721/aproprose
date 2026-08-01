@@ -3,7 +3,7 @@ import type { AgentErrorCode } from "@/lib/ai/agent-types";
 const agentErrorText: Record<AgentErrorCode, string> = {
   configuration: "AI is not configured. Open AI Settings to continue.",
   quota:
-    "Your OpenAI API account has no credits remaining. Add credits and retry.",
+    "Your AI provider account has no credits remaining. Add credits and retry.",
   transport:
     "The AI request could not be completed. Check your connection and retry.",
   tool: "A project action could not be completed. Retry the request.",

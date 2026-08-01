@@ -55,6 +55,7 @@ import { renderStoryStructure } from "@/lib/outline/grounding";
 import { getChapterOutline } from "@/lib/outline/model";
 import { readTextFile } from "@/lib/tauri";
 import type {
+  AiProvider,
   Block,
   Card,
   CritiqueNote,
@@ -75,8 +76,14 @@ import { useViewStore } from "@/stores/view-store";
 export interface AgentControllerDependencies {
   now: () => string;
   id: () => string;
-  getModel: (modelId: string) => Promise<LanguageModel>;
-  getContextWindow: (modelId: string) => Promise<number>;
+  getModel: (
+    provider: AiProvider,
+    modelId: string,
+  ) => Promise<LanguageModel>;
+  getContextWindow: (
+    provider: AiProvider,
+    modelId: string,
+  ) => Promise<number>;
   summarize: (
     model: LanguageModel,
     source: string,
@@ -153,6 +160,7 @@ interface SubmissionCapture {
   mode: AgentMode;
   task: AgentTask;
   text: string;
+  provider: AiProvider;
   modelId: string | null;
   styleGuide: string;
   editingRules: string;
@@ -857,12 +865,15 @@ function errorCode(error: unknown, phase: AgentErrorCode | null): AgentErrorCode
     return (error as ErrorWithDetails).agentErrorCode as AgentErrorCode;
   }
   if (!(error instanceof Error)) return "unknown";
+  const detailedError = error as ErrorWithDetails;
+  const status = detailedError.statusCode ?? detailedError.status;
   const normalizedMessage = error.message.toLowerCase();
   if (
-    (error.name.includes("APICallError") || error.name.includes("RetryError")) &&
-    (normalizedMessage.includes("credit_balance_exhausted") ||
-      normalizedMessage.includes("insufficient_quota") ||
-      normalizedMessage.includes("no credits remaining"))
+    status === 402 ||
+    ((error.name.includes("APICallError") || error.name.includes("RetryError")) &&
+      (normalizedMessage.includes("credit_balance_exhausted") ||
+        normalizedMessage.includes("insufficient_quota") ||
+        normalizedMessage.includes("no credits remaining")))
   ) {
     return "quota";
   }
@@ -1286,9 +1297,15 @@ export function createAgentController(
       const frozen = targetResult.value;
 
       failurePhase = "configuration";
-      const model = await dependencies.getModel(capture.modelId);
+      const model = await dependencies.getModel(
+        capture.provider,
+        capture.modelId,
+      );
       failurePhase = null;
-      const contextWindow = await dependencies.getContextWindow(capture.modelId);
+      const contextWindow = await dependencies.getContextWindow(
+        capture.provider,
+        capture.modelId,
+      );
       if (!ownsCurrentRun()) return;
 
       let summary = capture.summary;
@@ -1406,6 +1423,7 @@ export function createAgentController(
         code: failure.code,
         message: failure.message,
         modelId: capture.modelId,
+        provider: capture.provider,
         phase: failurePhase,
         projectRoot: capture.projectRoot,
         runId,
@@ -1517,6 +1535,7 @@ export function createAgentController(
       mode: args.mode,
       task,
       text: args.text,
+      provider: settings.aiProvider,
       modelId: settings.aiModel,
       styleGuide: settings.styleGuide,
       editingRules: settings.editingRules,
@@ -1576,6 +1595,7 @@ export function createAgentController(
       mode: consoleState.mode,
       task: taskTarget.task,
       text,
+      provider: settings.aiProvider,
       modelId: settings.aiModel,
       styleGuide: settings.styleGuide,
       editingRules: settings.editingRules,

@@ -1,7 +1,7 @@
 //! aproprose — Rust backend.
 //!
 //! The webview is untrusted UI: every privileged operation (filesystem,
-//! latexmk, reading the OpenAI key) lives here and is exposed as a narrow
+//! latexmk, reading provider API keys) lives here and is exposed as a narrow
 //! `#[tauri::command]`. The command names + argument shapes are the contract
 //! defined by `src/lib/tauri.ts`; Tauri maps the JS camelCase argument keys to
 //! these snake_case parameters.
@@ -139,39 +139,57 @@ fn read_pdf(root: String, path: String) -> Result<Option<String>, String> {
 
 // ── AI config ─────────────────────────────────────────────────────────────────
 //
-// The OpenAI key is entered by the user in the app's Settings and stored as a
-// plaintext JSON file in the app-config dir (`openai_key.json`). It is read here
-// and handed to the frontend AI layer at runtime — never written into the JS
-// bundle, never logged. There is no environment or `.env` fallback: the key comes
-// only from what the user saved in Settings.
+// Provider keys are entered in Settings and stored as separate plaintext JSON
+// files in the app-config dir. The selected key is handed to the frontend AI
+// layer at runtime, never written into the JS bundle, and never logged.
 
-/// The OpenAI key handed to the frontend AI layer. Mirrors `AiConfig` in
-/// `src/lib/tauri.ts`. The key is read here and never logged.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum AiProvider {
+    Openai,
+    Openrouter,
+}
+
+/// The selected provider key handed to the frontend AI layer.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AiConfig {
     api_key: String,
 }
 
-/// On-disk shape of the stored key (`<app_config_dir>/openai_key.json`).
+/// On-disk shape of each stored provider key.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredApiKey {
     api_key: String,
 }
 
-/// Path of the stored-key file in the app config dir.
-fn openai_key_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn provider_key_filename(provider: AiProvider) -> &'static str {
+    match provider {
+        AiProvider::Openai => "openai_key.json",
+        AiProvider::Openrouter => "openrouter_key.json",
+    }
+}
+
+fn provider_name(provider: AiProvider) -> &'static str {
+    match provider {
+        AiProvider::Openai => "OpenAI",
+        AiProvider::Openrouter => "OpenRouter",
+    }
+}
+
+/// Path of a provider's stored-key file in the app config dir.
+fn api_key_path(app: &tauri::AppHandle, provider: AiProvider) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("no app config dir: {e}"))?;
-    Ok(base.join("openai_key.json"))
+    Ok(base.join(provider_key_filename(provider)))
 }
 
 /// Read the key the user saved in Settings, if any (trimmed, non-empty).
-fn read_stored_key(app: &tauri::AppHandle) -> Option<String> {
-    let path = openai_key_path(app).ok()?;
+fn read_stored_key(app: &tauri::AppHandle, provider: AiProvider) -> Option<String> {
+    let path = api_key_path(app, provider).ok()?;
     let raw = std::fs::read_to_string(&path).ok()?;
     let parsed: StoredApiKey = serde_json::from_str(&raw).ok()?;
     let key = parsed.api_key.trim().to_string();
@@ -179,31 +197,34 @@ fn read_stored_key(app: &tauri::AppHandle) -> Option<String> {
 }
 
 /// Return the API key the user saved in Settings, or `None` when none is stored.
-fn resolve_api_key(app: &tauri::AppHandle) -> Option<String> {
-    read_stored_key(app)
+fn resolve_api_key(app: &tauri::AppHandle, provider: AiProvider) -> Option<String> {
+    read_stored_key(app, provider)
 }
 
-/// Return the resolved OpenAI key for the frontend AI layer, or an actionable
-/// error when none is configured.
+/// Return the selected provider key or an actionable error when none is set.
 #[tauri::command]
-fn get_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
-    resolve_api_key(&app)
+fn get_ai_config(app: tauri::AppHandle, provider: AiProvider) -> Result<AiConfig, String> {
+    resolve_api_key(&app, provider)
         .map(|api_key| AiConfig { api_key })
-        .ok_or_else(|| "No OpenAI API key set — add one in Settings.".to_string())
+        .ok_or_else(|| {
+            format!(
+                "No {} API key set - add one in Settings.",
+                provider_name(provider)
+            )
+        })
 }
 
-/// Whether a usable key is available from any source. Lets the Settings UI show
-/// configured/not-configured state without ever reading the secret back into JS.
+/// Whether a provider key is configured without returning the secret to the UI.
 #[tauri::command]
-fn has_openai_key(app: tauri::AppHandle) -> Result<bool, String> {
-    Ok(resolve_api_key(&app).is_some())
+fn has_ai_key(app: tauri::AppHandle, provider: AiProvider) -> Result<bool, String> {
+    Ok(resolve_api_key(&app, provider).is_some())
 }
 
-/// Save (or, when `key` is blank, clear) the user's OpenAI key in the app config
+/// Save (or, when `key` is blank, clear) a provider key in the app config
 /// dir. The value is never logged; on Unix the file is chmod'd to owner-only.
 #[tauri::command]
-fn set_openai_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
-    let path = openai_key_path(&app)?;
+fn set_ai_key(app: tauri::AppHandle, provider: AiProvider, key: String) -> Result<(), String> {
+    let path = api_key_path(&app, provider)?;
     let trimmed = key.trim();
 
     if trimmed.is_empty() {
@@ -441,8 +462,8 @@ pub fn run() {
             pdf_path,
             read_pdf,
             get_ai_config,
-            has_openai_key,
-            set_openai_key,
+            has_ai_key,
+            set_ai_key,
             read_app_data,
             write_app_data,
             git::git_tooling_status,
@@ -458,7 +479,16 @@ pub fn run() {
 
 #[cfg(test)]
 mod capability_tests {
+    use super::{provider_key_filename, AiProvider};
     use serde_json::Value;
+
+    #[test]
+    fn ai_providers_use_separate_key_files() {
+        let openrouter: AiProvider = serde_json::from_str("\"openrouter\"")
+            .expect("OpenRouter must deserialize from the frontend value");
+        assert_eq!(provider_key_filename(AiProvider::Openai), "openai_key.json");
+        assert_eq!(provider_key_filename(openrouter), "openrouter_key.json");
+    }
 
     #[test]
     fn http_capability_allows_model_metadata_endpoint() {
@@ -482,5 +512,6 @@ mod capability_tests {
             .collect();
 
         assert!(urls.contains(&"https://models.dev/*"));
+        assert!(urls.contains(&"https://openrouter.ai/*"));
     }
 }

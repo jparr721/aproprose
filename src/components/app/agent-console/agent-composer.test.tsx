@@ -641,7 +641,7 @@ describe("AgentComposer submission task", () => {
 });
 
 describe("AgentComposer context usage", () => {
-  it("renders latest usage, context window, and a once-prefixed OpenAI model ID", async () => {
+  it("renders latest usage, context window, and provider-qualified model IDs", async () => {
     useAgentConsoleStore.setState({ lastUsage: usage });
     const rendered = render(<AgentComposer />);
 
@@ -662,5 +662,15 @@ describe("AgentComposer context usage", () => {
 
     expect(screen.getByText("Model: openai:gpt-4o")).toBeTruthy();
     expect(screen.queryByText("Model: openai:openai:gpt-4o")).toBeNull();
+
+    act(() => {
+      useAgentConsoleStore.setState({
+        lastUsage: { ...usage, modelId: "anthropic/claude-sonnet-4" },
+      });
+    });
+    rendered.rerender(<AgentComposer />);
+    fireEvent.pointerEnter(screen.getByRole("button", { name: /30%/ }));
+
+    expect(screen.getByText("Model: anthropic:claude-sonnet-4")).toBeTruthy();
   });
 });

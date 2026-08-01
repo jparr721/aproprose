@@ -8,7 +8,9 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
+  isAiProvider,
   PREFERENCE_MAX_CHARS,
+  type AiProvider,
   type Settings,
   type Theme,
 } from "@/lib/types";
@@ -20,6 +22,7 @@ export interface SettingsState extends Settings {
   setTheme: (theme: Theme) => void;
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
+  setAiProvider: (aiProvider: AiProvider) => void;
   setAiModel: (aiModel: string | null) => void;
   setLoreTags: (loreTags: string[]) => void;
   setStyleGuide: (styleGuide: string) => void;
@@ -35,11 +38,20 @@ export function mergePersistedSettings(
   if (persistedState === null || typeof persistedState !== "object") {
     return currentState;
   }
-  const migrated = {
-    ...(persistedState as Partial<Settings> & { aiProvider?: unknown }),
+  const { aiProvider, ...migrated } = persistedState as Partial<Settings> & {
+    aiProvider?: unknown;
   };
-  delete migrated.aiProvider;
-  return { ...currentState, ...migrated };
+  return {
+    ...currentState,
+    ...migrated,
+    aiProvider: isAiProvider(aiProvider) ? aiProvider : currentState.aiProvider,
+    aiModel:
+      aiProvider !== undefined && !isAiProvider(aiProvider)
+        ? null
+        : typeof migrated.aiModel === "string" || migrated.aiModel === null
+          ? migrated.aiModel
+          : currentState.aiModel,
+  };
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -50,6 +62,7 @@ export const useSettingsStore = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
+      setAiProvider: (aiProvider) => set({ aiProvider, aiModel: null }),
       setAiModel: (aiModel) => set({ aiModel }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
@@ -75,6 +88,7 @@ export const useSettingsStore = create<SettingsState>()(
         theme,
         proseSize,
         pdfZoom,
+        aiProvider,
         aiModel,
         loreTags,
         styleGuide,
@@ -84,6 +98,7 @@ export const useSettingsStore = create<SettingsState>()(
         theme,
         proseSize,
         pdfZoom,
+        aiProvider,
         aiModel,
         loreTags,
         styleGuide,

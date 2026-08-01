@@ -81,7 +81,9 @@ export function AgentComposer() {
   const tokenlensModelId =
     lastUsage === null
       ? null
-      : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
+      : lastUsage.modelId.includes("/")
+        ? lastUsage.modelId.replace("/", ":")
+        : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
   const blocksTargetEditing = ownershipStatus !== "ready";

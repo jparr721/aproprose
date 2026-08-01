@@ -11,6 +11,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  AiProvider,
   CompileResult,
   NameCheck,
   NovelMetadata,
@@ -111,28 +112,27 @@ export function pdfPath(root: string, mainFile: string): Promise<string> {
 }
 
 // ── AI config ─────────────────────────────────────────────────────────────────
-// The OpenAI key is entered in Settings and stored in the app-config dir on the
-// Rust side (with optional dev fallbacks to an env var / `.env`). It is fetched
-// at runtime to build the provider — never inlined into the bundle. The Settings
-// UI only ever reads the *presence* of a key, never the secret itself.
+// Provider keys are entered in Settings and stored in the app-config dir on the
+// Rust side. A selected key is fetched at runtime to build the provider and is
+// never inlined into the bundle. The Settings UI only reads whether a key exists.
 
 export interface AiConfig {
-  /** OpenAI API key, resolved on the Rust side — never bundled into JS. */
+  /** Provider API key, resolved on the Rust side and never bundled into JS. */
   apiKey: string;
 }
 
-export function getAiConfig(): Promise<AiConfig> {
-  return invoke<AiConfig>("get_ai_config");
+export function getAiConfig(provider: AiProvider): Promise<AiConfig> {
+  return invoke<AiConfig>("get_ai_config", { provider });
 }
 
-/** Whether a usable OpenAI key is configured (stored, or a dev fallback). */
-export function hasOpenAiKey(): Promise<boolean> {
-  return invoke<boolean>("has_openai_key");
+/** Whether a key is configured for the selected provider. */
+export function hasAiKey(provider: AiProvider): Promise<boolean> {
+  return invoke<boolean>("has_ai_key", { provider });
 }
 
-/** Persist the OpenAI key to the app-config dir; an empty string clears it. */
-export function setOpenAiKey(key: string): Promise<void> {
-  return invoke<void>("set_openai_key", { key });
+/** Persist a provider key to the app-config dir; an empty string clears it. */
+export function setAiKey(provider: AiProvider, key: string): Promise<void> {
+  return invoke<void>("set_ai_key", { provider, key });
 }
 
 // ── App data (recents, per-project metadata) ───────────────────────────────────

@@ -19,8 +19,8 @@ frontend (shadcn-style UI, serif-forward typography) over a Rust backend.
   content is preserved byte-for-byte and only blocks you actually touch are
   re-serialized. Lore and scratchpad blocks are stored as LaTeX comments, so they
   travel with the file but never render.
-- **A real AI assistant** (right panel, powered by the OpenAI model you pick in
-  Settings, via the Vercel AI SDK): **Suggest** the next block, **Critique**
+- **A real AI assistant** (right panel, powered by the OpenAI or OpenRouter model
+  you pick in Settings, via the Vercel AI SDK): **Suggest** the next block, **Critique**
   tone/pacing/voice,
   **Brainstorm** in a streaming chat, run **Continuity** checks, and track the
   **Cast** in the scene — all grounded on the prose up to your cursor. The mic
@@ -81,11 +81,11 @@ requires Windows code signing or Microsoft Store distribution.
 
 - **Privileged work lives in Rust** (`src-tauri/src`): project discovery + LaTeX
   preamble/chapter parsing, file IO (path-traversal guarded), `latexmk`
-  compilation with log/error parsing, and resolving the OpenAI key (entered in
-  Settings, stored in the OS app-config dir). The narrow command surface is
+  compilation with log/error parsing, and resolving provider API keys (entered
+  in Settings, stored in the OS app-config dir). The narrow command surface is
   mirrored, typed, in `src/lib/tauri.ts`.
-- **AI** uses the Vercel AI SDK in the frontend, but the API key — entered in
-  Settings and stored in the app-config dir — is read in Rust (never bundled into
+- **AI** uses the Vercel AI SDK in the frontend, but each provider API key entered
+  in Settings and stored in the app-config dir is read in Rust (never bundled into
   JS) and HTTP egress is routed through Tauri's `http` plugin so it isn't subject
   to webview CORS. The model is the one you select in Settings
   (`settings-store.aiModel`), read by `getModel()` in `src/lib/ai/model.ts`.
@@ -100,8 +100,9 @@ requires Windows code signing or Microsoft Store distribution.
 - [bun](https://bun.sh), Rust + Cargo, and [`just`](https://github.com/casey/just).
 - A TeX distribution with `latexmk` and the usual book packages. On Arch:
   `sudo pacman -S --needed texlive-binextra texlive-latexextra texlive-fontsrecommended texlive-fontsextra`.
-- An OpenAI API key. Set it in the app — **Settings (gear) → OpenAI key** — where
-  it is saved to your OS app-config dir, never to this repo.
+- An OpenAI or OpenRouter API key. Select the provider and set its key under
+  **Settings (gear) -> AI**. It is saved to your OS app-config dir, never to this
+  repo.
 
 ## Commands
 

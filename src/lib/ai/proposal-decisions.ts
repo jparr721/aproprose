@@ -29,6 +29,31 @@ type ProposalApplyFailure = Exclude<
   { status: "applied" }
 >;
 
+export class ProposalDecisionCorrelationError extends Error {
+  constructor(proposal: PendingProposal, current: PendingProposal | null) {
+    const currentDescription =
+      current === null ? "none" : `${current.id} (${current.kind})`;
+    super(
+      `Cannot decide proposal ${proposal.id} (${proposal.kind}): current pending proposal is ${currentDescription}. Refresh and retry.`,
+    );
+    this.name = "ProposalDecisionCorrelationError";
+  }
+}
+
+function currentProposalForDecision(
+  proposal: PendingProposal,
+): PendingProposal {
+  const current = useAgentConsoleStore.getState().pendingProposal;
+  if (
+    current === null ||
+    current.id !== proposal.id ||
+    current.kind !== proposal.kind
+  ) {
+    throw new ProposalDecisionCorrelationError(proposal, current);
+  }
+  return current;
+}
+
 function assertProposalKindExhausted(proposal: never): never {
   throw new Error(`Unsupported proposal kind: ${JSON.stringify(proposal)}`);
 }
@@ -178,24 +203,26 @@ export function acceptProposalChange(
   changeId: string,
 ): void {
   requireAgentConsoleProject(proposal.projectRoot);
-  const change = proposal.changes.find((item) => item.id === changeId);
+  const current = currentProposalForDecision(proposal);
+  const change = current.changes.find((item) => item.id === changeId);
   if (change === undefined) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
-  if (!applyProposalChanges(proposal, [changeId])) return;
+  if (!applyProposalChanges(current, [changeId])) return;
   useAgentConsoleStore.getState().removePendingChanges([changeId]);
-  closeExhaustedManuscriptReview(proposal);
-  recordProposalEvent(proposalEvent(proposal, "accepted", 1));
+  closeExhaustedManuscriptReview(current);
+  recordProposalEvent(proposalEvent(current, "accepted", 1));
 }
 
 export function acceptAllProposalChanges(proposal: PendingProposal): void {
   requireAgentConsoleProject(proposal.projectRoot);
-  const changeIds = proposal.changes.map((change) => change.id);
-  if (!applyProposalChanges(proposal, changeIds)) return;
+  const current = currentProposalForDecision(proposal);
+  const changeIds = current.changes.map((change) => change.id);
+  if (!applyProposalChanges(current, changeIds)) return;
   useAgentConsoleStore.getState().clearPendingProposal();
-  closeExhaustedManuscriptReview(proposal);
+  closeExhaustedManuscriptReview(current);
   recordProposalEvent(
-    proposalEvent(proposal, "accepted-all", changeIds.length),
+    proposalEvent(current, "accepted-all", changeIds.length),
   );
 }
 
@@ -204,20 +231,22 @@ export function rejectProposalChange(
   changeId: string,
 ): void {
   requireAgentConsoleProject(proposal.projectRoot);
-  if (!proposal.changes.some((change) => change.id === changeId)) {
+  const current = currentProposalForDecision(proposal);
+  if (!current.changes.some((change) => change.id === changeId)) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
   useAgentConsoleStore.getState().removePendingChanges([changeId]);
-  closeExhaustedManuscriptReview(proposal);
-  recordProposalEvent(proposalEvent(proposal, "rejected", 1));
+  closeExhaustedManuscriptReview(current);
+  recordProposalEvent(proposalEvent(current, "rejected", 1));
 }
 
 export function rejectAllProposalChanges(proposal: PendingProposal): void {
   requireAgentConsoleProject(proposal.projectRoot);
-  const changeCount = proposal.changes.length;
+  const current = currentProposalForDecision(proposal);
+  const changeCount = current.changes.length;
   useAgentConsoleStore.getState().clearPendingProposal();
-  closeExhaustedManuscriptReview(proposal);
+  closeExhaustedManuscriptReview(current);
   recordProposalEvent(
-    proposalEvent(proposal, "rejected-all", changeCount),
+    proposalEvent(current, "rejected-all", changeCount),
   );
 }

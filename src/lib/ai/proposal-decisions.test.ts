@@ -528,6 +528,244 @@ describe("proposal decisions", () => {
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
     expect(recordProposalEvent).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      name: "accept one",
+      kind: "outline",
+      decide: (proposal: PendingProposal) =>
+        acceptProposalChange(proposal, "change-0"),
+    },
+    {
+      name: "accept all",
+      kind: "outline",
+      decide: (proposal: PendingProposal) => acceptAllProposalChanges(proposal),
+    },
+    {
+      name: "reject one",
+      kind: "manuscript",
+      decide: (proposal: PendingProposal) =>
+        rejectProposalChange(proposal, "change-0"),
+    },
+    {
+      name: "reject all",
+      kind: "manuscript",
+      decide: (proposal: PendingProposal) => rejectAllProposalChanges(proposal),
+    },
+  ])(
+    "refuses to $name from a callback after another proposal replaces it",
+    ({ decide, kind }) => {
+      const callbackProposal: PendingProposal =
+        kind === "outline"
+          ? outlineProposal(initialCards(), [outlineRewrite()])
+          : manuscriptProposal(useProjectStore.getState().blocks, [
+              rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+              rewrite("block-2", "The door eased open.", "Slow the reveal"),
+            ]);
+      const replacement: PendingProposal =
+        kind === "outline"
+          ? {
+              ...outlineProposal(initialCards(), [
+                {
+                  ...outlineRewrite(),
+                  title: "Quiet arrival",
+                  reason: "Lower the tension",
+                },
+              ]),
+              id: "replacement-proposal",
+            }
+          : {
+              ...manuscriptProposal(useProjectStore.getState().blocks, [
+                rewrite("block-1", "Rain hammered.", "Intensify the opening"),
+                rewrite("block-2", "The door burst open.", "Speed the reveal"),
+              ]),
+              id: "replacement-proposal",
+            };
+      const beforeBlocks = structuredClone(useProjectStore.getState().blocks);
+      const beforeMeta = structuredClone(useProjectStore.getState().meta);
+      setPending(replacement);
+      useViewStore.getState().openManuscriptReview(callbackProposal.id);
+
+      expect(() => decide(callbackProposal)).toThrow(
+        `Cannot decide proposal proposal-1 (${kind}): current pending proposal is replacement-proposal (${kind}). Refresh and retry.`,
+      );
+
+      expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
+      expect(useProjectStore.getState().meta).toEqual(beforeMeta);
+      expect(useProjectStore.getState().past).toHaveLength(0);
+      expect(useProjectStore.getState().chapterDirty).toBe(false);
+      expect(useAgentConsoleStore.getState().pendingProposal).toBe(replacement);
+      expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
+        callbackProposal.id,
+      );
+      expect(writeProjectMeta).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(recordProposalEvent).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses a same-ID callback when the current proposal kind differs", () => {
+    const callbackProposal = manuscriptProposal(
+      useProjectStore.getState().blocks,
+      [rewrite("block-1", "Rain whispered.", "Quiet the opening")],
+    );
+    const replacement = {
+      ...outlineProposal(initialCards(), [outlineRewrite()]),
+      id: callbackProposal.id,
+    };
+    const beforeBlocks = structuredClone(useProjectStore.getState().blocks);
+    const beforeMeta = structuredClone(useProjectStore.getState().meta);
+    setPending(replacement);
+    useViewStore.getState().openManuscriptReview(callbackProposal.id);
+
+    expect(() => acceptAllProposalChanges(callbackProposal)).toThrow(
+      "Cannot decide proposal proposal-1 (manuscript): current pending proposal is proposal-1 (outline). Refresh and retry.",
+    );
+
+    expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
+    expect(useProjectStore.getState().meta).toEqual(beforeMeta);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(replacement);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
+      callbackProposal.id,
+    );
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(recordProposalEvent).not.toHaveBeenCalled();
+  });
+
+  it("accepts one change with canonical same-ID edited text", () => {
+    const callbackProposal = manuscriptProposal(
+      useProjectStore.getState().blocks,
+      [
+        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+        rewrite("block-2", "The door eased open.", "Slow the reveal"),
+      ],
+    );
+    setPending(callbackProposal);
+    useAgentConsoleStore.getState().updatePendingManuscriptText({
+      proposalId: callbackProposal.id,
+      changeId: "change-0",
+      newText: "Rain sang against the glass.",
+    });
+
+    acceptProposalChange(callbackProposal, "change-0");
+
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "Rain sang against the glass.",
+      "The door opened.",
+    ]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toMatchObject({
+      id: callbackProposal.id,
+      changes: [{ id: "change-1" }],
+    });
+    expect(recordProposalEvent).toHaveBeenCalledWith({
+      proposalId: callbackProposal.id,
+      action: "accepted",
+      changeCount: 1,
+      text: "Accepted one manuscript change.",
+    });
+  });
+
+  it("accepts all using canonical same-ID changes, edited text, and count", () => {
+    const callbackProposal = manuscriptProposal(
+      useProjectStore.getState().blocks,
+      [
+        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+        rewrite("block-2", "The door eased open.", "Slow the reveal"),
+      ],
+    );
+    setPending(callbackProposal);
+    useAgentConsoleStore.getState().updatePendingManuscriptText({
+      proposalId: callbackProposal.id,
+      changeId: "change-1",
+      newText: "The door opened without a sound.",
+    });
+    const editedProposal = useAgentConsoleStore.getState().pendingProposal;
+    if (editedProposal === null || editedProposal.kind !== "manuscript") {
+      throw new Error("Expected the edited manuscript proposal.");
+    }
+    setPending({ ...editedProposal, changes: [editedProposal.changes[1]] });
+
+    acceptAllProposalChanges(callbackProposal);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "The rain fell.",
+      "The door opened without a sound.",
+    ]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(recordProposalEvent).toHaveBeenCalledWith({
+      proposalId: callbackProposal.id,
+      action: "accepted-all",
+      changeCount: 1,
+      text: "Accepted all 1 manuscript changes.",
+    });
+  });
+
+  it.each([
+    {
+      name: "accept",
+      decide: (proposal: PendingProposal) =>
+        acceptProposalChange(proposal, "change-0"),
+    },
+    {
+      name: "reject",
+      decide: (proposal: PendingProposal) =>
+        rejectProposalChange(proposal, "change-0"),
+    },
+  ])("uses canonical same-ID change lookup before $name", ({ decide }) => {
+    const callbackProposal = manuscriptProposal(
+      useProjectStore.getState().blocks,
+      [
+        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+        rewrite("block-2", "The door eased open.", "Slow the reveal"),
+      ],
+    );
+    const currentProposal = {
+      ...callbackProposal,
+      changes: [callbackProposal.changes[1]],
+    };
+    const beforeBlocks = structuredClone(useProjectStore.getState().blocks);
+    setPending(currentProposal);
+
+    expect(() => decide(callbackProposal)).toThrow(
+      "Pending proposal change not found: change-0",
+    );
+    expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(
+      currentProposal,
+    );
+    expect(recordProposalEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects all using the canonical same-ID count and event data", () => {
+    const callbackProposal = manuscriptProposal(
+      useProjectStore.getState().blocks,
+      [
+        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+        rewrite("block-2", "The door eased open.", "Slow the reveal"),
+      ],
+    );
+    const currentProposal = {
+      ...callbackProposal,
+      changes: [callbackProposal.changes[1]],
+    };
+    setPending(currentProposal);
+
+    rejectAllProposalChanges(callbackProposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(recordProposalEvent).toHaveBeenCalledWith({
+      proposalId: callbackProposal.id,
+      action: "rejected-all",
+      changeCount: 1,
+      text: "Rejected all 1 manuscript changes.",
+    });
+  });
 });
 
 describe("proposalStaleChangeIds", () => {

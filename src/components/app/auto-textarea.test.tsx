@@ -7,7 +7,7 @@
 // call focus() without preventScroll, letting the browser reveal-scroll the
 // field. Both showed up as the page jumping when clicking a block to edit it.
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 
@@ -35,6 +35,20 @@ function renderInViewport(ui: React.ReactElement): { scrollTopWrites: number[] }
 }
 
 describe("AutoGrowTextarea", () => {
+  it("forwards an accessible name to the proposal textarea", () => {
+    renderInViewport(
+      <AutoGrowTextarea
+        ariaLabel="Edit proposed rewrite"
+        value="hello"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+    ).toBeInstanceOf(HTMLTextAreaElement);
+  });
+
   it("never writes the scroll viewport's scrollTop on mount", () => {
     const { scrollTopWrites } = renderInViewport(
       <AutoGrowTextarea value={"line\n".repeat(40)} onChange={() => {}} autoFocus />,

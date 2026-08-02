@@ -164,7 +164,7 @@ function BlockImpl({
           // color transition applies.
           style={
             {
-              "--dnd-transform": CSS.Transform.toString(transform),
+              "--dnd-transform": CSS.Translate.toString(transform),
               "--dnd-transition": transition,
             } as CSSProperties
           }

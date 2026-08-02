@@ -11,7 +11,7 @@ import {
   KEYBINDINGS,
   type KeybindingDefinition,
   type KeybindingId,
-  toHotkeyString,
+  toHotkeyStrings,
 } from "@/lib/keybindings";
 
 export interface UseKeybindingOptions {
@@ -34,7 +34,7 @@ export function useKeybindingWithOptions(
   options: UseKeybindingOptions,
 ): void {
   const definition: KeybindingDefinition = KEYBINDINGS[id];
-  const hotkey = toHotkeyString(definition);
+  const hotkeys = toHotkeyStrings(definition);
   // Chord shortcuts (carry a mod/alt) fire even while a form input is focused, so
   // Cmd+S / Cmd+Shift+P work from the editor's block textareas. Per-binding
   // `ignoreEventWhen` still narrows that — editor undo/redo bows out inside the AI
@@ -47,7 +47,7 @@ export function useKeybindingWithOptions(
     definition.firesWhileEditing ? ["input", "textarea"] : isChord;
 
   useHotkeys(
-    hotkey,
+    hotkeys,
     () => callback(),
     {
       preventDefault: true,

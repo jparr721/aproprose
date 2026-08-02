@@ -1,10 +1,10 @@
 import {
   ToolLoopAgent,
-  hasToolCall,
   readUIMessageStream,
   stepCountIs,
   type LanguageModel,
   type LanguageModelUsage,
+  type StopCondition,
 } from "ai";
 import {
   convertAgentMessagesToModel,
@@ -14,6 +14,7 @@ import {
 import {
   createAgentTools,
   type AgentToolEnvironment,
+  type AgentToolSet,
 } from "@/lib/ai/agent-tools";
 import type {
   AgentDataParts,
@@ -22,6 +23,13 @@ import type {
   AgentUIMessage,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
+
+export interface AgentToolFailure {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  error: unknown;
+}
 
 export interface StreamAgentRunInput {
   model: LanguageModel;
@@ -34,11 +42,26 @@ export interface StreamAgentRunInput {
   signal: AbortSignal;
   generateMessageId: () => string;
   onMessage: (message: AgentUIMessage) => void;
+  onToolFailure: (failure: AgentToolFailure) => Promise<void>;
 }
 
 export interface StreamAgentRunResult {
   message: AgentUIMessage;
   usage: PersistedUsage;
+}
+
+function proposalStageSucceeded({
+  steps,
+}: Parameters<StopCondition<AgentToolSet>>[0]): boolean {
+  const step = steps.at(-1);
+  return (
+    step?.content.some(
+      (part) =>
+        part.type === "tool-result" &&
+        (part.toolName === "stage_manuscript_proposal" ||
+          part.toolName === "stage_outline_proposal"),
+    ) ?? false
+  );
 }
 
 function messageMetadata(
@@ -51,8 +74,7 @@ function messageMetadata(
     task: run.task,
     state,
     createdAt: run.startedAt,
-    error: null,
-    errorCode: null,
+    failure: null,
     retryOf: null,
     usage: null,
   };
@@ -135,9 +157,28 @@ export async function streamAgentRun(
     tools,
     stopWhen: [
       stepCountIs(8),
-      hasToolCall("stage_manuscript_proposal"),
-      hasToolCall("stage_outline_proposal"),
+      proposalStageSucceeded,
     ],
+    onStepFinish: async (step) => {
+      for (const part of step.content) {
+        if (part.type !== "tool-error") continue;
+        try {
+          await input.onToolFailure({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+            error: part.error,
+          });
+        } catch (error) {
+          console.error("Agent tool failure diagnostic could not be written", {
+            cause: error,
+            runId: input.run.id,
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+          });
+        }
+      }
+    },
   });
   const result = await agent.stream({
     prompt: modelMessages,

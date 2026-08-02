@@ -244,10 +244,44 @@ export type AgentErrorCode =
   | "transition"
   | "unknown";
 
-export interface AgentRunError {
+export type AgentFailureReason =
+  | "model-unselected"
+  | "key-missing"
+  | "key-rejected"
+  | "model-unavailable"
+  | "settings-unavailable"
+  | "quota"
+  | "transport"
+  | "tool"
+  | "compaction"
+  | "transition"
+  | "unknown";
+
+export type AgentFailureAction =
+  | "retry"
+  | "add-key"
+  | "replace-key"
+  | "choose-model";
+
+export type AgentSettingsTarget = "key" | "model";
+
+export interface AgentFailure {
+  reason: AgentFailureReason;
+  message: string;
+  action: AgentFailureAction | null;
+  settingsTarget: AgentSettingsTarget | null;
+}
+
+/**
+ * The former error shape remains accepted only while persisted conversations
+ * created before safe failures are migrated during hydration.
+ */
+export interface LegacyAgentRunError {
   code: AgentErrorCode;
   message: string;
 }
+
+export type AgentRunError = AgentFailure | LegacyAgentRunError;
 
 export interface AgentPersistenceIssue {
   kind: "corrupt" | "load" | "save";
@@ -261,8 +295,9 @@ export interface AgentMessageMetadata {
   task: AgentTask;
   state: AgentMessageState;
   createdAt: string;
-  error: string | null;
-  errorCode: AgentErrorCode | null;
+  failure?: AgentFailure | null;
+  error?: string | null;
+  errorCode?: AgentErrorCode | null;
   retryOf: string | null;
   usage: PersistedUsage | null;
 }

@@ -307,12 +307,51 @@ describe("agent persistence", () => {
       id: "assistant-empty",
       metadata: {
         state: "error",
-        error: "The AI response did not contain any output.",
-        errorCode: "unknown",
+        failure: {
+          reason: "unknown",
+          message: "A previous AI request could not be completed. Retry the request.",
+          action: "retry",
+          settingsTarget: null,
+        },
         usage: null,
       },
     });
     expect(restored.lastUsage).toBeNull();
+  });
+
+  it("migrates legacy raw error fields to a safe failure descriptor", async () => {
+    const rawFailure =
+      "provider response body at /Users/author/.config/aproprose/openai_key.json";
+    const raw = persistedState("", [
+      {
+        id: "assistant-legacy-error",
+        role: "assistant",
+        metadata: {
+          ...metadata,
+          state: "error",
+          error: rawFailure,
+          errorCode: "transport",
+        },
+        parts: [{ type: "text", text: "The request failed." }],
+      },
+    ]);
+
+    const restored = await fromAgentSnapshot("/books/one", raw);
+    const restoredMetadata = restored.messages[0].metadata;
+
+    expect(restoredMetadata).toMatchObject({
+      state: "error",
+      failure: {
+        reason: "unknown",
+        message: "A previous AI request could not be completed. Retry the request.",
+        action: "retry",
+        settingsTarget: null,
+      },
+    });
+    expect(restoredMetadata).not.toHaveProperty("error");
+    expect(restoredMetadata).not.toHaveProperty("errorCode");
+    expect(JSON.stringify(restored)).not.toContain(rawFailure);
+    expect(JSON.stringify(restored)).not.toContain("/Users/author");
   });
 
   it("round-trips a sanitized v3 transcript, draft, mode, and proposal", async () => {
@@ -443,7 +482,6 @@ describe("agent persistence", () => {
     expect(restored).toMatchObject({
       v: 3,
       mode: "edit",
-      messages,
       draftText: "Ask about the ending",
       draftContextRefs: expect.arrayContaining([blockRef]),
       pendingProposal: {
@@ -451,6 +489,10 @@ describe("agent persistence", () => {
         projectRoot: "/books/reopened",
       },
     });
+    expect(restored.messages).toHaveLength(messages.length);
+    expect(restored.messages[0].metadata).toMatchObject({ failure: null });
+    expect(restored.messages[1].metadata).toMatchObject({ failure: null });
+    expect(restored.messages[2].metadata).toMatchObject({ failure: null });
     expect(snapshot.pendingProposal).not.toHaveProperty("projectRoot");
     expect(JSON.stringify(snapshot)).not.toContain("/books/one");
     expect(JSON.stringify(snapshot)).not.toContain("Live source text must not persist");
@@ -1233,7 +1275,7 @@ describe("agent persistence", () => {
     const switching = transitionAgentProject(nextRoot);
     const mutationError = {
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     };
     const immediateState = useAgentConsoleStore.getState();
     const mutationErrors = [
@@ -1279,7 +1321,7 @@ describe("agent persistence", () => {
     for (const error of mutationErrors) {
       expect(error).toMatchObject(mutationError);
     }
-    expect(transitionRunError).toMatchObject({ code: "transition" });
+    expect(transitionRunError).toMatchObject({ reason: "transition" });
     expect(tauri.getAiConfig).not.toHaveBeenCalled();
     expect(oldWriteCall).toEqual([
       agentStateKey(oldRoot),
@@ -1375,7 +1417,7 @@ describe("agent persistence", () => {
     );
     const ownershipError = {
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     };
     const mutationErrors = captureMutationErrors([
       () => store.setMode("writing"),
@@ -1405,7 +1447,7 @@ describe("agent persistence", () => {
       refs: [retainedDuringLoadRef],
     });
     expect(useAgentConsoleStore.getState().runError).toMatchObject({
-      code: "transition",
+      reason: "transition",
     });
 
     useProjectStore.setState({ project: project(otherRoot) });
@@ -1470,7 +1512,7 @@ describe("agent persistence", () => {
     });
     await expect(submission).rejects.toMatchObject({
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     });
 
     loaded.resolve(null);
@@ -2261,7 +2303,7 @@ describe("agent persistence", () => {
     expect(() => resetAgentConversation(wrongRoot)).toThrowError(
       expect.objectContaining({
         name: "AgentConsoleOwnershipError",
-        agentErrorCode: "transition",
+        agentFailureReason: "transition",
       }),
     );
     expect(useAgentConsoleStore.getState()).toBe(stateBeforeReset);
@@ -2504,7 +2546,7 @@ describe("agent persistence", () => {
     );
     const ownershipError = {
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     };
     const mutationErrors = captureMutationErrors([
       () => store.setMode("writing"),
@@ -2726,11 +2768,17 @@ describe("agent persistence", () => {
     expect(useAgentConsoleStore.getState()).toMatchObject({
       hydratedProjectRoot: nextRoot,
       mode: "edit",
-      messages: nextMessages,
       draftText: "Next project draft",
       pendingProposal: nextProposal,
       persistenceIssue: null,
     });
+    expect(useAgentConsoleStore.getState().messages).toMatchObject([
+      {
+        id: "user-next",
+        parts: [{ type: "text", text: "Keep the next project" }],
+        metadata: { failure: null },
+      },
+    ]);
   });
 
   it("retains the malformed conversation and issue when reset cannot be written", async () => {

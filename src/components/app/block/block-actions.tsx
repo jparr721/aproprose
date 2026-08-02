@@ -4,14 +4,14 @@
 
 import { Fragment, type ComponentType, type ReactNode } from "react";
 import {
-  IconArrowDown,
-  IconArrowUp,
-  IconMessagePlus,
-  IconSquareRoundedPlus,
-  IconTextPlus,
-  IconTrash,
-  IconWand,
-} from "@tabler/icons-react";
+  ArrowDown as IconArrowDown,
+  ArrowUp as IconArrowUp,
+  MessageSquarePlus as IconMessagePlus,
+  SquarePlus as IconSquareRoundedPlus,
+  TextCursorInput as IconTextPlus,
+  Trash as IconTrash,
+  WandSparkles as IconWand,
+} from "lucide-react";
 import { useProjectStore } from "@/stores/project-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { findBridgeSuccessor } from "@/lib/ai/agent-context";

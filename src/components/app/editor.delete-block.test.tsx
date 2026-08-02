@@ -8,6 +8,7 @@ import type { Block } from "@/lib/types";
 const keybindings = new Map<KeybindingId, () => void>();
 
 vi.mock("@/lib/tauri", () => ({
+  appendAgentFailureLog: vi.fn(),
   readAppData: vi.fn().mockResolvedValue(null),
   writeAppData: vi.fn().mockResolvedValue(undefined),
 }));

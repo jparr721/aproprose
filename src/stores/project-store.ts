@@ -142,6 +142,7 @@ const LOADING_RESET = {
   chapterDirty: false,
   compile: EMPTY_COMPILE,
   error: null,
+  saveError: null,
   past: [],
   future: [],
   lastTextEditId: null,
@@ -200,6 +201,7 @@ interface ProjectState {
 
   compile: CompileState;
   error: string | null;
+  saveError: string | null;
 
   // lifecycle
   init: () => Promise<void>;
@@ -593,6 +595,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     saving: false,
     compile: EMPTY_COMPILE,
     error: null,
+    saveError: null,
     past: [],
     future: [],
     lastTextEditId: null,
@@ -660,6 +663,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         chapterDirty: false,
         compile: EMPTY_COMPILE,
         error: null,
+        saveError: null,
         past: [],
         future: [],
         lastTextEditId: null,
@@ -684,6 +688,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           editCaret: null,
           chapterDirty: false,
           error: null,
+          saveError: null,
           past: [],
           future: [],
           lastTextEditId: null,
@@ -790,7 +795,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
-          else set({ activeChapterId: null, blocks: [], selectedId: null, selectedIds: [], editing: false, editCaret: null });
+          else
+            set({
+              activeChapterId: null,
+              blocks: [],
+              selectedId: null,
+              selectedIds: [],
+              editing: false,
+              editCaret: null,
+              saveError: null,
+            });
         }
       } catch (e) {
         toast.error("Couldn't delete the chapter", { description: String(e) });
@@ -1341,7 +1355,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       if (!project || !activeChapterId || !chapterDirty) return;
       const chapter = project.chapters.find((c) => c.id === activeChapterId);
       if (!chapter) return;
-      set({ saving: true });
+      set({ saving: true, saveError: null });
       try {
         const source = serializeChapter(blocks);
         await writeTextFile(project.root, chapter.file, source);
@@ -1371,6 +1385,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             selectedIds: sameCount ? s.selectedIds : [],
             chapterDirty: false,
             saving: false,
+            saveError: null,
             past: [],
             future: [],
             lastTextEditId: null,
@@ -1398,7 +1413,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // instead of waiting for the next status poll tick.
         void useSyncStore.getState().refreshStatus();
       } catch (e) {
-        set({ saving: false, error: String(e) });
+        const message = String(e);
+        set({ saving: false, error: message, saveError: message });
       }
     },
 

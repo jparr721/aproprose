@@ -1,4 +1,4 @@
-import { IconCheck, IconEdit, IconX } from "@tabler/icons-react";
+import { Check as IconCheck, Pencil as IconEdit, X as IconX } from "lucide-react";
 import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 import { BlockBody } from "@/components/app/block/block-body";

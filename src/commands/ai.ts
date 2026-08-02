@@ -1,13 +1,13 @@
 // commands/ai.ts - typed entry points into the persistent AI console.
 
 import {
-  IconLink,
-  IconListCheck,
-  IconMessageCircle,
-  IconPencil,
-  IconSparkles,
-  IconWand,
-} from "@tabler/icons-react";
+  Link as IconLink,
+  ListChecks as IconListCheck,
+  MessageCircle as IconMessageCircle,
+  Pencil as IconPencil,
+  Sparkles as IconSparkles,
+  WandSparkles as IconWand,
+} from "lucide-react";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { findBridgeSuccessor } from "@/lib/ai/agent-context";
 import {

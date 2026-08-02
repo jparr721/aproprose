@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
-  IconGitMerge,
-  IconPlus,
-  IconSparkles,
-  IconWriting,
-} from "@tabler/icons-react";
+  GitMerge as IconGitMerge,
+  Plus as IconPlus,
+  Sparkles as IconSparkles,
+  PenLine as IconWriting,
+} from "lucide-react";
 import {
   DndContext,
   closestCenter,

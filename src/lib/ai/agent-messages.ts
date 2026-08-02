@@ -14,6 +14,7 @@ import type {
   AgentUiTools,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
+import { legacyAgentFailure } from "@/lib/ai/agent-failure";
 import type { ContinuityFlag, CritiqueNote } from "@/lib/types";
 
 const agentModeSchema = z.enum(["writing", "edit"]);
@@ -44,13 +45,37 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("proposal-follow-up"), proposalId: z.string() }),
 ]);
 
+const agentFailureSchema = z
+  .object({
+    reason: z.enum([
+      "model-unselected",
+      "key-missing",
+      "key-rejected",
+      "model-unavailable",
+      "settings-unavailable",
+      "quota",
+      "transport",
+      "tool",
+      "compaction",
+      "transition",
+      "unknown",
+    ]),
+    message: z.string(),
+    action: z
+      .enum(["retry", "add-key", "replace-key", "choose-model"])
+      .nullable(),
+    settingsTarget: z.enum(["key", "model"]).nullable(),
+  })
+  .strict();
+
 const metadataSchema = z.object({
   runId: z.string(),
   mode: agentModeSchema,
   task: agentTaskSchema,
   state: z.enum(["complete", "streaming", "stopped", "error"]),
   createdAt: z.string(),
-  error: z.string().nullable(),
+  failure: agentFailureSchema.nullable().optional(),
+  error: z.string().nullable().optional(),
   errorCode: z
     .enum([
       "configuration",
@@ -61,7 +86,8 @@ const metadataSchema = z.object({
       "transition",
       "unknown",
     ])
-    .nullable(),
+    .nullable()
+    .optional(),
   retryOf: z.string().nullable(),
   usage: z.unknown().nullable(),
 });
@@ -427,6 +453,17 @@ function settledToolProjection(
   } as AgentUIMessage["parts"][number];
 }
 
+function safeMessageMetadata(
+  metadata: AgentMessageMetadata,
+): AgentMessageMetadata {
+  const { error: _error, errorCode: _errorCode, failure, ...safe } = metadata;
+  return {
+    ...safe,
+    failure:
+      failure ?? (metadata.state === "error" ? legacyAgentFailure() : null),
+  };
+}
+
 export function settleAgentMessages(
   messages: AgentUIMessage[],
 ): AgentUIMessage[] {
@@ -442,7 +479,7 @@ export function settleAgentMessages(
       metadata:
         message.metadata === undefined
           ? undefined
-          : ({ ...message.metadata } satisfies AgentMessageMetadata),
+          : safeMessageMetadata(message.metadata),
       parts: message.parts.flatMap((part): AgentUIMessage["parts"] => {
         if (part.type === "reasoning") {
           return [{ ...part, state: "done" }];

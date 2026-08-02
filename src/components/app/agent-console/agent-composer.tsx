@@ -27,6 +27,7 @@ import {
   submitAgentDraft,
 } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
+import { agentFailureActionLabel } from "@/lib/ai/agent-failure";
 import type { AgentTask } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
 import {
@@ -35,7 +36,6 @@ import {
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
-  SETTINGS_TABS,
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
 
@@ -90,25 +90,25 @@ export function AgentComposer() {
     draftText.trim().length > 0 || draftContextRefs.length > 0;
   const blocksTargetEditing = ownershipStatus !== "ready";
 
-  const handleSubmit = async (): Promise<void> => {
+  const handleSubmit = async (): Promise<"submitted" | "failed"> => {
     if (
       runStatus !== "idle" ||
       !hasMeaningfulDraft
     ) {
-      return;
+      return "failed";
     }
     const consoleState = useAgentConsoleStore.getState();
     if (
       consoleState.activeRun !== null ||
       consoleState.runStatus !== "idle"
     ) {
-      return;
+      return "failed";
     }
     if (
       consoleState.draftText.trim().length === 0 &&
       consoleState.draftContextRefs.length === 0
     ) {
-      return;
+      return "failed";
     }
     const task: AgentTask =
       consoleState.pendingProposal === null
@@ -120,7 +120,8 @@ export function AgentComposer() {
             kind: "proposal-follow-up",
             proposalId: consoleState.pendingProposal.id,
           };
-    await submitAgentDraft(task);
+    const outcome = await submitAgentDraft(task);
+    return outcome.status === "failure" ? "failed" : "submitted";
   };
 
   return (
@@ -155,22 +156,23 @@ export function AgentComposer() {
       {runError === null ? null : (
         <div className="flex items-center justify-between gap-2">
           <TypographyMuted className="text-destructive" role="alert">
-            {safeAgentErrorText(runError.code)}
+            {safeAgentErrorText(runError)}
           </TypographyMuted>
-          {runError.code === "configuration" ? (
+          {runError.settingsTarget === null ||
+          agentFailureActionLabel(runError) === null ? null : (
             <Button
               onClick={() =>
                 useSettingsDialogStore
                   .getState()
-                  .openWithTab(SETTINGS_TABS.AI)
+                  .openAiSettings(runError.settingsTarget as "key" | "model")
               }
               size="sm"
               type="button"
               variant="outline"
             >
-              Open AI Settings
+              {agentFailureActionLabel(runError)}
             </Button>
-          ) : null}
+          )}
         </div>
       )}
       <PromptInput

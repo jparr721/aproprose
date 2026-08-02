@@ -7,7 +7,7 @@
 
 import { memo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
-import { IconClipboardText, IconCopy, IconGripVertical } from "@tabler/icons-react";
+import { ClipboardList as IconClipboardText, Copy as IconCopy, GripVertical as IconGripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {

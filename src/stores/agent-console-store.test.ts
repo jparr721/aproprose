@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
-  AgentErrorCode,
+  AgentFailure,
+  AgentFailureReason,
   AgentMessageState,
   AgentRun,
-  AgentRunError,
   AgentUIMessage,
   DraftContextRef,
   DraftContextSource,
@@ -43,8 +43,7 @@ const message = (id: string): AgentUIMessage => ({
     task: run.task,
     state: "complete",
     createdAt: "2026-07-30T12:00:00.000Z",
-    error: null,
-    errorCode: null,
+    failure: null,
     retryOf: null,
     usage: null,
   },
@@ -93,15 +92,22 @@ const source = (
 const assistantMessage = (
   id: string,
   state: AgentMessageState,
-  errorCode: AgentErrorCode | null,
+  failureReason: AgentFailureReason | null,
 ): AgentUIMessage => ({
   ...message(id),
   role: "assistant",
   metadata: {
     ...message(id).metadata,
     state,
-    error: state === "error" ? "Request failed" : null,
-    errorCode,
+    failure:
+      state === "error" && failureReason !== null
+        ? {
+            reason: failureReason,
+            message: "The AI request could not be completed. Retry the request.",
+            action: "retry",
+            settingsTarget: null,
+          }
+        : null,
   },
   parts: [{ type: "text", text: "Response" }],
 });
@@ -580,7 +586,7 @@ describe("agent console store", () => {
     arrange();
     const mutationError = {
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     };
     const authorMutations = [
       () => store.setMode("edit"),
@@ -750,18 +756,20 @@ describe("agent console store", () => {
   });
 
   it("returns a failed preflight to idle with a typed inline error", () => {
-    const error: AgentRunError = {
-      code: "configuration",
-      message: "Choose a model",
+    const failure: AgentFailure = {
+      reason: "model-unselected",
+      message: "Choose a model for OpenAI, then submit again.",
+      action: "choose-model",
+      settingsTarget: "model",
     };
     const store = useAgentConsoleStore.getState();
     store.beginPreflight();
-    store.failPreflight(error);
+    store.failPreflight(failure);
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       activeRun: null,
       runStatus: "idle",
-      runError: error,
+      runError: failure,
     });
   });
 
@@ -895,19 +903,25 @@ describe("agent console store", () => {
     const store = useAgentConsoleStore.getState();
     store.beginRun(run, message("user-1"));
     const failed = assistantMessage("assistant-1", "streaming", "transport");
-    store.failRun(failed, "Network unavailable");
+    const failure: AgentFailure = {
+      reason: "transport",
+      message: "The AI request could not be completed. Check your connection and retry.",
+      action: "retry",
+      settingsTarget: null,
+    };
+    store.failRun(failed, failure);
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       activeRun: null,
       runStatus: "idle",
-      runError: { code: "transport", message: "Network unavailable" },
+      runError: failure,
     });
     expect(useAgentConsoleStore.getState().messages[1]).toEqual({
       ...failed,
       metadata: {
         ...failed.metadata,
         state: "error",
-        error: "Network unavailable",
+        failure,
       },
     });
   });
@@ -1172,7 +1186,7 @@ describe("agent console store", () => {
 
       expect(error).toBeInstanceOf(AgentConsoleOwnershipError);
       expect(error).not.toBeInstanceOf(PendingProposalEditError);
-      expect(error).toMatchObject({ agentErrorCode: "transition" });
+      expect(error).toMatchObject({ agentFailureReason: "transition" });
       expect(useAgentConsoleStore.getState().pendingProposal).toBe(
         pendingBefore,
       );

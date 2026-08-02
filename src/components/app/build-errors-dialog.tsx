@@ -1,4 +1,4 @@
-import { IconCopy } from "@tabler/icons-react";
+import { Copy as IconCopy } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,

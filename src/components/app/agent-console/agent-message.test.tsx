@@ -22,7 +22,6 @@ import type {
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
 import {
-  AgentConsoleOwnershipError,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -60,7 +59,7 @@ function assistantMessage(
 
 function renderAgentMessage(message: AgentUIMessage) {
   const onNavigateSnapshot = vi.fn().mockResolvedValue(true);
-  const onRetry = vi.fn().mockResolvedValue(undefined);
+  const onRetry = vi.fn().mockResolvedValue({ status: "success" });
   const onOpenSettings = vi.fn();
   render(
     <AgentMessage
@@ -794,9 +793,12 @@ describe("AgentMessage errors", () => {
       metadata({
         runId: "failed-run",
         state: "error",
-        error:
-          "APICallError at /Users/author/.config/key from C:\\Users\\author\\.config\\key",
-        errorCode: "transport",
+        failure: {
+          reason: "transport",
+          message: "The AI request could not be completed. Check your connection and retry.",
+          action: "retry",
+          settingsTarget: null,
+        },
       }),
     );
     useAgentConsoleStore.setState({ messages: [user, failed] });
@@ -851,8 +853,12 @@ describe("AgentMessage errors", () => {
       metadata({
         runId: "locked-run",
         state: "error",
-        error: "Request failed",
-        errorCode: "transport",
+        failure: {
+          reason: "transport",
+          message: "The AI request could not be completed. Check your connection and retry.",
+          action: "retry",
+          settingsTarget: null,
+        },
       }),
     );
     useAgentConsoleStore.setState({ messages: [user, failed], ...state });
@@ -880,13 +886,25 @@ describe("AgentMessage errors", () => {
       metadata({
         runId: "racing-run",
         state: "error",
-        error: "Request failed",
-        errorCode: "transport",
+        failure: {
+          reason: "transport",
+          message: "The AI request could not be completed. Check your connection and retry.",
+          action: "retry",
+          settingsTarget: null,
+        },
       }),
     );
     useAgentConsoleStore.setState({ messages: [user, failed] });
     const { onRetry } = renderAgentMessage(failed);
-    onRetry.mockRejectedValueOnce(new AgentConsoleOwnershipError());
+    onRetry.mockResolvedValueOnce({
+      status: "failure",
+      failure: {
+        reason: "transition",
+        message: "The AI conversation is loading for this project. Retry when loading finishes.",
+        action: "retry",
+        settingsTarget: null,
+      },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
@@ -908,17 +926,21 @@ describe("AgentMessage errors", () => {
       [],
       metadata({
         state: "error",
-        error: "A required setting is unavailable.",
-        errorCode: "configuration",
+        failure: {
+          reason: "key-missing",
+          message: "Add an OpenAI key, then submit again.",
+          action: "add-key",
+          settingsTarget: "key",
+        },
       }),
     );
     const { onOpenSettings } = renderAgentMessage(configuration);
 
     expect(
-      screen.getByText("AI is not configured. Open AI Settings to continue."),
+      screen.getByText("Add an OpenAI key, then submit again."),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open AI Settings" }));
-    expect(onOpenSettings).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+    expect(onOpenSettings).toHaveBeenCalledWith("key");
 
     cleanup();
     renderAgentMessage(
@@ -927,11 +949,15 @@ describe("AgentMessage errors", () => {
         [],
         metadata({
           state: "error",
-          error: "OpenAI key or model could not be reached.",
-          errorCode: "transport",
+          failure: {
+            reason: "transport",
+            message: "The AI request could not be completed. Check your connection and retry.",
+            action: "retry",
+            settingsTarget: null,
+          },
         }),
       ),
     );
-    expect(screen.queryByRole("button", { name: "Open AI Settings" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add key" })).toBeNull();
   });
 });

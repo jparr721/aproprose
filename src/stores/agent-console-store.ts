@@ -4,8 +4,8 @@ import type {
   AgentMode,
   AgentMessageMetadata,
   AgentPersistenceIssue,
+  AgentFailure,
   AgentRun,
-  AgentRunError,
   AgentRunStatus,
   AgentUIMessage,
   ConversationSummary,
@@ -82,7 +82,7 @@ interface AgentConsoleData {
   interruptedRun: InterruptedRun | null;
   activeRun: AgentRun | null;
   runStatus: AgentRunStatus;
-  runError: AgentRunError | null;
+  runError: AgentFailure | null;
   persistenceIssue: AgentPersistenceIssue | null;
   requestedProjectRoot: string | null;
   activeProjectRoot: string | null;
@@ -123,7 +123,7 @@ export interface AgentConsoleState extends AgentConsoleData {
   ) => void;
   captureDraft: () => SubmittedAgentDraft;
   beginPreflight: () => void;
-  failPreflight: (error: AgentRunError) => void;
+  failPreflight: (failure: AgentFailure) => void;
   beginRun: (run: AgentRun, userMessage: AgentUIMessage) => void;
   beginDraftRun: (
     run: AgentRun,
@@ -137,7 +137,7 @@ export interface AgentConsoleState extends AgentConsoleData {
     usage: PersistedUsage | null,
   ) => void;
   interruptRun: (interrupted: InterruptedRun) => void;
-  failRun: (message: AgentUIMessage, error: string) => void;
+  failRun: (message: AgentUIMessage, failure: AgentFailure) => void;
   replacePendingProposal: (proposal: PendingProposal) => void;
   updatePendingManuscriptText: (edit: PendingManuscriptTextEdit) => void;
   removePendingChanges: (changeIds: string[]) => void;
@@ -258,7 +258,7 @@ function hydratedDraftState(
 }
 
 export class AgentConsoleOwnershipError extends Error {
-  readonly agentErrorCode = "transition" as const;
+  readonly agentFailureReason = "transition" as const;
 
   constructor() {
     super(
@@ -784,24 +784,22 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
       runStatus: "idle",
       runError: null,
     })),
-  failRun: (message, error) =>
+  failRun: (message, failure) =>
     set((state) => {
       const metadata = requireAgentMetadata(message);
-      const errorCode = metadata.errorCode ?? "unknown";
       const failedMessage: AgentUIMessage = {
         ...message,
         metadata: {
           ...metadata,
           state: "error",
-          error,
-          errorCode,
+          failure,
         },
       };
       return {
         messages: upsertMessage(state.messages, failedMessage),
         activeRun: null,
         runStatus: "idle",
-        runError: { code: errorCode, message: error },
+        runError: failure,
       };
     }),
   replacePendingProposal: (pendingProposal) =>

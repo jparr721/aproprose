@@ -1,11 +1,11 @@
 import { useState } from "react";
 import {
-  IconCheck,
-  IconChevronDown,
-  IconChevronUp,
-  IconWriting,
-  IconX,
-} from "@tabler/icons-react";
+  Check as IconCheck,
+  ChevronDown as IconChevronDown,
+  ChevronUp as IconChevronUp,
+  PenLine as IconWriting,
+  X as IconX,
+} from "lucide-react";
 import { OutlineReview } from "@/components/app/agent-console/outline-review";
 import { Button } from "@/components/ui/button";
 import {

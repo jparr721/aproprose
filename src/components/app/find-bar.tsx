@@ -6,15 +6,15 @@
 
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import {
-  IconAbc,
-  IconChevronDown,
-  IconChevronRight,
-  IconChevronUp,
-  IconLetterCase,
-  IconRegex,
-  IconReplace,
-  IconX,
-} from "@tabler/icons-react";
+  WholeWord as IconAbc,
+  ChevronDown as IconChevronDown,
+  ChevronRight as IconChevronRight,
+  ChevronUp as IconChevronUp,
+  CaseSensitive as IconLetterCase,
+  Regex as IconRegex,
+  Replace as IconReplace,
+  X as IconX,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,

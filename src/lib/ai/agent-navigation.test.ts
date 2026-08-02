@@ -13,6 +13,7 @@ vi.mock("@/lib/storage", () => ({
 }));
 
 vi.mock("@/lib/tauri", () => ({
+  appendAgentFailureLog: vi.fn(),
   compileProject: vi.fn(),
   openProject: vi.fn(),
   createProject: vi.fn(),

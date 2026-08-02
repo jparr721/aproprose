@@ -17,6 +17,7 @@ import type {
   PersistedUsage,
 } from "@/lib/ai/agent-types";
 import { pathHash } from "@/lib/path-hash";
+import { legacyAgentFailure } from "@/lib/ai/agent-failure";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import {
   type AgentPersistenceTransitionCapture,
@@ -300,6 +301,29 @@ const persistedUsageSchema = z
   })
   .strict();
 
+const agentFailureSchema = z
+  .object({
+    reason: z.enum([
+      "model-unselected",
+      "key-missing",
+      "key-rejected",
+      "model-unavailable",
+      "settings-unavailable",
+      "quota",
+      "transport",
+      "tool",
+      "compaction",
+      "transition",
+      "unknown",
+    ]),
+    message: z.string(),
+    action: z
+      .enum(["retry", "add-key", "replace-key", "choose-model"])
+      .nullable(),
+    settingsTarget: z.enum(["key", "model"]).nullable(),
+  })
+  .strict();
+
 const messageMetadataSchema = z
   .object({
     runId: z.string(),
@@ -307,7 +331,8 @@ const messageMetadataSchema = z
     task: agentTaskSchema,
     state: z.enum(["complete", "stopped", "error"]),
     createdAt: z.string(),
-    error: z.string().nullable(),
+    failure: agentFailureSchema.nullable().optional(),
+    error: z.string().nullable().optional(),
     errorCode: z
       .enum([
         "configuration",
@@ -318,7 +343,8 @@ const messageMetadataSchema = z
         "transition",
         "unknown",
       ])
-      .nullable(),
+      .nullable()
+      .optional(),
     retryOf: z.string().nullable(),
     usage: persistedUsageSchema.nullable(),
   })
@@ -932,16 +958,25 @@ async function parseAgentSnapshot(
   raw: unknown,
 ): Promise<PersistedAgentSnapshot> {
   const parsed = persistedAgentStateSchema.parse(raw);
-  const normalizedMessages = parsed.messages.map((message) => ({
-    ...message,
-    metadata: {
-      ...message.metadata,
-      usage:
-        message.metadata.usage === null
-          ? null
-          : normalizedUsage(message.metadata.usage),
-    },
-  }));
+  const normalizedMessages = parsed.messages.map((message) => {
+    const {
+      error: _error,
+      errorCode: _errorCode,
+      failure,
+      usage,
+      ...metadata
+    } = message.metadata;
+    return {
+      ...message,
+      metadata: {
+        ...metadata,
+        failure:
+          failure ??
+          (metadata.state === "error" ? legacyAgentFailure() : null),
+        usage: usage === null ? null : normalizedUsage(usage),
+      },
+    };
+  });
   validatePersistedParts(normalizedMessages);
   const messages = await validateAgentMessages(normalizedMessages);
   const recoveredMessages = messages.map((message) =>
@@ -953,8 +988,7 @@ async function parseAgentSnapshot(
           metadata: {
             ...message.metadata,
             state: "error" as const,
-            error: "The AI response did not contain any output.",
-            errorCode: "unknown" as const,
+            failure: legacyAgentFailure(),
             usage: null,
           },
         }

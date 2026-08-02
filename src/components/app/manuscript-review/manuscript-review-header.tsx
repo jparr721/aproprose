@@ -1,9 +1,9 @@
 import {
-  IconArrowDown,
-  IconArrowUp,
-  IconCheck,
-  IconX,
-} from "@tabler/icons-react";
+  ArrowDown as IconArrowDown,
+  ArrowUp as IconArrowUp,
+  Check as IconCheck,
+  X as IconX,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,

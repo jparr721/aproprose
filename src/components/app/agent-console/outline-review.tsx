@@ -1,8 +1,8 @@
 import {
-  IconCheck,
-  IconMapPin,
-  IconX,
-} from "@tabler/icons-react";
+  Check as IconCheck,
+  MapPin as IconMapPin,
+  X as IconX,
+} from "lucide-react";
 import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { Button } from "@/components/ui/button";
 import {

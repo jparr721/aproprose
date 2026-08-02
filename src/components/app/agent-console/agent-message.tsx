@@ -29,26 +29,30 @@ import {
 import { TypographyMuted } from "@/components/ui/typography";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  IconCheck,
-  IconChevronDown,
-  IconCopy,
-  IconExclamationCircle,
-} from "@tabler/icons-react";
+  Check as IconCheck,
+  ChevronDown as IconChevronDown,
+  Copy as IconCopy,
+  CircleAlert as IconExclamationCircle,
+} from "lucide-react";
 import {
   flattenMessageFindings,
   type FlattenedMessageFinding,
 } from "@/lib/ai/agent-context";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
+import {
+  agentFailureActionLabel,
+  agentFailureFromReason,
+} from "@/lib/ai/agent-failure";
 import { copyText } from "@/lib/clipboard";
 import type {
-  AgentErrorCode,
+  AgentFailure,
+  AgentSettingsTarget,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
 import {
-  AgentConsoleOwnershipError,
   agentConsoleOwnershipStatus,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -58,8 +62,11 @@ import { toast } from "sonner";
 export interface AgentMessageProps {
   message: AgentUIMessage;
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>;
-  onRetry: (userMessageId: string) => Promise<void>;
-  onOpenSettings: () => void;
+  onRetry: (userMessageId: string) => Promise<{
+    status: "success" | "stopped" | "failure";
+    failure?: AgentFailure;
+  }>;
+  onOpenSettings: (target: AgentSettingsTarget) => void;
 }
 
 type AgentMessagePart = AgentUIMessage["parts"][number];
@@ -324,8 +331,7 @@ export function AgentMessage({
   const authorMutationsDisabled = useAgentConsoleStore(
     (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
-  const [retryErrorCode, setRetryErrorCode] =
-    useState<AgentErrorCode | null>(null);
+  const [retryFailure, setRetryFailure] = useState<AgentFailure | null>(null);
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
@@ -347,23 +353,21 @@ export function AgentMessage({
   const lastPart = message.parts.at(-1);
   const isReasoningStreaming =
     messageMetadata.state === "streaming" && lastPart?.type === "reasoning";
-  const error =
+  const failure =
     messageMetadata.state === "error"
-      ? safeAgentErrorText(messageMetadata.errorCode)
+      ? messageMetadata.failure ?? agentFailureFromReason("unknown", "openai")
       : null;
   const messageText = message.parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n\n");
   const retry = (): void => {
-    setRetryErrorCode(null);
-    onRetry(retryUserMessageId(message)).catch((retryError: unknown) => {
-      setRetryErrorCode(
-        retryError instanceof AgentConsoleOwnershipError
-          ? retryError.agentErrorCode
-          : "unknown",
-      );
-    });
+    setRetryFailure(null);
+    void onRetry(retryUserMessageId(message))
+      .then((outcome) => {
+        if (outcome.status === "failure") setRetryFailure(outcome.failure ?? null);
+      })
+      .catch(() => setRetryFailure(agentFailureFromReason("unknown", "openai")));
   };
   const copyMessage = async (): Promise<void> => {
     if (await copyText(messageText)) {
@@ -406,12 +410,12 @@ export function AgentMessage({
         {messageMetadata.state === "stopped" ? (
           <TypographyMuted>Stopped</TypographyMuted>
         ) : null}
-        {error === null ? null : <InlineMessageError message={error} />}
-        {retryErrorCode === null ? null : (
-          <InlineMessageError message={safeAgentErrorText(retryErrorCode)} />
+        {failure === null ? null : <InlineMessageError message={safeAgentErrorText(failure)} />}
+        {retryFailure === null ? null : (
+          <InlineMessageError message={safeAgentErrorText(retryFailure)} />
         )}
       </MessageContent>
-      {messageText.length === 0 && error === null ? null : (
+      {messageText.length === 0 && failure === null ? null : (
         <MessageActions>
           {messageText.length === 0 ? null : (
             <MessageAction
@@ -422,7 +426,7 @@ export function AgentMessage({
               <IconCopy className="size-3" />
             </MessageAction>
           )}
-          {error === null ? null : (
+          {failure === null ? null : (
             <Button
               disabled={authorMutationsDisabled}
               onClick={retry}
@@ -433,16 +437,18 @@ export function AgentMessage({
               Retry
             </Button>
           )}
-          {error !== null && messageMetadata.errorCode === "configuration" ? (
+          {failure === null ||
+          failure.settingsTarget === null ||
+          agentFailureActionLabel(failure) === null ? null : (
             <Button
-              onClick={onOpenSettings}
+              onClick={() => onOpenSettings(failure.settingsTarget as AgentSettingsTarget)}
               size="sm"
               type="button"
               variant="outline"
             >
-              Open AI Settings
+              {agentFailureActionLabel(failure)}
             </Button>
-          ) : null}
+          )}
         </MessageActions>
       )}
     </Message>

@@ -1,4 +1,4 @@
-import { IconPlus, IconTrash } from "@tabler/icons-react";
+import { Plus as IconPlus, Trash as IconTrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

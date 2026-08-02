@@ -10,6 +10,7 @@ import type { AgentToolEnvironment } from "@/lib/ai/agent-tools";
 import type {
   AgentRun,
   AgentUIMessage,
+  PendingProposal,
 } from "@/lib/ai/agent-types";
 import {
   streamAgentRun,
@@ -131,11 +132,13 @@ function analysisToolCallResult(
   ]);
 }
 
-function manuscriptStageToolCallResult(): LanguageModelV3StreamResult {
+function manuscriptStageToolCallResult(
+  toolCallId = "call-stage-manuscript",
+): LanguageModelV3StreamResult {
   return streamResult([
     {
       type: "tool-call",
-      toolCallId: "call-stage-manuscript",
+      toolCallId,
       toolName: "stage_manuscript_proposal",
       input: JSON.stringify({ summary: "Continue the scene", changes: [] }),
     },
@@ -187,55 +190,187 @@ function makeRuntimeInput(model: LanguageModel): StreamAgentRunInput {
     signal: controller.signal,
     generateMessageId: () => "assistant-1",
     onMessage: () => undefined,
+    onToolFailure: async () => undefined,
   };
 }
 
 describe("streamAgentRun", () => {
   it("records an actionable failure when manuscript staging throws", async () => {
     const onToolFailure = vi.fn(async () => undefined);
+    let modelCalls = 0;
     const input = {
       ...makeRuntimeInput(
         new MockLanguageModelV3({
-          doStream: async () => manuscriptStageToolCallResult(),
+          doStream: async () => {
+            modelCalls += 1;
+            return modelCalls === 1
+              ? manuscriptStageToolCallResult()
+              : textResult("The proposal could not be staged.");
+          },
         }),
       ),
       onToolFailure,
-    } as StreamAgentRunInput & {
-      onToolFailure: (failure: {
-        occurredAt: string;
-        runId: string;
-        modelId: string;
-        task: AgentRun["task"];
-        toolName: string;
-        toolCallId: string;
-        error: string;
-      }) => Promise<void>;
-    };
+    } satisfies StreamAgentRunInput;
 
     await streamAgentRun(input);
 
+    expect(onToolFailure).toHaveBeenCalledOnce();
     expect(onToolFailure).toHaveBeenCalledWith({
-      occurredAt: expect.any(String),
-      runId: "run-1",
-      modelId: "gpt-5",
-      task: { kind: "conversation", targetChapterId: "ch1" },
       toolName: "stage_manuscript_proposal",
       toolCallId: "call-stage-manuscript",
-      error: "Unexpected manuscript proposal",
+      input: { summary: "Continue the scene", changes: [] },
+      error: expect.objectContaining({
+        message: "Unexpected manuscript proposal",
+      }),
     });
+    expect(modelCalls).toBe(2);
+  });
+
+  it("retries a failed manuscript staging call before stopping", async () => {
+    let modelCalls = 0;
+    let stagingAttempts = 0;
+    const proposal: PendingProposal = {
+      id: "proposal-1",
+      kind: "manuscript",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Continue the scene",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes: [],
+    };
+    const buildManuscriptProposal: AgentToolEnvironment["buildManuscriptProposal"] =
+      () => {
+        stagingAttempts += 1;
+        if (stagingAttempts === 1) {
+          throw new Error("A manuscript proposal must target the frozen chapter.");
+        }
+        return proposal;
+      };
+    const replacePendingProposal = vi.fn();
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        modelCalls += 1;
+        return manuscriptStageToolCallResult(`call-stage-${modelCalls}`);
+      },
+    });
+    const input = makeRuntimeInput(model);
+
+    await streamAgentRun({
+      ...input,
+      environment: {
+        ...input.environment,
+        buildManuscriptProposal,
+        replacePendingProposal,
+      },
+    });
+
+    expect(modelCalls).toBe(2);
+    expect(stagingAttempts).toBe(2);
+    expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
+  });
+
+  it("retries a failed outline staging call before stopping", async () => {
+    let modelCalls = 0;
+    let stagingAttempts = 0;
+    const proposal: PendingProposal = {
+      id: "outline-proposal-1",
+      kind: "outline",
+      projectRoot: "/book",
+      chapterId: "ch1",
+      summary: "Reshape the outline",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes: [],
+    };
+    const buildOutlineProposal: AgentToolEnvironment["buildOutlineProposal"] =
+      () => {
+        stagingAttempts += 1;
+        if (stagingAttempts === 1) {
+          throw new Error("An outline proposal must target the frozen chapter.");
+        }
+        return proposal;
+      };
+    const replacePendingProposal = vi.fn();
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        modelCalls += 1;
+        return streamResult([
+          {
+            type: "tool-call",
+            toolCallId: `call-stage-${modelCalls}`,
+            toolName: "stage_outline_proposal",
+            input: JSON.stringify({
+              summary: "Reshape the outline",
+              changes: [],
+            }),
+          },
+          {
+            type: "finish",
+            finishReason: { unified: "tool-calls", raw: "tool_calls" },
+            usage,
+          },
+        ]);
+      },
+    });
+    const input = makeRuntimeInput(model);
+
+    await streamAgentRun({
+      ...input,
+      environment: {
+        ...input.environment,
+        buildOutlineProposal,
+        replacePendingProposal,
+      },
+    });
+
+    expect(modelCalls).toBe(2);
+    expect(stagingAttempts).toBe(2);
+    expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
+  });
+
+  it("bounds failed manuscript staging recovery at eight model steps", async () => {
+    let modelCalls = 0;
+    const onToolFailure = vi.fn(async () => undefined);
+    const replacePendingProposal = vi.fn();
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        modelCalls += 1;
+        return manuscriptStageToolCallResult(`call-stage-${modelCalls}`);
+      },
+    });
+    const input = makeRuntimeInput(model);
+
+    await streamAgentRun({
+      ...input,
+      environment: {
+        ...input.environment,
+        replacePendingProposal,
+      },
+      onToolFailure,
+    });
+
+    expect(modelCalls).toBe(8);
+    expect(onToolFailure).toHaveBeenCalledTimes(8);
+    expect(replacePendingProposal).not.toHaveBeenCalled();
   });
 
   it("rejects provider stream errors instead of completing an empty message", async () => {
     const providerError = new Error("You have no credits remaining.");
     providerError.name = "AI_RetryError";
-    const input = makeRuntimeInput(
-      new MockLanguageModelV3({
-        doStream: async () =>
-          streamResult([{ type: "error", error: providerError }]),
-      }),
-    );
+    const onToolFailure = vi.fn(async () => undefined);
+    const input = {
+      ...makeRuntimeInput(
+        new MockLanguageModelV3({
+          doStream: async () =>
+            streamResult([{ type: "error", error: providerError }]),
+        }),
+      ),
+      onToolFailure,
+    } satisfies StreamAgentRunInput;
 
     await expect(streamAgentRun(input)).rejects.toBe(providerError);
+    expect(onToolFailure).not.toHaveBeenCalled();
   });
 
   it("rejects successful streams that contain no assistant output", async () => {

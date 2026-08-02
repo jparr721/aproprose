@@ -231,7 +231,7 @@ function ConversationWithReview() {
         messages={messages}
         onNavigateSnapshot={async () => true}
         onOpenSettings={() => undefined}
-        onRetry={async () => undefined}
+        onRetry={async () => ({ status: "success" })}
         summary={null}
       />
       <ReviewTray />

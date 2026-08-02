@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { IconCheck, IconEye, IconEyeOff, IconTrash } from "@tabler/icons-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { Check as IconCheck, Eye as IconEye, EyeOff as IconEyeOff, Trash as IconTrash } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -35,15 +35,20 @@ import {
 } from "@/components/ui/typography";
 import { Field } from "@/components/app/settings/field";
 import { useSettingsStore } from "@/stores/settings-store";
-import { hasAiKey, setAiKey } from "@/lib/tauri";
+import {
+  failureFromError,
+  settingsUnavailableFailure,
+} from "@/lib/ai/agent-failure";
+import type { AgentFailure } from "@/lib/ai/agent-types";
+import { getAiKeyStatus, setAiKey, type AiKeyStatus } from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
 import { listTextModels, resetModelMetadata } from "@/lib/ai/models";
-import { describeAiError } from "@/lib/ai/errors";
 import {
   isAiProvider,
   PREFERENCE_MAX_CHARS,
   type AiProvider,
 } from "@/lib/types";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 
 const providerLabels: Record<AiProvider, string> = {
   openai: "OpenAI",
@@ -58,11 +63,17 @@ const providerKeyPlaceholders: Record<AiProvider, string> = {
 function ApiKeyField({
   provider,
   configured,
+  failure,
+  inputRef,
   onConfiguredChange,
+  onRetry,
 }: {
   provider: AiProvider;
   configured: boolean;
+  failure: AgentFailure | null;
+  inputRef: RefObject<HTMLInputElement | null>;
   onConfiguredChange: (configured: boolean) => void;
+  onRetry: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [show, setShow] = useState(false);
@@ -73,15 +84,19 @@ function ApiKeyField({
     if (!key || saving) return;
     setSaving(true);
     try {
-      await setAiKey(provider, key);
+      const outcome = await setAiKey(provider, key);
+      if (outcome.status === "failure") {
+        toast.error(outcome.failure.message);
+        return;
+      }
       resetAiProvider();
       resetModelMetadata();
       setDraft("");
       setShow(false);
       onConfiguredChange(true);
       toast.success(`${providerLabels[provider]} key saved`);
-    } catch (e) {
-      toast.error(`Couldn't save key: ${String(e)}`);
+    } catch {
+      toast.error("AI settings are unavailable. Retry.");
     } finally {
       setSaving(false);
     }
@@ -89,13 +104,17 @@ function ApiKeyField({
 
   const clear = async () => {
     try {
-      await setAiKey(provider, "");
+      const outcome = await setAiKey(provider, "");
+      if (outcome.status === "failure") {
+        toast.error(outcome.failure.message);
+        return;
+      }
       resetAiProvider();
       resetModelMetadata();
       onConfiguredChange(false);
       toast.success(`${providerLabels[provider]} key removed`);
-    } catch (e) {
-      toast.error(`Couldn't remove key: ${String(e)}`);
+    } catch {
+      toast.error("AI settings are unavailable. Retry.");
     }
   };
 
@@ -120,6 +139,7 @@ function ApiKeyField({
             }
             autoComplete="off"
             spellCheck={false}
+            ref={inputRef}
           />
           <InputGroupAddon align="inline-end">
             <InputGroupButton
@@ -178,6 +198,16 @@ function ApiKeyField({
           manuscript.
         </TypographyMuted>
       )}
+      {failure === null ? null : (
+        <div className="flex items-center justify-between gap-2">
+          <TypographyForeground className="text-xs text-destructive" role="alert">
+            {failure.message}
+          </TypographyForeground>
+          <Button onClick={onRetry} size="sm" type="button" variant="outline">
+            Retry
+          </Button>
+        </div>
+      )}
     </Field>
   );
 }
@@ -214,15 +244,20 @@ function ProviderField() {
 function AiModelField({
   provider,
   keyConfigured,
+  modelRef,
+  onLoadingChange,
 }: {
   provider: AiProvider;
   keyConfigured: boolean;
+  modelRef: RefObject<HTMLButtonElement | null>;
+  onLoadingChange: (loading: boolean) => void;
 }) {
   const aiModel = useSettingsStore((s) => s.aiModel);
   const setAiModel = useSettingsStore((s) => s.setAiModel);
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AgentFailure | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!keyConfigured) {
@@ -239,7 +274,7 @@ function AiModelField({
         if (active) setModels(m);
       })
       .catch((e) => {
-        if (active) setError(describeAiError(e));
+        if (active) setError(failureFromError(e, provider, null));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -247,7 +282,11 @@ function AiModelField({
     return () => {
       active = false;
     };
-  }, [keyConfigured, provider]);
+  }, [keyConfigured, provider, reload]);
+
+  useEffect(() => {
+    onLoadingChange(loading);
+  }, [loading, onLoadingChange]);
 
   const options = aiModel && !models.includes(aiModel) ? [aiModel, ...models] : models;
 
@@ -268,7 +307,7 @@ function AiModelField({
         onValueChange={(v) => setAiModel(v)}
         disabled={loading || options.length === 0}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" ref={modelRef}>
           <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
         </SelectTrigger>
         <SelectContent>
@@ -285,9 +324,19 @@ function AiModelField({
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="text-xs text-destructive">
-          {error}
-        </TypographyForeground>
+        <div className="flex items-center justify-between gap-2">
+          <TypographyForeground className="text-xs text-destructive" role="alert">
+            {error.message}
+          </TypographyForeground>
+          <Button
+            onClick={() => setReload((value) => value + 1)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Retry
+          </Button>
+        </div>
       ) : null}
       {!loading && !error ? (
         <TypographyMuted className="text-xs">
@@ -336,43 +385,86 @@ function PreferencesFields() {
 
 export function AiTab() {
   const aiProvider = useSettingsStore((state) => state.aiProvider);
+  const aiTarget = useSettingsDialogStore((state) => state.aiTarget);
+  const clearAiSettingsTarget = useSettingsDialogStore(
+    (state) => state.clearAiSettingsTarget,
+  );
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [keyStatus, setKeyStatus] = useState<{
     provider: AiProvider;
-    configured: boolean;
+    status: AiKeyStatus;
   } | null>(null);
-  const keyConfigured =
-    keyStatus?.provider === aiProvider && keyStatus.configured;
+  const activeKeyStatus =
+    keyStatus?.provider === aiProvider ? keyStatus.status : null;
+  const keyConfigured = activeKeyStatus?.status === "configured";
+  const keyFailure =
+    activeKeyStatus?.status === "unavailable"
+      ? activeKeyStatus.failure
+      : null;
+
+  const refreshKeyStatus = (): void => {
+    void getAiKeyStatus(aiProvider)
+      .then((status) => {
+        setKeyStatus({ provider: aiProvider, status });
+      })
+      .catch(() => {
+        setKeyStatus({
+          provider: aiProvider,
+          status: {
+            status: "unavailable",
+            failure: settingsUnavailableFailure(),
+          },
+        });
+      });
+  };
 
   useEffect(() => {
-    let active = true;
-    void hasAiKey(aiProvider)
-      .then((configured) => {
-        if (active) setKeyStatus({ provider: aiProvider, configured });
-      })
-      .catch((error) => {
-        console.error("AI key presence check failed", {
-          error,
-          provider: aiProvider,
-        });
-        if (active) setKeyStatus({ provider: aiProvider, configured: false });
-      });
-    return () => {
-      active = false;
-    };
+    refreshKeyStatus();
   }, [aiProvider]);
+
+  useEffect(() => {
+    if (aiTarget === null || (aiTarget === "model" && modelsLoading)) return;
+    const element = aiTarget === "key" ? keyInputRef.current : modelTriggerRef.current;
+    if (element === null) return;
+    const timeout = window.setTimeout(() => {
+      const scrollable = element as HTMLButtonElement & {
+        scrollIntoView?: (options: ScrollIntoViewOptions) => void;
+      };
+      if (scrollable.scrollIntoView !== undefined) {
+        scrollable.scrollIntoView({ block: "nearest" });
+      }
+      element.focus();
+      clearAiSettingsTarget();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [aiTarget, clearAiSettingsTarget, modelsLoading]);
 
   return (
     <div className="flex flex-col gap-6">
       <ProviderField />
       <ApiKeyField
-        key={aiProvider}
+        key={`key-${aiProvider}`}
         provider={aiProvider}
         configured={keyConfigured}
+        failure={keyFailure}
+        inputRef={keyInputRef}
         onConfiguredChange={(configured) =>
-          setKeyStatus({ provider: aiProvider, configured })
+          setKeyStatus({
+            provider: aiProvider,
+            status: { status: configured ? "configured" : "missing" },
+          })
         }
+        onRetry={refreshKeyStatus}
       />
-      <AiModelField provider={aiProvider} keyConfigured={keyConfigured} />
+      <AiModelField
+        key={`model-${aiProvider}`}
+        keyConfigured={keyConfigured}
+        modelRef={modelTriggerRef}
+        onLoadingChange={setModelsLoading}
+        provider={aiProvider}
+      />
       <PreferencesFields />
     </div>
   );

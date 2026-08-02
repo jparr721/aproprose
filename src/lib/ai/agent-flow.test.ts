@@ -29,6 +29,7 @@ vi.mock("@/lib/id", () => ({
 }));
 
 vi.mock("@/lib/tauri", () => ({
+  appendAgentFailureLog: vi.fn(),
   compileProject: vi.fn(),
   createProject: vi.fn(),
   deleteChapterCmd: vi.fn(),
@@ -193,11 +194,30 @@ function messageMetadata(
     task: run.task,
     state,
     createdAt: run.startedAt,
-    error: null,
-    errorCode: null,
+    failure: null,
     retryOf: null,
     usage: null,
   };
+}
+
+function safeExpectedMessages(messages: AgentUIMessage[]): AgentUIMessage[] {
+  return messages.map((message) => {
+    if (message.metadata === undefined) return message;
+    const metadata = message.metadata;
+    return {
+      ...message,
+      metadata: {
+        runId: metadata.runId,
+        mode: metadata.mode,
+        task: metadata.task,
+        state: metadata.state,
+        createdAt: metadata.createdAt,
+        failure: metadata.failure ?? null,
+        retryOf: metadata.retryOf,
+        usage: metadata.usage,
+      },
+    };
+  });
 }
 
 function completeAssistant(input: StreamAgentRunInput): AgentUIMessage {
@@ -220,6 +240,7 @@ function dependencies(
     getContextWindow: async () => 1_047_576,
     summarize: async () => "Compacted history",
     stream: streamImplementation,
+    recordFailure: async () => undefined,
   };
 }
 
@@ -869,7 +890,7 @@ describe("agent console authoring flows", () => {
         kind: "proposal-follow-up",
         proposalId: "flow-11",
       }),
-    ).rejects.toThrow("invalid manuscript change");
+    ).resolves.toMatchObject({ status: "failure", failure: { reason: "tool" } });
     expect(readPendingChanges).toEqual([
       expectedInitial.changes,
       expectedReplacement.changes,
@@ -1320,7 +1341,7 @@ describe("agent console authoring flows", () => {
       },
     ];
     const expectedStoppedState = {
-      messages: expectedStoppedMessages,
+      messages: safeExpectedMessages(expectedStoppedMessages),
       interruptedRun: {
         runId: "flow-1",
         userMessageId: "flow-2",
@@ -1830,7 +1851,7 @@ describe("agent console authoring flows", () => {
     try {
       await vi.waitFor(() => expect(liveInput).not.toBeNull());
       expect(useAgentConsoleStore.getState().messages).toEqual(
-        expectedLiveBookATranscript,
+        safeExpectedMessages(expectedLiveBookATranscript),
       );
       unsubscribe = useAgentConsoleStore.subscribe((state, previous) => {
         if (
@@ -1868,7 +1889,7 @@ describe("agent console authoring flows", () => {
       expect(persistedA).toEqual({
         v: 3,
         mode: "edit",
-        messages: expectedPersistedBookATranscript,
+        messages: safeExpectedMessages(expectedPersistedBookATranscript),
         summary: null,
         draftText: "Book A draft",
         draftContextRefs: [],
@@ -1935,7 +1956,7 @@ describe("agent console authoring flows", () => {
         hydratedProjectRoot: restoredA.hydratedProjectRoot,
       }).toEqual({
         mode: "edit",
-        messages: expectedPersistedBookATranscript,
+        messages: safeExpectedMessages(expectedPersistedBookATranscript),
         summary: null,
         draftText: "Book A draft",
         draftContextRefs: [],

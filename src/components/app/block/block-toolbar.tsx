@@ -3,7 +3,7 @@
 // more-menu (move / insert / AI cleanup / delete).
 
 import { toast } from "sonner";
-import { IconDotsVertical, IconMicrophone, IconSparkles } from "@tabler/icons-react";
+import { EllipsisVertical as IconDotsVertical, Mic as IconMicrophone, Sparkles as IconSparkles } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,

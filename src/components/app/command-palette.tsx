@@ -6,7 +6,7 @@
 // "Recent" group plus the grouped catalog; page-openers drill into a flat sub-list.
 
 import { useEffect, useState } from "react";
-import { IconChevronRight } from "@tabler/icons-react";
+import { ChevronRight as IconChevronRight } from "lucide-react";
 import {
   Command,
   CommandDialog,

@@ -10,13 +10,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  hasAiKey: vi.fn(),
+  getAiKeyStatus: vi.fn(),
   setAiKey: vi.fn(),
   listTextModels: vi.fn(),
 }));
 
 vi.mock("@/lib/tauri", () => ({
-  hasAiKey: mocks.hasAiKey,
+  getAiKeyStatus: mocks.getAiKeyStatus,
   setAiKey: mocks.setAiKey,
 }));
 
@@ -30,13 +30,14 @@ vi.mock("@/lib/ai/model", () => ({
 }));
 
 import { AiTab } from "@/components/app/settings/ai-tab";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
 afterEach(cleanup);
 
 beforeEach(() => {
-  mocks.hasAiKey.mockReset().mockResolvedValue(false);
-  mocks.setAiKey.mockReset().mockResolvedValue(undefined);
+  mocks.getAiKeyStatus.mockReset().mockResolvedValue({ status: "missing" });
+  mocks.setAiKey.mockReset().mockResolvedValue({ status: "saved" });
   mocks.listTextModels.mockReset().mockResolvedValue([]);
   useSettingsStore.setState({
     aiProvider: "openai",
@@ -44,6 +45,7 @@ beforeEach(() => {
     styleGuide: "",
     editingRules: "",
   });
+  useSettingsDialogStore.setState({ aiTarget: null });
 });
 
 describe("AiTab", () => {
@@ -51,7 +53,7 @@ describe("AiTab", () => {
     render(<AiTab />);
 
     await waitFor(() =>
-      expect(mocks.hasAiKey).toHaveBeenCalledExactlyOnceWith("openai"),
+      expect(mocks.getAiKeyStatus).toHaveBeenCalledExactlyOnceWith("openai"),
     );
     expect(screen.getByText("OpenAI key")).toBeTruthy();
     expect(screen.getByText("AI model")).toBeTruthy();
@@ -63,13 +65,13 @@ describe("AiTab", () => {
       aiProvider: "openrouter",
       aiModel: "anthropic/claude-sonnet-4",
     });
-    mocks.hasAiKey.mockResolvedValue(true);
+    mocks.getAiKeyStatus.mockResolvedValue({ status: "configured" });
     mocks.listTextModels.mockResolvedValue(["anthropic/claude-sonnet-4"]);
 
     render(<AiTab />);
 
     await waitFor(() =>
-      expect(mocks.hasAiKey).toHaveBeenCalledExactlyOnceWith("openrouter"),
+      expect(mocks.getAiKeyStatus).toHaveBeenCalledExactlyOnceWith("openrouter"),
     );
     await waitFor(() =>
       expect(mocks.listTextModels).toHaveBeenCalledExactlyOnceWith("openrouter"),
@@ -82,7 +84,7 @@ describe("AiTab", () => {
     useSettingsStore.setState({ aiProvider: "openrouter" });
     render(<AiTab />);
     await waitFor(() =>
-      expect(mocks.hasAiKey).toHaveBeenCalledExactlyOnceWith("openrouter"),
+      expect(mocks.getAiKeyStatus).toHaveBeenCalledExactlyOnceWith("openrouter"),
     );
 
     fireEvent.change(screen.getByPlaceholderText("sk-or-v1-"), {
@@ -101,8 +103,42 @@ describe("AiTab", () => {
   it("describes standing instructions for both modes", async () => {
     render(<AiTab />);
 
-    await waitFor(() => expect(mocks.hasAiKey).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.getAiKeyStatus).toHaveBeenCalledOnce());
     expect(screen.getByText("Writing and editing instructions")).toBeTruthy();
     expect(screen.getByText("Applies to Writing and Edit.")).toBeTruthy();
+  });
+
+  it("shows a safe key-status failure and retries without rendering bridge details", async () => {
+    mocks.getAiKeyStatus.mockRejectedValue(
+      new Error("provider response body at /Users/author/.config/aproprose"),
+    );
+
+    render(<AiTab />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "AI settings are unavailable. Retry.",
+    );
+    expect(document.body.textContent).not.toContain("/Users/author/.config");
+    expect(document.body.textContent).not.toContain("provider response body");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() =>
+      expect(mocks.getAiKeyStatus).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  it("focuses the model selector after opening AI settings for model recovery", async () => {
+    mocks.getAiKeyStatus.mockResolvedValue({ status: "configured" });
+    mocks.listTextModels.mockResolvedValue(["gpt-5-mini"]);
+    useSettingsDialogStore.getState().openAiSettings("model");
+
+    render(<AiTab />);
+
+    await waitFor(() => {
+      const selectors = screen.getAllByRole("combobox");
+      expect(document.activeElement).toBe(selectors[selectors.length - 1]);
+    });
+    expect(useSettingsDialogStore.getState().aiTarget).toBeNull();
   });
 });

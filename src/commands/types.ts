@@ -9,7 +9,7 @@
 // lists (chapters, recent projects) are produced by provider functions in the group
 // modules and assembled in `registry.ts`.
 
-import type { Icon } from "@tabler/icons-react";
+import type { LucideIcon } from "lucide-react";
 import type { KeybindingId } from "@/lib/keybindings";
 
 export type CommandGroup =
@@ -35,7 +35,7 @@ export interface Command {
   title: string;
   /** Extra fuzzy-search aliases, e.g. ["dark mode"] for the dark theme. */
   keywords?: string[];
-  icon?: Icon;
+  icon?: LucideIcon;
   /** Renders a <KeybindingHint>; the keybinding registry stays the source of glyphs. */
   keybindingId?: KeybindingId;
   /** Page-opener: selecting pushes this sub-page instead of running. */

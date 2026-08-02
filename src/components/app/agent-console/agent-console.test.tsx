@@ -445,14 +445,16 @@ describe("AgentConsole configuration navigation", () => {
   it("opens the AI settings tab from an inline configuration error", () => {
     useAgentConsoleStore.setState({
       runError: {
-        code: "configuration",
-        message: "Choose an OpenAI model before submitting.",
+        reason: "model-unselected",
+        message: "Choose a model for OpenAI, then submit again.",
+        action: "choose-model",
+        settingsTarget: "model",
       },
     });
     render(<AgentConsole />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open AI Settings" }),
+      screen.getByRole("button", { name: "Choose model" }),
     );
 
     expect(useSettingsDialogStore.getState()).toMatchObject({

@@ -24,17 +24,18 @@ import {
 } from "@/lib/ai/agent-proposals";
 import {
   streamAgentRun,
+  type AgentToolFailure,
   type StreamAgentRunInput,
   type StreamAgentRunResult,
 } from "@/lib/ai/agent-runtime";
 import type { AgentToolEnvironment } from "@/lib/ai/agent-tools";
 import type {
-  AgentErrorCode,
+  AgentFailure,
+  AgentFailureReason,
   AgentIntent,
   AgentMessageMetadata,
   AgentMode,
   AgentRun,
-  AgentRunError,
   AgentTask,
   AgentUIMessage,
   ChapterToolValue,
@@ -48,12 +49,22 @@ import type {
   PendingProposal,
   ProposalEventData,
 } from "@/lib/ai/agent-types";
+import {
+  agentFailureDiagnosticCode,
+  failureFromError,
+  modelUnselectedFailure,
+  type AgentFailurePhase,
+} from "@/lib/ai/agent-failure";
 import { critique, continuityCheck, type AnchoredContext } from "@/lib/ai/operations";
 import { uid } from "@/lib/id";
 import { parseChapter } from "@/lib/latex";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 import { getChapterOutline } from "@/lib/outline/model";
-import { readTextFile } from "@/lib/tauri";
+import {
+  appendAgentFailureLog,
+  readTextFile,
+  type AgentFailureLogEntry,
+} from "@/lib/tauri";
 import type {
   AiProvider,
   Block,
@@ -90,7 +101,13 @@ export interface AgentControllerDependencies {
     signal: AbortSignal,
   ) => Promise<string>;
   stream: (input: StreamAgentRunInput) => Promise<StreamAgentRunResult>;
+  recordFailure: (entry: AgentFailureLogEntry) => Promise<void>;
 }
+
+export type AgentSubmissionOutcome =
+  | { status: "success" }
+  | { status: "stopped" }
+  | { status: "failure"; failure: AgentFailure };
 
 interface ActiveController {
   projectRoot: string;
@@ -189,7 +206,7 @@ interface ErrorWithDetails extends Error {
   status?: number;
   responseBody?: string;
   cause?: unknown;
-  agentErrorCode?: AgentErrorCode;
+  agentFailureReason?: AgentFailureReason;
 }
 
 function cloneBlock(block: Block): Block {
@@ -846,9 +863,120 @@ function errorDetails(error: unknown): string {
   return details.join(" - ") || detailed.name;
 }
 
-function taggedError(code: AgentErrorCode, error: unknown): ErrorWithDetails {
+function recordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function diagnosticString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function diagnosticInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function toolFailureChangeTargets(
+  toolName: string,
+  input: unknown,
+): AgentFailureLogEntry["changeTargets"] {
+  if (
+    toolName !== "stage_manuscript_proposal" &&
+    toolName !== "stage_outline_proposal"
+  ) {
+    return null;
+  }
+  if (!recordValue(input) || !Array.isArray(input.changes)) return null;
+  return input.changes.flatMap((change) => {
+    if (!recordValue(change) || typeof change.kind !== "string") return [];
+    const blockId = diagnosticString(change.blockId);
+    const cardId = diagnosticString(change.cardId);
+    return [
+      {
+        kind: change.kind,
+        targetId: blockId === null ? cardId : blockId,
+        afterId: diagnosticString(change.afterId),
+        toIndex: diagnosticInteger(change.toIndex),
+      },
+    ];
+  });
+}
+
+function failureErrorText(error: unknown): string {
+  if (error instanceof Error) return (error.message || error.name).slice(0, 2_000);
+  if (typeof error === "string") return error.slice(0, 2_000);
+  return String(error).slice(0, 2_000);
+}
+
+function toolFailureLogEntry(args: {
+  failure: AgentToolFailure;
+  occurredAt: string;
+  provider: AiProvider;
+  modelId: string;
+  run: AgentRun;
+}): AgentFailureLogEntry {
+  return {
+    kind: "tool",
+    occurredAt: args.occurredAt,
+    runId: args.run.id,
+    provider: args.provider,
+    modelId: args.modelId,
+    task: args.run.task,
+    toolName: args.failure.toolName,
+    toolCallId: args.failure.toolCallId,
+    changeTargets: toolFailureChangeTargets(
+      args.failure.toolName,
+      args.failure.input,
+    ),
+    errorCode: "tool",
+    error: failureErrorText(args.failure.error),
+  };
+}
+
+function runFailureLogEntry(args: {
+  occurredAt: string;
+  runId: string;
+  provider: AiProvider;
+  modelId: string | null;
+  task: AgentTask;
+  failure: AgentFailure;
+  diagnostic: unknown;
+}): AgentFailureLogEntry {
+  return {
+    kind: "run",
+    occurredAt: args.occurredAt,
+    runId: args.runId,
+    provider: args.provider,
+    modelId: args.modelId,
+    task: args.task,
+    toolName: null,
+    toolCallId: null,
+    changeTargets: null,
+    errorCode: agentFailureDiagnosticCode(args.failure),
+    error: failureErrorText(errorDetails(args.diagnostic)),
+  };
+}
+
+async function persistAgentFailure(
+  recordFailure: (entry: AgentFailureLogEntry) => Promise<void>,
+  entry: AgentFailureLogEntry,
+): Promise<void> {
+  try {
+    await recordFailure(entry);
+  } catch (error) {
+    console.error("Agent failure diagnostic could not be written", {
+      cause: error,
+      kind: entry.kind,
+      runId: entry.runId,
+    });
+  }
+}
+
+function taggedError(
+  reason: AgentFailureReason,
+  error: unknown,
+): ErrorWithDetails {
   const wrapped = new Error(errorDetails(error), { cause: error }) as ErrorWithDetails;
-  wrapped.agentErrorCode = code;
+  wrapped.agentFailureReason = reason;
   return wrapped;
 }
 
@@ -856,49 +984,12 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-function errorCode(error: unknown, phase: AgentErrorCode | null): AgentErrorCode {
-  if (phase !== null) return phase;
-  if (
-    error instanceof Error &&
-    (error as ErrorWithDetails).agentErrorCode !== undefined
-  ) {
-    return (error as ErrorWithDetails).agentErrorCode as AgentErrorCode;
-  }
-  if (!(error instanceof Error)) return "unknown";
-  const detailedError = error as ErrorWithDetails;
-  const status = detailedError.statusCode ?? detailedError.status;
-  const normalizedMessage = error.message.toLowerCase();
-  if (
-    status === 402 ||
-    ((error.name.includes("APICallError") || error.name.includes("RetryError")) &&
-      (normalizedMessage.includes("credit_balance_exhausted") ||
-        normalizedMessage.includes("insufficient_quota") ||
-        normalizedMessage.includes("no credits remaining")))
-  ) {
-    return "quota";
-  }
-  if (
-    error.name.includes("APICallError") ||
-    error.name.includes("RetryError") ||
-    error.name.includes("DownloadError") ||
-    error.name.includes("EmptyResponseBodyError") ||
-    "statusCode" in error ||
-    "status" in error
-  ) {
-    return "transport";
-  }
-  if (
-    error.name.includes("InvalidTool") ||
-    error.name.includes("NoSuchTool") ||
-    error.name.includes("ToolCall")
-  ) {
-    return "tool";
-  }
-  return "unknown";
-}
-
-function runError(error: unknown, phase: AgentErrorCode | null): AgentRunError {
-  return { code: errorCode(error, phase), message: errorDetails(error) };
+function runFailure(
+  error: unknown,
+  provider: AiProvider,
+  phase: AgentFailurePhase,
+): AgentFailure {
+  return failureFromError(error, provider, phase);
 }
 
 function requireMetadata(message: AgentUIMessage): AgentMessageMetadata {
@@ -923,8 +1014,7 @@ function userMessage(args: {
       task: args.run.task,
       state: "complete",
       createdAt: args.run.startedAt,
-      error: null,
-      errorCode: null,
+      failure: null,
       retryOf: args.retryOf,
       usage: null,
     },
@@ -945,8 +1035,7 @@ function assistantMetadata(args: {
   run: AgentRun;
   state: AgentMessageMetadata["state"];
   retryOf: string | null;
-  error: string | null;
-  errorCode: AgentErrorCode | null;
+  failure: AgentFailure | null;
 }): AgentUIMessage {
   return {
     ...args.message,
@@ -958,8 +1047,7 @@ function assistantMetadata(args: {
       task: args.run.task,
       state: args.state,
       createdAt: args.run.startedAt,
-      error: args.error,
-      errorCode: args.errorCode,
+      failure: args.failure,
       retryOf: args.retryOf,
       usage: requireMetadata(args.message).usage,
     },
@@ -1238,8 +1326,7 @@ export function createAgentController(
           metadata: {
             ...requireMetadata(assistant),
             state: "stopped",
-            error: null,
-            errorCode: null,
+            failure: null,
           },
         }),
       );
@@ -1253,7 +1340,9 @@ export function createAgentController(
     });
   };
 
-  const runSubmission = async (capture: SubmissionCapture): Promise<void> => {
+  const runSubmission = async (
+    capture: SubmissionCapture,
+  ): Promise<AgentSubmissionOutcome> => {
     const runId = dependencies.id();
     const userMessageId = dependencies.id();
     const assistantMessageId = dependencies.id();
@@ -1261,9 +1350,21 @@ export function createAgentController(
     try {
       useAgentConsoleStore.getState().beginPreflight();
     } catch (error) {
-      const refusal = runError(error, null);
+      const refusal = runFailure(error, capture.provider, null);
+      await persistAgentFailure(
+        dependencies.recordFailure,
+        runFailureLogEntry({
+          occurredAt: dependencies.now(),
+          runId,
+          provider: capture.provider,
+          modelId: capture.modelId,
+          task: capture.task,
+          failure: refusal,
+          diagnostic: error,
+        }),
+      );
       useAgentConsoleStore.setState({ runError: refusal });
-      throw error;
+      return { status: "failure", failure: refusal };
     }
     activeController = {
       projectRoot: capture.projectRoot,
@@ -1275,14 +1376,26 @@ export function createAgentController(
     const ownsCurrentRun = () => ownsRun(capture.projectRoot, runId);
     let enteredRun = false;
     let latestAssistant: AgentUIMessage | null = null;
-    let failurePhase: AgentErrorCode | null = null;
+    let failurePhase: AgentFailurePhase = null;
 
     try {
-      if (capture.modelId === null) {
-        failurePhase = "configuration";
-        throw new Error(
-          "Select an AI model in Settings before using AI features.",
+      const modelId = capture.modelId;
+      if (modelId === null) {
+        const failure = modelUnselectedFailure(capture.provider);
+        await persistAgentFailure(
+          dependencies.recordFailure,
+          runFailureLogEntry({
+            occurredAt: dependencies.now(),
+            runId,
+            provider: capture.provider,
+            modelId,
+            task: capture.task,
+            failure,
+            diagnostic: failure.message,
+          }),
         );
+        useAgentConsoleStore.getState().failPreflight(failure);
+        return { status: "failure", failure };
       }
       const [attachmentsResult, targetResult] = await Promise.allSettled([
         capture.resolveAttachments(
@@ -1291,7 +1404,7 @@ export function createAgentController(
         ),
         capture.resolveTaskAndTarget(),
       ]);
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
       if (attachmentsResult.status === "rejected") {
         throw attachmentsResult.reason;
       }
@@ -1306,17 +1419,16 @@ export function createAgentController(
       }
       const frozen = targetResult.value;
 
-      failurePhase = "configuration";
       const model = await dependencies.getModel(
         capture.provider,
-        capture.modelId,
+        modelId,
       );
       failurePhase = null;
       const contextWindow = await dependencies.getContextWindow(
         capture.provider,
-        capture.modelId,
+        modelId,
       );
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
 
       let summary = capture.summary;
       failurePhase = "compaction";
@@ -1331,13 +1443,13 @@ export function createAgentController(
           summarize: (source) =>
             dependencies.summarize(model, source, abortController.signal),
         });
-        if (!ownsCurrentRun()) return;
+        if (!ownsCurrentRun()) return { status: "stopped" };
         summary = compacted.summary;
         if (summary !== null && summary !== capture.summary) {
           useAgentConsoleStore.getState().setSummary(summary);
         }
       }
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
 
       const run: AgentRun = {
         id: runId,
@@ -1379,12 +1491,12 @@ export function createAgentController(
       });
       capture.enterRun(run, user);
       enteredRun = true;
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
       useAgentConsoleStore.getState().markStreaming();
 
       const result = await dependencies.stream({
         model,
-        modelId: capture.modelId,
+        modelId,
         contextWindow,
         run,
         instructions,
@@ -1399,38 +1511,63 @@ export function createAgentController(
             run,
             state: requireMetadata(message).state,
             retryOf: capture.retryOf,
-            error: null,
-            errorCode: null,
+            failure: null,
           });
           useAgentConsoleStore
             .getState()
             .upsertAssistantMessage(latestAssistant);
         },
+        onToolFailure: async (failure) => {
+          await persistAgentFailure(
+            dependencies.recordFailure,
+            toolFailureLogEntry({
+              failure,
+              occurredAt: dependencies.now(),
+              provider: capture.provider,
+              modelId,
+              run,
+            }),
+          );
+        },
       });
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
       const completed = assistantMetadata({
         message: result.message,
         run,
         state: "complete",
         retryOf: capture.retryOf,
-        error: null,
-        errorCode: null,
+        failure: null,
       });
       useAgentConsoleStore
         .getState()
         .finishRun(settledAssistantMessage(completed), result.usage);
+      return { status: "success" };
     } catch (error) {
-      if (!ownsCurrentRun()) return;
+      if (!ownsCurrentRun()) return { status: "stopped" };
       if (isAbortError(error)) {
         if (activeController !== null) {
           interruptVisibleRun(activeController, "stopped");
         }
-        return;
+        return { status: "stopped" };
       }
-      const failure = runError(error, failurePhase);
+      const failure = runFailure(error, capture.provider, failurePhase);
+      const activeRun = useAgentConsoleStore.getState().activeRun;
+      await persistAgentFailure(
+        dependencies.recordFailure,
+        runFailureLogEntry({
+          occurredAt: dependencies.now(),
+          runId,
+          provider: capture.provider,
+          modelId: capture.modelId,
+          task: activeRun === null ? capture.task : activeRun.task,
+          failure,
+          diagnostic: error,
+        }),
+      );
+      if (!ownsCurrentRun()) return { status: "stopped" };
       console.error("Agent run failed", {
         cause: error,
-        code: failure.code,
+        reason: failure.reason,
         message: failure.message,
         modelId: capture.modelId,
         provider: capture.provider,
@@ -1441,21 +1578,19 @@ export function createAgentController(
       if (!enteredRun) {
         useAgentConsoleStore.getState().failPreflight(failure);
       } else {
-        const run = useAgentConsoleStore.getState().activeRun;
-        if (run === null) return;
+        if (activeRun === null) return { status: "stopped" };
         const base =
           latestAssistant ??
           ({
             id: assistantMessageId,
             role: "assistant",
             metadata: {
-              runId: run.id,
-              mode: run.mode,
-              task: run.task,
+              runId: activeRun.id,
+              mode: activeRun.mode,
+              task: activeRun.task,
               state: "error",
-              createdAt: run.startedAt,
-              error: failure.message,
-              errorCode: failure.code,
+              createdAt: activeRun.startedAt,
+              failure,
               retryOf: capture.retryOf,
               usage: null,
             },
@@ -1463,17 +1598,16 @@ export function createAgentController(
           } satisfies AgentUIMessage);
         const failed = assistantMetadata({
           message: base,
-          run,
+          run: activeRun,
           state: "error",
           retryOf: capture.retryOf,
-          error: failure.message,
-          errorCode: failure.code,
+          failure,
         });
         useAgentConsoleStore
           .getState()
-          .failRun(settledAssistantMessage(failed), failure.message);
+          .failRun(settledAssistantMessage(failed), failure);
       }
-      throw error;
+      return { status: "failure", failure };
     } finally {
       if (
         activeController?.projectRoot === capture.projectRoot &&
@@ -1564,7 +1698,9 @@ export function createAgentController(
     };
   };
 
-  const submitAgentDraft = async (task: AgentTask): Promise<void> => {
+  const submitAgentDraft = async (
+    task: AgentTask,
+  ): Promise<AgentSubmissionOutcome> => {
     const requestedProject = useProjectStore.getState().project;
     if (requestedProject === null) {
       throw new Error("Open a project before running the agent.");
@@ -1580,7 +1716,9 @@ export function createAgentController(
     const submittedDraft = consoleState.captureDraft();
     const attachments = structuredClone(submittedDraft.attachments);
     const text = submittedDraft.text;
-    if (text.trim() === "" && attachments.length === 0) return;
+    if (text.trim() === "" && attachments.length === 0) {
+      return { status: "success" };
+    }
     const frozenTask = structuredClone(task);
     const pendingProposal =
       consoleState.pendingProposal === null
@@ -1642,18 +1780,18 @@ export function createAgentController(
           .beginDraftRun(run, user, submittedDraft);
       },
     };
-    await runSubmission(capture);
+    return runSubmission(capture);
   };
 
   const submitAgentRequest = async (
     request: Extract<AgentIntent, { kind: "run" }>,
-  ): Promise<void> => {
+  ): Promise<AgentSubmissionOutcome> => {
     const frozenRequest = structuredClone(request);
     if (
       frozenRequest.text.trim() === "" &&
       frozenRequest.refs.length === 0
     ) {
-      return;
+      return { status: "success" };
     }
     const project = useProjectStore.getState().project;
     if (project === null) {
@@ -1678,7 +1816,7 @@ export function createAgentController(
     const consoleState = useAgentConsoleStore.getState();
     const attachments: CapturedContextAttachment[] =
       frozenRequest.refs.map((ref) => ({ ref, revision: null }));
-    await runSubmission({
+    return runSubmission({
       ...base,
       task: taskTarget.task,
       resolveTaskAndTarget: taskTarget.resolve,
@@ -1706,7 +1844,9 @@ export function createAgentController(
     void refreshAttachedDraftSources();
   };
 
-  const retryAgentTurn = async (userMessageId: string): Promise<void> => {
+  const retryAgentTurn = async (
+    userMessageId: string,
+  ): Promise<AgentSubmissionOutcome> => {
     const project = useProjectStore.getState().project;
     if (project === null) {
       throw new Error("Open a project before running the agent.");
@@ -1752,7 +1892,7 @@ export function createAgentController(
       task: originalMetadata.task,
       retryOf: userMessageId,
     });
-    await runSubmission({
+    return runSubmission({
       ...base,
       resolveTaskAndTarget: () =>
         loadExactTaskAndTarget({
@@ -1788,8 +1928,7 @@ export function createAgentController(
         task: { kind: "proposal-follow-up", proposalId: event.proposalId },
         state: "complete",
         createdAt,
-        error: null,
-        errorCode: null,
+        failure: null,
         retryOf: null,
         usage: null,
       },
@@ -1912,7 +2051,26 @@ export function createAgentController(
       await submitAgentRequest(frozenIntent);
     } catch (error) {
       if (useAgentConsoleStore.getState().runError === null) {
-        const failure = runError(error, null);
+        const failure = runFailure(
+          error,
+          useSettingsStore.getState().aiProvider,
+          null,
+        );
+        if (frozenIntent.kind === "run") {
+          const settings = useSettingsStore.getState();
+          await persistAgentFailure(
+            dependencies.recordFailure,
+            runFailureLogEntry({
+              occurredAt: dependencies.now(),
+              runId: dependencies.id(),
+              provider: settings.aiProvider,
+              modelId: settings.aiModel,
+              task: frozenIntent.task,
+              failure,
+              diagnostic: error,
+            }),
+          );
+        }
         useAgentConsoleStore.setState({ runError: failure });
       }
     }
@@ -2043,6 +2201,7 @@ const productionController = createAgentController({
     return result.text;
   },
   stream: streamAgentRun,
+  recordFailure: appendAgentFailureLog,
 });
 
 export const submitAgentDraft = productionController.submitAgentDraft;

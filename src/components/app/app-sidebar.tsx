@@ -3,16 +3,16 @@
 
 import { useState } from "react";
 import {
-  IconAdjustments,
-  IconChevronDown,
-  IconChevronRight,
-  IconDeviceFloppy,
-  IconFolderOpen,
-  IconLayoutList,
-  IconPlus,
-  IconSettings,
-  IconX,
-} from "@tabler/icons-react";
+  SlidersHorizontal as IconAdjustments,
+  ChevronDown as IconChevronDown,
+  ChevronRight as IconChevronRight,
+  Save as IconDeviceFloppy,
+  FolderOpen as IconFolderOpen,
+  List as IconLayoutList,
+  Plus as IconPlus,
+  Settings as IconSettings,
+  X as IconX,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,

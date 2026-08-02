@@ -28,6 +28,7 @@ import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
+  deleteChapterCmd,
   openProject,
   readAppData,
   readPdf,
@@ -140,6 +141,9 @@ beforeEach(() => {
     editing: false,
     editCaret: null,
     chapterDirty: false,
+    saving: false,
+    error: null,
+    saveError: null,
     past: [],
     future: [],
     lastTextEditId: null,
@@ -1038,6 +1042,133 @@ describe("saveChapter refreshes the backup indicator", () => {
 
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     refreshSpy.mockRestore();
+  });
+});
+
+describe("saveChapter save errors", () => {
+  const saveReadyState = () => ({
+    project: projectFixture("/book"),
+    activeChapterId: "ch1",
+    blocks: [mkBlock({ id: "save-block", text: "Alpha", dirty: true })],
+    chapterDirty: true,
+    saving: false,
+    error: null,
+    saveError: null,
+  });
+
+  it("clears a previous save error when the save starts", async () => {
+    let resolveWrite: (() => void) | null = null;
+    vi.mocked(writeTextFile).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+    useProjectStore.setState({ ...saveReadyState(), saveError: "Earlier save failed" });
+
+    const save = useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      saving: true,
+      saveError: null,
+    });
+
+    if (!resolveWrite) throw new Error("save did not start the disk write");
+    resolveWrite();
+    await save;
+  });
+
+  it("records a save-specific error and preserves the generic save error", async () => {
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      saving: false,
+      chapterDirty: true,
+      error: "Error: disk full",
+      saveError: "Error: disk full",
+    });
+  });
+
+  it("clears the save-specific error after a successful retry", async () => {
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+    expect(useProjectStore.getState().saveError).toBe("Error: disk full");
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      chapterDirty: false,
+      error: "Error: disk full",
+      saveError: null,
+    });
+  });
+});
+
+describe("save error resets", () => {
+  it("clears the save error when loading another project", async () => {
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project: projectFixture("/next-book"),
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readTextFile).mockResolvedValueOnce("Fresh chapter text.");
+    vi.mocked(readPdf).mockResolvedValueOnce(null);
+    useProjectStore.setState({ saveError: "Earlier save failed" });
+
+    await useProjectStore.getState().loadProjectAt("/next-book");
+
+    expect(useProjectStore.getState().saveError).toBeNull();
+  });
+
+  it("clears the save error when closing a project", () => {
+    useProjectStore.setState({ saveError: "Earlier save failed" });
+
+    useProjectStore.getState().closeProject();
+
+    expect(useProjectStore.getState().saveError).toBeNull();
+  });
+
+  it("clears the save error after deleting the active final chapter", async () => {
+    const project = projectFixture("/book");
+    vi.mocked(deleteChapterCmd).mockResolvedValueOnce({ ...project, chapters: [] });
+    useProjectStore.setState({
+      project,
+      activeChapterId: "ch1",
+      saveError: "Earlier save failed",
+    });
+
+    await useProjectStore.getState().deleteChapter("ch1");
+
+    expect(useProjectStore.getState()).toMatchObject({
+      activeChapterId: null,
+      saveError: null,
+    });
+  });
+
+  it("clears the save error after selecting a chapter", async () => {
+    const project = {
+      ...projectFixture("/book"),
+      chapters: [
+        { id: "ch1", label: "I", title: "Chapter One", file: "chapter-one.tex", wordCount: 2 },
+        { id: "ch2", label: "II", title: "Chapter Two", file: "chapter-two.tex", wordCount: 2 },
+      ],
+    };
+    vi.mocked(readTextFile).mockResolvedValueOnce("Fresh chapter text.");
+    useProjectStore.setState({
+      project,
+      activeChapterId: "ch1",
+      saveError: "Earlier save failed",
+    });
+
+    await useProjectStore.getState().selectChapter("ch2");
+
+    expect(useProjectStore.getState().saveError).toBeNull();
   });
 });
 

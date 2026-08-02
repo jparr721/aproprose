@@ -43,6 +43,7 @@ import {
   SETTINGS_TABS,
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -224,7 +225,7 @@ beforeEach(() => {
     tab: SETTINGS_TABS.APPEARANCE,
   });
   controller.submitAgentDraft.mockReset();
-  controller.submitAgentDraft.mockResolvedValue(undefined);
+  controller.submitAgentDraft.mockResolvedValue({ status: "success" });
   controller.stopAgentRun.mockReset();
 });
 
@@ -520,11 +521,15 @@ describe("AgentComposer draft behavior", () => {
     controller.submitAgentDraft.mockImplementation(async () => {
       const state = useAgentConsoleStore.getState();
       state.beginPreflight();
-      state.failPreflight({
-        code: "compaction",
+      const failure = {
+        reason: "compaction" as const,
         message:
-          "Compaction failed at /Users/author/private/book with internal detail.",
-      });
+          "Older conversation context could not be prepared. Retry the request.",
+        action: "retry" as const,
+        settingsTarget: null,
+      };
+      state.failPreflight(failure);
+      return { status: "failure" as const, failure };
     });
     render(<AgentComposer />);
 
@@ -551,8 +556,10 @@ describe("AgentComposer draft behavior", () => {
     useAgentConsoleStore.setState({
       draftText: "Keep this transport draft",
       runError: {
-        code: "transport",
-        message: rawError,
+        reason: "transport",
+        message: "The AI request could not be completed. Check your connection and retry.",
+        action: "retry",
+        settingsTarget: null,
       },
     });
     render(<AgentComposer />);
@@ -574,26 +581,28 @@ describe("AgentComposer draft behavior", () => {
     useAgentConsoleStore.setState({
       draftText: "Retry this request",
       runError: {
-        code: "configuration",
-        message:
-          "Missing key at /private/book/.env with raw provider response.",
+        reason: "key-missing",
+        message: "Add an OpenAI key, then submit again.",
+        action: "add-key",
+        settingsTarget: "key",
       },
     });
     render(<AgentComposer />);
 
     expect(screen.getByRole("alert").textContent).toBe(
-      "AI is not configured. Open AI Settings to continue.",
+      "Add an OpenAI key, then submit again.",
     );
     expect(document.body.textContent).not.toContain("/private/book");
     expect(document.body.textContent).not.toContain("raw provider response");
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open AI Settings" }),
+      screen.getByRole("button", { name: "Add key" }),
     );
 
     expect(useSettingsDialogStore.getState()).toMatchObject({
       open: true,
       tab: SETTINGS_TABS.AI,
+      aiTarget: "key",
     });
 
     const submit = screen.getByRole("button", { name: "Submit" });
@@ -604,6 +613,35 @@ describe("AgentComposer draft behavior", () => {
     await waitFor(() =>
       expect(controller.submitAgentDraft).toHaveBeenCalledOnce(),
     );
+  });
+
+  it("retains an OpenRouter draft and targets the model selector for an unselected model", () => {
+    useSettingsStore.setState({ aiProvider: "openrouter", aiModel: null });
+    useAgentConsoleStore.setState({
+      draftText: "Keep this OpenRouter draft",
+      runError: {
+        reason: "model-unselected",
+        message: "Choose a model for OpenRouter, then submit again.",
+        action: "choose-model",
+        settingsTarget: "model",
+      },
+    });
+    render(<AgentComposer />);
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Choose a model for OpenRouter, then submit again.",
+    );
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Keep this OpenRouter draft",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
+
+    expect(useSettingsDialogStore.getState()).toMatchObject({
+      open: true,
+      tab: SETTINGS_TABS.AI,
+      aiTarget: "model",
+    });
   });
 });
 

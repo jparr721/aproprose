@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { IconX } from "@tabler/icons-react";
+import { X as IconX } from "lucide-react";
 import { AgentComposer } from "@/components/app/agent-console/agent-composer";
 import { AgentConversation } from "@/components/app/agent-console/agent-conversation";
 import { ReviewTray } from "@/components/app/agent-console/review-tray";
+import { AiConsoleErrorBoundary } from "@/components/app/error-boundary";
 import {
   Alert,
   AlertAction,
@@ -39,7 +40,6 @@ import {
 } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import {
-  SETTINGS_TABS,
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
 import { useViewStore } from "@/stores/view-store";
@@ -130,6 +130,16 @@ function AgentPersistenceBanner({ issue }: { issue: AgentPersistenceIssue }) {
 }
 
 export function AgentConsole() {
+  return (
+    <AiConsoleErrorBoundary
+      onClose={() => useViewStore.getState().setAiOpen(false)}
+    >
+      <AgentConsoleContent />
+    </AiConsoleErrorBoundary>
+  );
+}
+
+function AgentConsoleContent() {
   const messages = useAgentConsoleStore((state) => state.messages);
   const summary = useAgentConsoleStore((state) => state.summary);
   const pendingProposal = useAgentConsoleStore(
@@ -154,8 +164,8 @@ export function AgentConsole() {
       : chapter === undefined
         ? project.name
         : `${project.name} / ${chapter.label}. ${chapter.title}`;
-  const openAiSettings = (): void => {
-    useSettingsDialogStore.getState().openWithTab(SETTINGS_TABS.AI);
+  const openAiSettings = (target: "key" | "model"): void => {
+    useSettingsDialogStore.getState().openAiSettings(target);
   };
 
   return (

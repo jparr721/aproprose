@@ -11,6 +11,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentErrorCode,
+  AgentFailure,
+  AgentTask,
+} from "@/lib/ai/agent-types";
+import {
+  agentFailureFromReason,
+  settingsUnavailableFailure,
+} from "@/lib/ai/agent-failure";
+import type {
   AiProvider,
   CompileResult,
   NameCheck,
@@ -121,18 +130,93 @@ export interface AiConfig {
   apiKey: string;
 }
 
-export function getAiConfig(provider: AiProvider): Promise<AiConfig> {
-  return invoke<AiConfig>("get_ai_config", { provider });
+export type AiKeyStatus =
+  | { status: "configured" }
+  | { status: "missing" }
+  | { status: "unavailable"; failure: AgentFailure };
+
+export type AiKeyWriteOutcome =
+  | { status: "saved" }
+  | { status: "failure"; failure: AgentFailure };
+
+export class AiConfigurationError extends Error {
+  readonly failure: AgentFailure;
+
+  constructor(failure: AgentFailure) {
+    super(failure.message);
+    this.name = "AiConfigurationError";
+    this.failure = failure;
+  }
 }
 
-/** Whether a key is configured for the selected provider. */
-export function hasAiKey(provider: AiProvider): Promise<boolean> {
-  return invoke<boolean>("has_ai_key", { provider });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Persist a provider key to the app-config dir; an empty string clears it. */
-export function setAiKey(provider: AiProvider, key: string): Promise<void> {
-  return invoke<void>("set_ai_key", { provider, key });
+function safeAiConfigFailure(value: unknown, provider: AiProvider): AgentFailure {
+  if (isRecord(value) && typeof value.reason === "string") {
+    const reasons = [
+      "model-unselected",
+      "key-missing",
+      "key-rejected",
+      "model-unavailable",
+      "settings-unavailable",
+      "quota",
+      "transport",
+      "tool",
+      "compaction",
+      "transition",
+      "unknown",
+    ] as const;
+    if (reasons.includes(value.reason as (typeof reasons)[number])) {
+      return agentFailureFromReason(
+        value.reason as (typeof reasons)[number],
+        provider,
+      );
+    }
+  }
+  return settingsUnavailableFailure();
+}
+
+export async function getAiConfig(provider: AiProvider): Promise<AiConfig> {
+  const outcome = await invoke<unknown>("get_ai_config", { provider });
+  if (
+    isRecord(outcome) &&
+    outcome.status === "configured" &&
+    typeof outcome.apiKey === "string"
+  ) {
+    return { apiKey: outcome.apiKey };
+  }
+  const failure = isRecord(outcome) ? outcome.failure : undefined;
+  throw new AiConfigurationError(safeAiConfigFailure(failure, provider));
+}
+
+export async function getAiKeyStatus(provider: AiProvider): Promise<AiKeyStatus> {
+  const outcome = await invoke<unknown>("get_ai_key_status", { provider });
+  if (!isRecord(outcome)) {
+    return { status: "unavailable", failure: settingsUnavailableFailure() };
+  }
+  if (outcome.status === "configured") return { status: "configured" };
+  if (outcome.status === "missing") return { status: "missing" };
+  return {
+    status: "unavailable",
+    failure: safeAiConfigFailure(outcome.failure, provider),
+  };
+}
+
+export async function setAiKey(
+  provider: AiProvider,
+  key: string,
+): Promise<AiKeyWriteOutcome> {
+  const outcome = await invoke<unknown>("set_ai_key", { provider, key });
+  if (isRecord(outcome) && outcome.status === "saved") return { status: "saved" };
+  return {
+    status: "failure",
+    failure: safeAiConfigFailure(
+      isRecord(outcome) ? outcome.failure : undefined,
+      provider,
+    ),
+  };
 }
 
 // ── App data (recents, per-project metadata) ───────────────────────────────────
@@ -146,6 +230,35 @@ export async function readAppData<T>(key: string): Promise<T | null> {
 
 export function writeAppData<T>(key: string, value: T): Promise<void> {
   return invoke<void>("write_app_data", { key, value: JSON.stringify(value) });
+}
+
+// ── AI diagnostics ───────────────────────────────────────────────────────────
+
+export interface AgentToolFailureChangeTarget {
+  kind: string;
+  targetId: string | null;
+  afterId: string | null;
+  toIndex: number | null;
+}
+
+export interface AgentFailureLogEntry {
+  kind: "tool" | "run";
+  occurredAt: string;
+  runId: string;
+  provider: AiProvider;
+  modelId: string | null;
+  task: AgentTask;
+  toolName: string | null;
+  toolCallId: string | null;
+  changeTargets: AgentToolFailureChangeTarget[] | null;
+  errorCode: AgentErrorCode;
+  error: string;
+}
+
+export function appendAgentFailureLog(
+  entry: AgentFailureLogEntry,
+): Promise<void> {
+  return invoke<void>("append_agent_failure_log", { entry });
 }
 
 // ── Backup / sync ─────────────────────────────────────────────────────────────

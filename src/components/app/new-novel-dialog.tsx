@@ -1,7 +1,7 @@
 // new-novel-dialog.tsx — scaffold a new managed novel: name, author, location.
 
 import { useState } from "react";
-import { IconFolder } from "@tabler/icons-react";
+import { Folder as IconFolder } from "lucide-react";
 import {
   Dialog,
   DialogContent,

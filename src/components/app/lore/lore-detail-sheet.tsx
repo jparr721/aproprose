@@ -4,7 +4,7 @@
 // character assign, tag multi-select, delete button.
 
 import { useState } from "react";
-import { IconBook, IconPlus, IconTag, IconTrash, IconX } from "@tabler/icons-react";
+import { Book as IconBook, Plus as IconPlus, Tag as IconTag, Trash as IconTrash, X as IconX } from "lucide-react";
 import {
   Sheet,
   SheetContent,

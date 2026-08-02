@@ -1,6 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { IconChevronRight, IconPlus, IconWand } from "@tabler/icons-react";
+import { ChevronRight as IconChevronRight, Plus as IconPlus, WandSparkles as IconWand } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BoardCard } from "@/components/app/outline/board-card";
 import { CharacterChip } from "@/components/app/outline/character-chip";

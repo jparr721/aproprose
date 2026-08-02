@@ -12,6 +12,7 @@ vi.mock("ai", async () => {
 });
 
 vi.mock("@/lib/tauri", () => ({
+  appendAgentFailureLog: vi.fn(),
   compileProject: vi.fn(),
   createProject: vi.fn(),
   deleteChapterCmd: vi.fn(),
@@ -48,9 +49,11 @@ import {
 } from "@/lib/ai/agent-context";
 import { modelContextWindow } from "@/lib/ai/agent-compaction";
 import type {
+  AgentToolFailure,
   StreamAgentRunInput,
   StreamAgentRunResult,
 } from "@/lib/ai/agent-runtime";
+import type { AgentFailureLogEntry } from "@/lib/tauri";
 import type {
   AgentIntent,
   AgentMessageMetadata,
@@ -88,6 +91,10 @@ interface Deferred<T> {
 type StreamImplementation = (
   input: StreamAgentRunInput,
 ) => Promise<StreamAgentRunResult>;
+
+interface ToolFailureStreamInput extends StreamAgentRunInput {
+  onToolFailure: (failure: AgentToolFailure) => Promise<void>;
+}
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
@@ -258,6 +265,9 @@ function makeDependencies(
   stream: ReturnType<typeof vi.fn<(
     input: StreamAgentRunInput,
   ) => Promise<StreamAgentRunResult>>>;
+  recordFailure: ReturnType<typeof vi.fn<(
+    entry: AgentFailureLogEntry,
+  ) => Promise<void>>>;
 } {
   let nextId = 0;
   const stream = vi.fn(
@@ -267,6 +277,7 @@ function makeDependencies(
         return successfulResult(input, "Draft response");
       }),
   );
+  const recordFailure = vi.fn(async () => undefined);
   return {
     now: () => "2026-07-30T12:00:00.000Z",
     id: () => `agent-${++nextId}`,
@@ -280,6 +291,7 @@ function makeDependencies(
     },
     summarize: async () => "Compacted history",
     stream,
+    recordFailure,
   };
 }
 
@@ -607,7 +619,7 @@ describe("dispatchAgentIntent", () => {
       draftContextRefs: [],
       draftContextSources: {},
       runError: {
-        code: "transition",
+        reason: "transition",
         message: expect.stringContaining("loading"),
       },
     });
@@ -651,7 +663,7 @@ describe("dispatchAgentIntent", () => {
       draftText: "Owned draft",
       draftContextRefs: [blockRef("b1", "ch1")],
       runError: {
-        code: "transition",
+        reason: "transition",
         message: expect.stringContaining("loading"),
       },
     });
@@ -687,8 +699,10 @@ describe("dispatchAgentIntent", () => {
     await controller.dispatchAgentIntent(intent);
 
     expect(useAgentConsoleStore.getState().runError).toEqual({
-      code: "unknown",
-      message: "Current context resolution failed",
+      reason: "unknown",
+      message: "The AI request could not be completed. Retry the request.",
+      action: "retry",
+      settingsTarget: null,
     });
   });
 
@@ -893,6 +907,108 @@ describe("dispatchAgentIntent", () => {
     expect(dependencies.stream).toHaveBeenCalledOnce();
   });
 
+  it("records a redacted diagnostic when manuscript staging fails", async () => {
+    const dependencies = {
+      ...makeDependencies(async (input) => {
+        await (input as ToolFailureStreamInput).onToolFailure({
+          toolCallId: "call-stage-manuscript",
+          toolName: "stage_manuscript_proposal",
+          input: {
+            summary: "Private proposal summary",
+            changes: [
+              {
+                kind: "rewrite",
+                blockId: "missing-block",
+                afterId: null,
+                type: "narration",
+                speaker: null,
+                newText: "Private replacement text",
+                toIndex: null,
+                reason: "Private reason",
+              },
+            ],
+          },
+          error: new Error("Block not found: missing-block"),
+        });
+        return successfulResult(input, "Tool failure reported");
+      }),
+    };
+    const controller = createAgentController(dependencies);
+
+    await controller.submitAgentRequest({
+      kind: "run",
+      mode: "writing",
+      text: "Stage a proposal.",
+      refs: [],
+      task: conversationTask("ch1"),
+    });
+
+    expect(dependencies.recordFailure).toHaveBeenCalledOnce();
+    expect(dependencies.recordFailure).toHaveBeenCalledWith({
+      kind: "tool",
+      occurredAt: "2026-07-30T12:00:00.000Z",
+      runId: "agent-1",
+      provider: "openai",
+      modelId: "gpt-4.1",
+      task: { kind: "conversation", targetChapterId: "ch1" },
+      toolName: "stage_manuscript_proposal",
+      toolCallId: "call-stage-manuscript",
+      changeTargets: [
+        {
+          kind: "rewrite",
+          targetId: "missing-block",
+          afterId: null,
+          toIndex: null,
+        },
+      ],
+      errorCode: "tool",
+      error: "Block not found: missing-block",
+    });
+  });
+
+  it("records provider stream failures in the diagnostic log", async () => {
+    const streamError = new Error("Provider unavailable");
+    streamError.name = "AI_APICallError";
+    const dependencies = makeDependencies(async () => {
+      throw streamError;
+    });
+    const controller = createAgentController(dependencies);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    await expect(
+      controller.submitAgentRequest({
+        kind: "run",
+        mode: "writing",
+        text: "Continue.",
+        refs: [],
+        task: conversationTask("ch1"),
+      }),
+    ).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "transport" },
+    });
+
+    expect(dependencies.recordFailure).toHaveBeenCalledOnce();
+    expect(dependencies.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "run",
+        occurredAt: "2026-07-30T12:00:00.000Z",
+        runId: "agent-1",
+        provider: "openai",
+        modelId: "gpt-4.1",
+        task: { kind: "conversation", targetChapterId: "ch1" },
+        toolName: null,
+        toolCallId: null,
+        changeTargets: null,
+        errorCode: "transport",
+        error: "Provider unavailable",
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
   it("resolves product run failures without erasing their typed error", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
@@ -912,22 +1028,47 @@ describe("dispatchAgentIntent", () => {
     expect(useAgentConsoleStore.getState()).toMatchObject({
       runStatus: "idle",
       runError: {
-        code: "configuration",
-        message: "Select an AI model in Settings before using AI features.",
+        reason: "model-unselected",
+        message: "Choose a model for OpenAI, then submit again.",
       },
       messages: [],
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalledWith(
-      "Agent run failed",
+    expect(dependencies.recordFailure).toHaveBeenCalledWith(
       expect.objectContaining({
-        code: "configuration",
-        message: "Select an AI model in Settings before using AI features.",
-        phase: "configuration",
-        projectRoot: "/book",
+        kind: "run",
+        modelId: null,
+        errorCode: "configuration",
+        error: "Choose a model for OpenAI, then submit again.",
       }),
     );
+    expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("records run requests rejected before preflight", async () => {
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+    useProjectStore.setState({ project: null });
+
+    await controller.dispatchAgentIntent({
+      kind: "run",
+      mode: "writing",
+      text: "Continue.",
+      refs: [],
+      task: conversationTask("ch1"),
+    });
+
+    expect(dependencies.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "run",
+        provider: "openai",
+        modelId: "gpt-4.1",
+        task: { kind: "conversation", targetChapterId: "ch1" },
+        errorCode: "unknown",
+        error: "Open a project before using the agent console.",
+      }),
+    );
   });
 
   it("does not report model metadata transport failures as missing configuration", async () => {
@@ -952,16 +1093,16 @@ describe("dispatchAgentIntent", () => {
       task: conversationTask("ch1"),
     });
 
-    expect(useAgentConsoleStore.getState().runError).toEqual({
-      code: "transport",
-      message: "HTTP 503 - Model metadata service unavailable",
+    expect(useAgentConsoleStore.getState().runError).toMatchObject({
+      reason: "transport",
+      message: "The AI request could not be completed. Check your connection and retry.",
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "Agent run failed",
       expect.objectContaining({
-        code: "transport",
-        message: "HTTP 503 - Model metadata service unavailable",
+        reason: "transport",
+        message: "The AI request could not be completed. Check your connection and retry.",
         phase: null,
       }),
     );
@@ -1502,7 +1643,7 @@ describe("frozen run preflight", () => {
 
     await expect(submission).rejects.toMatchObject({
       name: "AgentConsoleOwnershipError",
-      agentErrorCode: "transition",
+      agentFailureReason: "transition",
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState()).toMatchObject({
@@ -1642,9 +1783,10 @@ describe("frozen run preflight", () => {
     });
     useAgentConsoleStore.getState().setDraftText("Use the missing source.");
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toThrow(
-      "Remove unavailable context sources",
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "unknown" },
+    });
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       draftText: "Use the missing source.",
@@ -1946,15 +2088,16 @@ describe("run settlement and cancellation", () => {
     await vi.waitFor(() => expect(captured).not.toBeNull());
     useAgentConsoleStore.getState().setDraftText("Second request");
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toThrow(
-      "An agent run is already active",
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "unknown" },
+    });
 
     expect(dependencies.stream).toHaveBeenCalledOnce();
     expect(useAgentConsoleStore.getState()).toMatchObject({
       runStatus: "streaming",
       runError: {
-        message: "An agent run is already active",
+        reason: "unknown",
       },
       draftText: "Second request",
     });
@@ -1972,18 +2115,19 @@ describe("run settlement and cancellation", () => {
     const controller = createAgentController(dependencies);
     useAgentConsoleStore.getState().setDraftText("Send this request");
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toBe(
-      transport,
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "transport" },
+    });
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       runStatus: "idle",
-      runError: { code: "transport", message: "Network unavailable" },
+      runError: { reason: "transport" },
     });
     const failed = useAgentConsoleStore.getState().messages.at(-1);
     expect(failed).toMatchObject({
       role: "assistant",
-      metadata: { state: "error", errorCode: "transport" },
+      metadata: { state: "error", failure: { reason: "transport" } },
     });
   });
 
@@ -1998,17 +2142,18 @@ describe("run settlement and cancellation", () => {
     const controller = createAgentController(dependencies);
     useAgentConsoleStore.getState().setDraftText("Send this request");
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toBe(
-      quota,
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "quota" },
+    });
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       runStatus: "idle",
-      runError: { code: "quota" },
+      runError: { reason: "quota" },
     });
     expect(useAgentConsoleStore.getState().messages.at(-1)).toMatchObject({
       role: "assistant",
-      metadata: { state: "error", errorCode: "quota" },
+      metadata: { state: "error", failure: { reason: "quota" } },
     });
   });
 
@@ -2024,13 +2169,14 @@ describe("run settlement and cancellation", () => {
     const controller = createAgentController(dependencies);
     useAgentConsoleStore.getState().setDraftText("Send this request");
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toBe(
-      quota,
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "quota" },
+    });
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       runStatus: "idle",
-      runError: { code: "quota" },
+      runError: { reason: "quota" },
     });
   });
 
@@ -2068,7 +2214,10 @@ describe("run settlement and cancellation", () => {
         refs: [],
         task: conversationTask("ch1"),
       }),
-    ).rejects.toBe(transport);
+    ).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "transport" },
+    });
 
     const settled = useAgentConsoleStore.getState().messages.at(-1);
     expect(settled?.parts).toEqual([
@@ -2095,14 +2244,15 @@ describe("run settlement and cancellation", () => {
       },
     });
 
-    await expect(controller.submitAgentDraft(conversationTask("ch1"))).rejects.toThrow(
-      "Compaction boundary message is missing",
-    );
+    await expect(controller.submitAgentDraft(conversationTask("ch1"))).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "compaction" },
+    });
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       draftText: "Keep this request",
       runStatus: "idle",
-      runError: { code: "compaction" },
+      runError: { reason: "compaction" },
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
   });
@@ -2121,7 +2271,10 @@ describe("run settlement and cancellation", () => {
 
     await expect(
       controller.submitAgentDraft(conversationTask("ch1")),
-    ).rejects.toThrow("Compaction cannot reclaim the required token target");
+    ).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "compaction" },
+    });
 
     expect(summarize).not.toHaveBeenCalled();
     expect(dependencies.stream).not.toHaveBeenCalled();
@@ -2129,7 +2282,7 @@ describe("run settlement and cancellation", () => {
       draftText: "Keep this request",
       messages,
       runStatus: "idle",
-      runError: { code: "compaction" },
+      runError: { reason: "compaction" },
     });
   });
 
@@ -2148,14 +2301,17 @@ describe("run settlement and cancellation", () => {
         refs: [],
         task: conversationTask("ch1"),
       }),
-    ).rejects.toThrow("Chapter does not belong to the frozen project: ch3");
+    ).resolves.toMatchObject({
+      status: "failure",
+      failure: { reason: "tool" },
+    });
 
     expect(useAgentConsoleStore.getState().runError).toMatchObject({
-      code: "tool",
+      reason: "tool",
     });
     expect(useAgentConsoleStore.getState().messages.at(-1)).toMatchObject({
       role: "assistant",
-      metadata: { state: "error", errorCode: "tool" },
+      metadata: { state: "error", failure: { reason: "tool" } },
     });
   });
 });
@@ -2256,7 +2412,7 @@ describe("retry and local events", () => {
     ).toThrowError(
       expect.objectContaining({
         name: "AgentConsoleOwnershipError",
-        agentErrorCode: "transition",
+        agentFailureReason: "transition",
       }),
     );
     expect(useAgentConsoleStore.getState().messages).toEqual([]);

@@ -131,6 +131,22 @@ function analysisToolCallResult(
   ]);
 }
 
+function manuscriptStageToolCallResult(): LanguageModelV3StreamResult {
+  return streamResult([
+    {
+      type: "tool-call",
+      toolCallId: "call-stage-manuscript",
+      toolName: "stage_manuscript_proposal",
+      input: JSON.stringify({ summary: "Continue the scene", changes: [] }),
+    },
+    {
+      type: "finish",
+      finishReason: { unified: "tool-calls", raw: "tool_calls" },
+      usage,
+    },
+  ]);
+}
+
 function makeEnvironment(): AgentToolEnvironment {
   return {
     run,
@@ -175,6 +191,40 @@ function makeRuntimeInput(model: LanguageModel): StreamAgentRunInput {
 }
 
 describe("streamAgentRun", () => {
+  it("records an actionable failure when manuscript staging throws", async () => {
+    const onToolFailure = vi.fn(async () => undefined);
+    const input = {
+      ...makeRuntimeInput(
+        new MockLanguageModelV3({
+          doStream: async () => manuscriptStageToolCallResult(),
+        }),
+      ),
+      onToolFailure,
+    } as StreamAgentRunInput & {
+      onToolFailure: (failure: {
+        occurredAt: string;
+        runId: string;
+        modelId: string;
+        task: AgentRun["task"];
+        toolName: string;
+        toolCallId: string;
+        error: string;
+      }) => Promise<void>;
+    };
+
+    await streamAgentRun(input);
+
+    expect(onToolFailure).toHaveBeenCalledWith({
+      occurredAt: expect.any(String),
+      runId: "run-1",
+      modelId: "gpt-5",
+      task: { kind: "conversation", targetChapterId: "ch1" },
+      toolName: "stage_manuscript_proposal",
+      toolCallId: "call-stage-manuscript",
+      error: "Unexpected manuscript proposal",
+    });
+  });
+
   it("rejects provider stream errors instead of completing an empty message", async () => {
     const providerError = new Error("You have no credits remaining.");
     providerError.name = "AI_RetryError";

@@ -480,7 +480,8 @@ pub fn run() {
 #[cfg(test)]
 mod capability_tests {
     use super::{provider_key_filename, AiProvider};
-    use serde_json::Value;
+    use serde_json::{json, Value};
+    use std::time::{Duration, SystemTime};
 
     #[test]
     fn ai_providers_use_separate_key_files() {
@@ -513,5 +514,56 @@ mod capability_tests {
 
         assert!(urls.contains(&"https://models.dev/*"));
         assert!(urls.contains(&"https://openrouter.ai/*"));
+    }
+
+    #[test]
+    fn agent_failure_log_appends_inside_the_retention_window() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        append_agent_failure_log_entry(&path, json!({ "runId": "run-1" }), now)
+            .expect("first failure must be written");
+        append_agent_failure_log_entry(
+            &path,
+            json!({ "runId": "run-2" }),
+            now + Duration::from_secs(23 * 60 * 60 + 59 * 60 + 59),
+        )
+            .expect("second failure must be appended");
+
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &std::fs::read_to_string(path).expect("log must be readable"),
+            )
+            .expect("log must be valid JSON"),
+            json!({
+                "windowStartedAtMs": 1_000_000_000u64,
+                "entries": [{ "runId": "run-1" }, { "runId": "run-2" }],
+            })
+        );
+    }
+
+    #[test]
+    fn agent_failure_log_replaces_entries_after_twenty_four_hours() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        append_agent_failure_log_entry(&path, json!({ "runId": "expired" }), now)
+            .expect("expired failure must be written");
+        let fresh_at = now + Duration::from_secs(24 * 60 * 60);
+
+        append_agent_failure_log_entry(&path, json!({ "runId": "fresh" }), fresh_at)
+            .expect("fresh failure must be written");
+
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &std::fs::read_to_string(path).expect("log must be readable"),
+            )
+            .expect("log must be valid JSON"),
+            json!({
+                "windowStartedAtMs": 1_086_400_000u64,
+                "entries": [{ "runId": "fresh" }],
+            })
+        );
     }
 }

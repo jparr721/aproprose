@@ -25,6 +25,8 @@ import type { ManuscriptReviewRow } from "@/lib/ai/manuscript-review-projection"
 import type { Block, Character, DialogueSegment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const COMPACT_PARAGRAPH = "[&:not(:first-child)]:mt-0";
+
 export interface ManuscriptReviewChangeProps {
   row: ManuscriptReviewRow;
   characters: Character[];
@@ -244,7 +246,7 @@ function DialogueTail({
   return segments.map((segment, index) =>
     segment.kind === "quote" ? (
       <TypographyP
-        className={cn(PROSE, DIALOGUE_INDENT)}
+        className={cn(PROSE, DIALOGUE_INDENT, COMPACT_PARAGRAPH)}
         key={`${changeId}:segment:${index}`}
       >
         <span aria-hidden className={DIALOGUE_QUOTE}>
@@ -255,7 +257,7 @@ function DialogueTail({
       </TypographyP>
     ) : (
       <TypographyP
-        className={DIALOGUE_BEAT}
+        className={cn(DIALOGUE_BEAT, COMPACT_PARAGRAPH)}
         key={`${changeId}:segment:${index}`}
       >
         {renderInline(segment.text)}
@@ -479,14 +481,14 @@ export function ManuscriptReviewChange({
       return (
         <div className="flex flex-col gap-3">
           <ChangeHeading row={row} />
-          <div className="text-destructive line-through decoration-destructive">
+          <del className="block text-destructive line-through decoration-destructive">
             <BlockBody
               block={row.source}
               editing={false}
               hit={null}
               speaker={findSpeaker(row.source, characters)}
             />
-          </div>
+          </del>
           <ChangeReason reason={row.change.change.reason} />
           <DecisionControls
             acceptDisabled={false}
@@ -538,11 +540,15 @@ export function ManuscriptReviewChange({
       return (
         <div className="flex flex-col gap-3">
           <ChangeHeading row={row} />
-          <TypographyP className="whitespace-pre-wrap">
+          <TypographyP
+            className={cn("whitespace-pre-wrap", COMPACT_PARAGRAPH)}
+          >
             {row.frozenText}
           </TypographyP>
           {proposedText === null ? null : (
-            <TypographyP className="whitespace-pre-wrap">
+            <TypographyP
+              className={cn("whitespace-pre-wrap", COMPACT_PARAGRAPH)}
+            >
               {proposedText}
             </TypographyP>
           )}

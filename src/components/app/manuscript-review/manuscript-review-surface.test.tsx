@@ -492,6 +492,17 @@ describe("ManuscriptReviewSurface rows", () => {
     expect(container.querySelector("[data-block-id]")).toBeNull();
     expect(container.querySelector("[data-prose-body]")).toBeNull();
   });
+
+  it("wraps removed manuscript content in deletion semantics", () => {
+    const { container } = renderProposal(mixedProposal());
+    const remove = container.querySelector(
+      '[data-review-row-kind="remove"]',
+    );
+    const deletion = remove?.querySelector("del");
+
+    expect(deletion?.tagName).toBe("DEL");
+    expect(deletion?.textContent).toContain("The bell rang twice.");
+  });
 });
 
 describe("ManuscriptReviewSurface rewrite editing", () => {
@@ -544,7 +555,7 @@ describe("ManuscriptReviewSurface rewrite editing", () => {
     expect(screen.getByText("gleamed").tagName).toBe("INS");
   });
 
-  it("keeps a stale rewrite frozen and disables edit and acceptance", () => {
+  it("keeps a stale rewrite frozen, compact, and disables edit and acceptance", () => {
     const current = proposal("proposal-stale-rewrite", [
       rewriteChange(
         "stale-rewrite",
@@ -563,7 +574,14 @@ describe("ManuscriptReviewSurface rewrite editing", () => {
     renderProposal(current);
 
     expect(screen.getByText("Stale rewrite")).toBeTruthy();
-    expect(screen.getByText("The harbor slept under rain.")).toBeTruthy();
+    const frozenText = screen.getByText("The harbor slept under rain.");
+    const proposedText = screen.getByText("The harbor waited under rain.");
+    expect(frozenText.className).not.toContain(
+      "[&:not(:first-child)]:mt-6",
+    );
+    expect(proposedText.className).not.toContain(
+      "[&:not(:first-child)]:mt-6",
+    );
     expect(screen.getByText("Source changed - regenerate")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit proposal" })).toHaveProperty(
       "disabled",
@@ -614,7 +632,7 @@ describe("ManuscriptReviewSurface insert editing", () => {
     expect(projectAfter.future).toBe(projectBefore.future);
   });
 
-  it("edits only dialogue primary text while speaker and tail stay read-only", () => {
+  it("edits only dialogue primary text while speaker and tail stay read-only and compact", () => {
     const base = insertChange(
       "dialogue-insert",
       frozenBlocks,
@@ -641,10 +659,11 @@ describe("ManuscriptReviewSurface insert editing", () => {
     if (!(insertRow instanceof HTMLElement)) return;
 
     expect(within(insertRow).getByText("Mara")).toBeTruthy();
-    expect(
-      within(insertRow).getByText("She watched the channel.").className,
-    ).toContain("leading-[1.6]");
-    expect(within(insertRow).getByText("We leave at dawn.")).toBeTruthy();
+    const beat = within(insertRow).getByText("She watched the channel.");
+    const quote = within(insertRow).getByText("We leave at dawn.");
+    expect(beat.className).toContain("leading-[1.6]");
+    expect(beat.className).not.toContain("[&:not(:first-child)]:mt-6");
+    expect(quote.className).not.toContain("[&:not(:first-child)]:mt-6");
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
     const textbox = screen.getByRole("textbox", {
       name: "Edit proposed insert",

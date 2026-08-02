@@ -2,6 +2,17 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  copyText: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+
+vi.mock("@/lib/clipboard", () => ({ copyText: mocks.copyText }));
+vi.mock("sonner", () => ({
+  toast: { error: mocks.toastError, success: mocks.toastSuccess },
+}));
+
 import { AgentMessage } from "@/components/app/agent-console/agent-message";
 import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import type {
@@ -97,6 +108,10 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  mocks.copyText.mockReset();
+  mocks.copyText.mockResolvedValue(true);
+  mocks.toastError.mockReset();
+  mocks.toastSuccess.mockReset();
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
     messages: [],
@@ -111,6 +126,28 @@ beforeEach(() => {
 });
 
 describe("AgentMessage content", () => {
+  it("copies all text parts and confirms the copy", async () => {
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-copy",
+        [
+          { type: "text", text: "First paragraph." },
+          { type: "text", text: "Second paragraph." },
+        ],
+        metadata({}),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+
+    await waitFor(() =>
+      expect(mocks.copyText).toHaveBeenCalledWith(
+        "First paragraph.\n\nSecond paragraph.",
+      ),
+    );
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Message copied");
+  });
+
   it("renders message text as a markdown response", () => {
     renderAgentMessage(
       assistantMessage(
@@ -171,20 +208,42 @@ describe("AgentMessage content", () => {
     );
   });
 
-  it("never renders model reasoning from a malformed message", () => {
-    const malformed = assistantMessage(
+  it("renders consolidated model reasoning in the stock reasoning view", () => {
+    const message = assistantMessage(
       "assistant-reasoning",
       [
-        { type: "reasoning", text: "Private chain of thought", state: "done" },
+        { type: "reasoning", text: "First consideration", state: "done" },
+        { type: "reasoning", text: "Second consideration", state: "done" },
         { type: "text", text: "Visible answer" },
       ],
       metadata({}),
     );
 
-    renderAgentMessage(malformed);
+    renderAgentMessage(message);
 
     expect(screen.getByText("Visible answer")).toBeTruthy();
-    expect(screen.queryByText("Private chain of thought")).toBeNull();
+    const trigger = screen.getByRole("button", {
+      name: /Thought for a few seconds/,
+    });
+    expect(screen.getAllByRole("button", { name: /Thought/ })).toHaveLength(1);
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByText("First consideration")).toBeTruthy();
+    expect(screen.getByText("Second consideration")).toBeTruthy();
+  });
+
+  it("opens model reasoning while it is streaming", () => {
+    renderAgentMessage(
+      assistantMessage(
+        "assistant-streaming-reasoning",
+        [{ type: "reasoning", text: "Inspecting the scene", state: "streaming" }],
+        metadata({ state: "streaming" }),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /Thinking/ })).toBeTruthy();
+    expect(screen.getByText("Inspecting the scene")).toBeTruthy();
   });
 
   it("renders immutable context data as sent attachments", () => {

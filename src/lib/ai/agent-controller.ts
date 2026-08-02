@@ -14,7 +14,7 @@ import {
   flattenMessageFindings,
   resolveDraftSnapshots,
 } from "@/lib/ai/agent-context";
-import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
+import { settleAgentMessages } from "@/lib/ai/agent-messages";
 import { getModel } from "@/lib/ai/model";
 import { resolveModelContextWindow } from "@/lib/ai/models";
 import { buildAgentInstructions } from "@/lib/ai/agent-prompts";
@@ -967,11 +967,11 @@ function assistantMetadata(args: {
 }
 
 function settledAssistantMessage(message: AgentUIMessage): AgentUIMessage {
-  const sanitized = sanitizeAgentMessages([message]);
-  if (sanitized.length !== 1) {
+  const settled = settleAgentMessages([message]);
+  if (settled.length !== 1) {
     throw new Error(`Agent run emitted no settled message: ${message.id}`);
   }
-  return sanitized[0];
+  return settled[0];
 }
 
 export function createAgentController(

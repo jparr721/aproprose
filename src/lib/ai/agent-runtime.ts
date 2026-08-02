@@ -148,7 +148,7 @@ export async function streamAgentRun(
   const stream = result.toUIMessageStream<AgentUIMessage>({
     originalMessages: validated,
     generateMessageId: input.generateMessageId,
-    sendReasoning: false,
+    sendReasoning: true,
     onError: (error) => {
       streamErrorId += 1;
       const errorToken = `Agent stream error ${streamErrorId}`;

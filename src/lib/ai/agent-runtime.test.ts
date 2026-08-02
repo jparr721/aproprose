@@ -215,7 +215,7 @@ describe("streamAgentRun", () => {
     );
   });
 
-  it("streams an assistant UI message without reasoning parts", async () => {
+  it("streams an assistant UI message with provider reasoning", async () => {
     const updates = vi.fn();
     const input = makeRuntimeInput(
       new MockLanguageModelV3({
@@ -241,9 +241,13 @@ describe("streamAgentRun", () => {
         state: "done",
       }),
     );
-    expect(
-      result.message.parts.some((part) => part.type === "reasoning"),
-    ).toBe(false);
+    expect(result.message.parts).toContainEqual(
+      expect.objectContaining({
+        type: "reasoning",
+        text: "Hidden chain of thought",
+        state: "done",
+      }),
+    );
     expect(updates).toHaveBeenCalled();
     expect(result.usage).toMatchObject({
       modelId: "gpt-5",

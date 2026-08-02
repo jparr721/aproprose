@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertAgentMessagesToModel,
   sanitizeAgentMessages,
+  settleAgentMessages,
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
 import type { AgentUIMessage } from "@/lib/ai/agent-types";
@@ -174,6 +175,28 @@ function assistantWithUntrustedToolTargets(): AgentUIMessage {
 }
 
 describe("sanitizeAgentMessages", () => {
+  it("keeps reasoning in settled live messages", () => {
+    const messages: AgentUIMessage[] = [
+      {
+        id: "assistant-live",
+        role: "assistant",
+        metadata,
+        parts: [
+          { type: "reasoning", text: "Visible live reasoning", state: "done" },
+          { type: "text", text: "Visible answer" },
+        ],
+      },
+    ];
+
+    expect(settleAgentMessages(messages)[0].parts).toEqual([
+      { type: "reasoning", text: "Visible live reasoning", state: "done" },
+      { type: "text", text: "Visible answer", state: "done" },
+    ]);
+    expect(JSON.stringify(sanitizeAgentMessages(messages))).not.toContain(
+      "Visible live reasoning",
+    );
+  });
+
   it("removes reasoning and replaces runtime tool values with summaries", () => {
     const messages: AgentUIMessage[] = [
       {

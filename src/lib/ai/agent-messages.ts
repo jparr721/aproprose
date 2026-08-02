@@ -427,7 +427,7 @@ function settledToolProjection(
   } as AgentUIMessage["parts"][number];
 }
 
-export function sanitizeAgentMessages(
+export function settleAgentMessages(
   messages: AgentUIMessage[],
 ): AgentUIMessage[] {
   return messages.flatMap((message) => {
@@ -444,7 +444,9 @@ export function sanitizeAgentMessages(
           ? undefined
           : ({ ...message.metadata } satisfies AgentMessageMetadata),
       parts: message.parts.flatMap((part): AgentUIMessage["parts"] => {
-        if (part.type === "reasoning") return [];
+        if (part.type === "reasoning") {
+          return [{ ...part, state: "done" }];
+        }
         if (
           part.type !== "text" &&
           part.type !== "source-url" &&
@@ -479,6 +481,15 @@ export function sanitizeAgentMessages(
       }),
     }];
   });
+}
+
+export function sanitizeAgentMessages(
+  messages: AgentUIMessage[],
+): AgentUIMessage[] {
+  return settleAgentMessages(messages).map((message) => ({
+    ...message,
+    parts: message.parts.filter((part) => part.type !== "reasoning"),
+  }));
 }
 
 export function hasAssistantOutput(message: AgentUIMessage): boolean {

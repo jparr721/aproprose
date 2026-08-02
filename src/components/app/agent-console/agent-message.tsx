@@ -13,10 +13,16 @@ import {
 } from "@/components/ai-elements/context";
 import {
   Message,
+  MessageAction,
   MessageActions,
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import {
   ChainOfThought,
   ChainOfThoughtStep,
@@ -35,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   IconCheck,
   IconChevronDown,
+  IconCopy,
   IconExclamationCircle,
 } from "@tabler/icons-react";
 import {
@@ -43,6 +50,7 @@ import {
 } from "@/lib/ai/agent-context";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
+import { copyText } from "@/lib/clipboard";
 import type {
   AgentErrorCode,
   AgentMessageMetadata,
@@ -56,6 +64,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
+import { toast } from "sonner";
 
 export interface AgentMessageProps {
   message: AgentUIMessage;
@@ -366,10 +375,24 @@ export function AgentMessage({
   const firstToolIndex = message.parts.findIndex((part) =>
     isStaticToolUIPart(part),
   );
+  const reasoningParts = message.parts.filter(
+    (part) => part.type === "reasoning",
+  );
+  const reasoningText = reasoningParts.map((part) => part.text).join("\n\n");
+  const firstReasoningIndex = message.parts.findIndex(
+    (part) => part.type === "reasoning",
+  );
+  const lastPart = message.parts.at(-1);
+  const isReasoningStreaming =
+    messageMetadata.state === "streaming" && lastPart?.type === "reasoning";
   const error =
     messageMetadata.state === "error"
       ? safeAgentErrorText(messageMetadata.errorCode)
       : null;
+  const messageText = message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n");
   const retry = (): void => {
     setRetryErrorCode(null);
     onRetry(retryUserMessageId(message)).catch((retryError: unknown) => {
@@ -380,11 +403,27 @@ export function AgentMessage({
       );
     });
   };
+  const copyMessage = async (): Promise<void> => {
+    if (await copyText(messageText)) {
+      toast.success("Message copied");
+      return;
+    }
+    toast.error("Couldn't copy the message to the clipboard");
+  };
   return (
     <Message from={message.role}>
       <MessageContent>
         {message.parts.map((part, index) =>
-          index === firstToolIndex ? (
+          index === firstReasoningIndex ? (
+            <Reasoning
+              className="w-full"
+              isStreaming={isReasoningStreaming}
+              key={`${message.id}:reasoning`}
+            >
+              <ReasoningTrigger />
+              <ReasoningContent>{reasoningText}</ReasoningContent>
+            </Reasoning>
+          ) : index === firstToolIndex ? (
             <ToolActivity
               key={`${message.id}:tools`}
               messageState={messageMetadata.state}
@@ -410,8 +449,17 @@ export function AgentMessage({
           <InlineMessageError message={safeAgentErrorText(retryErrorCode)} />
         )}
       </MessageContent>
-      {error === null && messageMetadata.usage === null ? null : (
+      {messageText.length === 0 && error === null && messageMetadata.usage === null ? null : (
         <MessageActions>
+          {messageText.length === 0 ? null : (
+            <MessageAction
+              label="Copy"
+              onClick={() => void copyMessage()}
+              tooltip="Copy"
+            >
+              <IconCopy className="size-3" />
+            </MessageAction>
+          )}
           {messageMetadata.usage === null ? null : (
             <MessageUsage usage={messageMetadata.usage} />
           )}

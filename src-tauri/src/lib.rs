@@ -249,7 +249,7 @@ fn read_stored_key(
 }
 
 fn read_stored_key_path(path: &Path) -> Result<StoredKeyState, AiConfigFailure> {
-    let raw = match std::fs::read_to_string(&path) {
+    let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(StoredKeyState::Missing)

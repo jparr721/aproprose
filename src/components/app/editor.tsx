@@ -1,6 +1,6 @@
 // editor.tsx — the center column: the chapter as an editable block stream.
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   IconGitMerge,
@@ -45,7 +45,7 @@ import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
-import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
+import { useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
@@ -54,13 +54,41 @@ import { isInAuxSurface, isInteractiveTarget, scrollBlockIntoView } from "@/lib/
 import { PROSE_BODY_SELECTOR } from "@/lib/prose-body";
 import { useDictation } from "@/hooks/use-dictation";
 import type { Block as BlockT, BlockType } from "@/lib/types";
+import type {
+  ManuscriptPendingProposal,
+  PendingProposal,
+} from "@/lib/ai/agent-types";
 
-// Editor history defers to native undo/redo while the AI console or a dialog holds
-// focus, so those inputs keep their own history.
-const EDITOR_HISTORY_OPTIONS: UseKeybindingOptions = {
-  enabled: true,
-  ignoreEventWhen: (event) => isInAuxSurface(event.target as Element | null),
-};
+function matchingManuscriptReview(
+  pendingProposal: PendingProposal | null,
+  reviewProposalId: string | null,
+  projectRoot: string | null,
+  activeChapterId: string | null,
+): ManuscriptPendingProposal | null {
+  return pendingProposal !== null &&
+    pendingProposal.kind === "manuscript" &&
+    reviewProposalId === pendingProposal.id &&
+    projectRoot === pendingProposal.projectRoot &&
+    activeChapterId === pendingProposal.chapterId
+    ? pendingProposal
+    : null;
+}
+
+function manuscriptReviewIsActive(): boolean {
+  const pendingProposal = useAgentConsoleStore.getState().pendingProposal;
+  const reviewProposalId = useViewStore.getState().manuscriptReviewProposalId;
+  const projectState = useProjectStore.getState();
+  const projectRoot =
+    projectState.project === null ? null : projectState.project.root;
+  return (
+    matchingManuscriptReview(
+      pendingProposal,
+      reviewProposalId,
+      projectRoot,
+      projectState.activeChapterId,
+    ) !== null
+  );
+}
 
 // After a nav-key move, bring the newly-selected block into view.
 function scrollSelectedIntoView() {
@@ -151,6 +179,30 @@ export function Editor() {
   const manuscriptReviewProposalId = useViewStore(
     (s) => s.manuscriptReviewProposalId,
   );
+  const activeReview = matchingManuscriptReview(
+    pendingProposal,
+    manuscriptReviewProposalId,
+    project === null ? null : project.root,
+    activeId,
+  );
+  const authoringEnabled = activeReview === null;
+  const authoringOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: authoringEnabled,
+      ignoreEventWhen: () => false,
+    }),
+    [authoringEnabled],
+  );
+  // Editor history and formatting defer to native behavior while the AI console
+  // or a dialog holds focus, so those inputs keep their own history.
+  const historyOptions: UseKeybindingOptions = useMemo(
+    () => ({
+      enabled: authoringEnabled,
+      ignoreEventWhen: (event) =>
+        isInAuxSurface(event.target as Element | null),
+    }),
+    [authoringEnabled],
+  );
 
   // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
   // click on the grip a selection rather than a drag; KeyboardSensor makes the
@@ -160,6 +212,7 @@ export function Editor() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = (e: DragEndEvent) => {
+    if (manuscriptReviewIsActive()) return;
     const { active, over } = e;
     if (over && active.id !== over.id) {
       reorderBlock(String(active.id), String(over.id));
@@ -168,6 +221,7 @@ export function Editor() {
 
   // One recognizer for the whole editor; dictation lands in the selected block.
   const dictation = useDictation((text) => {
+    if (manuscriptReviewIsActive()) return;
     const st = useProjectStore.getState();
     const id = st.selectedId;
     if (!id) return;
@@ -175,54 +229,98 @@ export function Editor() {
     if (!b) return;
     st.updateBlockText(id, (b.text ? `${b.text} ` : "") + text);
   });
+  useEffect(() => {
+    if (activeReview !== null && dictation.listening) dictation.toggle();
+  }, [activeReview, dictation.listening, dictation.toggle]);
 
   // Document + history shortcuts live with the editing surface they act on.
-  useKeybinding(KEYBINDING_IDS.SAVE_CHAPTER, () => void useProjectStore.getState().compileNow());
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.SAVE_CHAPTER,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      void useProjectStore.getState().compileNow();
+    },
+    authoringOptions,
+  );
   useKeybindingWithOptions(
     KEYBINDING_IDS.UNDO,
-    () => useProjectStore.getState().undo(),
-    EDITOR_HISTORY_OPTIONS,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useProjectStore.getState().undo();
+    },
+    historyOptions,
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.REDO,
-    () => useProjectStore.getState().redo(),
-    EDITOR_HISTORY_OPTIONS,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useProjectStore.getState().redo();
+    },
+    historyOptions,
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.REDO_ALT,
-    () => useProjectStore.getState().redo(),
-    EDITOR_HISTORY_OPTIONS,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useProjectStore.getState().redo();
+    },
+    historyOptions,
   );
 
   // Carve/split: Cmd+Shift+Enter. With a selection it isolates the slice as its
   // own same-type block (like the toolbar's Split); a bare caret splits in two.
-  useKeybinding(KEYBINDING_IDS.SPLIT_BLOCK, () => {
-    const el = document.activeElement;
-    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
-    const host = el.closest("[data-block-id]");
-    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
-    if (!blockId) return;
-    const store = useProjectStore.getState();
-    const { selectionStart, selectionEnd } = el;
-    if (selectionStart !== selectionEnd) {
-      const block = store.blocks.find((b) => b.id === blockId);
-      if (block) store.convertSelection(blockId, selectionStart, selectionEnd, block.type);
-    } else {
-      store.splitBlock(blockId, selectionStart);
-    }
-  });
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.SPLIT_BLOCK,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      const el = document.activeElement;
+      if (
+        !(el instanceof HTMLTextAreaElement) ||
+        !el.matches(PROSE_BODY_SELECTOR)
+      )
+        return;
+      const host = el.closest("[data-block-id]");
+      const blockId =
+        host instanceof HTMLElement ? host.dataset.blockId : undefined;
+      if (!blockId) return;
+      const store = useProjectStore.getState();
+      const { selectionStart, selectionEnd } = el;
+      if (selectionStart !== selectionEnd) {
+        const block = store.blocks.find((b) => b.id === blockId);
+        if (block)
+          store.convertSelection(
+            blockId,
+            selectionStart,
+            selectionEnd,
+            block.type,
+          );
+      } else {
+        store.splitBlock(blockId, selectionStart);
+      }
+    },
+    authoringOptions,
+  );
 
   // Inline emphasis: Cmd/Ctrl+B bold, Cmd/Ctrl+I italic. Toggle the marker around
   // the focused prose-body textarea's selection, mirroring SPLIT_BLOCK's read of
   // document.activeElement. The textarea is controlled, so the new selection is
   // restored on the next frame, after React commits the new value.
   const applyFormat = (marker: InlineMarker) => {
+    if (manuscriptReviewIsActive()) return;
     const el = document.activeElement;
-    if (!(el instanceof HTMLTextAreaElement) || !el.matches(PROSE_BODY_SELECTOR)) return;
+    if (
+      !(el instanceof HTMLTextAreaElement) ||
+      !el.matches(PROSE_BODY_SELECTOR)
+    )
+      return;
     const host = el.closest("[data-block-id]");
-    const blockId = host instanceof HTMLElement ? host.dataset.blockId : undefined;
+    const blockId =
+      host instanceof HTMLElement ? host.dataset.blockId : undefined;
     if (!blockId) return;
-    const res = toggleInlineWrap({ text: el.value, start: el.selectionStart, end: el.selectionEnd }, marker);
+    const res = toggleInlineWrap(
+      { text: el.value, start: el.selectionStart, end: el.selectionEnd },
+      marker,
+    );
     useProjectStore.getState().formatBlockText(blockId, res.text);
     requestAnimationFrame(() => {
       if (!el.isConnected) return;
@@ -230,26 +328,42 @@ export function Editor() {
       el.setSelectionRange(res.start, res.end);
     });
   };
-  useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_BOLD, () => applyFormat("**"), EDITOR_HISTORY_OPTIONS);
-  useKeybindingWithOptions(KEYBINDING_IDS.FORMAT_ITALIC, () => applyFormat("_"), EDITOR_HISTORY_OPTIONS);
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.FORMAT_BOLD,
+    () => applyFormat("**"),
+    historyOptions,
+  );
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.FORMAT_ITALIC,
+    () => applyFormat("_"),
+    historyOptions,
+  );
 
   // Find & replace across the chapter's blocks. Cmd+F opens the widget (and
   // re-selects the query on repeat); the widget owns its own Enter/Esc keys.
-  useKeybinding(KEYBINDING_IDS.OPEN_FIND, () => useFindStore.getState().openFind());
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.OPEN_FIND,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useFindStore.getState().openFind();
+    },
+    authoringOptions,
+  );
 
   // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
   // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders
   // and powers on-screen hints. All four bow out of the AI panel / dialogs.
   const navOptions: UseKeybindingOptions = useMemo(
     () => ({
-      enabled: selectedId != null && !editing,
+      enabled: authoringEnabled && selectedId != null && !editing,
       ignoreEventWhen: (e) => isInAuxSurface(e.target as Element | null),
     }),
-    [selectedId, editing],
+    [authoringEnabled, selectedId, editing],
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.NAV_PREV_BLOCK,
     () => {
+      if (manuscriptReviewIsActive()) return;
       useProjectStore.getState().moveSelection(-1);
       scrollSelectedIntoView();
     },
@@ -258,6 +372,7 @@ export function Editor() {
   useKeybindingWithOptions(
     KEYBINDING_IDS.NAV_NEXT_BLOCK,
     () => {
+      if (manuscriptReviewIsActive()) return;
       useProjectStore.getState().moveSelection(1);
       scrollSelectedIntoView();
     },
@@ -265,7 +380,10 @@ export function Editor() {
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.EDIT_BLOCK,
-    () => useProjectStore.getState().beginEdit("start"),
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useProjectStore.getState().beginEdit("start");
+    },
     navOptions,
   );
   // Nav-mode Enter resumes typing where the block left off (appending is the
@@ -274,15 +392,18 @@ export function Editor() {
   // menu item instead of hijacking its press.
   const enterNavOptions: UseKeybindingOptions = useMemo(
     () => ({
-      enabled: selectedId != null && !editing,
+      enabled: authoringEnabled && selectedId != null && !editing,
       ignoreEventWhen: (e) =>
         isInAuxSurface(e.target as Element | null) || isInteractiveTarget(e.target),
     }),
-    [selectedId, editing],
+    [authoringEnabled, selectedId, editing],
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.EDIT_BLOCK_ENTER,
-    () => useProjectStore.getState().beginEdit("end"),
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      useProjectStore.getState().beginEdit("end");
+    },
     enterNavOptions,
   );
 
@@ -291,14 +412,15 @@ export function Editor() {
   // AI panel / dialogs, which own their own Esc.
   const exitOptions: UseKeybindingOptions = useMemo(
     () => ({
-      enabled: selectedId != null,
+      enabled: authoringEnabled && selectedId != null,
       ignoreEventWhen: (e) => isInAuxSurface(e.target as Element | null),
     }),
-    [selectedId],
+    [authoringEnabled, selectedId],
   );
   useKeybindingWithOptions(
     KEYBINDING_IDS.EXIT_BLOCK,
     () => {
+      if (manuscriptReviewIsActive()) return;
       const st = useProjectStore.getState();
       if (st.editing) st.stopEdit();
       else st.deselect();
@@ -309,15 +431,6 @@ export function Editor() {
   const conflictedFiles = useSyncStore((s) => s.conflictedFiles);
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
-  const activeReview =
-    pendingProposal !== null &&
-    pendingProposal.kind === "manuscript" &&
-    manuscriptReviewProposalId === pendingProposal.id &&
-    project !== null &&
-    project.root === pendingProposal.projectRoot &&
-    activeId === pendingProposal.chapterId
-      ? pendingProposal
-      : null;
 
   // Live word count: chapter.wordCount only refreshes on save, which reads as
   // a stuck number to a writer chasing a daily quota.
@@ -358,6 +471,7 @@ export function Editor() {
         onMouseDown={
           activeReview === null
             ? (e) => {
+                if (manuscriptReviewIsActive()) return;
                 const t = e.target as Element;
                 if (
                   t.closest("[data-block-id]") ||

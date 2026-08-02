@@ -43,6 +43,7 @@ vi.mock("@/lib/ai/agent-controller", () => ({
 
 vi.mock("@/lib/ai/agent-navigation", () => ({
   navigateToProposalChange: vi.fn().mockResolvedValue(true),
+  openManuscriptProposalInEditor: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("sonner", () => ({
@@ -55,7 +56,10 @@ vi.mock("sonner", () => ({
 import { AgentConversation } from "@/components/app/agent-console/agent-conversation";
 import { ReviewTray } from "@/components/app/agent-console/review-tray";
 import { recordProposalEvent } from "@/lib/ai/agent-controller";
-import { navigateToProposalChange } from "@/lib/ai/agent-navigation";
+import {
+  navigateToProposalChange,
+  openManuscriptProposalInEditor,
+} from "@/lib/ai/agent-navigation";
 import {
   buildManuscriptPendingProposal,
   buildOutlinePendingProposal,
@@ -135,17 +139,6 @@ const rewrite = (
   newText,
   toIndex: null,
   reason,
-});
-
-const move = (blockId: string, toIndex: number): BlockChange => ({
-  kind: "move",
-  blockId,
-  afterId: null,
-  type: null,
-  speaker: null,
-  newText: null,
-  toIndex,
-  reason: "Move the reveal",
 });
 
 const idFactory = (): (() => string) => {
@@ -299,8 +292,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("ReviewTray summary and expansion", () => {
-  it("shows the collapsed proposal summary, type, count, and batch actions", () => {
+describe("ReviewTray manuscript summary", () => {
+  it("shows a compact summary with editor and batch actions but no diff cards", () => {
     const blocks = useProjectStore.getState().blocks;
     setPending(
       manuscriptProposal(blocks, [
@@ -315,39 +308,80 @@ describe("ReviewTray summary and expansion", () => {
     expect(screen.getByText("Manuscript")).toBeTruthy();
     expect(screen.getByText("Revise the opening")).toBeTruthy();
     expect(screen.getByText("2 changes")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Review in editor" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Accept All" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reject All" })).toBeTruthy();
-    expect(container.querySelector('[data-agent-change-id="change-0"]')).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Expand proposal review" }),
+    ).toBeNull();
+    expect(container.querySelector("[data-agent-change-id]")).toBeNull();
+    expect(container.querySelector('[data-slot="collapsible"]')).toBeNull();
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeNull();
   });
 
-  it("expands all review cards in place", () => {
+  it("opens the pending proposal in the editor without clearing it", async () => {
     const blocks = useProjectStore.getState().blocks;
-    setPending(
-      manuscriptProposal(blocks, [
-        rewrite("block-1", "Rain whispered.", "Quiet the opening"),
-        rewrite("block-2", "The door eased open.", "Slow the reveal"),
-      ]),
+    const proposal = manuscriptProposal(blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    setPending(proposal);
+    render(<ReviewTray />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review in editor" }),
     );
-    const { container } = render(<ReviewTray />);
-    const tray = container.querySelector("[data-agent-review-tray]");
 
-    expandReview();
-
-    expect(container.querySelectorAll("[data-agent-change-id]")).toHaveLength(2);
-    expect(container.querySelector("[data-agent-review-tray]")).toBe(tray);
+    await waitFor(() =>
+      expect(openManuscriptProposalInEditor).toHaveBeenCalledWith(proposal),
+    );
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
   });
 
-  it("renders a zero-change workspace with a Dismiss action", () => {
-    const proposal = manuscriptProposal(
-      useProjectStore.getState().blocks,
-      [],
+  it("reports a refused editor navigation and keeps the proposal", async () => {
+    const blocks = useProjectStore.getState().blocks;
+    const proposal = manuscriptProposal(blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    vi.mocked(openManuscriptProposalInEditor).mockResolvedValueOnce(false);
+    setPending(proposal);
+    render(<ReviewTray />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review in editor" }),
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't open proposal context",
+      ),
+    );
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+  });
+
+  it("reports an editor navigation error and keeps the proposal", async () => {
+    const blocks = useProjectStore.getState().blocks;
+    const proposal = manuscriptProposal(blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    vi.mocked(openManuscriptProposalInEditor).mockRejectedValueOnce(
+      new Error("Navigation failed"),
     );
     setPending(proposal);
     render(<ReviewTray />);
 
-    expect(screen.getByText("Revise the opening")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review in editor" }),
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't open proposal context",
+        { description: "Error: Navigation failed" },
+      ),
+    );
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
   });
 
   it.each([
@@ -369,7 +403,7 @@ describe("ReviewTray summary and expansion", () => {
         persistenceTransition: null,
       },
     },
-  ])("disables all proposal decisions during $name", ({ state }) => {
+  ])("disables batch decisions during $name", ({ state }) => {
     const blocks = useProjectStore.getState().blocks;
     setPending(
       manuscriptProposal(blocks, [
@@ -377,88 +411,21 @@ describe("ReviewTray summary and expansion", () => {
       ]),
     );
     useAgentConsoleStore.setState(state);
-    const { container } = render(<ReviewTray />);
-    expandReview();
+    render(<ReviewTray />);
 
     expect(
-      (screen.getByRole("button", { name: "Accept All" }) as HTMLButtonElement)
-        .disabled,
+      screen.getByRole("button", { name: "Accept All" }).hasAttribute(
+        "disabled",
+      ),
     ).toBe(true);
     expect(
-      (screen.getByRole("button", { name: "Reject All" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    const change = container.querySelector(
-      '[data-agent-change-id="change-0"]',
-    );
-    if (!(change instanceof HTMLElement)) throw new Error("Missing change");
-    expect(
-      (within(change).getByRole("button", {
-        name: "Accept",
-      }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-    expect(
-      (within(change).getByRole("button", {
-        name: "Reject",
-      }) as HTMLButtonElement).disabled,
+      screen.getByRole("button", { name: "Reject All" }).hasAttribute(
+        "disabled",
+      ),
     ).toBe(true);
   });
-});
 
-describe("ReviewTray manuscript decisions", () => {
-  it("accepts one change, records it, and visibly revalidates the remainder", async () => {
-    const blocks = useProjectStore.getState().blocks;
-    const proposal = manuscriptProposal(blocks, [
-      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
-      move("block-2", 0),
-    ]);
-    setPending(proposal);
-    const { container } = render(<ReviewTray />);
-    expandReview();
-    const first = container.querySelector('[data-agent-change-id="change-0"]');
-    if (!(first instanceof HTMLElement)) throw new Error("Missing first change.");
-
-    fireEvent.click(within(first).getByRole("button", { name: "Accept" }));
-
-    expect(useProjectStore.getState().blocks[0].text).toBe("Rain whispered.");
-    expect(useProjectStore.getState().past).toHaveLength(1);
-    expect(useAgentConsoleStore.getState().pendingProposal?.changes).toHaveLength(1);
-    expect(recordProposalEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        proposalId: proposal.id,
-        action: "accepted",
-        changeCount: 1,
-      }),
-    );
-    expect(await screen.findByText("Source changed - regenerate")).toBeTruthy();
-  });
-
-  it("rejects one change without writing manuscript or metadata", () => {
-    const blocks = useProjectStore.getState().blocks;
-    const proposal = manuscriptProposal(blocks, [
-      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
-      rewrite("block-2", "The door eased open.", "Slow the reveal"),
-    ]);
-    const beforeBlocks = structuredClone(blocks);
-    const beforeMeta = structuredClone(useProjectStore.getState().meta);
-    setPending(proposal);
-    const { container } = render(<ReviewTray />);
-    expandReview();
-    const first = container.querySelector('[data-agent-change-id="change-0"]');
-    if (!(first instanceof HTMLElement)) throw new Error("Missing first change.");
-
-    fireEvent.click(within(first).getByRole("button", { name: "Reject" }));
-
-    expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
-    expect(useProjectStore.getState().meta).toEqual(beforeMeta);
-    expect(writeProjectMeta).not.toHaveBeenCalled();
-    expect(useAgentConsoleStore.getState().pendingProposal?.changes).toHaveLength(1);
-    expect(recordProposalEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "rejected", changeCount: 1 }),
-    );
-  });
-
-  it("refuses Accept All when any source is stale", () => {
+  it("disables Accept All for stale sources but keeps Reject All enabled", () => {
     const blocks = useProjectStore.getState().blocks;
     const proposal = manuscriptProposal(blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
@@ -466,22 +433,23 @@ describe("ReviewTray manuscript decisions", () => {
     ]);
     setPending(proposal);
     useProjectStore.setState({
-      blocks: [
-        { ...blocks[0], text: "The source changed." },
-        blocks[1],
-      ],
+      blocks: [{ ...blocks[0], text: "The source changed." }, blocks[1]],
     });
     render(<ReviewTray />);
 
-    const acceptAll = screen.getByRole("button", { name: "Accept All" });
-    expect(acceptAll.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(acceptAll);
-    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
-    expect(useProjectStore.getState().past).toHaveLength(0);
-    expect(recordProposalEvent).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Accept All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Reject All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(false);
   });
 
-  it("applies Accept All as one manuscript history entry", () => {
+  it("applies Accept All through the shared manuscript decision", () => {
     const blocks = useProjectStore.getState().blocks;
     const proposal = manuscriptProposal(blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
@@ -491,7 +459,6 @@ describe("ReviewTray manuscript decisions", () => {
     render(<ReviewTray />);
 
     fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
-
     expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
       "Rain whispered.",
       "The door eased open.",
@@ -503,7 +470,28 @@ describe("ReviewTray manuscript decisions", () => {
     );
   });
 
-  it("keeps a change visible and reports an apply-time stale result", () => {
+  it("rejects all through the shared manuscript decision without project writes", () => {
+    const blocks = useProjectStore.getState().blocks;
+    const proposal = manuscriptProposal(blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    const beforeBlocks = structuredClone(blocks);
+    const beforeMeta = structuredClone(useProjectStore.getState().meta);
+    setPending(proposal);
+    render(<ReviewTray />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject All" }));
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
+    expect(useProjectStore.getState().meta).toEqual(beforeMeta);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+    expect(recordProposalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "rejected-all", changeCount: 1 }),
+    );
+  });
+
+  it("keeps the compact proposal visible after an apply-time stale result", () => {
     const blocks = useProjectStore.getState().blocks;
     const proposal = manuscriptProposal(blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
@@ -513,15 +501,12 @@ describe("ReviewTray manuscript decisions", () => {
       "applyAgentManuscriptProposal",
     ).mockReturnValue({ status: "stale", staleChangeIds: ["change-0"] });
     setPending(proposal);
-    const { container } = render(<ReviewTray />);
-    expandReview();
-    const card = container.querySelector('[data-agent-change-id="change-0"]');
-    if (!(card instanceof HTMLElement)) throw new Error("Missing review card.");
+    render(<ReviewTray />);
 
-    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
 
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
-    expect(within(card).getByRole("button", { name: "Accept" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Accept All" })).toBeTruthy();
     expect(recordProposalEvent).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith("Proposal source changed", {
       description: "Keep this proposal open and ask the agent to regenerate it.",
@@ -530,6 +515,196 @@ describe("ReviewTray manuscript decisions", () => {
 });
 
 describe("ReviewTray outline decisions", () => {
+  it("retains the collapsible summary and renders outline cards only when expanded", () => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    setPending(
+      outlineProposal(cards, [
+        {
+          kind: "rewrite",
+          cardId: "card-1",
+          title: "Hard arrival",
+          intention: null,
+          toIndex: null,
+          reason: "Raise the stakes",
+        },
+      ]),
+    );
+    const { container } = render(<ReviewTray />);
+
+    expect(screen.getByText("Outline")).toBeTruthy();
+    expect(screen.getByText("Strengthen the outline")).toBeTruthy();
+    expect(screen.getByText("1 change")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Expand proposal review" }),
+    ).toBeTruthy();
+    expect(container.querySelector("[data-agent-change-id]")).toBeNull();
+
+    expandReview();
+
+    expect(container.querySelectorAll("[data-agent-change-id]")).toHaveLength(1);
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Collapse proposal review" }),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    {
+      name: "a same-project persistence transition",
+      state: {
+        hydratedProjectRoot: "/book",
+        persistenceTransition: {
+          generation: 9,
+          kind: "load" as const,
+          projectRoot: "/book",
+        },
+      },
+    },
+    {
+      name: "a failed load with mismatched hydration",
+      state: {
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+      },
+    },
+  ])("disables every outline decision during $name", ({ state }) => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    setPending(
+      outlineProposal(cards, [
+        {
+          kind: "rewrite",
+          cardId: "card-1",
+          title: "Hard arrival",
+          intention: null,
+          toIndex: null,
+          reason: "Raise the stakes",
+        },
+      ]),
+    );
+    useAgentConsoleStore.setState(state);
+    const { container } = render(<ReviewTray />);
+    expandReview();
+
+    expect(
+      screen.getByRole("button", { name: "Accept All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Reject All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    const change = container.querySelector(
+      '[data-agent-change-id="change-0"]',
+    );
+    if (!(change instanceof HTMLElement)) throw new Error("Missing change.");
+    expect(
+      within(change).getByRole("button", { name: "Accept" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      within(change).getByRole("button", { name: "Reject" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps stale outline cards visible and allows rejection", () => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const proposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ]);
+    setPending(proposal);
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        chapters: {
+          ...state.meta.chapters,
+          ch1: {
+            ...state.meta.chapters.ch1,
+            cards: [{ ...cards[0], title: "Changed arrival" }],
+          },
+        },
+      },
+    }));
+    const { container } = render(<ReviewTray />);
+    expandReview();
+
+    expect(
+      screen.getByRole("button", { name: "Accept All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Reject All" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(false);
+    const change = container.querySelector(
+      '[data-agent-change-id="change-0"]',
+    );
+    if (!(change instanceof HTMLElement)) throw new Error("Missing stale change.");
+    expect(within(change).getByText("Source changed - regenerate")).toBeTruthy();
+    expect(
+      within(change).getByRole("button", { name: "Accept" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      within(change).getByRole("button", { name: "Reject" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(false);
+  });
+
+  it("applies an individual outline decision through the shared lifecycle", () => {
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const proposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+      {
+        kind: "add",
+        cardId: null,
+        title: "The turn",
+        intention: "Force the final choice",
+        toIndex: null,
+        reason: "Complete the arc",
+      },
+    ]);
+    setPending(proposal);
+    const { container } = render(<ReviewTray />);
+    expandReview();
+    const change = container.querySelector(
+      '[data-agent-change-id="change-0"]',
+    );
+    if (!(change instanceof HTMLElement)) throw new Error("Missing change.");
+
+    fireEvent.click(within(change).getByRole("button", { name: "Accept" }));
+
+    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe(
+      "Hard arrival",
+    );
+    expect(useAgentConsoleStore.getState().pendingProposal?.changes).toHaveLength(1);
+    expect(recordProposalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "accepted", changeCount: 1 }),
+    );
+  });
+
   it("keeps a mismatched proposal open without writing or recording an event", () => {
     const cards = useProjectStore.getState().meta.chapters.ch1.cards;
     const addProposal = outlineProposal(cards, [
@@ -686,34 +861,17 @@ describe("ReviewTray outline decisions", () => {
       description: "Keep this proposal open and ask the agent to replace it.",
     });
   });
-});
-
-describe("ReviewTray rejection and navigation", () => {
-  it("rejects the complete workspace without a project write", () => {
-    const blocks = useProjectStore.getState().blocks;
-    const proposal = manuscriptProposal(blocks, [
-      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
-    ]);
-    const beforeBlocks = structuredClone(blocks);
-    const beforeMeta = structuredClone(useProjectStore.getState().meta);
-    setPending(proposal);
-    render(<ReviewTray />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Reject All" }));
-
-    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
-    expect(useProjectStore.getState().blocks).toEqual(beforeBlocks);
-    expect(useProjectStore.getState().meta).toEqual(beforeMeta);
-    expect(writeProjectMeta).not.toHaveBeenCalled();
-    expect(recordProposalEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "rejected-all", changeCount: 1 }),
-    );
-  });
-
   it("navigates a review card without closing the tray", async () => {
-    const blocks = useProjectStore.getState().blocks;
-    const proposal = manuscriptProposal(blocks, [
-      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const proposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
     ]);
     setPending(proposal);
     const { container } = render(<ReviewTray />);
@@ -736,8 +894,16 @@ describe("ReviewTray rejection and navigation", () => {
   });
 
   it("preserves expanded review and scroll state through conversation updates", () => {
-    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
-      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    const cards = useProjectStore.getState().meta.chapters.ch1.cards;
+    const proposal = outlineProposal(cards, [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
     ]);
     setPending(proposal);
     useAgentConsoleStore.setState({

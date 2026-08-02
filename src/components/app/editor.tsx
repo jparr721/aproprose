@@ -25,6 +25,7 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Block } from "@/components/app/block";
 import { FindBar } from "@/components/app/find-bar";
+import { ManuscriptReviewSurface } from "@/components/app/manuscript-review/manuscript-review-surface";
 import { SelectionToolbar } from "@/components/app/selection-toolbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,8 +39,10 @@ import {
   selectionTargetIds,
   useProjectStore,
 } from "@/stores/project-store";
+import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useFindStore } from "@/stores/find-store";
 import { useSyncStore } from "@/stores/sync-store";
+import { useViewStore } from "@/stores/view-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
 import { useKeybinding, useKeybindingWithOptions } from "@/hooks/use-keybinding";
@@ -144,6 +147,10 @@ export function Editor() {
   const editing = useProjectStore((s) => s.editing);
   const select = useProjectStore((s) => s.select);
   const reorderBlock = useProjectStore((s) => s.reorderBlock);
+  const pendingProposal = useAgentConsoleStore((s) => s.pendingProposal);
+  const manuscriptReviewProposalId = useViewStore(
+    (s) => s.manuscriptReviewProposalId,
+  );
 
   // Drag-to-reorder (grip handle). PointerSensor's 6px activation keeps a plain
   // click on the grip a selection rather than a drag; KeyboardSensor makes the
@@ -302,6 +309,15 @@ export function Editor() {
   const conflictedFiles = useSyncStore((s) => s.conflictedFiles);
 
   const chapter = project?.chapters.find((c) => c.id === activeId);
+  const activeReview =
+    pendingProposal !== null &&
+    pendingProposal.kind === "manuscript" &&
+    manuscriptReviewProposalId === pendingProposal.id &&
+    project !== null &&
+    project.root === pendingProposal.projectRoot &&
+    activeId === pendingProposal.chapterId
+      ? pendingProposal
+      : null;
 
   // Live word count: chapter.wordCount only refreshes on save, which reads as
   // a stuck number to a writer chasing a daily quota.
@@ -331,7 +347,7 @@ export function Editor() {
 
   return (
     <div className="relative h-full min-h-0">
-      <FindBar />
+      {activeReview === null ? <FindBar /> : null}
       <ScrollArea
         className="h-full bg-background"
         // A press on empty editor surface (gutters, padding, the chapter header)
@@ -339,16 +355,20 @@ export function Editor() {
         // their own selection; buttons (the add-block row) and the scrollbar keep
         // the selection so they still act on the selected block. (The find widget is
         // a sibling of this ScrollArea, so its presses never reach this handler.)
-        onMouseDown={(e) => {
-          const t = e.target as Element;
-          if (
-            t.closest("[data-block-id]") ||
-            t.closest("button") ||
-            t.closest('[data-slot="scroll-area-scrollbar"]')
-          )
-            return;
-          select(null);
-        }}
+        onMouseDown={
+          activeReview === null
+            ? (e) => {
+                const t = e.target as Element;
+                if (
+                  t.closest("[data-block-id]") ||
+                  t.closest("button") ||
+                  t.closest('[data-slot="scroll-area-scrollbar"]')
+                )
+                  return;
+                select(null);
+              }
+            : undefined
+        }
       >
         <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
           <header className="mb-5 flex items-baseline gap-3 border-b border-border pb-3.5">
@@ -364,25 +384,31 @@ export function Editor() {
             </TypographyMutedSpan>
           </header>
 
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={[restrictToVerticalAxis]}
-            onDragEnd={onDragEnd}
-          >
-            <SortableContext
-              items={blockIds}
-              strategy={verticalListSortingStrategy}
-            >
-              {blocks.map((b) => (
-                <Block key={b.id} block={b} dictation={dictation} />
-              ))}
-            </SortableContext>
-          </DndContext>
+          {activeReview === null ? (
+            <>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis]}
+                onDragEnd={onDragEnd}
+              >
+                <SortableContext
+                  items={blockIds}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {blocks.map((b) => (
+                    <Block key={b.id} block={b} dictation={dictation} />
+                  ))}
+                </SortableContext>
+              </DndContext>
 
-          <AddBlockRow />
-          <SelectionToolbar />
-          <div aria-hidden data-editor-end />
+              <AddBlockRow />
+              <SelectionToolbar />
+              <div aria-hidden data-editor-end />
+            </>
+          ) : (
+            <ManuscriptReviewSurface proposal={activeReview} />
+          )}
         </div>
       </ScrollArea>
     </div>

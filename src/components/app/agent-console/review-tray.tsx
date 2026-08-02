@@ -3,9 +3,9 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronUp,
+  IconWriting,
   IconX,
 } from "@tabler/icons-react";
-import { ManuscriptReview } from "@/components/app/agent-console/manuscript-review";
 import { OutlineReview } from "@/components/app/agent-console/outline-review";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,10 @@ import {
   TypographyEyebrow,
   TypographyMuted,
 } from "@/components/ui/typography";
-import { navigateToProposalChange } from "@/lib/ai/agent-navigation";
+import {
+  navigateToProposalChange,
+  openManuscriptProposalInEditor,
+} from "@/lib/ai/agent-navigation";
 import {
   acceptAllProposalChanges,
   acceptProposalChange,
@@ -33,6 +36,10 @@ import {
   rejectAllProposalChanges,
   rejectProposalChange,
 } from "@/lib/ai/proposal-decisions";
+import type {
+  ManuscriptPendingProposal,
+  OutlinePendingProposal,
+} from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
   useAgentConsoleStore,
@@ -40,23 +47,80 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
 
-export function ReviewTray() {
+interface ManuscriptReviewTrayProps {
+  proposal: ManuscriptPendingProposal;
+  staleChangeIds: Set<string>;
+  authorMutationsDisabled: boolean;
+}
+
+function ManuscriptReviewTray({
+  proposal,
+  staleChangeIds,
+  authorMutationsDisabled,
+}: ManuscriptReviewTrayProps) {
+  const remaining = proposal.changes.length;
+  const remainingLabel = `${remaining} ${remaining === 1 ? "change" : "changes"}`;
+
+  const openReview = (): void => {
+    void openManuscriptProposalInEditor(proposal)
+      .then((opened) => {
+        if (!opened) toast.error("Couldn't open proposal context");
+      })
+      .catch((error) => {
+        toast.error("Couldn't open proposal context", {
+          description: String(error),
+        });
+      });
+  };
+
+  return (
+    <Card data-agent-review-tray size="sm">
+      <CardHeader>
+        <div className="flex flex-col gap-1">
+          <TypographyEyebrow>Manuscript</TypographyEyebrow>
+          <CardTitle>{proposal.summary}</CardTitle>
+          <TypographyMuted>{remainingLabel}</TypographyMuted>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-2">
+        <Button onClick={openReview} size="sm" variant="outline">
+          <IconWriting data-icon="inline-start" />
+          Review in editor
+        </Button>
+        <Button
+          disabled={authorMutationsDisabled || staleChangeIds.size > 0}
+          onClick={() => acceptAllProposalChanges(proposal)}
+          size="sm"
+        >
+          <IconCheck data-icon="inline-start" />
+          Accept All
+        </Button>
+        <Button
+          disabled={authorMutationsDisabled}
+          onClick={() => rejectAllProposalChanges(proposal)}
+          size="sm"
+          variant="outline"
+        >
+          <IconX data-icon="inline-start" />
+          Reject All
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface OutlineReviewTrayProps {
+  proposal: OutlinePendingProposal;
+  staleChangeIds: Set<string>;
+  authorMutationsDisabled: boolean;
+}
+
+function OutlineReviewTray({
+  proposal,
+  staleChangeIds,
+  authorMutationsDisabled,
+}: OutlineReviewTrayProps) {
   const [expanded, setExpanded] = useState(false);
-  const proposal = useAgentConsoleStore((state) => state.pendingProposal);
-  const projectRoot = useProjectStore(
-    (state) => state.project?.root ?? null,
-  );
-  const authorMutationsDisabled = useAgentConsoleStore(
-    (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
-  );
-  useProjectStore((state) => state.activeChapterId);
-  useProjectStore((state) => state.blocks);
-  useProjectStore((state) => state.meta);
-
-  if (proposal === null) return null;
-
-  const staleChangeIds = proposalStaleChangeIds(proposal);
-  const proposalType = proposal.kind === "manuscript" ? "Manuscript" : "Outline";
   const remaining = proposal.changes.length;
   const remainingLabel = `${remaining} ${remaining === 1 ? "change" : "changes"}`;
 
@@ -77,7 +141,7 @@ export function ReviewTray() {
       <Collapsible onOpenChange={setExpanded} open={expanded}>
         <CardHeader>
           <div className="flex flex-col gap-1">
-            <TypographyEyebrow>{proposalType}</TypographyEyebrow>
+            <TypographyEyebrow>Outline</TypographyEyebrow>
             <CardTitle>{proposal.summary}</CardTitle>
             <TypographyMuted>{remainingLabel}</TypographyMuted>
           </div>
@@ -134,37 +198,52 @@ export function ReviewTray() {
           )}
           <CollapsibleContent>
             <ScrollArea className="h-80 pr-3">
-              {proposal.kind === "manuscript" ? (
-                <ManuscriptReview
-                  disabled={authorMutationsDisabled}
-                  onAccept={(changeId) =>
-                    acceptProposalChange(proposal, changeId)
-                  }
-                  onNavigate={navigate}
-                  onReject={(changeId) =>
-                    rejectProposalChange(proposal, changeId)
-                  }
-                  proposal={proposal}
-                  staleChangeIds={staleChangeIds}
-                />
-              ) : (
-                <OutlineReview
-                  disabled={authorMutationsDisabled}
-                  onAccept={(changeId) =>
-                    acceptProposalChange(proposal, changeId)
-                  }
-                  onNavigate={navigate}
-                  onReject={(changeId) =>
-                    rejectProposalChange(proposal, changeId)
-                  }
-                  proposal={proposal}
-                  staleChangeIds={staleChangeIds}
-                />
-              )}
+              <OutlineReview
+                disabled={authorMutationsDisabled}
+                onAccept={(changeId) =>
+                  acceptProposalChange(proposal, changeId)
+                }
+                onNavigate={navigate}
+                onReject={(changeId) =>
+                  rejectProposalChange(proposal, changeId)
+                }
+                proposal={proposal}
+                staleChangeIds={staleChangeIds}
+              />
             </ScrollArea>
           </CollapsibleContent>
         </CardContent>
       </Collapsible>
     </Card>
+  );
+}
+
+export function ReviewTray() {
+  const proposal = useAgentConsoleStore((state) => state.pendingProposal);
+  const projectRoot = useProjectStore(
+    (state) => state.project?.root ?? null,
+  );
+  const authorMutationsDisabled = useAgentConsoleStore(
+    (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
+  );
+  useProjectStore((state) => state.activeChapterId);
+  useProjectStore((state) => state.blocks);
+  useProjectStore((state) => state.meta);
+
+  if (proposal === null) return null;
+
+  const staleChangeIds = proposalStaleChangeIds(proposal);
+  return proposal.kind === "manuscript" ? (
+    <ManuscriptReviewTray
+      authorMutationsDisabled={authorMutationsDisabled}
+      proposal={proposal}
+      staleChangeIds={staleChangeIds}
+    />
+  ) : (
+    <OutlineReviewTray
+      authorMutationsDisabled={authorMutationsDisabled}
+      proposal={proposal}
+      staleChangeIds={staleChangeIds}
+    />
   );
 }

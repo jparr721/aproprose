@@ -291,6 +291,72 @@ function conversationTask(chapterId: string): AgentTask {
   return { kind: "conversation", targetChapterId: chapterId };
 }
 
+function manuscriptProposalFixture(
+  id: string,
+  projectRoot: string,
+  chapterId: string,
+): PendingProposal {
+  return {
+    id,
+    kind: "manuscript",
+    projectRoot,
+    chapterId,
+    summary: `Manuscript proposal ${id}`,
+    createdAt: "2026-07-30T12:00:00.000Z",
+    originatingMessageId: "assistant-1",
+    changes: [],
+  };
+}
+
+function outlineProposalFixture(
+  id: string,
+  projectRoot: string,
+  chapterId: string,
+): PendingProposal {
+  return {
+    id,
+    kind: "outline",
+    projectRoot,
+    chapterId,
+    summary: `Outline proposal ${id}`,
+    createdAt: "2026-07-30T12:00:00.000Z",
+    originatingMessageId: "assistant-1",
+    changes: [],
+  };
+}
+
+interface CapturedToolRun {
+  input: StreamAgentRunInput;
+  finish: () => Promise<void>;
+}
+
+async function captureToolRun(): Promise<CapturedToolRun> {
+  const pending = deferred<StreamAgentRunResult>();
+  let captured: StreamAgentRunInput | null = null;
+  const dependencies = makeDependencies(async (input) => {
+    captured = input;
+    return pending.promise;
+  });
+  const controller = createAgentController(dependencies);
+  const submission = controller.submitAgentRequest({
+    kind: "run",
+    mode: "writing",
+    text: "Stage a proposal.",
+    refs: [],
+    task: conversationTask("ch1"),
+  });
+  await vi.waitFor(() => expect(captured).not.toBeNull());
+  if (captured === null) throw new Error("Expected captured stream input");
+  const input = captured;
+  return {
+    input,
+    finish: async () => {
+      pending.resolve(successfulResult(input, "Proposal staged"));
+      await submission;
+    },
+  };
+}
+
 function originalTurn(
   snapshots: ContextSnapshot[],
 ): { run: AgentRun; messages: AgentUIMessage[] } {
@@ -422,6 +488,7 @@ beforeEach(() => {
     styleGuide: "Keep the clipped voice.",
     editingRules: "Preserve intentional fragments.",
   });
+  useViewStore.setState(useViewStore.getInitialState(), true);
   useViewStore.setState({ aiOpen: false });
 });
 
@@ -2196,6 +2263,98 @@ describe("retry and local events", () => {
   });
 });
 
+describe("proposal staging lifecycle", () => {
+  it("opens an active manuscript proposal in editor review", async () => {
+    const run = await captureToolRun();
+    const proposal = manuscriptProposalFixture(
+      "active-proposal",
+      "/book",
+      "ch1",
+    );
+
+    run.input.environment.replacePendingProposal(proposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
+      proposal.id,
+    );
+    await run.finish();
+  });
+
+  it("keeps an inactive chapter proposal pending without opening review", async () => {
+    const run = await captureToolRun();
+    const proposal = manuscriptProposalFixture(
+      "inactive-proposal",
+      "/book",
+      "ch2",
+    );
+
+    run.input.environment.replacePendingProposal(proposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+    await run.finish();
+  });
+
+  it("closes manuscript review when an outline proposal replaces it", async () => {
+    const run = await captureToolRun();
+    const proposal = outlineProposalFixture(
+      "outline-proposal",
+      "/book",
+      "ch1",
+    );
+    useViewStore.getState().openManuscriptReview("old-proposal");
+
+    run.input.environment.replacePendingProposal(proposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+    await run.finish();
+  });
+
+  it("closes the old review before replacing and opening the new proposal", async () => {
+    const run = await captureToolRun();
+    const oldProposal = manuscriptProposalFixture(
+      "old-proposal",
+      "/book",
+      "ch1",
+    );
+    const newProposal = manuscriptProposalFixture(
+      "new-proposal",
+      "/book",
+      "ch1",
+    );
+    useAgentConsoleStore.getState().replacePendingProposal(oldProposal);
+    useViewStore.getState().openManuscriptReview(oldProposal.id);
+    const transitions: Array<{
+      pendingProposalId: string | null;
+      reviewProposalId: string | null;
+    }> = [];
+    const unsubscribe = useViewStore.subscribe((state) => {
+      transitions.push({
+        pendingProposalId:
+          useAgentConsoleStore.getState().pendingProposal?.id ?? null,
+        reviewProposalId: state.manuscriptReviewProposalId,
+      });
+    });
+
+    run.input.environment.replacePendingProposal(newProposal);
+    unsubscribe();
+
+    expect(transitions).toEqual([
+      {
+        pendingProposalId: oldProposal.id,
+        reviewProposalId: null,
+      },
+      {
+        pendingProposalId: newProposal.id,
+        reviewProposalId: newProposal.id,
+      },
+    ]);
+    await run.finish();
+  });
+});
+
 describe("project ownership", () => {
   it("discards a delayed old-project source refresh after console hydration", async () => {
     const sourceText = "Inactive target.\n";
@@ -2368,22 +2527,27 @@ describe("project ownership", () => {
       project: { ...project, root: "/new-book", name: "New Book" },
     });
     useAgentConsoleStore.getState().hydrate("/new-book", persistedState([]));
-    const lateProposal: PendingProposal = {
-      id: "late-proposal",
-      kind: "manuscript",
-      projectRoot: "/book",
-      chapterId: "ch1",
-      summary: "Late",
-      createdAt: "2026-07-30T12:00:00.000Z",
-      originatingMessageId: "old-assistant",
-      changes: [],
-    };
+    const currentProposal = manuscriptProposalFixture(
+      "current-proposal",
+      "/new-book",
+      "ch1",
+    );
+    useAgentConsoleStore.getState().replacePendingProposal(currentProposal);
+    useViewStore.getState().openManuscriptReview(currentProposal.id);
+    const lateProposal = manuscriptProposalFixture(
+      "late-proposal",
+      "/book",
+      "ch1",
+    );
     if (captured === null) throw new Error("Expected captured stream input");
     captured.environment.replacePendingProposal(lateProposal);
     pending.resolve(successfulResult(captured, "Late finish"));
     await submission;
 
-    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(currentProposal);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
+      currentProposal.id,
+    );
   });
 });
 

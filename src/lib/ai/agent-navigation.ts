@@ -8,9 +8,11 @@ import {
 import type {
   ContextSnapshot,
   ManuscriptPendingChange,
+  ManuscriptPendingProposal,
   OutlinePendingChange,
   SourceLocator,
 } from "@/lib/ai/agent-types";
+import { projectManuscriptReview } from "@/lib/ai/manuscript-review-projection";
 import type { Block } from "@/lib/types";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
@@ -195,6 +197,60 @@ export async function navigateToContextSnapshot(
     }
     return null;
   });
+}
+
+export async function openManuscriptProposalInEditor(
+  proposal: ManuscriptPendingProposal,
+): Promise<boolean> {
+  const initialPending = useAgentConsoleStore.getState().pendingProposal;
+  const initialProject = useProjectStore.getState();
+  if (
+    initialPending === null ||
+    initialPending.kind !== "manuscript" ||
+    initialPending.id !== proposal.id ||
+    initialProject.project === null ||
+    initialProject.project.root !== proposal.projectRoot ||
+    !initialProject.project.chapters.some(
+      (chapter) => chapter.id === proposal.chapterId,
+    )
+  ) {
+    return false;
+  }
+
+  if (initialProject.activeChapterId !== proposal.chapterId) {
+    const result = await useViewStore
+      .getState()
+      .requestGuarded(() =>
+        useProjectStore.getState().selectChapter(proposal.chapterId),
+      );
+    if (result.status === "canceled") return false;
+  }
+
+  const pending = useAgentConsoleStore.getState().pendingProposal;
+  const projectState = useProjectStore.getState();
+  if (
+    pending === null ||
+    pending.kind !== "manuscript" ||
+    pending.id !== proposal.id ||
+    projectState.project === null ||
+    projectState.project.root !== proposal.projectRoot ||
+    !projectState.project.chapters.some(
+      (chapter) => chapter.id === proposal.chapterId,
+    ) ||
+    projectState.activeChapterId !== proposal.chapterId
+  ) {
+    return false;
+  }
+
+  useViewStore.getState().openManuscriptReview(proposal.id);
+  const firstChangeId = projectManuscriptReview(
+    projectState.blocks,
+    pending,
+  ).navigationChangeIds[0];
+  if (firstChangeId !== undefined) {
+    scheduleScroll("data-agent-decision-change-id", firstChangeId);
+  }
+  return true;
 }
 
 export async function navigateToProposalChange(

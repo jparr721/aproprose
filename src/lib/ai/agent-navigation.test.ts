@@ -44,11 +44,13 @@ import { Editor } from "@/components/app/editor";
 import {
   navigateToContextSnapshot,
   navigateToProposalChange,
+  openManuscriptProposalInEditor,
 } from "@/lib/ai/agent-navigation";
 import type {
   AgentUIMessage,
   ContextSnapshot,
   ManuscriptPendingChange,
+  ManuscriptPendingProposal,
   OutlinePendingChange,
   SourceLocator,
 } from "@/lib/ai/agent-types";
@@ -158,6 +160,22 @@ const outlineAddChange = (): OutlinePendingChange => ({
   },
 });
 
+const manuscriptProposal = (
+  id: string,
+  projectRoot: string,
+  chapterId: string,
+  changes: ManuscriptPendingChange[],
+): ManuscriptPendingProposal => ({
+  id,
+  kind: "manuscript",
+  projectRoot,
+  chapterId,
+  summary: "Review the manuscript changes",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  originatingMessageId: "assistant-1",
+  changes,
+});
+
 const snapshotFixture = (
   block: Block,
   order: number,
@@ -183,6 +201,7 @@ const addScrollTarget = (attribute: string, id: string): HTMLElement => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(readTextFile).mockReset();
   vi.stubGlobal("CSS", { escape: (value: string): string => value });
   vi.stubGlobal(
     "requestAnimationFrame",
@@ -205,9 +224,11 @@ beforeEach(() => {
   });
   useViewStore.setState({
     outlineOpen: false,
+    manuscriptReviewProposalId: null,
     focus: false,
     pending: null,
   });
+  useProjectStore.setState(useProjectStore.getInitialState(), true);
   useProjectStore.setState({
     project: projectFixture(),
     activeChapterId: "ch1",
@@ -400,6 +421,271 @@ describe("navigateToContextSnapshot", () => {
 
     await expect(navigateToContextSnapshot(snapshot)).resolves.toBe(true);
     expect(useProjectStore.getState().selectedId).toBe("linked-2");
+  });
+});
+
+describe("openManuscriptProposalInEditor", () => {
+  it("opens a proposal for the active chapter without using the dirty guard", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch1",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    const requestGuarded = vi.spyOn(
+      useViewStore.getState(),
+      "requestGuarded",
+    );
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(true);
+
+    expect(requestGuarded).not.toHaveBeenCalled();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(proposal.id);
+  });
+
+  it("guards chapter selection before opening an inactive proposal", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    vi.mocked(readTextFile).mockResolvedValue("");
+    const requestGuarded = vi.spyOn(
+      useViewStore.getState(),
+      "requestGuarded",
+    );
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(true);
+
+    expect(requestGuarded).toHaveBeenCalledOnce();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(proposal.id);
+  });
+
+  it("settles a canceled dirty guard without opening review", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    useProjectStore.setState({ chapterDirty: true });
+
+    const opening = openManuscriptProposalInEditor(proposal);
+    expect(useViewStore.getState().pending).not.toBeNull();
+    useViewStore.getState().cancelPending();
+
+    await expect(opening).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("returns false when no project is open", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch1",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    useProjectStore.setState({ project: null });
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(false);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("returns false when the open project has another root", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch1",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    useProjectStore.setState({
+      project: { ...projectFixture(), root: "/another-book" },
+    });
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(false);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("returns false when the proposal chapter no longer exists", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    useProjectStore.setState({
+      project: {
+        ...projectFixture(),
+        chapters: projectFixture().chapters.filter(
+          (chapter) => chapter.id !== "ch2",
+        ),
+      },
+    });
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(false);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("returns false when guarded chapter selection fails", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    vi.mocked(readTextFile).mockRejectedValue(new Error("Chapter unavailable"));
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("does not open a proposal replaced during chapter selection", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    const replacement = manuscriptProposal(
+      "proposal-2",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    let resolveSource: ((source: string) => void) | null = null;
+    vi.mocked(readTextFile).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveSource = resolve;
+      }),
+    );
+
+    const opening = openManuscriptProposalInEditor(proposal);
+    await waitFor(() => expect(readTextFile).toHaveBeenCalledOnce());
+    useAgentConsoleStore.setState({ pendingProposal: replacement });
+    if (resolveSource === null) throw new Error("Expected a pending chapter read");
+    resolveSource("");
+
+    await expect(opening).resolves.toBe(false);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(replacement);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("revalidates the project root after chapter selection", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    let resolveSource: ((source: string) => void) | null = null;
+    vi.mocked(readTextFile).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveSource = resolve;
+      }),
+    );
+
+    const opening = openManuscriptProposalInEditor(proposal);
+    await waitFor(() => expect(readTextFile).toHaveBeenCalledOnce());
+    useProjectStore.setState({
+      project: { ...projectFixture(), root: "/replacement-book" },
+    });
+    if (resolveSource === null) throw new Error("Expected a pending chapter read");
+    resolveSource("");
+
+    await expect(opening).resolves.toBe(false);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("revalidates the active chapter after guarded selection", async () => {
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch2",
+      [appendChange()],
+    );
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    vi.spyOn(
+      useProjectStore.getState(),
+      "selectChapter",
+    ).mockImplementation(async (chapterId) => {
+      useProjectStore.setState({ activeChapterId: chapterId });
+      queueMicrotask(() => {
+        useProjectStore.setState({ activeChapterId: "ch1" });
+      });
+    });
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("scrolls the first projected decision row into view", async () => {
+    const first = blockFixture("first", "First paragraph.");
+    const second = blockFixture("second", "Second paragraph.");
+    const secondChange: ManuscriptPendingChange = {
+      id: "second-change",
+      change: {
+        kind: "rewrite",
+        blockId: second.id,
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: "Revised second paragraph.",
+        toIndex: null,
+        reason: "Revise the second paragraph",
+      },
+      precondition: { kind: "target", target: blockLocator(second, 1) },
+    };
+    const firstChange: ManuscriptPendingChange = {
+      id: "first-change",
+      change: {
+        kind: "rewrite",
+        blockId: first.id,
+        afterId: null,
+        type: null,
+        speaker: null,
+        newText: "Revised first paragraph.",
+        toIndex: null,
+        reason: "Revise the first paragraph",
+      },
+      precondition: { kind: "target", target: blockLocator(first, 0) },
+    };
+    const proposal = manuscriptProposal(
+      "proposal-1",
+      "/book",
+      "ch1",
+      [secondChange, firstChange],
+    );
+    useProjectStore.setState({ blocks: [first, second] });
+    useAgentConsoleStore.setState({ pendingProposal: proposal });
+    const firstTarget = addScrollTarget(
+      "data-agent-decision-change-id",
+      firstChange.id,
+    );
+    const secondTarget = addScrollTarget(
+      "data-agent-decision-change-id",
+      secondChange.id,
+    );
+    firstTarget.scrollIntoView = vi.fn();
+    secondTarget.scrollIntoView = vi.fn();
+
+    await expect(openManuscriptProposalInEditor(proposal)).resolves.toBe(true);
+
+    expect(firstTarget.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(secondTarget.scrollIntoView).not.toHaveBeenCalled();
   });
 });
 

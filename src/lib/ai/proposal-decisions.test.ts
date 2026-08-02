@@ -68,6 +68,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import { toast } from "sonner";
 
 const projectFixture = (root: string): ProjectInfo => ({
@@ -234,6 +235,7 @@ beforeEach(() => {
     activeProjectRoot: "/book",
     hydratedProjectRoot: "/book",
   });
+  useViewStore.setState(useViewStore.getInitialState(), true);
 });
 
 afterEach(() => {
@@ -247,6 +249,7 @@ describe("proposal decisions", () => {
       rewrite("block-2", "The door eased open.", "Slow the reveal"),
     ]);
     setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
 
     acceptProposalChange(proposal, "change-0");
 
@@ -259,6 +262,7 @@ describe("proposal decisions", () => {
       id: proposal.id,
       changes: [{ id: "change-1" }],
     });
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(proposal.id);
     expect(recordProposalEvent).toHaveBeenCalledWith({
       proposalId: proposal.id,
       action: "accepted",
@@ -273,6 +277,7 @@ describe("proposal decisions", () => {
       rewrite("block-2", "The door eased open.", "Slow the reveal"),
     ]);
     setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
 
     acceptAllProposalChanges(proposal);
 
@@ -282,6 +287,7 @@ describe("proposal decisions", () => {
     ]);
     expect(useProjectStore.getState().past).toHaveLength(1);
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
     expect(recordProposalEvent).toHaveBeenCalledWith({
       proposalId: proposal.id,
       action: "accepted-all",
@@ -298,6 +304,7 @@ describe("proposal decisions", () => {
     const beforeBlocks = structuredClone(useProjectStore.getState().blocks);
     const beforeMeta = structuredClone(useProjectStore.getState().meta);
     setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
 
     rejectProposalChange(proposal, "change-0");
 
@@ -308,6 +315,7 @@ describe("proposal decisions", () => {
       id: proposal.id,
       changes: [{ id: "change-1" }],
     });
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(proposal.id);
     expect(recordProposalEvent).toHaveBeenCalledWith({
       proposalId: proposal.id,
       action: "rejected",
@@ -324,6 +332,7 @@ describe("proposal decisions", () => {
     const beforeBlocks = structuredClone(useProjectStore.getState().blocks);
     const beforeMeta = structuredClone(useProjectStore.getState().meta);
     setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
 
     rejectAllProposalChanges(proposal);
 
@@ -331,12 +340,39 @@ describe("proposal decisions", () => {
     expect(useProjectStore.getState().meta).toEqual(beforeMeta);
     expect(writeProjectMeta).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
     expect(recordProposalEvent).toHaveBeenCalledWith({
       proposalId: proposal.id,
       action: "rejected-all",
       changeCount: 2,
       text: "Rejected all 2 manuscript changes.",
     });
+  });
+
+  it("closes review after accepting the final manuscript change", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
+
+    acceptProposalChange(proposal, "change-0");
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("closes review after rejecting the final manuscript change", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "Rain whispered.", "Quiet the opening"),
+    ]);
+    setPending(proposal);
+    useViewStore.getState().openManuscriptReview(proposal.id);
+
+    rejectProposalChange(proposal, "change-0");
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
   });
 
   it("keeps a stale manuscript proposal open with regeneration guidance", () => {
@@ -423,6 +459,7 @@ describe("proposal decisions", () => {
     expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe(
       "Hard arrival",
     );
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
     expect(recordProposalEvent).toHaveBeenCalledWith({
       proposalId: proposal.id,
       action: "accepted-all",

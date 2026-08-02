@@ -113,6 +113,97 @@ describe("view-store buildErrorsOpen", () => {
   });
 });
 
+describe("view-store manuscript review lifecycle", () => {
+  it("starts with no manuscript review open", () => {
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("opens a manuscript review without changing AI or PDF visibility", () => {
+    useViewStore.setState({
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: true,
+    });
+
+    useViewStore.getState().openManuscriptReview("proposal-1");
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: "proposal-1",
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: false,
+    });
+  });
+
+  it("closes only the manuscript review", () => {
+    useViewStore.setState({
+      manuscriptReviewProposalId: "proposal-1",
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: true,
+      buildErrorsOpen: true,
+      rightPanelWidth: 444,
+    });
+
+    useViewStore.getState().closeManuscriptReview();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: true,
+      buildErrorsOpen: true,
+      rightPanelWidth: 444,
+    });
+  });
+
+  it("opening the outline directly replaces manuscript review", () => {
+    useViewStore.setState({ manuscriptReviewProposalId: "proposal-1" });
+
+    useViewStore.getState().openOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      outlineOpen: true,
+    });
+  });
+
+  it("opening the outline through its toggle replaces manuscript review", () => {
+    useViewStore.setState({
+      manuscriptReviewProposalId: "proposal-1",
+      outlineOpen: false,
+    });
+
+    useViewStore.getState().toggleOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      outlineOpen: true,
+    });
+  });
+
+  it("excludes manuscript review identity and actions from persistence", () => {
+    useViewStore.getState().openManuscriptReview("proposal-1");
+    const opts = useViewStore.persist.getOptions();
+    const persisted = opts.partialize
+      ? opts.partialize(useViewStore.getState())
+      : {};
+
+    expect(persisted).not.toHaveProperty("manuscriptReviewProposalId");
+    expect(persisted).not.toHaveProperty("openManuscriptReview");
+    expect(persisted).not.toHaveProperty("closeManuscriptReview");
+    expect(persisted).toEqual({
+      rightPanelWidth: useViewStore.getState().rightPanelWidth,
+      pdfOpen: useViewStore.getState().pdfOpen,
+      outlineOpen: useViewStore.getState().outlineOpen,
+    });
+  });
+});
+
 describe("view-store layout persistence", () => {
   it("persists the PDF and Outline open flags so a relaunch restores the layout", () => {
     useViewStore.setState({ pdfOpen: true, outlineOpen: true });
@@ -131,6 +222,7 @@ describe("view-store layout persistence", () => {
           rightPanelWidth: 488,
           pdfOpen: true,
           outlineOpen: true,
+          manuscriptReviewProposalId: "persisted-proposal",
           obsoleteLayout: true,
         },
         version: 0,
@@ -146,6 +238,7 @@ describe("view-store layout persistence", () => {
       outlineOpen: true,
       aiOpen: false,
       focus: true,
+      manuscriptReviewProposalId: null,
     });
     expect(state).not.toHaveProperty("obsoleteLayout");
     expect(state).not.toHaveProperty("sidebarOpen");

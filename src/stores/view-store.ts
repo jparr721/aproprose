@@ -32,6 +32,7 @@ interface ViewState {
   pdfOpen: boolean;
   /** Whether the full-page Outline storyboard replaces the editor (persisted). */
   outlineOpen: boolean;
+  manuscriptReviewProposalId: string | null;
   focus: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
@@ -48,6 +49,8 @@ interface ViewState {
   togglePdf: () => void;
   toggleOutline: () => void;
   openOutline: () => void;
+  openManuscriptReview: (proposalId: string) => void;
+  closeManuscriptReview: () => void;
   setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
   setRightPanelWidth: (px: number) => void;
@@ -86,6 +89,7 @@ export const useViewStore = create<ViewState>()(
       aiOpen: true,
       pdfOpen: false,
       outlineOpen: false,
+      manuscriptReviewProposalId: null,
       focus: false,
       buildErrorsOpen: false,
 
@@ -97,8 +101,28 @@ export const useViewStore = create<ViewState>()(
       setAiOpen: (aiOpen) => set({ aiOpen }),
       openAiConsole: () => set({ aiOpen: true, focus: false }),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
-      toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen, focus: false })),
-      openOutline: () => set({ outlineOpen: true, focus: false }),
+      toggleOutline: () =>
+        set((s) => {
+          const outlineOpen = !s.outlineOpen;
+          return {
+            outlineOpen,
+            focus: false,
+            ...(outlineOpen ? { manuscriptReviewProposalId: null } : {}),
+          };
+        }),
+      openOutline: () =>
+        set({
+          outlineOpen: true,
+          manuscriptReviewProposalId: null,
+          focus: false,
+        }),
+      openManuscriptReview: (manuscriptReviewProposalId) =>
+        set({
+          manuscriptReviewProposalId,
+          outlineOpen: false,
+          focus: false,
+        }),
+      closeManuscriptReview: () => set({ manuscriptReviewProposalId: null }),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {

@@ -25,6 +25,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 
 const agentModeSchema = z.enum(["writing", "edit"]);
 
@@ -1324,6 +1325,7 @@ function scheduleAgentSave(): void {
 }
 
 export function transitionAgentProject(nextRoot: string | null): Promise<void> {
+  useViewStore.getState().closeManuscriptReview();
   clearSaveTimer();
   const consoleBeforeSwitch = useAgentConsoleStore.getState();
   const oldRoot = consoleBeforeSwitch.activeProjectRoot;

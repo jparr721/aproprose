@@ -1191,7 +1191,17 @@ export function createAgentController(
       },
       replacePendingProposal: (proposal) => {
         if (!ownsRun(args.run.projectRoot, args.run.id)) return;
+        useViewStore.getState().closeManuscriptReview();
         useAgentConsoleStore.getState().replacePendingProposal(proposal);
+        const projectState = useProjectStore.getState();
+        if (
+          proposal.kind === "manuscript" &&
+          projectState.project !== null &&
+          projectState.project.root === proposal.projectRoot &&
+          projectState.activeChapterId === proposal.chapterId
+        ) {
+          useViewStore.getState().openManuscriptReview(proposal.id);
+        }
       },
     };
   };

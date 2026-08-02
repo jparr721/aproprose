@@ -17,6 +17,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 
 type ProposalDecisionAction = Exclude<
   ProposalEventData["action"],
@@ -88,6 +89,15 @@ function showProposalApplyFailure(result: ProposalApplyFailure): void {
   toast.error("Proposal couldn't be applied", {
     description: "Keep this proposal open and ask the agent to replace it.",
   });
+}
+
+function closeExhaustedManuscriptReview(proposal: PendingProposal): void {
+  if (
+    proposal.kind === "manuscript" &&
+    useAgentConsoleStore.getState().pendingProposal === null
+  ) {
+    useViewStore.getState().closeManuscriptReview();
+  }
 }
 
 function applyProposalChanges(
@@ -174,6 +184,7 @@ export function acceptProposalChange(
   }
   if (!applyProposalChanges(proposal, [changeId])) return;
   useAgentConsoleStore.getState().removePendingChanges([changeId]);
+  closeExhaustedManuscriptReview(proposal);
   recordProposalEvent(proposalEvent(proposal, "accepted", 1));
 }
 
@@ -182,6 +193,7 @@ export function acceptAllProposalChanges(proposal: PendingProposal): void {
   const changeIds = proposal.changes.map((change) => change.id);
   if (!applyProposalChanges(proposal, changeIds)) return;
   useAgentConsoleStore.getState().clearPendingProposal();
+  closeExhaustedManuscriptReview(proposal);
   recordProposalEvent(
     proposalEvent(proposal, "accepted-all", changeIds.length),
   );
@@ -196,6 +208,7 @@ export function rejectProposalChange(
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
   useAgentConsoleStore.getState().removePendingChanges([changeId]);
+  closeExhaustedManuscriptReview(proposal);
   recordProposalEvent(proposalEvent(proposal, "rejected", 1));
 }
 
@@ -203,6 +216,7 @@ export function rejectAllProposalChanges(proposal: PendingProposal): void {
   requireAgentConsoleProject(proposal.projectRoot);
   const changeCount = proposal.changes.length;
   useAgentConsoleStore.getState().clearPendingProposal();
+  closeExhaustedManuscriptReview(proposal);
   recordProposalEvent(
     proposalEvent(proposal, "rejected-all", changeCount),
   );

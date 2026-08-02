@@ -35,6 +35,7 @@ import {
 } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useViewStore } from "@/stores/view-store";
 
 const tauri = vi.hoisted(() => ({
   getAiConfig: vi.fn(),
@@ -248,6 +249,7 @@ async function resetPersistence(): Promise<void> {
   await transitionAgentProject(null);
   useAgentConsoleStore.getState().resetProject();
   useProjectStore.setState({ project: null, meta: EMPTY_META });
+  useViewStore.setState(useViewStore.getInitialState(), true);
   useSettingsStore.setState({ aiModel: null });
   resetAiProvider();
   tauri.getAiConfig.mockReset();
@@ -1164,6 +1166,42 @@ describe("agent persistence", () => {
     write.resolve(undefined);
     await switching;
     expect(tauri.readAppData).toHaveBeenCalledWith(agentStateKey("/books/new"));
+  });
+
+  it("closes manuscript review synchronously when switching roots", async () => {
+    await transitionAgentProject("/books/review-old");
+    useAgentConsoleStore.getState().setDraftText("Draft before review switch");
+    tauri.writeAppData.mockClear();
+    const write = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(write.promise);
+    useViewStore.getState().openManuscriptReview("proposal-1");
+
+    const switching = transitionAgentProject("/books/review-new");
+    const reviewIdImmediately =
+      useViewStore.getState().manuscriptReviewProposalId;
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    write.resolve(undefined);
+    await switching;
+
+    expect(reviewIdImmediately).toBeNull();
+  });
+
+  it("closes manuscript review synchronously when closing the project", async () => {
+    await transitionAgentProject("/books/review-close");
+    useAgentConsoleStore.getState().setDraftText("Draft before review close");
+    tauri.writeAppData.mockClear();
+    const write = deferred<void>();
+    tauri.writeAppData.mockReturnValueOnce(write.promise);
+    useViewStore.getState().openManuscriptReview("proposal-1");
+
+    const closing = transitionAgentProject(null);
+    const reviewIdImmediately =
+      useViewStore.getState().manuscriptReviewProposalId;
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    write.resolve(undefined);
+    await closing;
+
+    expect(reviewIdImmediately).toBeNull();
   });
 
   it("installs cross-root ownership and freezes the old snapshot synchronously", async () => {

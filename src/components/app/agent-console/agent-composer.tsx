@@ -69,9 +69,9 @@ export function AgentComposer() {
       : runStatus === "streaming"
         ? "streaming"
         : "ready";
-  const displayUsage: LanguageModelUsage | null =
+  const displayUsage: LanguageModelUsage | undefined =
     lastUsage === null
-      ? null
+      ? undefined
       : {
           ...lastUsage.raw,
           inputTokens: lastUsage.inputTokens,
@@ -80,10 +80,12 @@ export function AgentComposer() {
         };
   const tokenlensModelId =
     lastUsage === null
-      ? null
+      ? undefined
       : lastUsage.modelId.includes("/")
         ? lastUsage.modelId.replace("/", ":")
         : `openai:${lastUsage.modelId.replace(/^(openai:)+/, "")}`;
+  const contextWindow = lastUsage === null ? 0 : lastUsage.contextWindow;
+  const usedTokens = lastUsage === null ? 0 : lastUsage.totalTokens;
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
   const blocksTargetEditing = ownershipStatus !== "ready";
@@ -201,28 +203,24 @@ export function AgentComposer() {
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputTools>
-            {lastUsage === null ||
-            displayUsage === null ||
-            tokenlensModelId === null ? null : (
-              <Context
-                maxTokens={lastUsage.contextWindow}
-                modelId={tokenlensModelId}
-                usage={displayUsage}
-                usedTokens={lastUsage.totalTokens}
-              >
-                <ContextTrigger />
-                <ContextContent>
-                  <ContextContentHeader />
-                  <ContextContentBody className="space-y-2">
-                    <ContextInputUsage />
-                    <ContextOutputUsage />
-                  </ContextContentBody>
-                  <ContextContentFooter>
-                    {`Model: ${tokenlensModelId}`}
-                  </ContextContentFooter>
-                </ContextContent>
-              </Context>
-            )}
+            <Context
+              maxTokens={contextWindow}
+              modelId={tokenlensModelId}
+              usage={displayUsage}
+              usedTokens={usedTokens}
+            >
+              <ContextTrigger />
+              <ContextContent>
+                <ContextContentHeader />
+                <ContextContentBody className="space-y-2">
+                  <ContextInputUsage />
+                  <ContextOutputUsage />
+                </ContextContentBody>
+                <ContextContentFooter>
+                  {`Model: ${tokenlensModelId ?? "-"}`}
+                </ContextContentFooter>
+              </ContextContent>
+            </Context>
           </PromptInputTools>
           <PromptInputSubmit
             disabled={

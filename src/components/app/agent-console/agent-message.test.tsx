@@ -160,7 +160,7 @@ describe("AgentMessage content", () => {
     expect(screen.getByText("quiet answer").dataset.streamdown).toBe("strong");
   });
 
-  it("renders non-null model usage through the stock context view", async () => {
+  it("does not render model usage for a message", () => {
     renderAgentMessage(
       assistantMessage(
         "assistant-usage",
@@ -188,24 +188,9 @@ describe("AgentMessage content", () => {
       ),
     );
 
-    const trigger = screen.getByRole("button", {
-      name: /Model context usage/,
-    });
-    expect(trigger.textContent).toContain("15%");
-    fireEvent.pointerEnter(trigger);
-
-    expect(await screen.findByText("1.5K / 10K")).toBeTruthy();
-    expect(screen.getByText("Model: gpt-4.1")).toBeTruthy();
-    const inputUsage = screen.getByText("Input").parentElement;
-    const outputUsage = screen.getByText("Output").parentElement;
-    if (inputUsage === null || outputUsage === null) {
-      throw new Error("Rendered token usage rows are missing.");
-    }
-    expect(inputUsage.textContent).toContain("1K - ");
-    expect(outputUsage.textContent).toContain("500 - ");
-    expect(`${inputUsage.textContent}${outputUsage.textContent}`).not.toMatch(
-      /[^\x00-\x7F]/,
-    );
+    expect(
+      screen.queryByRole("button", { name: /Model context usage/ }),
+    ).toBeNull();
   });
 
   it("renders consolidated model reasoning in the stock reasoning view", () => {

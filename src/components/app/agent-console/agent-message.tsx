@@ -2,16 +2,6 @@ import { useState, type ReactNode } from "react";
 import { isStaticToolUIPart } from "ai";
 import { SentContextAttachments } from "@/components/app/agent-console/context-attachments";
 import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentFooter,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextTrigger,
-} from "@/components/ai-elements/context";
-import {
   Message,
   MessageAction,
   MessageActions,
@@ -56,7 +46,6 @@ import type {
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
-  PersistedUsage,
 } from "@/lib/ai/agent-types";
 import {
   AgentConsoleOwnershipError,
@@ -303,33 +292,6 @@ function renderPart(
   }
 }
 
-function MessageUsage({ usage }: { usage: PersistedUsage }) {
-  const displayUsage = {
-    ...usage.raw,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-  };
-  return (
-    <Context
-      maxTokens={usage.contextWindow}
-      modelId={usage.modelId}
-      usage={displayUsage}
-      usedTokens={usage.totalTokens}
-    >
-      <ContextTrigger />
-      <ContextContent>
-        <ContextContentHeader />
-        <ContextContentBody className="space-y-2">
-          <ContextInputUsage />
-          <ContextOutputUsage />
-        </ContextContentBody>
-        <ContextContentFooter>{`Model: ${usage.modelId}`}</ContextContentFooter>
-      </ContextContent>
-    </Context>
-  );
-}
-
 function retryUserMessageId(message: AgentUIMessage): string {
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
@@ -449,7 +411,7 @@ export function AgentMessage({
           <InlineMessageError message={safeAgentErrorText(retryErrorCode)} />
         )}
       </MessageContent>
-      {messageText.length === 0 && error === null && messageMetadata.usage === null ? null : (
+      {messageText.length === 0 && error === null ? null : (
         <MessageActions>
           {messageText.length === 0 ? null : (
             <MessageAction
@@ -459,9 +421,6 @@ export function AgentMessage({
             >
               <IconCopy className="size-3" />
             </MessageAction>
-          )}
-          {messageMetadata.usage === null ? null : (
-            <MessageUsage usage={messageMetadata.usage} />
           )}
           {error === null ? null : (
             <Button

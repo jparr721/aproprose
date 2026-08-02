@@ -21,6 +21,10 @@ const ICON_STROKE_WIDTH = 2;
 
 type ModelId = string;
 
+function usagePercent(usedTokens: number, maxTokens: number): number {
+  return maxTokens === 0 ? 0 : usedTokens / maxTokens;
+}
+
 interface ContextSchema {
   usedTokens: number;
   maxTokens: number;
@@ -64,7 +68,7 @@ export const Context = ({
 const ContextIcon = () => {
   const { usedTokens, maxTokens } = useContextValue();
   const circumference = 2 * Math.PI * ICON_RADIUS;
-  const usedPercent = usedTokens / maxTokens;
+  const usedPercent = usagePercent(usedTokens, maxTokens);
   const dashOffset = circumference * (1 - usedPercent);
 
   return (
@@ -106,7 +110,7 @@ export type ContextTriggerProps = ComponentProps<typeof Button>;
 
 export const ContextTrigger = ({ children, ...props }: ContextTriggerProps) => {
   const { usedTokens, maxTokens } = useContextValue();
-  const usedPercent = usedTokens / maxTokens;
+  const usedPercent = usagePercent(usedTokens, maxTokens);
   const renderedPercent = new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 1,
     style: "percent",
@@ -146,7 +150,7 @@ export const ContextContentHeader = ({
   ...props
 }: ContextContentHeaderProps) => {
   const { usedTokens, maxTokens } = useContextValue();
-  const usedPercent = usedTokens / maxTokens;
+  const usedPercent = usagePercent(usedTokens, maxTokens);
   const displayPct = new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 1,
     style: "percent",
@@ -154,9 +158,12 @@ export const ContextContentHeader = ({
   const used = new Intl.NumberFormat("en-US", {
     notation: "compact",
   }).format(usedTokens);
-  const total = new Intl.NumberFormat("en-US", {
-    notation: "compact",
-  }).format(maxTokens);
+  const total =
+    maxTokens === 0
+      ? "-"
+      : new Intl.NumberFormat("en-US", {
+          notation: "compact",
+        }).format(maxTokens);
 
   return (
     <div className={cn("w-full space-y-2 p-3", className)} {...props}>

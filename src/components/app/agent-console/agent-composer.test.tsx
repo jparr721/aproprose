@@ -641,6 +641,14 @@ describe("AgentComposer submission task", () => {
 });
 
 describe("AgentComposer context usage", () => {
+  it("shows zero context usage before the first response", () => {
+    render(<AgentComposer />);
+
+    expect(screen.getByRole("button", { name: /0%/ }).textContent).toContain(
+      "0%",
+    );
+  });
+
   it("renders latest usage, context window, and provider-qualified model IDs", async () => {
     useAgentConsoleStore.setState({ lastUsage: usage });
     const rendered = render(<AgentComposer />);

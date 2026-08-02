@@ -17,9 +17,7 @@ describe("AgentDiffPreview", () => {
 
     const addition = screen.getByText("shone.");
     expect(addition.tagName).toBe("INS");
-    expect(addition.className).toContain("bg-success/10");
-    expect(addition.className).not.toContain("text-success-foreground");
-    expect(addition.className).not.toContain("text-success");
+    expect(addition.className).toBe("bg-success/10 no-underline");
 
     const deletion = screen.getByText("slept.");
     expect(deletion.tagName).toBe("DEL");

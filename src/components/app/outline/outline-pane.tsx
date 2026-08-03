@@ -1,4 +1,4 @@
-import { IconLayoutKanban, IconX } from "@tabler/icons-react";
+import { Kanban as IconLayoutKanban, X as IconX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TypographySmall } from "@/components/ui/typography";
 import { OutlineBoard } from "@/components/app/outline/outline-board";

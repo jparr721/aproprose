@@ -25,14 +25,34 @@ export type ConversationContentProps = ComponentProps<
 >;
 
 export const ConversationContent = ({
+  children,
   className,
+  scrollClassName,
   ...props
-}: ConversationContentProps) => (
-  <StickToBottom.Content
-    className={cn("flex flex-col gap-8 p-4", className)}
-    {...props}
-  />
-);
+}: ConversationContentProps) => {
+  const context = useStickToBottomContext();
+  const { contentRef, scrollRef } = context;
+  return (
+    <div
+      aria-label="Conversation messages"
+      className={cn(
+        scrollClassName,
+        "size-full [scrollbar-gutter:stable_both-edges]",
+      )}
+      data-slot="conversation-viewport"
+      ref={scrollRef}
+      role="region"
+    >
+      <div
+        className={cn("flex flex-col gap-8 p-4", className)}
+        ref={contentRef}
+        {...props}
+      >
+        {typeof children === "function" ? children(context) : children}
+      </div>
+    </div>
+  );
+};
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {
   title?: string;

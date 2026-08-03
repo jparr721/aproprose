@@ -15,18 +15,17 @@ import type {
   Block,
   BlockTextEdit,
   BlockType,
+  Card,
   ChapterRef,
   ChapterStatus,
   Character,
   CompileError,
   ContinuityFlag,
   LoreEntry,
-  ManuscriptProposal,
   NovelMetadata,
   Outline,
   ProjectInfo,
   ProjectMeta,
-  ProposalApplyResult,
   RecentProject,
   SkeletonModel,
   SculptProposal,
@@ -62,6 +61,22 @@ import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
+import { projectMetaFingerprint } from "@/lib/ai/agent-context";
+import {
+  conflictingTargetChangeIds,
+  invalidProposalCorrelationIds,
+  materializeManuscriptChanges,
+  validateManuscriptChanges,
+  validateOutlineChanges,
+} from "@/lib/ai/agent-proposals";
+import type {
+  AgentOutlineApplyResult,
+  AgentProposalApplyResult,
+  ManuscriptPendingProposal,
+  OutlinePendingChange,
+  OutlinePendingProposal,
+  OutlineUndoToken,
+} from "@/lib/ai/agent-types";
 import {
   addCard as addCardModel,
   addCharacterToCard as addCharacterToCardModel,
@@ -71,6 +86,7 @@ import {
   editCard as editCardModel,
   editChapterField,
   editPremise,
+  getChapterOutline,
   moveCardToChapter as moveCardToChapterModel,
   moveCardWithin as moveCardWithinModel,
   removeCard as removeCardModel,
@@ -126,6 +142,7 @@ const LOADING_RESET = {
   chapterDirty: false,
   compile: EMPTY_COMPILE,
   error: null,
+  saveError: null,
   past: [],
   future: [],
   lastTextEditId: null,
@@ -184,6 +201,7 @@ interface ProjectState {
 
   compile: CompileState;
   error: string | null;
+  saveError: string | null;
 
   // lifecycle
   init: () => Promise<void>;
@@ -223,9 +241,10 @@ interface ProjectState {
   formatBlockText: (id: string, text: string) => void;
   /** Apply several text edits as a SINGLE undo step (AI "Accept all"). */
   applyBlockEdits: (edits: BlockTextEdit[]) => void;
-  /** Apply the kept changes of a reviewed proposal as ONE undo step. Returns
-   *  counts so the caller can warn about skipped (vanished-target) changes. */
-  applyManuscriptProposal: (proposal: ManuscriptProposal, kept: number[]) => ProposalApplyResult;
+  applyAgentManuscriptProposal: (
+    proposal: ManuscriptPendingProposal,
+    changeIds: string[],
+  ) => AgentProposalApplyResult;
   updateBlock: (id: string, patch: Partial<Block>) => void;
   changeType: (id: string, type: BlockType) => void;
   changeSpeaker: (id: string, speaker: string) => void;
@@ -243,7 +262,9 @@ interface ProjectState {
    */
   mergeWithPrevious: (id: string) => void;
   deleteBlock: (id: string) => void;
+  deleteBlocks: (ids: string[]) => void;
   moveBlock: (id: string, dir: -1 | 1) => void;
+  moveBlocks: (ids: string[], dir: -1 | 1) => void;
   /** Drag-reorder: move `fromId` to where `toId` currently sits (arrayMove). */
   reorderBlock: (fromId: string, toId: string) => void;
 
@@ -289,7 +310,11 @@ interface ProjectState {
   setChapterAct: (chapterId: string, act: ActKind | null) => void;
   setChapterPlotPoint: (chapterId: string, plotPoint: BeatType | null) => void;
   setChapterField: (chapterId: string, patch: { premise?: string; goal?: string; conflict?: string; turn?: string }) => void;
-  applySculpt: (chapterId: string, proposal: SculptProposal, kept: number[]) => void;
+  applyAgentOutlineProposal: (
+    proposal: OutlinePendingProposal,
+    changeIds: string[],
+  ) => AgentOutlineApplyResult;
+  undoAgentOutlineProposal: (token: OutlineUndoToken) => boolean;
 }
 
 const HISTORY_CAP = 100;
@@ -303,6 +328,162 @@ interface HistoryEntry {
 
 const capPush = (stack: HistoryEntry[], snapshot: HistoryEntry): HistoryEntry[] =>
   [...stack, snapshot].slice(-HISTORY_CAP);
+
+function invalidSelectedChangeIds(
+  proposalChanges: readonly { id: string }[],
+  changeIds: readonly string[],
+): string[] {
+  const proposalCounts = new Map<string, number>();
+  for (const change of proposalChanges) {
+    proposalCounts.set(change.id, (proposalCounts.get(change.id) ?? 0) + 1);
+  }
+  const selectedCounts = new Map<string, number>();
+  for (const changeId of changeIds) {
+    selectedCounts.set(changeId, (selectedCounts.get(changeId) ?? 0) + 1);
+  }
+  return [
+    ...new Set(
+      changeIds.filter(
+        (changeId) =>
+          proposalCounts.get(changeId) !== 1 ||
+          selectedCounts.get(changeId) !== 1,
+      ),
+    ),
+  ];
+}
+
+interface ManuscriptProposalMutation {
+  blocks: Block[];
+  selectedId: string | null;
+  selectedIds: string[];
+  editing: boolean;
+  editCaret: "start" | "end" | number | null;
+  chapterDirty: true;
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  lastTextEditId: null;
+}
+
+function manuscriptProposalMutation(
+  state: ProjectState,
+  blocks: Block[],
+): ManuscriptProposalMutation {
+  const liveIds = new Set(blocks.map((block) => block.id));
+  const selectedIds = state.selectedIds.filter((id) => liveIds.has(id));
+  const selectionLost =
+    state.selectedId !== null && !liveIds.has(state.selectedId);
+  const selectedId = selectionLost
+    ? selectedIds[selectedIds.length - 1] ?? null
+    : state.selectedId;
+  return {
+    blocks,
+    selectedId,
+    selectedIds,
+    editing: selectionLost ? false : state.editing,
+    editCaret: selectionLost ? null : state.editCaret,
+    chapterDirty: true,
+    past: capPush(state.past, {
+      blocks: state.blocks,
+      selectedId: state.selectedId,
+    }),
+    future: [],
+    lastTextEditId: null,
+  };
+}
+
+function sameCardOrder(left: Card[], right: Card[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((card, index) => card.id === right[index].id)
+  );
+}
+
+function outlineChangeCanApply(
+  change: OutlinePendingChange["change"],
+  cards: Card[],
+): boolean {
+  if (change.kind === "add") return change.cardId === null;
+  if (
+    change.cardId === null ||
+    !cards.some((card) => card.id === change.cardId)
+  ) {
+    return false;
+  }
+  if (change.kind === "rewrite") {
+    return change.title !== null || change.intention !== null;
+  }
+  if (change.kind === "move") {
+    return change.toIndex !== null && Number.isInteger(change.toIndex);
+  }
+  return true;
+}
+
+function outlineChangeLanded(
+  change: OutlinePendingChange["change"],
+  before: Card[],
+  after: Card[],
+): boolean {
+  if (change.kind === "add") {
+    const added = after[after.length - 1];
+    return (
+      after.length === before.length + 1 &&
+      sameCardOrder(before, after.slice(0, -1)) &&
+      added !== undefined &&
+      !before.some((card) => card.id === added.id) &&
+      added.title === (change.title ?? "") &&
+      added.intention === (change.intention ?? "")
+    );
+  }
+  if (change.cardId === null) return false;
+  if (change.kind === "remove") {
+    return sameCardOrder(
+      before.filter((card) => card.id !== change.cardId),
+      after,
+    );
+  }
+  if (change.kind === "rewrite") {
+    const previous = before.find((card) => card.id === change.cardId);
+    const rewritten = after.find((card) => card.id === change.cardId);
+    return (
+      previous !== undefined &&
+      rewritten !== undefined &&
+      sameCardOrder(before, after) &&
+      rewritten.title === (change.title ?? previous.title) &&
+      rewritten.intention === (change.intention ?? previous.intention)
+    );
+  }
+  if (change.toIndex === null) return false;
+  const expected = [...before];
+  const from = expected.findIndex((card) => card.id === change.cardId);
+  if (from < 0) return false;
+  const [moved] = expected.splice(from, 1);
+  const to = Math.max(0, Math.min(change.toIndex, expected.length));
+  expected.splice(to, 0, moved);
+  return sameCardOrder(expected, after);
+}
+
+function applyOutlineChangesStrict(
+  chapters: ProjectMeta["chapters"],
+  chapterId: string,
+  summary: string,
+  changes: OutlinePendingChange[],
+): ProjectMeta["chapters"] | null {
+  let next = chapters;
+  for (const item of changes) {
+    const before = getChapterOutline(next, chapterId).cards;
+    if (!outlineChangeCanApply(item.change, before)) return null;
+    const proposal: SculptProposal = {
+      chapterId,
+      summary,
+      changes: [item.change],
+    };
+    const candidate = applySculptModel(next, chapterId, proposal, [0]);
+    const after = getChapterOutline(candidate, chapterId).cards;
+    if (!outlineChangeLanded(item.change, before, after)) return null;
+    next = candidate;
+  }
+  return next;
+}
 
 function notifyBuildFailed(errorCount: number): void {
   toast.error(
@@ -414,6 +595,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     saving: false,
     compile: EMPTY_COMPILE,
     error: null,
+    saveError: null,
     past: [],
     future: [],
     lastTextEditId: null,
@@ -481,6 +663,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         chapterDirty: false,
         compile: EMPTY_COMPILE,
         error: null,
+        saveError: null,
         past: [],
         future: [],
         lastTextEditId: null,
@@ -505,6 +688,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           editCaret: null,
           chapterDirty: false,
           error: null,
+          saveError: null,
           past: [],
           future: [],
           lastTextEditId: null,
@@ -611,7 +795,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
-          else set({ activeChapterId: null, blocks: [], selectedId: null, selectedIds: [], editing: false, editCaret: null });
+          else
+            set({
+              activeChapterId: null,
+              blocks: [],
+              selectedId: null,
+              selectedIds: [],
+              editing: false,
+              editCaret: null,
+              saveError: null,
+            });
         }
       } catch (e) {
         toast.error("Couldn't delete the chapter", { description: String(e) });
@@ -759,40 +952,83 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    // Apply the author-kept changes of a reviewed ManuscriptProposal as ONE undo
-    // step. The pure fold lives in lib/blocks/proposal.ts; this wraps it with
-    // history, selection pruning, and the meta-backed speaker resolver.
-    applyManuscriptProposal: (proposal, kept) => {
-      if (kept.length === 0) return { applied: 0, skipped: 0 };
-      const s = get();
+    applyAgentManuscriptProposal: (proposal, changeIds) => {
+      const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);
+      if (mismatchedChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: mismatchedChangeIds,
+          reason: "mismatched-precondition",
+        };
+      }
+      const state = get();
+      if (
+        state.project === null ||
+        state.project.root !== proposal.projectRoot ||
+        state.activeChapterId !== proposal.chapterId ||
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        return { status: "stale", staleChangeIds: changeIds };
+      }
+      const invalidChangeIds = invalidSelectedChangeIds(
+        proposal.changes,
+        changeIds,
+      );
+      if (invalidChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds,
+          reason: "unknown-selection",
+        };
+      }
+      const selected = new Set(changeIds);
+      const selectedProposal = {
+        ...proposal,
+        changes: proposal.changes.filter((item) => selected.has(item.id)),
+      };
+      const stale = validateManuscriptChanges(selectedProposal, state.blocks);
+      if (stale.length > 0) {
+        return {
+          status: "stale",
+          staleChangeIds: stale.map((item) => item.changeId),
+        };
+      }
+      const changes = materializeManuscriptChanges(
+        proposal,
+        changeIds,
+        state.blocks,
+      );
+      const conflicts = conflictingTargetChangeIds(
+        changes.map((change, index) => ({
+          changeId: selectedProposal.changes[index].id,
+          targetId: change.kind === "insert" ? null : change.blockId,
+        })),
+      );
+      if (conflicts.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: conflicts,
+          reason: "conflicting-changes",
+        };
+      }
       const resolveSpeakerId = (name: string): string | undefined =>
-        s.meta.characters.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id;
-      const changes = kept.map((i) => proposal.changes[i]).filter((c) => c !== undefined);
-      const outcome = applyProposal(s.blocks, changes, resolveSpeakerId);
-      // Nothing landed (every kept change targeted a vanished block): report the
-      // skips without burning an undo step on an identical snapshot.
-      if (outcome.applied === 0) return { applied: 0, skipped: outcome.skipped };
-      // Keep the selection in lockstep with the live list (deleteBlock precedent):
-      // prune removed ids; if the active block was removed, fall to the last
-      // surviving set member and drop out of edit mode.
-      const liveIds = new Set(outcome.blocks.map((b) => b.id));
-      const selectedIds = s.selectedIds.filter((id) => liveIds.has(id));
-      const selectionLost = s.selectedId !== null && !liveIds.has(s.selectedId);
-      const selectedId = selectionLost
-        ? selectedIds[selectedIds.length - 1] ?? null
-        : s.selectedId;
-      set({
-        blocks: outcome.blocks,
-        selectedId,
-        selectedIds,
-        editing: selectionLost ? false : s.editing,
-        editCaret: selectionLost ? null : s.editCaret,
-        chapterDirty: true,
-        past: capPush(s.past, { blocks: s.blocks, selectedId: s.selectedId }),
-        future: [],
-        lastTextEditId: null,
-      });
-      return { applied: outcome.applied, skipped: outcome.skipped };
+        state.meta.characters.find(
+          (character) => character.name.toLowerCase() === name.toLowerCase(),
+        )?.id;
+      const outcome = applyProposal(state.blocks, changes, resolveSpeakerId);
+      if (outcome.applied !== changes.length || outcome.skipped !== 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: selectedProposal.changes.map((item) => item.id),
+          reason: "apply-failed",
+        };
+      }
+      if (changes.length > 0) {
+        set(manuscriptProposalMutation(state, outcome.blocks));
+      }
+      return { status: "applied", appliedChangeIds: changeIds };
     },
 
     updateBlock: (id, patch) =>
@@ -971,18 +1207,24 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    deleteBlock: (id) =>
+    deleteBlocks: (ids) =>
       set((s) => {
-        const idx = s.blocks.findIndex((b) => b.id === id);
-        const blocks = s.blocks.filter((b) => b.id !== id);
+        const deletedIds = new Set(ids);
+        const firstDeletedIndex = s.blocks.findIndex((block) =>
+          deletedIds.has(block.id),
+        );
+        if (firstDeletedIndex < 0) return {};
+        const blocks = s.blocks.filter((block) => !deletedIds.has(block.id));
         // Keep the multi-selection in lockstep with the block list: drop the
         // deleted id so the set never references a block that no longer exists.
-        const selectedIds = s.selectedIds.filter((x) => x !== id);
+        const selectedIds = s.selectedIds.filter((id) => !deletedIds.has(id));
         const selectedId =
-          s.selectedId === id
+          s.selectedId !== null && deletedIds.has(s.selectedId)
             ? // Deleting the active block: keep the active pointer on a surviving
               // member of the set if one remains, else the document neighbour.
-              (selectedIds[selectedIds.length - 1] ?? blocks[Math.max(0, idx - 1)]?.id ?? null)
+              (selectedIds[selectedIds.length - 1] ??
+                blocks[Math.max(0, firstDeletedIndex - 1)]?.id ??
+                null)
             : s.selectedId;
         return {
           blocks,
@@ -998,14 +1240,37 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }),
 
-    moveBlock: (id, dir) =>
+    deleteBlock: (id) => get().deleteBlocks([id]),
+
+    moveBlocks: (ids, dir) =>
       set((s) => {
-        const idx = s.blocks.findIndex((b) => b.id === id);
-        const to = idx + dir;
-        if (idx < 0 || to < 0 || to >= s.blocks.length) return {};
         const next = [...s.blocks];
-        const [moved] = next.splice(idx, 1);
-        next.splice(to, 0, moved);
+        const selectedIds = new Set(ids);
+        let moved = false;
+
+        if (dir === -1) {
+          for (let index = 1; index < next.length; index += 1) {
+            if (
+              selectedIds.has(next[index].id) &&
+              !selectedIds.has(next[index - 1].id)
+            ) {
+              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+              moved = true;
+            }
+          }
+        } else {
+          for (let index = next.length - 2; index >= 0; index -= 1) {
+            if (
+              selectedIds.has(next[index].id) &&
+              !selectedIds.has(next[index + 1].id)
+            ) {
+              [next[index], next[index + 1]] = [next[index + 1], next[index]];
+              moved = true;
+            }
+          }
+        }
+
+        if (!moved) return {};
         // Reordering changes emitted output even for clean blocks; mark them so
         // serialization uses positions consistently.
         return {
@@ -1016,6 +1281,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastTextEditId: null,
         };
       }),
+
+    moveBlock: (id, dir) => get().moveBlocks([id], dir),
 
     // Drag-reorder via @dnd-kit: drop `fromId` onto `toId`'s slot. Mirrors
     // arrayMove (remove, then insert at the target's original index) and keeps
@@ -1088,7 +1355,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       if (!project || !activeChapterId || !chapterDirty) return;
       const chapter = project.chapters.find((c) => c.id === activeChapterId);
       if (!chapter) return;
-      set({ saving: true });
+      set({ saving: true, saveError: null });
       try {
         const source = serializeChapter(blocks);
         await writeTextFile(project.root, chapter.file, source);
@@ -1118,6 +1385,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             selectedIds: sameCount ? s.selectedIds : [],
             chapterDirty: false,
             saving: false,
+            saveError: null,
             past: [],
             future: [],
             lastTextEditId: null,
@@ -1145,7 +1413,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // instead of waiting for the next status poll tick.
         void useSyncStore.getState().refreshStatus();
       } catch (e) {
-        set({ saving: false, error: String(e) });
+        const message = String(e);
+        set({ saving: false, error: message, saveError: message });
       }
     },
 
@@ -1368,20 +1637,116 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
-    applySculpt: (chapterId, proposal, kept) =>
-      set((s) => {
-        const meta = { ...s.meta, chapters: applySculptModel(s.meta.chapters, chapterId, proposal, kept) };
-        persistMeta(meta);
-        return { meta };
-      }),
+    applyAgentOutlineProposal: (proposal, changeIds) => {
+      const mismatchedChangeIds = invalidProposalCorrelationIds(proposal);
+      if (mismatchedChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: mismatchedChangeIds,
+          reason: "mismatched-precondition",
+        };
+      }
+      const state = get();
+      if (
+        state.project === null ||
+        state.project.root !== proposal.projectRoot ||
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        return { status: "stale", staleChangeIds: changeIds };
+      }
+      const invalidChangeIds = invalidSelectedChangeIds(
+        proposal.changes,
+        changeIds,
+      );
+      if (invalidChangeIds.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds,
+          reason: "unknown-selection",
+        };
+      }
+      const chapter = getChapterOutline(
+        state.meta.chapters,
+        proposal.chapterId,
+      );
+      const selected = new Set(changeIds);
+      const selectedProposal = {
+        ...proposal,
+        changes: proposal.changes.filter((item) => selected.has(item.id)),
+      };
+      const stale = validateOutlineChanges(selectedProposal, chapter.cards);
+      if (stale.length > 0) {
+        return {
+          status: "stale",
+          staleChangeIds: stale.map((item) => item.changeId),
+        };
+      }
+      const conflicts = conflictingTargetChangeIds(
+        selectedProposal.changes.map((item) => ({
+          changeId: item.id,
+          targetId: item.change.kind === "add" ? null : item.change.cardId,
+        })),
+      );
+      if (conflicts.length > 0) {
+        return {
+          status: "invalid",
+          invalidChangeIds: conflicts,
+          reason: "conflicting-changes",
+        };
+      }
+      const before = state.meta;
+      const chapters = applyOutlineChangesStrict(
+        before.chapters,
+        proposal.chapterId,
+        proposal.summary,
+        selectedProposal.changes,
+      );
+      if (chapters === null) {
+        return {
+          status: "invalid",
+          invalidChangeIds: selectedProposal.changes.map((item) => item.id),
+          reason: "apply-failed",
+        };
+      }
+      const meta = { ...before, chapters };
+      const undoToken: OutlineUndoToken = {
+        id: uid(),
+        projectRoot: state.project.root,
+        before,
+        afterFingerprint: projectMetaFingerprint(meta),
+      };
+      persistMeta(meta);
+      set({ meta });
+      return {
+        status: "applied",
+        appliedChangeIds: changeIds,
+        undoToken,
+      };
+    },
+
+    undoAgentOutlineProposal: (token) => {
+      const state = get();
+      if (
+        state.project === null ||
+        state.project.root !== token.projectRoot ||
+        projectMetaFingerprint(state.meta) !== token.afterFingerprint
+      ) {
+        return false;
+      }
+      persistMeta(token.before);
+      set({ meta: token.before });
+      return true;
+    },
   };
 });
 
 /**
  * The blocks a `"block"`-scoped operation acts on: the multi-selection set when
  * one is active, otherwise the single selected block (empty when nothing is
- * selected). The single definition of the selection-precedence rule, shared by
- * `buildEditRequest` and the Edit-tab cache key so they cannot drift.
+ * selected). This is the single definition of the selection-precedence rule
+ * shared by agent entry points.
  */
 export function selectionTargetIds(
   selectedIds: string[],

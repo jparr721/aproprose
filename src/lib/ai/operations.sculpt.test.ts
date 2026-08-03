@@ -29,6 +29,21 @@ describe("sanitizeSculpt", () => {
     expect(out.changes[1].cardId).toBe("b1");
   });
 
+  it("drops a malformed add that claims an existing card id", () => {
+    const p = base([
+      {
+        kind: "add",
+        cardId: "b1",
+        title: "New",
+        intention: "i",
+        toIndex: null,
+        reason: "r",
+      },
+    ]);
+
+    expect(sanitizeSculpt(p, ["b1"]).changes).toEqual([]);
+  });
+
   it("drops a move whose toIndex is null (nowhere to move)", () => {
     const p = base([
       { kind: "move", cardId: "b1", title: null, intention: null, toIndex: null, reason: "r" },

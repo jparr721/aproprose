@@ -4,7 +4,7 @@
 // Clicking either opens a popover to edit or remove the goal. Sits above Settings.
 
 import { useState } from "react";
-import { IconCheck, IconTarget } from "@tabler/icons-react";
+import { Check as IconCheck, Target as IconTarget } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,

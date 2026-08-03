@@ -1,6 +1,6 @@
-// settings-store.ts - user preferences: appearance and AI provider/model.
+// settings-store.ts - user preferences: appearance and AI model.
 //
-// One store, one concern (per CLAUDE.md). Persisted to the app config dir via the
+// One store, one concern. Persisted to the app config dir via the
 // Tauri-backed storage adapter. The ThemeController subscribes to apply the theme
 // to <html> and drive the prose-size CSS variable.
 
@@ -8,6 +8,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   DEFAULT_SETTINGS,
+  isAiProvider,
   PREFERENCE_MAX_CHARS,
   type AiProvider,
   type Settings,
@@ -15,19 +16,42 @@ import {
 } from "@/lib/types";
 import { tauriStateStorage } from "@/lib/storage";
 
-interface SettingsState extends Settings {
+export interface SettingsState extends Settings {
   /** Whether persisted settings have been read back from disk yet. */
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
   setProseSize: (proseSize: number) => void;
   setPdfZoom: (pdfZoom: number) => void;
-  setAiModel: (aiModel: string | null) => void;
   setAiProvider: (aiProvider: AiProvider) => void;
+  setAiModel: (aiModel: string | null) => void;
   setLoreTags: (loreTags: string[]) => void;
   setStyleGuide: (styleGuide: string) => void;
   setEditingRules: (editingRules: string) => void;
   setDailyWordGoal: (dailyWordGoal: number | null) => void;
   reset: () => void;
+}
+
+export function mergePersistedSettings(
+  persistedState: unknown,
+  currentState: SettingsState,
+): SettingsState {
+  if (persistedState === null || typeof persistedState !== "object") {
+    return currentState;
+  }
+  const { aiProvider, ...migrated } = persistedState as Partial<Settings> & {
+    aiProvider?: unknown;
+  };
+  return {
+    ...currentState,
+    ...migrated,
+    aiProvider: isAiProvider(aiProvider) ? aiProvider : currentState.aiProvider,
+    aiModel:
+      aiProvider !== undefined && !isAiProvider(aiProvider)
+        ? null
+        : typeof migrated.aiModel === "string" || migrated.aiModel === null
+          ? migrated.aiModel
+          : currentState.aiModel,
+  };
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -38,8 +62,8 @@ export const useSettingsStore = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setProseSize: (proseSize) => set({ proseSize }),
       setPdfZoom: (pdfZoom) => set({ pdfZoom }),
+      setAiProvider: (aiProvider) => set({ aiProvider, aiModel: null }),
       setAiModel: (aiModel) => set({ aiModel }),
-      setAiProvider: (aiProvider) => set({ aiProvider }),
       setLoreTags: (loreTags) =>
         set({ loreTags: [...new Set(loreTags.map((t) => t.trim()).filter(Boolean))] }),
       setStyleGuide: (styleGuide) => set({ styleGuide: styleGuide.slice(0, PREFERENCE_MAX_CHARS) }),
@@ -59,12 +83,13 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "settings",
       storage: createJSONStorage(() => tauriStateStorage),
+      merge: mergePersistedSettings,
       partialize: ({
         theme,
         proseSize,
         pdfZoom,
-        aiModel,
         aiProvider,
+        aiModel,
         loreTags,
         styleGuide,
         editingRules,
@@ -73,8 +98,8 @@ export const useSettingsStore = create<SettingsState>()(
         theme,
         proseSize,
         pdfZoom,
-        aiModel,
         aiProvider,
+        aiModel,
         loreTags,
         styleGuide,
         editingRules,

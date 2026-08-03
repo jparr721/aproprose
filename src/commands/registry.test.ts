@@ -112,10 +112,23 @@ describe("command registry", () => {
     expect(buildRootCommands().map((c) => c.id)).toContain("doc.build-errors");
   });
 
-  it("exposes every AI tab in the palette, including Edit", () => {
-    const ids = STATIC_COMMANDS.map((c) => c.id);
-    for (const tab of ["suggest", "edit", "critique", "brainstorm", "continuity", "muse"]) {
-      expect(ids).toContain(`ai.tab-${tab}`);
-    }
+  it("exposes only the typed AI console commands", () => {
+    const aiCommands = STATIC_COMMANDS.filter((command) => command.group === "AI");
+    expect(aiCommands.map((command) => command.id)).toEqual([
+      "ai.open",
+      "ai.mode-writing",
+      "ai.mode-edit",
+      "ai.suggest",
+      "ai.pick-up",
+      "ai.critique",
+      "ai.continuity",
+    ]);
+    expect(STATIC_COMMANDS.map((command) => command.id)).not.toContain("view.outline");
+  });
+
+  it("names the view toggle for the AI Console", () => {
+    expect(resolveStaticCommand("view.toggle-ai")?.title).toBe(
+      "Toggle AI Console",
+    );
   });
 });

@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { clamp } from "es-toolkit";
 import { toast } from "sonner";
 import {
-  IconCheck,
-  IconCopy,
-  IconMinus,
-  IconPlayerPlayFilled,
-  IconPlus,
-  IconRefresh,
-  IconX,
-} from "@tabler/icons-react";
+  Check as IconCheck,
+  Copy as IconCopy,
+  Minus as IconMinus,
+  Play as IconPlayerPlayFilled,
+  Plus as IconPlus,
+  RefreshCw as IconRefresh,
+  X as IconX,
+} from "lucide-react";
 import { PdfFindBar } from "@/components/app/pdf-find-bar";
 import {
   Alert,

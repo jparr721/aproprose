@@ -6,7 +6,7 @@
 // "Recent" group plus the grouped catalog; page-openers drill into a flat sub-list.
 
 import { useEffect, useState } from "react";
-import { IconChevronRight } from "@tabler/icons-react";
+import { ChevronRight as IconChevronRight } from "lucide-react";
 import {
   Command,
   CommandDialog,
@@ -76,6 +76,7 @@ export function CommandPalette() {
   const ctx: CommandContext = { toggleSidebar };
 
   const runCommand = (cmd: Cmd) => {
+    if (!(cmd.enabled?.() ?? true)) return;
     if (cmd.page) {
       pushPage(cmd.page);
       return;
@@ -93,12 +94,16 @@ export function CommandPalette() {
   };
 
   const commands = !open ? [] : page === "root" ? buildRootCommands() : buildPage(page);
-  const showRecent = page === "root" && query.trim() === "" && recentIds.length > 0;
-  const recentCommands = showRecent
-    ? recentIds
-        .map((id) => resolveStaticCommand(id))
-        .filter((c): c is Cmd => Boolean(c))
-    : [];
+  const recentCommands =
+    page === "root" && query.trim() === "" && recentIds.length > 0
+      ? recentIds
+          .map((id) => resolveStaticCommand(id))
+          .filter(
+            (command): command is Cmd =>
+              command !== undefined && (command.enabled?.() ?? true),
+          )
+      : [];
+  const showRecent = recentCommands.length > 0;
 
   const renderItem = (cmd: Cmd, opts?: { recent?: boolean }) => {
     const Icon = cmd.icon;

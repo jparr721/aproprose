@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IconCopy, IconMinus, IconSquare, IconX } from "@tabler/icons-react";
+import { Copy as IconCopy, Minus as IconMinus, Square as IconSquare, X as IconX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IS_MAC } from "@/lib/platform";
 

@@ -4,7 +4,7 @@
 // throw unhandled rejections, matching window-controls.tsx.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IconMinus, IconSquare, IconX } from "@tabler/icons-react";
+import { Minus as IconMinus, Square as IconSquare, X as IconX } from "lucide-react";
 import type { Command } from "./types";
 
 export const windowCommands: Command[] = [

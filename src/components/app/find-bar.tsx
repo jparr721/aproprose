@@ -4,27 +4,51 @@
 // keys; all match/replace logic lives in the find store. Marked `data-find-widget`
 // so editor history/format shortcuts stay native while typing here (see lib/dom.ts).
 
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import {
-  IconAbc,
-  IconChevronDown,
-  IconChevronRight,
-  IconChevronUp,
-  IconLetterCase,
-  IconRegex,
-  IconReplace,
-  IconX,
-} from "@tabler/icons-react";
-import { FindOptionToggle } from "@/components/app/find-option-toggle";
+  WholeWord as IconAbc,
+  ChevronDown as IconChevronDown,
+  ChevronRight as IconChevronRight,
+  ChevronUp as IconChevronUp,
+  CaseSensitive as IconLetterCase,
+  Regex as IconRegex,
+  Replace as IconReplace,
+  X as IconX,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { useFindStore } from "@/stores/find-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSearchSurfaceStore } from "@/stores/search-surface-store";
+
+function OptionToggle({
+  active,
+  title,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <InputGroupButton
+      size="icon-xs"
+      variant={active ? "secondary" : "ghost"}
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+    >
+      {children}
+    </InputGroupButton>
+  );
+}
 
 export function FindBar() {
   const open = useSearchSurfaceStore((state) => state.openSurface === "editor");
@@ -70,15 +94,15 @@ export function FindBar() {
     if (open) recompute();
   }, [open, blocks, query, caseSensitive, wholeWord, regex, recompute]);
 
-  // Center the active match when the SEARCH changes (query / options / a fresh
-  // Cmd+F) but NOT when `blocks` change, so typing in another block with find open
+  // Center the active match when the search changes (query / options / a fresh
+  // open) but NOT when `blocks` change, so typing in another block with find open
   // doesn't yank the viewport. Declared after the recompute effect, and zustand's
   // set is synchronous, so the current index is already fresh here.
   useEffect(() => {
     if (open) scrollToCurrent();
   }, [open, query, caseSensitive, wholeWord, regex, focusRevision, scrollToCurrent]);
 
-  // Focus + select the query on open and on every Cmd+F.
+  // Focus + select the query on open and on every global Find command.
   useEffect(() => {
     if (!open) return;
     const el = inputRef.current;
@@ -148,27 +172,15 @@ export function FindBar() {
               {counter}
             </InputGroupAddon>
             <InputGroupAddon align="inline-end">
-              <FindOptionToggle
-                active={caseSensitive}
-                title="Match case"
-                onClick={toggleCase}
-              >
+              <OptionToggle active={caseSensitive} title="Match case" onClick={toggleCase}>
                 <IconLetterCase />
-              </FindOptionToggle>
-              <FindOptionToggle
-                active={wholeWord}
-                title="Match whole word"
-                onClick={toggleWord}
-              >
+              </OptionToggle>
+              <OptionToggle active={wholeWord} title="Match whole word" onClick={toggleWord}>
                 <IconAbc />
-              </FindOptionToggle>
-              <FindOptionToggle
-                active={regex}
-                title="Use regular expression"
-                onClick={toggleRegex}
-              >
+              </OptionToggle>
+              <OptionToggle active={regex} title="Use regular expression" onClick={toggleRegex}>
                 <IconRegex />
-              </FindOptionToggle>
+              </OptionToggle>
             </InputGroupAddon>
           </InputGroup>
           <Button

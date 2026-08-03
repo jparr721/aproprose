@@ -1,5 +1,5 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon } from "@tabler/icons-react"
+import { CircleCheck as IconCircleCheck, Info as IconInfoCircle, TriangleAlert as IconAlertTriangle, OctagonAlert as IconAlertOctagon } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useSettingsStore } from "@/stores/settings-store"
 

@@ -1,13 +1,19 @@
 // @vitest-environment happy-dom
-//
-// The pick-up command must park an auto-running muse intent carrying the canned
-// directive plus a cursor line read from the project store's selectedId, and
-// open the panel on the Muse tab. Stores are real (store-test convention); only
-// the tauri persistence boundary under project-store is mocked (the established
-// edit-tab.test.tsx pattern). registry.test.ts already covers the generic
-// invariants (unique ids, leaf-xor-page) for every command including this one.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  AgentIntent,
+  AgentUIMessage,
+  ManuscriptPendingProposal,
+} from "@/lib/ai/agent-types";
+
+const controller = vi.hoisted(() => ({
+  dispatchAgentIntent: vi.fn<(intent: AgentIntent) => Promise<void>>(),
+}));
+
+vi.mock("@/lib/ai/agent-controller", () => ({
+  dispatchAgentIntent: controller.dispatchAgentIntent,
+}));
 
 vi.mock("@/lib/tauri", () => ({
   readAppData: vi.fn().mockResolvedValue(null),
@@ -15,64 +21,340 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { aiCommands } from "@/commands/ai";
-import { useAiIntentStore } from "@/stores/ai-intent-store";
+import type { Command } from "@/commands/types";
+import {
+  EMPTY_AGENT_STATE,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import { PICK_UP_AND_GO_DIRECTIVE, pickUpCursorSuffix } from "@/lib/ai/prompts";
+import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
 
-const runPickUp = () => {
-  const cmd = aiCommands.find((c) => c.id === "ai.pick-up");
-  if (!cmd?.run) throw new Error("ai.pick-up leaf command not registered");
-  void cmd.run({ toggleSidebar: () => {} });
+const PICK_UP_DIRECTIVE =
+  "Continue from the anchor. If later prose exists, propose only the minimum bridge into it and preserve that later prose. If the anchor is final prose, continue after it.";
+
+const project: ProjectInfo = {
+  root: "/book",
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [
+    {
+      id: "chapter-1",
+      label: "1",
+      title: "The Crossing",
+      file: "chapter-1.tex",
+      wordCount: 12,
+    },
+  ],
 };
 
-describe("pickUpCursorSuffix", () => {
-  // Raw literals on purpose: the directive's wording promises exactly these
-  // lines, so a drift in the helper must fail here, not be rebuilt by it.
-  it("pins the exact cursor-line literals", () => {
-    expect(pickUpCursorSuffix("b7")).toBe("\n\nThe cursor block id is [b7].");
-    expect(pickUpCursorSuffix(null)).toBe(
-      "\n\nNo cursor is set; continue from where the chapter's prose currently ends.",
-    );
+const block = (id: string, type: Block["type"]): Block => ({
+  id,
+  type,
+  text: `${id} text`,
+  raw: "",
+  dirty: false,
+});
+
+const blocks: Block[] = [
+  block("block-1", "narration"),
+  block("note", "scratchpad"),
+  block("block-2", "dialogue"),
+];
+
+const meta: ProjectMeta = {
+  version: 3,
+  characters: [],
+  lore: [],
+  statuses: {},
+  outline: { premise: "" },
+  chapters: {
+    "chapter-1": {
+      act: null,
+      plotPoint: null,
+      premise: "",
+      goal: "",
+      conflict: "",
+      turn: "",
+      characterIds: [],
+      cards: [],
+    },
+  },
+};
+
+const message: AgentUIMessage = {
+  id: "message-1",
+  role: "assistant",
+  metadata: {
+    runId: "run-1",
+    mode: "writing",
+    task: { kind: "conversation", targetChapterId: "chapter-1" },
+    state: "complete",
+    createdAt: "2026-07-30T12:00:00.000Z",
+    error: null,
+    errorCode: null,
+    retryOf: null,
+    usage: null,
+  },
+  parts: [{ type: "text", text: "Existing conversation" }],
+};
+
+const proposal: ManuscriptPendingProposal = {
+  id: "proposal-1",
+  kind: "manuscript",
+  projectRoot: "/book",
+  chapterId: "chapter-1",
+  summary: "Existing proposal",
+  changes: [],
+  createdAt: "2026-07-30T12:00:00.000Z",
+  originatingMessageId: "message-1",
+};
+
+function command(id: string): Command {
+  const found = aiCommands.find((candidate) => candidate.id === id);
+  if (found === undefined) throw new Error(`Command not registered: ${id}`);
+  return found;
+}
+
+async function runCommand(id: string): Promise<void> {
+  const run = command(id).run;
+  if (run === undefined) throw new Error(`Leaf command not registered: ${id}`);
+  await run({ toggleSidebar: () => undefined });
+}
+
+beforeEach(() => {
+  controller.dispatchAgentIntent.mockReset().mockImplementation(async (intent) => {
+    useViewStore.getState().openAiConsole();
+    if (intent.kind === "focus" || intent.kind === "prefill" || intent.kind === "run") {
+      useAgentConsoleStore.getState().setMode(intent.mode);
+    }
+  });
+  useViewStore.setState({ aiOpen: false, focus: false });
+  useAgentConsoleStore.setState({
+    ...EMPTY_AGENT_STATE,
+    mode: "writing",
+    messages: [message],
+    pendingProposal: proposal,
+    requestedProjectRoot: "/book",
+    activeProjectRoot: "/book",
+    hydratedProjectRoot: "/book",
+  });
+  useProjectStore.setState({
+    project,
+    meta,
+    activeChapterId: "chapter-1",
+    blocks,
+    selectedId: "block-1",
+    selectedIds: ["block-2", "block-1"],
+    editing: false,
   });
 });
 
-describe("ai.pick-up command", () => {
-  beforeEach(() => {
-    useAiIntentStore.setState({ pending: null });
-    useProjectStore.setState({ selectedId: null, editing: false });
+describe("AI command catalog", () => {
+  it("registers the exact seven unique commands and titles", () => {
+    expect(aiCommands.map(({ id, title }) => ({ id, title }))).toEqual([
+      { id: "ai.open", title: "Open AI Console" },
+      { id: "ai.mode-writing", title: "Use Writing Mode" },
+      { id: "ai.mode-edit", title: "Use Edit Mode" },
+      { id: "ai.suggest", title: "Suggest From Context" },
+      { id: "ai.pick-up", title: "Pick Up From Here" },
+      { id: "ai.critique", title: "Critique Chapter" },
+      { id: "ai.continuity", title: "Check Continuity" },
+    ]);
+    const ids = aiCommands.map(({ id }) => id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("parks an auto-running muse intent carrying the directive and the cursor line", () => {
-    useProjectStore.setState({ selectedId: "b7", editing: true });
-    runPickUp();
+  it("contains no screen terminology", () => {
+    for (const entry of aiCommands) {
+      expect(entry.title).not.toMatch(/tab/i);
+    }
+  });
 
-    expect(useAiIntentStore.getState().pending).toEqual({
-      tab: "muse",
-      instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix("b7"),
-      autoRun: true,
+  it("opens the existing console without dispatching or clearing state", async () => {
+    const messages = useAgentConsoleStore.getState().messages;
+    const pendingProposal = useAgentConsoleStore.getState().pendingProposal;
+
+    await runCommand("ai.open");
+
+    expect(useViewStore.getState().aiOpen).toBe(true);
+    expect(controller.dispatchAgentIntent).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().messages).toBe(messages);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingProposal);
+  });
+
+  it.each([
+    ["ai.mode-writing", "writing"],
+    ["ai.mode-edit", "edit"],
+  ] as const)("%s focuses %s without clearing the conversation", async (id, mode) => {
+    const messages = useAgentConsoleStore.getState().messages;
+    const pendingProposal = useAgentConsoleStore.getState().pendingProposal;
+
+    await runCommand(id);
+
+    expect(controller.dispatchAgentIntent).toHaveBeenCalledWith({
+      kind: "focus",
+      mode,
     });
-    expect(useViewStore.getState().aiTab).toBe("muse");
+    expect(useAgentConsoleStore.getState().mode).toBe(mode);
+    expect(useAgentConsoleStore.getState().messages).toBe(messages);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(pendingProposal);
   });
 
-  it("appends the no-cursor line when nothing is selected", () => {
-    runPickUp();
+  it.each(["narration", "dialogue"] as const)(
+    "enables Pick Up for selected %s prose",
+    (type) => {
+      useProjectStore.setState({
+        blocks: [block("selected", type)],
+        selectedId: "selected",
+        selectedIds: [],
+      });
+      expect(command("ai.pick-up").enabled?.()).toBe(true);
+    },
+  );
 
-    expect(useAiIntentStore.getState().pending).toEqual({
-      tab: "muse",
-      instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(null),
-      autoRun: true,
-    });
+  it.each(["lore", "scratchpad", "latex", "chapter"] as const)(
+    "disables Pick Up for selected %s content",
+    (type) => {
+      useProjectStore.setState({
+        blocks: [block("selected", type)],
+        selectedId: "selected",
+        selectedIds: [],
+      });
+      expect(command("ai.pick-up").enabled?.()).toBe(false);
+    },
+  );
+
+  it("disables Pick Up when there is no selected source", () => {
+    useProjectStore.setState({ selectedId: null, selectedIds: [] });
+    expect(command("ai.pick-up").enabled?.()).toBe(false);
   });
 
-  it("does not treat a nav-only highlight as the cursor", () => {
-    useProjectStore.setState({ selectedId: "b7", editing: false });
-    runPickUp();
+  it.each(["ai.critique", "ai.continuity"])(
+    "%s requires an active chapter",
+    (id) => {
+      expect(command(id).enabled?.()).toBe(true);
+      useProjectStore.setState({ activeChapterId: null });
+      expect(command(id).enabled?.()).toBe(false);
+    },
+  );
+});
 
-    expect(useAiIntentStore.getState().pending).toEqual({
-      tab: "muse",
-      instruction: PICK_UP_AND_GO_DIRECTIVE + pickUpCursorSuffix(null),
-      autoRun: true,
-    });
-  });
+describe("AI run commands", () => {
+  it.each([
+    {
+      id: "ai.suggest",
+      intent: {
+        kind: "run",
+        mode: "writing",
+        text: "Suggest what should come next from the selected context.",
+        refs: [
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-2",
+          },
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-1",
+          },
+        ],
+        task: { kind: "conversation", targetChapterId: "chapter-1" },
+      },
+    },
+    {
+      id: "ai.pick-up",
+      intent: {
+        kind: "run",
+        mode: "writing",
+        text: PICK_UP_DIRECTIVE,
+        refs: [
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-1",
+          },
+        ],
+        task: {
+          kind: "bridge",
+          chapterId: "chapter-1",
+          anchorBlockId: "block-1",
+          successorBlockId: "block-2",
+        },
+      },
+    },
+    {
+      id: "ai.critique",
+      intent: {
+        kind: "run",
+        mode: "edit",
+        text: "Critique this chapter with concrete, block-linked craft notes.",
+        refs: [
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-2",
+          },
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-1",
+          },
+        ],
+        task: {
+          kind: "chapter-analysis",
+          chapterId: "chapter-1",
+          analysis: "critique",
+        },
+      },
+    },
+    {
+      id: "ai.continuity",
+      intent: {
+        kind: "run",
+        mode: "edit",
+        text: "Check this chapter for continuity issues with concrete, block-linked findings.",
+        refs: [
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-2",
+          },
+          {
+            kind: "block",
+            chapterId: "chapter-1",
+            blockId: "block-1",
+          },
+        ],
+        task: {
+          kind: "chapter-analysis",
+          chapterId: "chapter-1",
+          analysis: "continuity",
+        },
+      },
+    },
+  ] satisfies Array<{ id: string; intent: AgentIntent }>)(
+    "$id snapshots the active chapter and live selected references",
+    async ({ id, intent }) => {
+      await runCommand(id);
+      useProjectStore.setState({
+        activeChapterId: null,
+        selectedId: null,
+        selectedIds: [],
+      });
+
+      expect(controller.dispatchAgentIntent).toHaveBeenCalledWith(intent);
+    },
+  );
+
 });

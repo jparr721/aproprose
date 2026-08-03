@@ -19,13 +19,12 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { IconPlus } from "@tabler/icons-react";
+import { Plus as IconPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { ActBand } from "@/components/app/outline/act-band";
-import { SculptReview } from "@/components/app/outline/sculpt-review";
 import { resolveCardDrop } from "@/lib/outline/board-dnd";
 import { actPacing } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
@@ -78,7 +77,6 @@ export function OutlineBoard() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <SculptReview />
       <div className="flex flex-col p-4 space-y-2">
         <TypographyEyebrow>Logline</TypographyEyebrow>
         <Textarea

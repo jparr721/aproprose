@@ -2,13 +2,13 @@
 
 import { clamp } from "es-toolkit";
 import {
-  IconMoon,
-  IconSettings,
-  IconSun,
-  IconSunMoon,
-  IconTextDecrease,
-  IconTextIncrease,
-} from "@tabler/icons-react";
+  Moon as IconMoon,
+  Settings as IconSettings,
+  Sun as IconSun,
+  SunMoon as IconSunMoon,
+  AArrowDown as IconTextDecrease,
+  AArrowUp as IconTextIncrease,
+} from "lucide-react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import type { Command } from "./types";

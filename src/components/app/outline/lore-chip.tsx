@@ -2,7 +2,7 @@
 //
 // Mirrors character-chip.tsx but uses lore-tint colors and an IconBook prefix.
 
-import { IconBook, IconX } from "@tabler/icons-react";
+import { Book as IconBook, X as IconX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 

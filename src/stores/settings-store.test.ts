@@ -13,8 +13,8 @@ import { DEFAULT_SETTINGS, PREFERENCE_MAX_CHARS } from "@/lib/types";
 
 beforeEach(() =>
   useSettingsStore.setState({
-    aiModel: DEFAULT_SETTINGS.aiModel,
     aiProvider: DEFAULT_SETTINGS.aiProvider,
+    aiModel: DEFAULT_SETTINGS.aiModel,
     styleGuide: DEFAULT_SETTINGS.styleGuide,
     editingRules: DEFAULT_SETTINGS.editingRules,
     dailyWordGoal: DEFAULT_SETTINGS.dailyWordGoal,
@@ -39,15 +39,54 @@ describe("settings-store aiModel", () => {
 });
 
 describe("settings-store aiProvider", () => {
-  it("defaults to openai", () => {
+  it("defaults to OpenAI", () => {
     expect(useSettingsStore.getState().aiProvider).toBe("openai");
   });
 
-  it("setAiProvider switches the active provider", () => {
-    useSettingsStore.getState().setAiProvider("codex");
-    expect(useSettingsStore.getState().aiProvider).toBe("codex");
-    useSettingsStore.getState().setAiProvider("claude");
-    expect(useSettingsStore.getState().aiProvider).toBe("claude");
+  it("switches providers and clears the incompatible model selection", () => {
+    useSettingsStore.setState({ aiModel: "gpt-4.1-mini" });
+    useSettingsStore.getState().setAiProvider("openrouter");
+    expect(useSettingsStore.getState()).toMatchObject({
+      aiProvider: "openrouter",
+      aiModel: null,
+    });
+  });
+
+  it("persists the active provider", () => {
+    useSettingsStore.getState().setAiProvider("openrouter");
+    const options = useSettingsStore.persist.getOptions();
+    const persisted = options.partialize
+      ? options.partialize(useSettingsStore.getState())
+      : {};
+    expect(persisted).toHaveProperty("aiProvider", "openrouter");
+  });
+
+  it("keeps supported provider values while merging persisted settings", () => {
+    const options = useSettingsStore.persist.getOptions();
+    if (!options.merge) {
+      throw new Error("settings persistence must define a merge function");
+    }
+    const current = useSettingsStore.getState();
+    const merged = options.merge(
+      { aiProvider: "openrouter", aiModel: "anthropic/claude-sonnet-4" },
+      current,
+    );
+    expect(merged.aiProvider).toBe("openrouter");
+    expect(merged.aiModel).toBe("anthropic/claude-sonnet-4");
+  });
+
+  it("drops retired provider values while merging persisted settings", () => {
+    const options = useSettingsStore.persist.getOptions();
+    if (!options.merge) {
+      throw new Error("settings persistence must define a merge function");
+    }
+    const current = useSettingsStore.getState();
+    const merged = options.merge(
+      { aiProvider: "codex", aiModel: "gpt-4.1-mini" },
+      current,
+    );
+    expect(merged.aiProvider).toBe("openai");
+    expect(merged.aiModel).toBeNull();
   });
 });
 

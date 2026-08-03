@@ -39,30 +39,28 @@ import { Editor } from "@/components/app/editor";
 import { SearchCoordinator } from "@/components/app/search-coordinator";
 import { OutlinePane } from "@/components/app/outline/outline-pane";
 import { PdfPane } from "@/components/app/pdf-pane";
-import { RightPanelContent, RightPanelRail } from "@/components/app/right-panel";
+import { AgentConsole } from "@/components/app/agent-console/agent-console";
 import { Welcome } from "@/components/app/welcome";
 import { UpdateChecker } from "@/components/app/update-checker";
 import { WhatsNewDialog } from "@/components/app/whats-new-dialog";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
-import { useAiPersistence } from "@/stores/ai-persistence";
+import { useAgentPersistence } from "@/stores/agent-persistence";
 import { cn } from "@/lib/utils";
 import { saveBeforeExit } from "@/lib/exit-guard";
 import { useEffect, useRef } from "react";
 
-function Workspace() {
+export function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
   const outlineOpen = useViewStore((s) => s.outlineOpen);
-  const collapsed = useViewStore((s) => s.aiCollapsed);
   const rightPanelWidth = useViewStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useViewStore((s) => s.setRightPanelWidth);
 
   const showOutline = outlineOpen && !focus;
   const showPdf = pdfOpen && !focus && !showOutline;
   const showAi = aiOpen && !focus;
-  const showContent = showAi && !collapsed;
 
   // Track the live px width during a drag in a ref (no re-render); persist it to
   // the store only on pointer release (the group's onLayoutChanged) so we don't
@@ -101,7 +99,7 @@ function Workspace() {
           <ResizablePanel id="main" minSize={360}>
             {main}
           </ResizablePanel>
-          {showContent ? (
+          {showAi ? (
             <>
               <ResizableHandle withHandle />
               <ResizablePanel
@@ -114,12 +112,11 @@ function Workspace() {
                   liveWidth.current = size.inPixels;
                 }}
               >
-                <RightPanelContent />
+                <AgentConsole />
               </ResizablePanel>
             </>
           ) : null}
         </ResizablePanelGroup>
-        {showAi ? <RightPanelRail /> : null}
       </div>
     </>
   );
@@ -212,7 +209,7 @@ function MigrationGuard() {
 }
 
 function App() {
-  useAiPersistence();
+  useAgentPersistence();
   const status = useProjectStore((s) => s.status);
 
   return (

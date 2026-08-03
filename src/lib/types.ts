@@ -14,7 +14,7 @@ export type BlockType =
   | "narration" // a prose paragraph
   | "dialogue" // a quoted utterance (+ optional action beat)
   | "lore" // worldbuilding note — never rendered (stored as a LaTeX comment)
-  | "scratchpad" // brainstorm note — never rendered (stored as a LaTeX comment)
+  | "scratchpad" // scratch note - never rendered (stored as a LaTeX comment)
   | "latex"; // raw LaTeX escape hatch — edited and emitted verbatim
 
 /** A chapter sub-kind for `chapter` blocks. */
@@ -242,24 +242,27 @@ export interface RecentProject {
 
 export type Theme = "light" | "sepia" | "dark";
 export type LayoutMode = "two" | "three" | "focus";
-export type AiProvider = "openai" | "codex" | "claude";
-/** The subscription CLI providers - exactly the non-OpenAI members of AiProvider. */
-export type CliKind = Exclude<AiProvider, "openai">;
+export type AiProvider = "openai" | "openrouter";
+
+export function isAiProvider(value: unknown): value is AiProvider {
+  return value === "openai" || value === "openrouter";
+}
+
 export interface Settings {
   theme: Theme;
   /** Editor prose font-size in px. */
   proseSize: number;
   /** PDF preview zoom as a scale factor (1 = 100%). */
   pdfZoom: number;
-  /** OpenAI model id chosen in Settings. Null until the user picks one - no default. */
-  aiModel: string | null;
-  /** Active AI provider. OpenAI uses an API key; codex/claude use the local CLI subscription. */
+  /** Active AI provider. */
   aiProvider: AiProvider;
+  /** Provider model id chosen in Settings. Null until the user picks one - no default. */
+  aiModel: string | null;
   /** Global tag list for lore entries. */
   loreTags: string[];
   /** The author's standing writing voice, injected into every AI operation. */
   styleGuide: string;
-  /** Standing mechanical editing rules, injected into Edit and Muse only. */
+  /** Standing writing and editing instructions, injected into both agent modes. */
   editingRules: string;
   /** Target words to write per day. Null until the user sets one - drives the sidebar goal bar. */
   dailyWordGoal: number | null;
@@ -275,8 +278,8 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "light",
   proseSize: 17.5,
   pdfZoom: 1.1,
-  aiModel: null,
   aiProvider: "openai",
+  aiModel: null,
   loreTags: [],
   styleGuide: "",
   editingRules: "",
@@ -303,21 +306,6 @@ export interface CompileResult {
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 
-/** A single continuation the AI proposes for the cursor position. */
-export interface Suggestion {
-  type: "dialogue" | "narration";
-  /** Display name of the speaker, for dialogue suggestions. */
-  speaker?: string;
-  text: string;
-  rationale: string;
-}
-
-export interface SuggestResult {
-  suggestions: Suggestion[];
-  /** Short "after this, you could…" follow-up prompts. */
-  followups: string[];
-}
-
 export type CritiqueKind = "strength" | "watch" | "idea";
 export interface CritiqueNote {
   kind: CritiqueKind;
@@ -335,11 +323,6 @@ export interface ContinuityFlag {
   text: string;
   /** Ids of the blocks this flag is about; [] for a scene-level flag. */
   blockIds: string[];
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
 }
 
 // ── Outline Sculpt ────────────────────────────────────────────────────────────
@@ -372,7 +355,7 @@ export interface BlockTextEdit {
 
 // -- Manuscript proposals ------------------------------------------------------
 // A reviewable set of structural changes to ONE chapter's block list - the
-// shared envelope every AI write path stages for review behind the Edit tab.
+// shared envelope every AI write path stages for review in the proposal tray.
 
 export type BlockChangeKind = "rewrite" | "insert" | "remove" | "move";
 
@@ -404,13 +387,6 @@ export interface ManuscriptProposal {
   chapterId: string;
   summary: string;
   changes: BlockChange[];
-}
-
-/** Counts returned by applyManuscriptProposal so the caller can warn about
- *  skipped (vanished-target) changes instead of silently dropping them. */
-export interface ProposalApplyResult {
-  applied: number;
-  skipped: number;
 }
 
 // ── Backup / sync ─────────────────────────────────────────────────────────────

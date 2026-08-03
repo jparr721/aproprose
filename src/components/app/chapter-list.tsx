@@ -4,14 +4,14 @@
 
 import { useState } from "react";
 import {
-  IconChevronRight,
-  IconChevronUp,
-  IconChevronDown,
-  IconDots,
-  IconPencil,
-  IconPlus,
-  IconTrash,
-} from "@tabler/icons-react";
+  ChevronRight as IconChevronRight,
+  ChevronUp as IconChevronUp,
+  ChevronDown as IconChevronDown,
+  Ellipsis as IconDots,
+  Pencil as IconPencil,
+  Plus as IconPlus,
+  Trash as IconTrash,
+} from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,

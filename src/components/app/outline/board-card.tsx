@@ -19,6 +19,8 @@ export function BoardCard(props: { card: CardModel; chapterId: string }) {
   const characters = useProjectStore((s) => s.meta.characters);
   const lore = useProjectStore((s) => s.meta.lore);
   const openChapter = useOutlineBoardStore((s) => s.openChapter);
+  const highlightedCardId = useOutlineBoardStore((s) => s.highlightedCardId);
+  const highlightCard = useOutlineBoardStore((s) => s.highlightCard);
   const { setNodeRef, attributes, listeners, transform, isDragging } = useSortable({ id: card.id });
 
   const cast = beatCharacters(card.characterIds, characters);
@@ -32,10 +34,15 @@ export function BoardCard(props: { card: CardModel; chapterId: string }) {
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      onClick={() => openChapter(chapterId)}
+      data-outline-card-id={card.id}
+      onClick={() => {
+        highlightCard(null);
+        openChapter(chapterId);
+      }}
       style={{ "--dnd-transform": CSS.Transform.toString(transform) } as DndVar}
       className={cn(
         "group cursor-pointer gap-0 py-0 transition-colors [transform:var(--dnd-transform,none)] hover:bg-muted/50",
+        highlightedCardId === card.id && "ring-2 ring-ring",
         isDragging && "z-10 opacity-90 shadow-lg",
       )}
     >

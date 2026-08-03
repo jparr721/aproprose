@@ -1,4 +1,4 @@
-import { IconLayoutList } from "@tabler/icons-react";
+import { List as IconLayoutList } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { TypographyEyebrow, TypographyMuted, TypographyP, TypographySmall } from "@/components/ui/typography";

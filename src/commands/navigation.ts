@@ -5,12 +5,14 @@
 // Every state-wiping action routes through the view store's dirty-chapter guard so
 // the "discard unsaved edits?" confirm still fires.
 
-import { IconBook, IconFolder, IconFolderOpen, IconFolders } from "@tabler/icons-react";
+import { Book as IconBook, Folder as IconFolder, FolderOpen as IconFolderOpen, Folders as IconFolders } from "lucide-react";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Command } from "./types";
 
-const guard = (action: () => void) => useViewStore.getState().requestGuarded(action);
+const guard = (action: () => void): void => {
+  void useViewStore.getState().requestGuarded(action);
+};
 
 export const navigationCommands: Command[] = [
   {

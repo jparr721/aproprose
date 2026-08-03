@@ -1,4 +1,4 @@
-// proposal.ts - the pure reducer behind applyManuscriptProposal.
+// proposal.ts - the pure manuscript change reducer.
 //
 // Folds a reviewed set of BlockChanges over a block list, in change order, so
 // each change sees the list exactly as the previous ones left it. Changes whose

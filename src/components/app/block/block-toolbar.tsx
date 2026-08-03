@@ -3,7 +3,7 @@
 // more-menu (move / insert / AI cleanup / delete).
 
 import { toast } from "sonner";
-import { IconDotsVertical, IconMicrophone, IconSparkles } from "@tabler/icons-react";
+import { EllipsisVertical as IconDotsVertical, Mic as IconMicrophone, Sparkles as IconSparkles } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
-import { dispatchAiIntent } from "@/stores/ai-intent-store";
+import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
+import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TypeChip } from "./type-chip";
@@ -85,7 +86,15 @@ export function BlockToolbar({
             aria-label="Suggest what comes next here"
             onClick={() => {
               select(block.id);
-              dispatchAiIntent({ tab: "suggest" });
+              const chapterId = useProjectStore.getState().activeChapterId;
+              if (chapterId === null) return;
+              void dispatchAgentIntent({
+                kind: "run",
+                mode: "writing",
+                text: SUGGEST_DIRECTIVE,
+                refs: [{ kind: "block", chapterId, blockId: block.id }],
+                task: { kind: "conversation", targetChapterId: chapterId },
+              });
             }}
           >
             <IconSparkles className="text-ai-ink" />

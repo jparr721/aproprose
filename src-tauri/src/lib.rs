@@ -1,12 +1,11 @@
 //! aproprose — Rust backend.
 //!
 //! The webview is untrusted UI: every privileged operation (filesystem,
-//! latexmk, reading the OpenAI key) lives here and is exposed as a narrow
+//! latexmk, reading provider API keys) lives here and is exposed as a narrow
 //! `#[tauri::command]`. The command names + argument shapes are the contract
 //! defined by `src/lib/tauri.ts`; Tauri maps the JS camelCase argument keys to
 //! these snake_case parameters.
 
-pub mod ai_cli;
 pub mod compile;
 pub mod git;
 pub mod novel;
@@ -16,6 +15,8 @@ pub mod project;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
@@ -140,99 +141,387 @@ fn read_pdf(root: String, path: String) -> Result<Option<String>, String> {
 
 // ── AI config ─────────────────────────────────────────────────────────────────
 //
-// The OpenAI key is entered by the user in the app's Settings and stored as a
-// plaintext JSON file in the app-config dir (`openai_key.json`). It is read here
-// and handed to the frontend AI layer at runtime — never written into the JS
-// bundle, never logged. There is no environment or `.env` fallback: the key comes
-// only from what the user saved in Settings.
+// Provider keys are entered in Settings and stored as separate plaintext JSON
+// files in the app-config dir. The selected key is handed to the frontend AI
+// layer at runtime, never written into the JS bundle, and never logged.
 
-/// The OpenAI key handed to the frontend AI layer. Mirrors `AiConfig` in
-/// `src/lib/tauri.ts`. The key is read here and never logged.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiConfig {
-    api_key: String,
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum AiProvider {
+    Openai,
+    Openrouter,
 }
 
-/// On-disk shape of the stored key (`<app_config_dir>/openai_key.json`).
+/// On-disk shape of each stored provider key.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredApiKey {
     api_key: String,
 }
 
-/// Path of the stored-key file in the app config dir.
-fn openai_key_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiConfigFailure {
+    reason: String,
+    message: String,
+    action: String,
+    settings_target: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+enum AiConfigOutcome {
+    Configured { api_key: String },
+    Failure { failure: AiConfigFailure },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+enum AiKeyStatus {
+    Configured,
+    Missing,
+    Unavailable { failure: AiConfigFailure },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+enum AiKeyWriteOutcome {
+    Saved,
+    Failure { failure: AiConfigFailure },
+}
+
+fn provider_key_filename(provider: AiProvider) -> &'static str {
+    match provider {
+        AiProvider::Openai => "openai_key.json",
+        AiProvider::Openrouter => "openrouter_key.json",
+    }
+}
+
+fn provider_name(provider: AiProvider) -> &'static str {
+    match provider {
+        AiProvider::Openai => "OpenAI",
+        AiProvider::Openrouter => "OpenRouter",
+    }
+}
+
+fn settings_unavailable_failure() -> AiConfigFailure {
+    AiConfigFailure {
+        reason: "settings-unavailable".to_string(),
+        message: "AI settings are unavailable. Retry.".to_string(),
+        action: "retry".to_string(),
+        settings_target: None,
+    }
+}
+
+fn key_missing_failure(provider: AiProvider) -> AiConfigFailure {
+    AiConfigFailure {
+        reason: "key-missing".to_string(),
+        message: format!("Add an {} key, then submit again.", provider_name(provider)),
+        action: "add-key".to_string(),
+        settings_target: Some("key".to_string()),
+    }
+}
+
+/// Path of a provider's stored-key file in the app config dir.
+fn api_key_path(app: &tauri::AppHandle, provider: AiProvider) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("no app config dir: {e}"))?;
-    Ok(base.join("openai_key.json"))
+    Ok(base.join(provider_key_filename(provider)))
 }
 
-/// Read the key the user saved in Settings, if any (trimmed, non-empty).
-fn read_stored_key(app: &tauri::AppHandle) -> Option<String> {
-    let path = openai_key_path(app).ok()?;
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let parsed: StoredApiKey = serde_json::from_str(&raw).ok()?;
+enum StoredKeyState {
+    Configured(String),
+    Missing,
+}
+
+fn read_stored_key(
+    app: &tauri::AppHandle,
+    provider: AiProvider,
+) -> Result<StoredKeyState, AiConfigFailure> {
+    let path = api_key_path(app, provider).map_err(|_| settings_unavailable_failure())?;
+    read_stored_key_path(&path)
+}
+
+fn read_stored_key_path(path: &Path) -> Result<StoredKeyState, AiConfigFailure> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StoredKeyState::Missing)
+        }
+        Err(_) => return Err(settings_unavailable_failure()),
+    };
+    let parsed: StoredApiKey =
+        serde_json::from_str(&raw).map_err(|_| settings_unavailable_failure())?;
     let key = parsed.api_key.trim().to_string();
-    (!key.is_empty()).then_some(key)
+    if key.is_empty() {
+        Ok(StoredKeyState::Missing)
+    } else {
+        Ok(StoredKeyState::Configured(key))
+    }
 }
 
-/// Return the API key the user saved in Settings, or `None` when none is stored.
-fn resolve_api_key(app: &tauri::AppHandle) -> Option<String> {
-    read_stored_key(app)
+fn key_status_from_storage(stored_key: Result<StoredKeyState, AiConfigFailure>) -> AiKeyStatus {
+    match stored_key {
+        Ok(StoredKeyState::Configured(_)) => AiKeyStatus::Configured,
+        Ok(StoredKeyState::Missing) => AiKeyStatus::Missing,
+        Err(failure) => AiKeyStatus::Unavailable { failure },
+    }
 }
 
-/// Return the resolved OpenAI key for the frontend AI layer, or an actionable
-/// error when none is configured.
 #[tauri::command]
-fn get_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
-    resolve_api_key(&app)
-        .map(|api_key| AiConfig { api_key })
-        .ok_or_else(|| "No OpenAI API key set — add one in Settings.".to_string())
+fn get_ai_config(app: tauri::AppHandle, provider: AiProvider) -> AiConfigOutcome {
+    match read_stored_key(&app, provider) {
+        Ok(StoredKeyState::Configured(api_key)) => AiConfigOutcome::Configured { api_key },
+        Ok(StoredKeyState::Missing) => AiConfigOutcome::Failure {
+            failure: key_missing_failure(provider),
+        },
+        Err(failure) => AiConfigOutcome::Failure { failure },
+    }
 }
 
-/// Whether a usable key is available from any source. Lets the Settings UI show
-/// configured/not-configured state without ever reading the secret back into JS.
 #[tauri::command]
-fn has_openai_key(app: tauri::AppHandle) -> Result<bool, String> {
-    Ok(resolve_api_key(&app).is_some())
+fn get_ai_key_status(app: tauri::AppHandle, provider: AiProvider) -> AiKeyStatus {
+    key_status_from_storage(read_stored_key(&app, provider))
 }
 
-/// Save (or, when `key` is blank, clear) the user's OpenAI key in the app config
+/// Save (or, when `key` is blank, clear) a provider key in the app config
 /// dir. The value is never logged; on Unix the file is chmod'd to owner-only.
-#[tauri::command]
-fn set_openai_key(app: tauri::AppHandle, key: String) -> Result<(), String> {
-    let path = openai_key_path(&app)?;
+fn write_ai_key(
+    app: &tauri::AppHandle,
+    provider: AiProvider,
+    key: String,
+) -> Result<(), AiConfigFailure> {
+    let path = api_key_path(app, provider).map_err(|_| settings_unavailable_failure())?;
     let trimmed = key.trim();
 
     if trimmed.is_empty() {
         return match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("cannot remove {}: {e}", path.display())),
+            Err(_) => Err(settings_unavailable_failure()),
         };
     }
 
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|_| settings_unavailable_failure())?;
     }
     let body = serde_json::to_string(&StoredApiKey {
         api_key: trimmed.to_string(),
     })
-    .map_err(|e| format!("cannot serialize key: {e}"))?;
-    std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    .map_err(|_| settings_unavailable_failure())?;
+    std::fs::write(&path, body).map_err(|_| settings_unavailable_failure())?;
 
-    // Best effort: keep the secret readable only by the owner.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| settings_unavailable_failure())?;
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn set_ai_key(app: tauri::AppHandle, provider: AiProvider, key: String) -> AiKeyWriteOutcome {
+    match write_ai_key(&app, provider, key) {
+        Ok(()) => AiKeyWriteOutcome::Saved,
+        Err(failure) => AiKeyWriteOutcome::Failure { failure },
+    }
+}
+
+// ── AI diagnostics ───────────────────────────────────────────────────────────
+
+const AGENT_FAILURE_LOG_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+const AGENT_FAILURE_LOG_MAX_ENTRIES: usize = 1_000;
+const AGENT_FAILURE_LOG_MAX_ENTRY_BYTES: usize = 16 * 1024;
+static AGENT_FAILURE_LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentToolFailureChangeTarget {
+    kind: String,
+    target_id: Option<String>,
+    after_id: Option<String>,
+    to_index: Option<i64>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum AgentFailureLogKind {
+    Tool,
+    Run,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentFailureLogEntry {
+    kind: AgentFailureLogKind,
+    occurred_at: String,
+    run_id: String,
+    provider: AiProvider,
+    model_id: Option<String>,
+    task: serde_json::Value,
+    tool_name: Option<String>,
+    tool_call_id: Option<String>,
+    change_targets: Option<Vec<AgentToolFailureChangeTarget>>,
+    error_code: String,
+    error: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentFailureLog {
+    window_started_at_ms: u64,
+    entries: Vec<serde_json::Value>,
+}
+
+fn agent_failure_log_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("no app config dir: {e}"))?;
+    Ok(base.join("logs").join("ai-failures.json"))
+}
+
+fn agent_failure_log_lock() -> &'static Mutex<()> {
+    AGENT_FAILURE_LOG_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn millis_since_unix_epoch(now: SystemTime) -> Result<u64, String> {
+    let elapsed = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("cannot determine current time: {e}"))?;
+    u64::try_from(elapsed.as_millis())
+        .map_err(|_| "current time is outside the supported log range".to_string())
+}
+
+fn truncate_agent_failure_log_text(value: &str, max_characters: usize) -> String {
+    let mut characters = value.chars();
+    let text: String = characters.by_ref().take(max_characters).collect();
+    if characters.next().is_none() {
+        text
+    } else {
+        format!("{text} [truncated]")
+    }
+}
+
+fn agent_failure_log_field(
+    entry: &serde_json::Value,
+    name: &str,
+    max_characters: usize,
+) -> serde_json::Value {
+    entry
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(|value| {
+            serde_json::Value::String(truncate_agent_failure_log_text(value, max_characters))
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn compact_agent_failure_log_entry(entry: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "kind": agent_failure_log_field(entry, "kind", 128),
+        "occurredAt": agent_failure_log_field(entry, "occurredAt", 128),
+        "runId": agent_failure_log_field(entry, "runId", 128),
+        "provider": agent_failure_log_field(entry, "provider", 64),
+        "modelId": agent_failure_log_field(entry, "modelId", 128),
+        "toolName": agent_failure_log_field(entry, "toolName", 128),
+        "toolCallId": agent_failure_log_field(entry, "toolCallId", 128),
+        "errorCode": agent_failure_log_field(entry, "errorCode", 128),
+        "error": agent_failure_log_field(entry, "error", 1_024),
+        "truncated": true,
+    })
+}
+
+fn bound_agent_failure_log_entry(entry: serde_json::Value) -> Result<serde_json::Value, String> {
+    let encoded = serde_json::to_vec(&entry)
+        .map_err(|error| format!("cannot serialize agent failure entry: {error}"))?;
+    if encoded.len() <= AGENT_FAILURE_LOG_MAX_ENTRY_BYTES {
+        return Ok(entry);
+    }
+    Ok(compact_agent_failure_log_entry(&entry))
+}
+
+fn append_agent_failure_log_entry(
+    path: &Path,
+    entry: serde_json::Value,
+    now: SystemTime,
+) -> Result<(), String> {
+    let now_ms = millis_since_unix_epoch(now)?;
+    let entry = bound_agent_failure_log_entry(entry)?;
+    let mut log = match std::fs::read_to_string(path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or(AgentFailureLog {
+            window_started_at_ms: now_ms,
+            entries: Vec::new(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => AgentFailureLog {
+            window_started_at_ms: now_ms,
+            entries: Vec::new(),
+        },
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let entries = std::mem::take(&mut log.entries);
+    log.entries = entries
+        .into_iter()
+        .map(bound_agent_failure_log_entry)
+        .collect::<Result<Vec<_>, _>>()?;
+    let should_rotate = match UNIX_EPOCH
+        .checked_add(Duration::from_millis(log.window_started_at_ms))
+        .and_then(|window_started_at| now.duration_since(window_started_at).ok())
+    {
+        Some(elapsed) => elapsed >= AGENT_FAILURE_LOG_RETENTION,
+        None => true,
+    };
+    if should_rotate {
+        log = AgentFailureLog {
+            window_started_at_ms: now_ms,
+            entries: vec![entry],
+        };
+    } else {
+        log.entries.push(entry);
+        if log.entries.len() > AGENT_FAILURE_LOG_MAX_ENTRIES {
+            let first_retained = log.entries.len() - AGENT_FAILURE_LOG_MAX_ENTRIES;
+            log.entries = log.entries.split_off(first_retained);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    let body = serde_json::to_string_pretty(&log)
+        .map_err(|error| format!("cannot serialize agent failure log: {error}"))?;
+    std::fs::write(path, body)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("cannot set permissions on {}: {error}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn append_agent_failure_log(
+    app: tauri::AppHandle,
+    entry: AgentFailureLogEntry,
+) -> Result<(), String> {
+    let entry = serde_json::to_value(entry)
+        .map_err(|error| format!("cannot serialize agent failure: {error}"))?;
+    let path = agent_failure_log_path(&app)?;
+    let _guard = agent_failure_log_lock()
+        .lock()
+        .map_err(|_| "agent failure log is unavailable".to_string())?;
+    append_agent_failure_log_entry(&path, entry, SystemTime::now())
 }
 
 // ── App data (recents, per-project metadata) ─────────────────────────────────
@@ -358,7 +647,7 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // A GUI launch (Finder/Dock/.dmg) inherits launchd's minimal PATH, hiding
-    // user-installed tools (latexmk, the Codex/Claude CLIs, git/gh). Recover the
+    // user-installed tools (latexmk, pdflatex, git, and gh). Recover the
     // real PATH before any command can spawn a child.
     path_env::repair_path();
 
@@ -442,10 +731,9 @@ pub fn run() {
             pdf_path,
             read_pdf,
             get_ai_config,
-            has_openai_key,
-            set_openai_key,
-            ai_cli::cli_provider_status,
-            ai_cli::cli_generate,
+            get_ai_key_status,
+            set_ai_key,
+            append_agent_failure_log,
             read_app_data,
             write_app_data,
             git::git_tooling_status,
@@ -457,4 +745,215 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::{
+        append_agent_failure_log_entry, key_status_from_storage, provider_key_filename,
+        read_stored_key_path, AiConfigOutcome, AiKeyStatus, AiProvider, StoredKeyState,
+    };
+    use serde_json::{json, Value};
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn ai_providers_use_separate_key_files() {
+        let openrouter: AiProvider = serde_json::from_str("\"openrouter\"")
+            .expect("OpenRouter must deserialize from the frontend value");
+        assert_eq!(provider_key_filename(AiProvider::Openai), "openai_key.json");
+        assert_eq!(provider_key_filename(openrouter), "openrouter_key.json");
+    }
+
+    #[test]
+    fn key_status_distinguishes_a_missing_key_from_unavailable_storage() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("openai_key.json");
+
+        let missing = key_status_from_storage(read_stored_key_path(&path));
+        assert!(matches!(missing, AiKeyStatus::Missing));
+
+        std::fs::write(&path, "not valid key storage")
+            .expect("corrupt key storage fixture must be written");
+        let unavailable = key_status_from_storage(read_stored_key_path(&path));
+        match unavailable {
+            AiKeyStatus::Unavailable { failure } => {
+                assert_eq!(failure.reason, "settings-unavailable");
+                assert_eq!(failure.message, "AI settings are unavailable. Retry.");
+                assert_eq!(failure.action, "retry");
+                assert_eq!(failure.settings_target, None);
+            }
+            AiKeyStatus::Configured | AiKeyStatus::Missing => {
+                panic!("corrupt key storage must be unavailable")
+            }
+        }
+
+        match read_stored_key_path(&path) {
+            Ok(StoredKeyState::Configured(_)) | Ok(StoredKeyState::Missing) => {
+                panic!("corrupt key storage must not produce a key state")
+            }
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn configured_key_outcomes_use_the_frontend_api_key_field() {
+        assert_eq!(
+            serde_json::to_value(AiConfigOutcome::Configured {
+                api_key: "test-key".to_string(),
+            })
+            .expect("configured key outcome must serialize"),
+            json!({ "status": "configured", "apiKey": "test-key" })
+        );
+    }
+
+    #[test]
+    fn http_capability_allows_model_metadata_endpoint() {
+        let capability: Value = serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("default capability must be valid JSON");
+        let http = capability["permissions"]
+            .as_array()
+            .expect("permissions must be an array")
+            .iter()
+            .find(|permission| permission["identifier"] == "http:default")
+            .expect("http:default permission must exist");
+        let urls: Vec<&str> = http["allow"]
+            .as_array()
+            .expect("http allowlist must be an array")
+            .iter()
+            .map(|entry| {
+                entry["url"]
+                    .as_str()
+                    .expect("http allowlist entries must contain URLs")
+            })
+            .collect();
+
+        assert!(urls.contains(&"https://models.dev/*"));
+        assert!(urls.contains(&"https://openrouter.ai/*"));
+    }
+
+    #[test]
+    fn agent_failure_log_appends_inside_the_retention_window() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        append_agent_failure_log_entry(&path, json!({ "runId": "run-1" }), now)
+            .expect("first failure must be written");
+        append_agent_failure_log_entry(
+            &path,
+            json!({ "runId": "run-2" }),
+            now + Duration::from_secs(23 * 60 * 60 + 59 * 60 + 59),
+        )
+        .expect("second failure must be appended");
+
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &std::fs::read_to_string(path).expect("log must be readable"),
+            )
+            .expect("log must be valid JSON"),
+            json!({
+                "windowStartedAtMs": 1_000_000_000u64,
+                "entries": [{ "runId": "run-1" }, { "runId": "run-2" }],
+            })
+        );
+    }
+
+    #[test]
+    fn agent_failure_log_replaces_entries_after_twenty_four_hours() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        append_agent_failure_log_entry(&path, json!({ "runId": "expired" }), now)
+            .expect("expired failure must be written");
+        let fresh_at = now + Duration::from_secs(24 * 60 * 60);
+
+        append_agent_failure_log_entry(&path, json!({ "runId": "fresh" }), fresh_at)
+            .expect("fresh failure must be written");
+
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &std::fs::read_to_string(path).expect("log must be readable"),
+            )
+            .expect("log must be valid JSON"),
+            json!({
+                "windowStartedAtMs": 1_086_400_000u64,
+                "entries": [{ "runId": "fresh" }],
+            })
+        );
+    }
+
+    #[test]
+    fn agent_failure_log_keeps_only_the_most_recent_thousand_entries() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        for index in 1..=1_001 {
+            append_agent_failure_log_entry(&path, json!({ "runId": format!("run-{index}") }), now)
+                .expect("failure must be written");
+        }
+
+        let log: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("log must be readable"))
+                .expect("log must be valid JSON");
+        let entries = log["entries"]
+            .as_array()
+            .expect("log entries must be an array");
+
+        assert_eq!(entries.len(), 1_000);
+        assert_eq!(entries[0], json!({ "runId": "run-2" }));
+        assert_eq!(entries[999], json!({ "runId": "run-1001" }));
+    }
+
+    #[test]
+    fn agent_failure_log_truncates_oversized_entries() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let payload = vec!["x".repeat(2_048); 100];
+
+        append_agent_failure_log_entry(
+            &path,
+            json!({
+                "kind": "tool",
+                "occurredAt": "2026-08-02T12:00:00.000Z",
+                "runId": "run-1",
+                "error": "Block not found: missing-block",
+                "payload": payload,
+            }),
+            now,
+        )
+        .expect("oversized failure must be written");
+
+        let log: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("log must be readable"))
+                .expect("log must be valid JSON");
+        let entry = &log["entries"][0];
+
+        assert_eq!(entry["truncated"], true);
+        assert!(
+            serde_json::to_vec(entry)
+                .expect("entry must serialize")
+                .len()
+                <= 16 * 1024
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_failure_log_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("ai-failures.json");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        append_agent_failure_log_entry(&path, json!({ "runId": "run-1" }), now)
+            .expect("failure must be written");
+
+        let permissions = std::fs::metadata(path)
+            .expect("log metadata must be readable")
+            .permissions();
+        assert_eq!(permissions.mode() & 0o777, 0o600);
+    }
 }

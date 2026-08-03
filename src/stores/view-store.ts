@@ -1,66 +1,86 @@
 // view-store.ts -- view state shared across the chrome.
 //
-// Panel visibility (AI / PDF / focus) and the AI panel's active tab / collapse
-// are read+written by the top bar, the editor layout, and the command palette,
-// so per CLAUDE.md it's a store rather than a context. It also owns the
+// Panel visibility (AI / PDF / focus) is read+written by the top bar, the editor
+// layout, and the command palette,
+// so it belongs in a shared store rather than a context. It also owns the
 // "discard unsaved edits?" guard: any state-wiping action (open project, switch
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// `aiTab`, the right-panel width, and the PDF / Outline open flags are persisted
-// (to the app config dir, via the Tauri-backed storage adapter) so a relaunch
-// reopens the same layout the author left; the rest of the state is ephemeral and
-// the `pending` callback is not serializable.
+// The right dock width and PDF / Outline open flags are persisted to the app
+// config dir through the Tauri-backed storage adapter. The rest of the state is
+// ephemeral and the pending guarded action is not serializable.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { z } from "zod";
 import type { LayoutMode } from "@/lib/types";
 import { tauriStateStorage } from "@/lib/storage";
 import { useProjectStore } from "@/stores/project-store";
 
-export type AiTab =
-  | "outline"
-  | "suggest"
-  | "edit"
-  | "critique"
-  | "brainstorm"
-  | "continuity"
-  | "muse";
+export type GuardedActionResult<Result> =
+  | { status: "ran"; value: Result }
+  | { status: "canceled" };
+
+interface PendingGuardedAction {
+  run: () => void;
+  cancel: () => void;
+}
 
 interface ViewState {
   aiOpen: boolean;
   pdfOpen: boolean;
   /** Whether the full-page Outline storyboard replaces the editor (persisted). */
   outlineOpen: boolean;
+  manuscriptReviewProposalId: string | null;
   focus: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
   buildErrorsOpen: boolean;
   /** A pending state-wiping action awaiting confirmation, or null. */
-  pending: (() => void) | null;
+  pending: PendingGuardedAction | null;
 
-  /** Active AI panel tab. */
-  aiTab: AiTab;
-  /** True when the panel is collapsed to just the icon rail (ephemeral). */
-  aiCollapsed: boolean;
   /** Persisted px width of the right panel's resizable content column. */
   rightPanelWidth: number;
 
   toggleAi: () => void;
+  setAiOpen: (open: boolean) => void;
+  openAiConsole: () => void;
   togglePdf: () => void;
   toggleOutline: () => void;
+  openOutline: () => void;
+  openManuscriptReview: (proposalId: string) => void;
+  closeManuscriptReview: () => void;
   setBuildErrorsOpen: (open: boolean) => void;
   applyLayoutPreset: (preset: LayoutMode) => void;
-  setAiTab: (tab: AiTab) => void;
-  setAiCollapsed: (v: boolean) => void;
   setRightPanelWidth: (px: number) => void;
-  /** Open + expand the AI panel and switch to `tab` in one step (command palette). */
-  openAiTab: (tab: AiTab) => void;
 
   /** Run `action` now, or stage it behind the confirm dialog if edits are unsaved. */
-  requestGuarded: (action: () => void) => void;
+  requestGuarded: <Result>(
+    action: () => Result | Promise<Result>,
+  ) => Promise<GuardedActionResult<Awaited<Result>>>;
   confirmPending: () => void;
   cancelPending: () => void;
+}
+
+const persistedViewStateSchema = z.object({
+  rightPanelWidth: z.number().finite(),
+  pdfOpen: z.boolean(),
+  outlineOpen: z.boolean(),
+});
+
+function mergePersistedViewState(
+  persistedState: unknown,
+  currentState: ViewState,
+): ViewState {
+  if (persistedState === undefined) return currentState;
+  const parsed = persistedViewStateSchema.parse(persistedState);
+  return {
+    ...currentState,
+    rightPanelWidth: parsed.rightPanelWidth,
+    pdfOpen: parsed.pdfOpen,
+    outlineOpen: parsed.outlineOpen,
+  };
 }
 
 export const useViewStore = create<ViewState>()(
@@ -69,60 +89,101 @@ export const useViewStore = create<ViewState>()(
       aiOpen: true,
       pdfOpen: false,
       outlineOpen: false,
+      manuscriptReviewProposalId: null,
       focus: false,
       buildErrorsOpen: false,
 
       pending: null,
 
-      aiTab: "suggest",
-      aiCollapsed: false,
       rightPanelWidth: 360,
 
-      // Clear aiCollapsed on every toggle so reopening always restores the panel
-      // content, never a bare icon rail (aiOpen + aiCollapsed must agree on "is
-      // content visible"). Matches openAiTab.
-      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false, aiCollapsed: false })),
+      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
+      setAiOpen: (aiOpen) => set({ aiOpen }),
+      openAiConsole: () => set({ aiOpen: true, focus: false }),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
-      toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen, focus: false })),
+      toggleOutline: () =>
+        set((s) => {
+          const outlineOpen = !s.outlineOpen;
+          return {
+            outlineOpen,
+            focus: false,
+            ...(outlineOpen ? { manuscriptReviewProposalId: null } : {}),
+          };
+        }),
+      openOutline: () =>
+        set({
+          outlineOpen: true,
+          manuscriptReviewProposalId: null,
+          focus: false,
+        }),
+      openManuscriptReview: (manuscriptReviewProposalId) =>
+        set({
+          manuscriptReviewProposalId,
+          outlineOpen: false,
+          focus: false,
+        }),
+      closeManuscriptReview: () => set({ manuscriptReviewProposalId: null }),
       setBuildErrorsOpen: (buildErrorsOpen) => set({ buildErrorsOpen }),
 
       applyLayoutPreset: (preset) => {
         if (preset === "focus") set({ focus: true });
         else if (preset === "two")
-          set({ focus: false, aiOpen: true, pdfOpen: false, aiCollapsed: false });
-        else set({ focus: false, aiOpen: true, pdfOpen: true, aiCollapsed: false });
+          set({ focus: false, aiOpen: true, pdfOpen: false });
+        else set({ focus: false, aiOpen: true, pdfOpen: true });
       },
 
-      setAiTab: (tab) => set({ aiTab: tab }),
-      setAiCollapsed: (v) => set({ aiCollapsed: v }),
       setRightPanelWidth: (rightPanelWidth) => set({ rightPanelWidth }),
-      openAiTab: (tab) =>
-        set({ aiOpen: true, focus: false, aiTab: tab, aiCollapsed: false }),
 
       requestGuarded: (action) => {
-        if (useProjectStore.getState().chapterDirty) set({ pending: () => action() });
-        else action();
+        get().pending?.cancel();
+        const request = new Promise<
+          GuardedActionResult<Awaited<ReturnType<typeof action>>>
+        >((resolve, reject) => {
+          const pending: PendingGuardedAction = {
+            run: () => {
+              try {
+                void Promise.resolve(action()).then(
+                  (value) => resolve({ status: "ran", value }),
+                  reject,
+                );
+              } catch (error) {
+                reject(error);
+              }
+            },
+            cancel: () => resolve({ status: "canceled" }),
+          };
+          if (useProjectStore.getState().chapterDirty) {
+            set({ pending });
+          } else {
+            set({ pending: null });
+            pending.run();
+          }
+        });
+        return request;
       },
       confirmPending: () => {
         const { pending } = get();
-        pending?.();
         set({ pending: null });
+        pending?.run();
       },
-      cancelPending: () => set({ pending: null }),
+      cancelPending: () => {
+        const { pending } = get();
+        set({ pending: null });
+        pending?.cancel();
+      },
     }),
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // Persisted so a relaunch lands back in the same layout: the selected tab,
-      // the right-panel width, and whether the PDF / Outline surfaces were open.
-      // The AI-panel and collapse flags stay ephemeral and `pending` isn't
-      // serializable.
-      partialize: ({ aiTab, rightPanelWidth, pdfOpen, outlineOpen }) => ({
-        aiTab,
+      // Persisted so a relaunch lands back in the same layout: the right dock
+      // width and whether the PDF / Outline surfaces were open. AI visibility
+      // stays ephemeral and `pending` is not serializable.
+      partialize: ({ rightPanelWidth, pdfOpen, outlineOpen }) => ({
         rightPanelWidth,
         pdfOpen,
         outlineOpen,
       }),
+      merge: mergePersistedViewState,
     },
   ),
 );

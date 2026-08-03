@@ -4,7 +4,7 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
-import { IconSelector, IconCheck, IconChevronUp, IconChevronDown } from "@tabler/icons-react"
+import { ChevronsUpDown as IconSelector, Check as IconCheck, ChevronUp as IconChevronUp, ChevronDown as IconChevronDown } from "lucide-react"
 
 function Select({
   ...props
@@ -31,14 +31,12 @@ function SelectValue({
   return <SelectPrimitive.Value data-slot="select-value" {...props} />
 }
 
-function SelectTrigger({
-  className,
-  size = "default",
-  children,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
-  size?: "sm" | "default"
-}) {
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentProps<typeof SelectPrimitive.Trigger> & {
+    size?: "sm" | "default"
+  }
+>(({ className, size = "default", children, ...props }, ref) => {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
@@ -48,6 +46,7 @@ function SelectTrigger({
         className
       )}
       {...props}
+      ref={ref}
     >
       {children}
       <SelectPrimitive.Icon asChild>
@@ -55,7 +54,9 @@ function SelectTrigger({
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   )
-}
+})
+
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
 
 function SelectContent({
   className,

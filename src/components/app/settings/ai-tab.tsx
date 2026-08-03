@@ -1,12 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconEye,
-  IconEyeOff,
-  IconRefresh,
-  IconTrash,
-} from "@tabler/icons-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { Check as IconCheck, Eye as IconEye, EyeOff as IconEyeOff, Trash as IconTrash } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -43,23 +36,44 @@ import {
 import { Field } from "@/components/app/settings/field";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
-  hasOpenAiKey,
-  setOpenAiKey,
-  cliProviderStatus,
-  type CliKind,
-  type CliProviderStatus,
-} from "@/lib/tauri";
+  failureFromError,
+  settingsUnavailableFailure,
+} from "@/lib/ai/agent-failure";
+import type { AgentFailure } from "@/lib/ai/agent-types";
+import { getAiKeyStatus, setAiKey, type AiKeyStatus } from "@/lib/tauri";
 import { resetAiProvider } from "@/lib/ai/model";
-import { listTextModels } from "@/lib/ai/models";
-import { describeAiError } from "@/lib/ai/errors";
-import { PREFERENCE_MAX_CHARS, type AiProvider } from "@/lib/types";
+import { listTextModels, resetModelMetadata } from "@/lib/ai/models";
+import {
+  isAiProvider,
+  PREFERENCE_MAX_CHARS,
+  type AiProvider,
+} from "@/lib/types";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 
-function OpenAiKeyField({
+const providerLabels: Record<AiProvider, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+};
+
+const providerKeyPlaceholders: Record<AiProvider, string> = {
+  openai: "sk-",
+  openrouter: "sk-or-v1-",
+};
+
+function ApiKeyField({
+  provider,
   configured,
+  failure,
+  inputRef,
   onConfiguredChange,
+  onRetry,
 }: {
+  provider: AiProvider;
   configured: boolean;
+  failure: AgentFailure | null;
+  inputRef: RefObject<HTMLInputElement | null>;
   onConfiguredChange: (configured: boolean) => void;
+  onRetry: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [show, setShow] = useState(false);
@@ -70,14 +84,19 @@ function OpenAiKeyField({
     if (!key || saving) return;
     setSaving(true);
     try {
-      await setOpenAiKey(key);
+      const outcome = await setAiKey(provider, key);
+      if (outcome.status === "failure") {
+        toast.error(outcome.failure.message);
+        return;
+      }
       resetAiProvider();
+      resetModelMetadata();
       setDraft("");
       setShow(false);
       onConfiguredChange(true);
-      toast.success("OpenAI key saved");
-    } catch (e) {
-      toast.error(`Couldn't save key: ${String(e)}`);
+      toast.success(`${providerLabels[provider]} key saved`);
+    } catch {
+      toast.error("AI settings are unavailable. Retry.");
     } finally {
       setSaving(false);
     }
@@ -85,17 +104,22 @@ function OpenAiKeyField({
 
   const clear = async () => {
     try {
-      await setOpenAiKey("");
+      const outcome = await setAiKey(provider, "");
+      if (outcome.status === "failure") {
+        toast.error(outcome.failure.message);
+        return;
+      }
       resetAiProvider();
+      resetModelMetadata();
       onConfiguredChange(false);
-      toast.success("OpenAI key removed");
-    } catch (e) {
-      toast.error(`Couldn't remove key: ${String(e)}`);
+      toast.success(`${providerLabels[provider]} key removed`);
+    } catch {
+      toast.error("AI settings are unavailable. Retry.");
     }
   };
 
   return (
-    <Field label="OpenAI key">
+    <Field label={`${providerLabels[provider]} key`}>
       <div className="flex items-center gap-2">
         <InputGroup className="flex-1">
           <InputGroupInput
@@ -108,9 +132,14 @@ function OpenAiKeyField({
                 void save();
               }
             }}
-            placeholder={configured ? "Replace stored key" : "sk-"}
+            placeholder={
+              configured
+                ? "Replace stored key"
+                : providerKeyPlaceholders[provider]
+            }
             autoComplete="off"
             spellCheck={false}
+            ref={inputRef}
           />
           <InputGroupAddon align="inline-end">
             <InputGroupButton
@@ -146,10 +175,12 @@ function OpenAiKeyField({
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Remove the OpenAI key?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  Remove the {providerLabels[provider]} key?
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  The stored key is deleted from this machine. AI features stop working
-                  until you add a key again.
+                  The stored key is deleted from this machine. This provider stops
+                  working until you add a key again.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -167,16 +198,66 @@ function OpenAiKeyField({
           manuscript.
         </TypographyMuted>
       )}
+      {failure === null ? null : (
+        <div className="flex items-center justify-between gap-2">
+          <TypographyForeground className="text-xs text-destructive" role="alert">
+            {failure.message}
+          </TypographyForeground>
+          <Button onClick={onRetry} size="sm" type="button" variant="outline">
+            Retry
+          </Button>
+        </div>
+      )}
     </Field>
   );
 }
 
-function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
+function ProviderField() {
+  const aiProvider = useSettingsStore((state) => state.aiProvider);
+  const setAiProvider = useSettingsStore((state) => state.setAiProvider);
+
+  return (
+    <Field label="AI provider">
+      <Select
+        value={aiProvider}
+        onValueChange={(value) => {
+          if (!isAiProvider(value)) {
+            throw new Error(`Unsupported AI provider: ${value}`);
+          }
+          setAiProvider(value);
+          resetAiProvider();
+          resetModelMetadata();
+        }}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="openai">OpenAI</SelectItem>
+          <SelectItem value="openrouter">OpenRouter</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function AiModelField({
+  provider,
+  keyConfigured,
+  modelRef,
+  onLoadingChange,
+}: {
+  provider: AiProvider;
+  keyConfigured: boolean;
+  modelRef: RefObject<HTMLButtonElement | null>;
+  onLoadingChange: (loading: boolean) => void;
+}) {
   const aiModel = useSettingsStore((s) => s.aiModel);
   const setAiModel = useSettingsStore((s) => s.setAiModel);
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AgentFailure | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!keyConfigured) {
@@ -188,12 +269,12 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
     let active = true;
     setLoading(true);
     setError(null);
-    listTextModels()
+    listTextModels(provider)
       .then((m) => {
         if (active) setModels(m);
       })
       .catch((e) => {
-        if (active) setError(describeAiError(e));
+        if (active) setError(failureFromError(e, provider, null));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -201,7 +282,11 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
     return () => {
       active = false;
     };
-  }, [keyConfigured]);
+  }, [keyConfigured, provider, reload]);
+
+  useEffect(() => {
+    onLoadingChange(loading);
+  }, [loading, onLoadingChange]);
 
   const options = aiModel && !models.includes(aiModel) ? [aiModel, ...models] : models;
 
@@ -222,7 +307,7 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         onValueChange={(v) => setAiModel(v)}
         disabled={loading || options.length === 0}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" ref={modelRef}>
           <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
         </SelectTrigger>
         <SelectContent>
@@ -239,124 +324,25 @@ function AiModelField({ keyConfigured }: { keyConfigured: boolean }) {
         </TypographyMutedSpan>
       ) : null}
       {error ? (
-        <TypographyForeground className="text-xs text-destructive">
-          {error}
-        </TypographyForeground>
+        <div className="flex items-center justify-between gap-2">
+          <TypographyForeground className="text-xs text-destructive" role="alert">
+            {error.message}
+          </TypographyForeground>
+          <Button
+            onClick={() => setReload((value) => value + 1)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Retry
+          </Button>
+        </div>
       ) : null}
       {!loading && !error ? (
         <TypographyMuted className="text-xs">
           {aiModel ? `Using ${aiModel}.` : "AI features are off until you pick a model."}
         </TypographyMuted>
       ) : null}
-    </Field>
-  );
-}
-
-/**
- * Active-provider picker. OpenAI uses an API key; codex/claude use the local CLI
- * subscription. Switching resets the cached AI provider so the next call rebuilds.
- */
-function ProviderField() {
-  const aiProvider = useSettingsStore((s) => s.aiProvider);
-  const setAiProvider = useSettingsStore((s) => s.setAiProvider);
-  return (
-    <Field label="AI provider">
-      <Select
-        value={aiProvider}
-        onValueChange={(v) => {
-          setAiProvider(v as AiProvider);
-          resetAiProvider();
-        }}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="openai">OpenAI (API key)</SelectItem>
-          <SelectItem value="codex">Codex CLI (subscription)</SelectItem>
-          <SelectItem value="claude">Claude Code (subscription)</SelectItem>
-        </SelectContent>
-      </Select>
-    </Field>
-  );
-}
-
-/**
- * Status panel for a CLI subscription provider. Detects install + login on open
- * and via Recheck; the user authenticates in their terminal, never here.
- */
-function CliStatusField({ kind }: { kind: CliKind }) {
-  const [status, setStatus] = useState<CliProviderStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const label = kind === "codex" ? "Codex CLI" : "Claude Code";
-
-  const check = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    cliProviderStatus(kind)
-      .then((s) => {
-        setStatus(s);
-      })
-      .catch((e) => {
-        // A rejected status command is a real backend failure, not a verdict
-        // that the CLI is missing - surface the cause instead of faking "not
-        // installed".
-        setError(describeAiError(e));
-        setStatus(null);
-      })
-      .finally(() => setLoading(false));
-  }, [kind]);
-
-  useEffect(check, [check]);
-
-  const ready = status?.installed && status.authenticated;
-
-  return (
-    <Field label={`${label} (subscription)`}>
-      {loading ? (
-        <TypographyMutedSpan className="flex items-center gap-1.5 text-xs">
-          <Spinner /> Checking
-        </TypographyMutedSpan>
-      ) : error ? (
-        <div className="flex flex-col gap-2">
-          <TypographyForeground className="flex items-center gap-1.5 text-xs text-destructive">
-            <IconAlertTriangle className="size-3.5" /> Could not check the {kind} CLI
-          </TypographyForeground>
-          <TypographyMuted className="text-xs">{error}</TypographyMuted>
-          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
-            <IconRefresh className="size-3.5" /> Recheck
-          </Button>
-        </div>
-      ) : ready ? (
-        <div className="flex flex-col gap-1">
-          <TypographyForeground className="flex items-center gap-1.5 text-xs text-success">
-            <IconCheck className="size-3.5" /> Connected through the {kind} CLI
-          </TypographyForeground>
-          <TypographyMuted className="text-xs">
-            {status?.model
-              ? `Using ${status.model}, your ${kind} default model.`
-              : `Using your ${kind} default model.`}
-          </TypographyMuted>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <TypographyForeground className="flex items-center gap-1.5 text-xs text-warning">
-            <IconAlertTriangle className="size-3.5" />
-            {status && !status.installed
-              ? `${kind} CLI not found on PATH`
-              : `${kind} is installed, but not signed in`}
-          </TypographyForeground>
-          <TypographyMuted className="text-xs">
-            {status && !status.installed
-              ? `Install it, then sign in with ${kind} login and recheck. Uses your subscription - no API key needed.`
-              : `Run ${kind} login in your terminal, then recheck. Uses your subscription - no API key needed.`}
-          </TypographyMuted>
-          <Button variant="ghost" size="sm" className="self-start" onClick={check}>
-            <IconRefresh className="size-3.5" /> Recheck
-          </Button>
-        </div>
-      )}
     </Field>
   );
 }
@@ -378,43 +364,107 @@ function PreferencesFields() {
         />
         <TypographyMuted className="text-xs">Shapes every AI response.</TypographyMuted>
       </Field>
-      <Field label="Editing & Muse rules" hint={`${editingRules.length}/${PREFERENCE_MAX_CHARS}`}>
+      <Field
+        label="Writing and editing instructions"
+        hint={`${editingRules.length}/${PREFERENCE_MAX_CHARS}`}
+      >
         <Textarea
           value={editingRules}
-          onChange={(e) => setEditingRules(e.currentTarget.value)}
+          onChange={(event) => setEditingRules(event.currentTarget.value)}
           maxLength={PREFERENCE_MAX_CHARS}
-          placeholder="Standing rules for revising - e.g. cut throat-clearing, no 'suddenly'"
+          placeholder="Standing rules for drafting and revising - e.g. cut throat-clearing, no 'suddenly'"
           className="min-h-24"
         />
-        <TypographyMuted className="text-xs">Applies to Edit and Muse.</TypographyMuted>
+        <TypographyMuted className="text-xs">
+          Applies to Writing and Edit.
+        </TypographyMuted>
       </Field>
     </>
   );
 }
 
 export function AiTab() {
-  const aiProvider = useSettingsStore((s) => s.aiProvider);
-  const [keyConfigured, setKeyConfigured] = useState(false);
-  useEffect(() => {
-    void hasOpenAiKey()
-      .then(setKeyConfigured)
-      .catch((e) => {
-        console.error("hasOpenAiKey failed:", e);
-        setKeyConfigured(false);
+  const aiProvider = useSettingsStore((state) => state.aiProvider);
+  const aiTarget = useSettingsDialogStore((state) => state.aiTarget);
+  const clearAiSettingsTarget = useSettingsDialogStore(
+    (state) => state.clearAiSettingsTarget,
+  );
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<{
+    provider: AiProvider;
+    status: AiKeyStatus;
+  } | null>(null);
+  const activeKeyStatus =
+    keyStatus?.provider === aiProvider ? keyStatus.status : null;
+  const keyConfigured = activeKeyStatus?.status === "configured";
+  const keyFailure =
+    activeKeyStatus?.status === "unavailable"
+      ? activeKeyStatus.failure
+      : null;
+
+  const refreshKeyStatus = (): void => {
+    void getAiKeyStatus(aiProvider)
+      .then((status) => {
+        setKeyStatus({ provider: aiProvider, status });
+      })
+      .catch(() => {
+        setKeyStatus({
+          provider: aiProvider,
+          status: {
+            status: "unavailable",
+            failure: settingsUnavailableFailure(),
+          },
+        });
       });
-  }, []);
+  };
+
+  useEffect(() => {
+    refreshKeyStatus();
+  }, [aiProvider]);
+
+  useEffect(() => {
+    if (aiTarget === null || (aiTarget === "model" && modelsLoading)) return;
+    const element = aiTarget === "key" ? keyInputRef.current : modelTriggerRef.current;
+    if (element === null) return;
+    const timeout = window.setTimeout(() => {
+      const scrollable = element as HTMLButtonElement & {
+        scrollIntoView?: (options: ScrollIntoViewOptions) => void;
+      };
+      if (scrollable.scrollIntoView !== undefined) {
+        scrollable.scrollIntoView({ block: "nearest" });
+      }
+      element.focus();
+      clearAiSettingsTarget();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [aiTarget, clearAiSettingsTarget, modelsLoading]);
 
   return (
     <div className="flex flex-col gap-6">
       <ProviderField />
-      {aiProvider === "openai" ? (
-        <>
-          <OpenAiKeyField configured={keyConfigured} onConfiguredChange={setKeyConfigured} />
-          <AiModelField keyConfigured={keyConfigured} />
-        </>
-      ) : (
-        <CliStatusField kind={aiProvider} />
-      )}
+      <ApiKeyField
+        key={`key-${aiProvider}`}
+        provider={aiProvider}
+        configured={keyConfigured}
+        failure={keyFailure}
+        inputRef={keyInputRef}
+        onConfiguredChange={(configured) =>
+          setKeyStatus({
+            provider: aiProvider,
+            status: { status: configured ? "configured" : "missing" },
+          })
+        }
+        onRetry={refreshKeyStatus}
+      />
+      <AiModelField
+        key={`model-${aiProvider}`}
+        keyConfigured={keyConfigured}
+        modelRef={modelTriggerRef}
+        onLoadingChange={setModelsLoading}
+        provider={aiProvider}
+      />
       <PreferencesFields />
     </div>
   );

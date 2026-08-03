@@ -1,64 +1,91 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+const storage = vi.hoisted(() => ({
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+}));
+
 vi.mock("@/lib/storage", () => ({
-  tauriStateStorage: {
-    getItem: async () => null,
-    setItem: async () => {},
-    removeItem: async () => {},
-  },
+  tauriStateStorage: storage,
 }));
 
 import { useViewStore } from "@/stores/view-store";
+import { useProjectStore } from "@/stores/project-store";
 
-beforeEach(() =>
-  useViewStore.setState({ aiTab: "suggest", aiCollapsed: false, buildErrorsOpen: false }),
-);
-
-describe("view-store aiTab", () => {
-  it("setAiTab switches the active tab, including the new 'edit' tab", () => {
-    useViewStore.getState().setAiTab("edit");
-    expect(useViewStore.getState().aiTab).toBe("edit");
+beforeEach(() => {
+  storage.getItem.mockReset();
+  storage.getItem.mockResolvedValue(null);
+  storage.setItem.mockReset();
+  storage.setItem.mockResolvedValue(undefined);
+  storage.removeItem.mockReset();
+  storage.removeItem.mockResolvedValue(undefined);
+  useViewStore.setState(useViewStore.getInitialState(), true);
+  useViewStore.setState({
+    aiOpen: true,
+    pdfOpen: false,
+    outlineOpen: false,
+    focus: false,
+    buildErrorsOpen: false,
+    pending: null,
+    rightPanelWidth: 360,
   });
-
-  it("can switch to the outline surface", () => {
-    useViewStore.getState().setAiTab("outline");
-    expect(useViewStore.getState().aiTab).toBe("outline");
-  });
-
-  it("setAiTab can switch to the muse tab", () => {
-    useViewStore.getState().setAiTab("muse");
-    expect(useViewStore.getState().aiTab).toBe("muse");
-  });
+  useProjectStore.setState({ chapterDirty: false });
 });
 
-describe("view-store aiCollapsed", () => {
-  it("defaults to false and setAiCollapsed flips it", () => {
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
-    useViewStore.getState().setAiCollapsed(true);
-    expect(useViewStore.getState().aiCollapsed).toBe(true);
+describe("view-store AI console", () => {
+  it("sets AI visibility explicitly without changing neighboring panes", () => {
+    useViewStore.setState({ pdfOpen: true, outlineOpen: true });
+
+    useViewStore.getState().setAiOpen(false);
+
+    expect(useViewStore.getState().aiOpen).toBe(false);
+    expect(useViewStore.getState().pdfOpen).toBe(true);
+    expect(useViewStore.getState().outlineOpen).toBe(true);
+    useViewStore.getState().setAiOpen(true);
+    expect(useViewStore.getState().aiOpen).toBe(true);
   });
 
-  it("toggleAi reopening a collapsed panel restores content, not a bare rail", () => {
-    // Collapse to the rail, close via the toggle, then reopen: the content must
-    // show. Otherwise aiOpen + aiCollapsed disagree and the panel reopens collapsed.
-    useViewStore.setState({ aiOpen: true, aiCollapsed: true });
-    useViewStore.getState().toggleAi(); // close
-    expect(useViewStore.getState().aiOpen).toBe(false);
-    useViewStore.getState().toggleAi(); // reopen
-    expect(useViewStore.getState().aiOpen).toBe(true);
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+  it("toggleAi changes only AI visibility and clears focus", () => {
+    useViewStore.setState({
+      aiOpen: true,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: true,
+      rightPanelWidth: 412,
+    });
+
+    useViewStore.getState().toggleAi();
+
+    expect(useViewStore.getState()).toMatchObject({
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: false,
+      rightPanelWidth: 412,
+    });
+  });
+
+  it("openAiConsole opens the dock and leaves the left sidebar outside this store", () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+
+    useViewStore.getState().openAiConsole();
+
+    const state = useViewStore.getState();
+    expect(state).toMatchObject({ aiOpen: true, focus: false });
+    expect(state).not.toHaveProperty("sidebarOpen");
   });
 });
 
 describe("view-store applyLayoutPreset", () => {
-  it("the two/three presets clear the collapse flag so panel content shows", () => {
-    useViewStore.setState({ aiCollapsed: true });
+  it("the two and three pane presets open the AI console", () => {
+    useViewStore.setState({ aiOpen: false });
     useViewStore.getState().applyLayoutPreset("two");
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+    expect(useViewStore.getState().aiOpen).toBe(true);
 
-    useViewStore.setState({ aiCollapsed: true });
+    useViewStore.setState({ aiOpen: false });
     useViewStore.getState().applyLayoutPreset("three");
-    expect(useViewStore.getState().aiCollapsed).toBe(false);
+    expect(useViewStore.getState().aiOpen).toBe(true);
   });
 });
 
@@ -79,7 +106,97 @@ describe("view-store buildErrorsOpen", () => {
       : {};
     expect(persisted).not.toHaveProperty("buildErrorsOpen");
     expect(persisted).toEqual({
-      aiTab: useViewStore.getState().aiTab,
+      rightPanelWidth: useViewStore.getState().rightPanelWidth,
+      pdfOpen: useViewStore.getState().pdfOpen,
+      outlineOpen: useViewStore.getState().outlineOpen,
+    });
+  });
+});
+
+describe("view-store manuscript review lifecycle", () => {
+  it("starts with no manuscript review open", () => {
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("opens a manuscript review without changing AI or PDF visibility", () => {
+    useViewStore.setState({
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: true,
+      focus: true,
+    });
+
+    useViewStore.getState().openManuscriptReview("proposal-1");
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: "proposal-1",
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: false,
+    });
+  });
+
+  it("closes only the manuscript review", () => {
+    useViewStore.setState({
+      manuscriptReviewProposalId: "proposal-1",
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: true,
+      buildErrorsOpen: true,
+      rightPanelWidth: 444,
+    });
+
+    useViewStore.getState().closeManuscriptReview();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      aiOpen: false,
+      pdfOpen: true,
+      outlineOpen: false,
+      focus: true,
+      buildErrorsOpen: true,
+      rightPanelWidth: 444,
+    });
+  });
+
+  it("opening the outline directly replaces manuscript review", () => {
+    useViewStore.setState({ manuscriptReviewProposalId: "proposal-1" });
+
+    useViewStore.getState().openOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      outlineOpen: true,
+    });
+  });
+
+  it("opening the outline through its toggle replaces manuscript review", () => {
+    useViewStore.setState({
+      manuscriptReviewProposalId: "proposal-1",
+      outlineOpen: false,
+    });
+
+    useViewStore.getState().toggleOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      manuscriptReviewProposalId: null,
+      outlineOpen: true,
+    });
+  });
+
+  it("excludes manuscript review identity and actions from persistence", () => {
+    useViewStore.getState().openManuscriptReview("proposal-1");
+    const opts = useViewStore.persist.getOptions();
+    const persisted = opts.partialize
+      ? opts.partialize(useViewStore.getState())
+      : {};
+
+    expect(persisted).not.toHaveProperty("manuscriptReviewProposalId");
+    expect(persisted).not.toHaveProperty("openManuscriptReview");
+    expect(persisted).not.toHaveProperty("closeManuscriptReview");
+    expect(persisted).toEqual({
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,
@@ -95,5 +212,101 @@ describe("view-store layout persistence", () => {
       ? opts.partialize(useViewStore.getState())
       : {};
     expect(persisted).toMatchObject({ pdfOpen: true, outlineOpen: true });
+  });
+
+  it("hydrates only current layout fields from a saved state with unknown fields", async () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+    storage.getItem.mockResolvedValueOnce(
+      JSON.stringify({
+        state: {
+          rightPanelWidth: 488,
+          pdfOpen: true,
+          outlineOpen: true,
+          manuscriptReviewProposalId: "persisted-proposal",
+          obsoleteLayout: true,
+        },
+        version: 0,
+      }),
+    );
+
+    await useViewStore.persist.rehydrate();
+
+    const state = useViewStore.getState();
+    expect(state).toMatchObject({
+      rightPanelWidth: 488,
+      pdfOpen: true,
+      outlineOpen: true,
+      aiOpen: false,
+      focus: true,
+      manuscriptReviewProposalId: null,
+    });
+    expect(state).not.toHaveProperty("obsoleteLayout");
+    expect(state).not.toHaveProperty("sidebarOpen");
+    expect(state.toggleAi).toBeTypeOf("function");
+    expect(state.openAiConsole).toBeTypeOf("function");
+  });
+
+  it("rejects malformed required persisted layout values as one state", async () => {
+    useViewStore.setState({
+      rightPanelWidth: 401,
+      pdfOpen: false,
+      outlineOpen: false,
+    });
+    storage.getItem.mockResolvedValueOnce(
+      JSON.stringify({
+        state: {
+          rightPanelWidth: "wide",
+          pdfOpen: true,
+          outlineOpen: true,
+        },
+        version: 0,
+      }),
+    );
+
+    await useViewStore.persist.rehydrate();
+
+    expect(useViewStore.getState()).toMatchObject({
+      rightPanelWidth: 401,
+      pdfOpen: false,
+      outlineOpen: false,
+    });
+  });
+});
+
+describe("view-store guarded action outcomes", () => {
+  it("settles a canceled request without running its action", async () => {
+    const action = vi.fn();
+    useProjectStore.setState({ chapterDirty: true });
+
+    const outcome = useViewStore.getState().requestGuarded(action);
+
+    useViewStore.getState().cancelPending();
+
+    await expect(outcome).resolves.toEqual({ status: "canceled" });
+    expect(action).not.toHaveBeenCalled();
+    expect(useViewStore.getState().pending).toBeNull();
+  });
+
+  it("cancels a replaced request and runs only the confirmed replacement", async () => {
+    const firstAction = vi.fn();
+    const replacementAction = vi.fn();
+    useProjectStore.setState({ chapterDirty: true });
+
+    const firstOutcome = useViewStore.getState().requestGuarded(firstAction);
+    const replacementOutcome = useViewStore
+      .getState()
+      .requestGuarded(replacementAction);
+
+    await expect(firstOutcome).resolves.toEqual({ status: "canceled" });
+    expect(firstAction).not.toHaveBeenCalled();
+    expect(replacementAction).not.toHaveBeenCalled();
+
+    useViewStore.getState().confirmPending();
+
+    await expect(replacementOutcome).resolves.toEqual({
+      status: "ran",
+      value: undefined,
+    });
+    expect(replacementAction).toHaveBeenCalledOnce();
   });
 });

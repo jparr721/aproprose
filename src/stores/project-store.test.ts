@@ -24,15 +24,19 @@ vi.mock("sonner", () => ({
 
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
+import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
+import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
+  deleteChapterCmd,
   openProject,
   readAppData,
   readPdf,
   readTextFile,
   writeAppData,
+  writeTextFile,
 } from "@/lib/tauri";
-import type { Block, BlockChange, ManuscriptProposal, ProjectInfo } from "@/lib/types";
+import type { Block, BlockChange, ProjectInfo } from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
   id: Math.random().toString(36).slice(2),
@@ -43,7 +47,93 @@ const mkBlock = (p: Partial<Block> = {}): Block => ({
   ...p,
 });
 
+const projectFixture = (root: string): ProjectInfo => ({
+  root,
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [
+    {
+      id: "ch1",
+      label: "I",
+      title: "Chapter One",
+      file: "chapter-one.tex",
+      wordCount: 2,
+    },
+  ],
+});
+
+const rewriteFixture = (blockId: string, newText: string): BlockChange => ({
+  kind: "rewrite",
+  blockId,
+  afterId: null,
+  type: null,
+  speaker: null,
+  newText,
+  toIndex: null,
+  reason: "Revise",
+});
+
+const removeFixture = (blockId: string): BlockChange => ({
+  kind: "remove",
+  blockId,
+  afterId: null,
+  type: null,
+  speaker: null,
+  newText: null,
+  toIndex: null,
+  reason: "Remove",
+});
+
+const dialogueInsertFixture = (
+  afterId: string,
+  speaker: string,
+): BlockChange => ({
+  kind: "insert",
+  blockId: null,
+  afterId,
+  type: "dialogue",
+  speaker,
+  newText: "Where were you?",
+  toIndex: null,
+  reason: "Add dialogue",
+});
+
+const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
+  buildManuscriptPendingProposal({
+    run: {
+      id: "run-1",
+      projectRoot: "/book",
+      mode: "edit",
+      task: { kind: "conversation", targetChapterId: "ch1" },
+      userMessageId: "user-1",
+      attachments: [],
+      startedAt: "2026-07-30T00:00:00.000Z",
+    } satisfies AgentRun,
+    raw: { chapterId: "ch1", summary: "Revise", changes },
+    blocks,
+    currentPending: null,
+    originatingMessageId: "assistant-1",
+    makeId: (() => {
+      let index = -1;
+      return () => {
+        index += 1;
+        return index === 0 ? "proposal-1" : `change-${index - 1}`;
+      };
+    })(),
+    now: "2026-07-30T00:01:00.000Z",
+  });
+
 beforeEach(() => {
+  vi.mocked(writeTextFile).mockClear();
   useProjectStore.setState({
     blocks: [],
     selectedId: null,
@@ -51,6 +141,9 @@ beforeEach(() => {
     editing: false,
     editCaret: null,
     chapterDirty: false,
+    saving: false,
+    error: null,
+    saveError: null,
     past: [],
     future: [],
     lastTextEditId: null,
@@ -805,6 +898,69 @@ describe("multi-selection stays live across structural edits (selectedIds invari
     expect(useProjectStore.getState().selectedIds).toEqual(["a", "c"]);
   });
 
+  it("moves selected blocks together and records one undo step", () => {
+    const d = mkBlock({ id: "d", text: "dd" });
+    useProjectStore.setState({
+      blocks: [a, b, c, d],
+      selectedId: "d",
+      selectedIds: ["b", "d"],
+      past: [],
+    });
+
+    useProjectStore.getState().moveBlocks(["b", "d"], -1);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "b",
+      "a",
+      "d",
+      "c",
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["b", "d"]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("moves selected blocks down together", () => {
+    const d = mkBlock({ id: "d", text: "dd" });
+    useProjectStore.setState({
+      blocks: [a, b, c, d],
+      selectedId: "d",
+      selectedIds: ["b", "d"],
+    });
+
+    useProjectStore.getState().moveBlocks(["b", "d"], 1);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "a",
+      "c",
+      "b",
+      "d",
+    ]);
+    expect(useProjectStore.getState().selectedIds).toEqual(["b", "d"]);
+  });
+
+  it("deletes selected blocks together and records one undo step", () => {
+    useProjectStore.setState({
+      selectedId: "c",
+      selectedIds: ["a", "c"],
+      past: [],
+    });
+
+    useProjectStore.getState().deleteBlocks(["a", "c"]);
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual(["b"]);
+    expect(useProjectStore.getState().selectedId).toBe("b");
+    expect(useProjectStore.getState().selectedIds).toEqual([]);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+  });
+
   it("reorderBlock preserves a live multi-selection (ids unchanged)", () => {
     useProjectStore.setState({ selectedId: "a", selectedIds: ["a", "c"] });
     useProjectStore.getState().reorderBlock("a", "c");
@@ -886,6 +1042,133 @@ describe("saveChapter refreshes the backup indicator", () => {
 
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     refreshSpy.mockRestore();
+  });
+});
+
+describe("saveChapter save errors", () => {
+  const saveReadyState = () => ({
+    project: projectFixture("/book"),
+    activeChapterId: "ch1",
+    blocks: [mkBlock({ id: "save-block", text: "Alpha", dirty: true })],
+    chapterDirty: true,
+    saving: false,
+    error: null,
+    saveError: null,
+  });
+
+  it("clears a previous save error when the save starts", async () => {
+    let resolveWrite: (() => void) | null = null;
+    vi.mocked(writeTextFile).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+    useProjectStore.setState({ ...saveReadyState(), saveError: "Earlier save failed" });
+
+    const save = useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      saving: true,
+      saveError: null,
+    });
+
+    if (!resolveWrite) throw new Error("save did not start the disk write");
+    resolveWrite();
+    await save;
+  });
+
+  it("records a save-specific error and preserves the generic save error", async () => {
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      saving: false,
+      chapterDirty: true,
+      error: "Error: disk full",
+      saveError: "Error: disk full",
+    });
+  });
+
+  it("clears the save-specific error after a successful retry", async () => {
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+    expect(useProjectStore.getState().saveError).toBe("Error: disk full");
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      chapterDirty: false,
+      error: "Error: disk full",
+      saveError: null,
+    });
+  });
+});
+
+describe("save error resets", () => {
+  it("clears the save error when loading another project", async () => {
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project: projectFixture("/next-book"),
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readTextFile).mockResolvedValueOnce("Fresh chapter text.");
+    vi.mocked(readPdf).mockResolvedValueOnce(null);
+    useProjectStore.setState({ saveError: "Earlier save failed" });
+
+    await useProjectStore.getState().loadProjectAt("/next-book");
+
+    expect(useProjectStore.getState().saveError).toBeNull();
+  });
+
+  it("clears the save error when closing a project", () => {
+    useProjectStore.setState({ saveError: "Earlier save failed" });
+
+    useProjectStore.getState().closeProject();
+
+    expect(useProjectStore.getState().saveError).toBeNull();
+  });
+
+  it("clears the save error after deleting the active final chapter", async () => {
+    const project = projectFixture("/book");
+    vi.mocked(deleteChapterCmd).mockResolvedValueOnce({ ...project, chapters: [] });
+    useProjectStore.setState({
+      project,
+      activeChapterId: "ch1",
+      saveError: "Earlier save failed",
+    });
+
+    await useProjectStore.getState().deleteChapter("ch1");
+
+    expect(useProjectStore.getState()).toMatchObject({
+      activeChapterId: null,
+      saveError: null,
+    });
+  });
+
+  it("clears the save error after selecting a chapter", async () => {
+    const project = {
+      ...projectFixture("/book"),
+      chapters: [
+        { id: "ch1", label: "I", title: "Chapter One", file: "chapter-one.tex", wordCount: 2 },
+        { id: "ch2", label: "II", title: "Chapter Two", file: "chapter-two.tex", wordCount: 2 },
+      ],
+    };
+    vi.mocked(readTextFile).mockResolvedValueOnce("Fresh chapter text.");
+    useProjectStore.setState({
+      project,
+      activeChapterId: "ch1",
+      saveError: "Earlier save failed",
+    });
+
+    await useProjectStore.getState().selectChapter("ch2");
+
+    expect(useProjectStore.getState().saveError).toBeNull();
   });
 });
 
@@ -1014,144 +1297,338 @@ describe("setSelection", () => {
   });
 });
 
-describe("applyManuscriptProposal", () => {
-  const change = (p: Partial<BlockChange> & { kind: BlockChange["kind"] }): BlockChange => ({
-    blockId: null,
-    afterId: null,
-    type: null,
-    speaker: null,
-    newText: null,
-    toIndex: null,
-    reason: "r",
-    ...p,
-  });
-  const proposal = (changes: BlockChange[]): ManuscriptProposal => ({
-    chapterId: "ch1",
-    summary: "s",
-    changes,
-  });
-
-  beforeEach(() => {
+describe("applyAgentManuscriptProposal", () => {
+  it("applies all selected changes as one editor undo step", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
     useProjectStore.setState({
-      blocks: [
-        mkBlock({ id: "a", text: "alpha" }),
-        mkBlock({ id: "b", text: "bravo" }),
-        mkBlock({ id: "c", text: "charlie" }),
-      ],
-      selectedId: null,
-      selectedIds: [],
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
       past: [],
       future: [],
+    } as never);
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      rewriteFixture("b", "B revised"),
+    ]);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  it("prunes a removed active selection and restores the batch with one undo", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+      mkBlock({ id: "c", text: "C" }),
+    ];
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      selectedId: "b",
+      selectedIds: ["a", "b"],
+      editing: true,
+      editCaret: 1,
       chapterDirty: false,
-      lastTextEditId: null,
+      past: [],
+      future: [{ blocks, selectedId: "a" }],
+    });
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      removeFixture("b"),
+    ]);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0", "change-1"],
+    });
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks: [expect.objectContaining({ id: "a", text: "A revised" }), blocks[2]],
+      selectedId: "a",
+      selectedIds: ["a"],
+      editing: false,
+      editCaret: null,
+      chapterDirty: true,
+      future: [],
+    });
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(writeTextFile).not.toHaveBeenCalled();
+
+    useProjectStore.getState().undo();
+
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks,
+      selectedId: "b",
+      selectedIds: [],
+      editing: false,
+      editCaret: null,
+      chapterDirty: true,
     });
   });
 
-  it("applies the kept changes as ONE undo step and returns the counts", () => {
-    const result = useProjectStore.getState().applyManuscriptProposal(
-      proposal([
-        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
-        change({ kind: "remove", blockId: "b" }),
-        change({ kind: "insert", afterId: null, type: "narration", newText: "coda" }),
-      ]),
-      [0, 1, 2],
-    );
-    const { blocks, past, future, chapterDirty, lastTextEditId } = useProjectStore.getState();
-    expect(result).toEqual({ applied: 3, skipped: 0 });
-    expect(blocks.map((x) => x.text)).toEqual(["ALPHA", "charlie", "coda"]);
-    expect(past).toHaveLength(1);
-    expect(future).toEqual([]);
-    expect(chapterDirty).toBe(true);
-    expect(lastTextEditId).toBeNull();
-
-    useProjectStore.getState().undo();
-    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
-      "alpha",
-      "bravo",
-      "charlie",
+  it("resolves an inserted dialogue speaker case-insensitively and persists it", async () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      meta: {
+        ...useProjectStore.getState().meta,
+        characters: [
+          {
+            id: "character-mara",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+          },
+        ],
+      },
+      blocks,
+      chapterDirty: false,
+      past: [],
+      future: [],
+    });
+    const proposal = pendingManuscriptFixture(blocks, [
+      dialogueInsertFixture("a", "mArA"),
     ]);
-  });
 
-  it("applies only the kept indices", () => {
-    useProjectStore.getState().applyManuscriptProposal(
-      proposal([
-        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
-        change({ kind: "remove", blockId: "b" }),
-      ]),
-      [0],
-    );
-    expect(useProjectStore.getState().blocks.map((x) => x.text)).toEqual([
-      "ALPHA",
-      "bravo",
-      "charlie",
-    ]);
-  });
-
-  it("is a no-op returning zero counts when kept is empty", () => {
     const result = useProjectStore
       .getState()
-      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "a" })]), []);
-    expect(result).toEqual({ applied: 0, skipped: 0 });
-    expect(useProjectStore.getState().past).toHaveLength(0);
+      .applyAgentManuscriptProposal(proposal, [proposal.changes[0].id]);
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().blocks[1]).toMatchObject({
+      type: "dialogue",
+      text: "Where were you?",
+      speaker: "character-mara",
+      dirty: true,
+    });
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(writeTextFile).not.toHaveBeenCalled();
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(writeTextFile).toHaveBeenCalledWith(
+      "/book",
+      "chapter-one.tex",
+      expect.stringContaining("% @speaker: character-mara"),
+    );
+    expect(useProjectStore.getState().blocks[1]).toMatchObject({
+      type: "dialogue",
+      text: "Where were you?",
+      speaker: "character-mara",
+      dirty: false,
+    });
     expect(useProjectStore.getState().chapterDirty).toBe(false);
   });
 
-  it("counts a vanished-target change as skipped while applying the rest", () => {
-    const result = useProjectStore.getState().applyManuscriptProposal(
-      proposal([
-        change({ kind: "rewrite", blockId: "ghost", newText: "x" }),
-        change({ kind: "rewrite", blockId: "a", newText: "ALPHA" }),
-      ]),
-      [0, 1],
-    );
-    expect(result).toEqual({ applied: 1, skipped: 1 });
-    expect(useProjectStore.getState().blocks[0].text).toBe("ALPHA");
-  });
+  it("applies nothing when one selected precondition is stale", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+      rewriteFixture("b", "B revised"),
+    ]);
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks: [{ ...blocks[0], text: "Changed live" }, blocks[1]],
+      past: [],
+    } as never);
 
-  it("reports skips without burning an undo step when nothing applies", () => {
     const result = useProjectStore
       .getState()
-      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "ghost" })]), [0]);
-    expect(result).toEqual({ applied: 0, skipped: 1 });
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({ status: "stale", staleChangeIds: ["change-0"] });
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "Changed live",
+      "B",
+    ]);
     expect(useProjectStore.getState().past).toHaveLength(0);
   });
 
-  it("prunes removed blocks from the selection (deleteBlock precedent)", () => {
-    useProjectStore.setState({ selectedId: "b", selectedIds: ["a", "b"], editing: true });
-    useProjectStore
-      .getState()
-      .applyManuscriptProposal(proposal([change({ kind: "remove", blockId: "b" })]), [0]);
-    const { selectedId, selectedIds, editing } = useProjectStore.getState();
-    expect(selectedIds).toEqual(["a"]);
-    expect(selectedId).toBe("a");
-    expect(editing).toBe(false);
-  });
-
-  it("resolves an inserted dialogue speaker case-insensitively from the cast", () => {
+  it("rejects an unknown selected change id before applying known changes", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
     useProjectStore.setState({
-      meta: {
-        ...useProjectStore.getState().meta,
-        characters: [{ id: "c9", name: "Mara", color: "#aabbcc", role: "PI" }],
-      },
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(proposal, ["change-0", "unknown"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["unknown"],
+      reason: "unknown-selection",
     });
-    useProjectStore.getState().applyManuscriptProposal(
-      proposal([
-        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "mara", newText: "Hi" }),
-      ]),
-      [0],
-    );
-    const inserted = useProjectStore.getState().blocks[1];
-    expect(inserted.type).toBe("dialogue");
-    expect(inserted.speaker).toBe("c9");
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
   });
 
-  it("leaves speaker unset when the name matches no character", () => {
-    useProjectStore.getState().applyManuscriptProposal(
-      proposal([
-        change({ kind: "insert", afterId: "a", type: "dialogue", speaker: "Nobody", newText: "Hi" }),
-      ]),
-      [0],
-    );
-    expect(useProjectStore.getState().blocks[1].speaker).toBeUndefined();
+  it("rejects a mismatched manuscript precondition without throwing or mutating", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
+    const mismatchedProposal = {
+      ...proposal,
+      changes: [
+        {
+          ...proposal.changes[0],
+          precondition: {
+            kind: "insert" as const,
+            boundary: "immediate" as const,
+            anchor: null,
+            expectedNext: null,
+          },
+        },
+      ],
+    };
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      selectedId: "a",
+      chapterDirty: false,
+      past: [],
+      future: [],
+    } as never);
+    const before = {
+      blocks: structuredClone(useProjectStore.getState().blocks),
+      selectedId: useProjectStore.getState().selectedId,
+      chapterDirty: useProjectStore.getState().chapterDirty,
+      past: structuredClone(useProjectStore.getState().past),
+      future: structuredClone(useProjectStore.getState().future),
+    };
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(mismatchedProposal, ["change-0"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "mismatched-precondition",
+    });
+    expect(useProjectStore.getState()).toMatchObject({
+      blocks: before.blocks,
+      selectedId: before.selectedId,
+      chapterDirty: before.chapterDirty,
+      past: before.past,
+      future: before.future,
+    });
+    expect(writeTextFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects conflicting selected targets without a partial mutation", () => {
+    const blocks = [
+      mkBlock({ id: "a", text: "A" }),
+      mkBlock({ id: "b", text: "B" }),
+    ];
+    const proposal = pendingManuscriptFixture(blocks, [removeFixture("a")]);
+    const conflictingProposal = {
+      ...proposal,
+      changes: [
+        proposal.changes[0],
+        {
+          ...proposal.changes[0],
+          id: "change-1",
+          change: {
+            ...proposal.changes[0].change,
+            reason: "Remove the same source again",
+          },
+        },
+      ],
+    };
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        conflictingProposal,
+        conflictingProposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0", "change-1"],
+      reason: "conflicting-changes",
+    });
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("rejects a proposal after its chapter is deleted", () => {
+    const blocks = [mkBlock({ id: "a", text: "A" })];
+    const proposal = pendingManuscriptFixture(blocks, [
+      rewriteFixture("a", "A revised"),
+    ]);
+    useProjectStore.setState({
+      project: { ...projectFixture("/book"), chapters: [] },
+      activeChapterId: "ch1",
+      blocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().blocks).toEqual(blocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
   });
 });

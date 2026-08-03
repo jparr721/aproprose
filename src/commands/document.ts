@@ -1,11 +1,11 @@
 // commands/document.ts - save & build, undo, redo.
 
 import {
-  IconAlertTriangle,
-  IconArrowBackUp,
-  IconArrowForwardUp,
-  IconPlayerPlayFilled,
-} from "@tabler/icons-react";
+  TriangleAlert as IconAlertTriangle,
+  Undo2 as IconArrowBackUp,
+  Redo2 as IconArrowForwardUp,
+  Play as IconPlayerPlayFilled,
+} from "lucide-react";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Command } from "./types";

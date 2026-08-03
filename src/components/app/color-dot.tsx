@@ -1,7 +1,7 @@
 // color-dot.tsx — a small colored dot/avatar for a character.
 //
 // Character colors are user data (arbitrary oklch strings), not design literals,
-// so per CLAUDE.md the dynamic value is passed through a CSS variable rather than
+// so the dynamic value is passed through a CSS variable rather than
 // a literal-color inline style. One tiny component owns that escape hatch.
 
 import { cn } from "@/lib/utils";

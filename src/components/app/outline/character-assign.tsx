@@ -6,7 +6,7 @@
 // chapter subview, so both assign cast the same way the editor assigns speakers.
 
 import { useState } from "react";
-import { IconPlus, IconUserPlus } from "@tabler/icons-react";
+import { Plus as IconPlus, UserPlus as IconUserPlus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,

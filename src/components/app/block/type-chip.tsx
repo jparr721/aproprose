@@ -2,7 +2,7 @@
 // speaker (and add a new character) for dialogue.
 
 import { useState } from "react";
-import { IconChevronDown, IconCheck, IconUserPlus } from "@tabler/icons-react";
+import { ChevronDown as IconChevronDown, Check as IconCheck, UserPlus as IconUserPlus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -20,6 +20,8 @@ export function AutoGrowTextarea({
   className,
   autoFocus,
   placeholder,
+  ariaLabel,
+  disabled,
   onKeyDown,
   proseBody,
   caret,
@@ -34,6 +36,8 @@ export function AutoGrowTextarea({
   className?: string;
   autoFocus?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Mark this as a carve-eligible prose body (selection toolbar + split shortcut). */
   proseBody?: boolean;
@@ -77,6 +81,8 @@ export function AutoGrowTextarea({
       <textarea
         ref={ref}
         value={value}
+        aria-label={ariaLabel}
+        disabled={disabled}
         placeholder={placeholder}
         rows={1}
         spellCheck

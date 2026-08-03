@@ -1,14 +1,13 @@
 // sync-status.tsx — the top-bar backup indicator. A Spinner while syncing; a
-// status dot otherwise; a popover with details and manual actions. When the
+// status icon otherwise; a popover with details and manual actions. When the
 // project isn't a backed-up repo, it offers "Back up to GitHub".
 
 import {
-  IconCloudCheck,
-  IconCloudUp,
-  IconAlertTriangle,
-  IconCloudOff,
-  IconGitMerge,
-} from "@tabler/icons-react";
+  CloudAlert,
+  CloudCheck,
+  CloudOff,
+  CloudUpload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -16,22 +15,14 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { TypographyMuted, TypographySmall } from "@/components/ui/typography";
 import { useSyncStore } from "@/stores/sync-store";
 import type { SyncStatus } from "@/lib/types";
-import { cn } from "@/lib/utils";
-
-const TONE: Record<SyncStatus, string> = {
-  clean: "bg-success",
-  synced: "bg-success",
-  syncing: "bg-success",
-  dirty: "bg-warning",
-  conflict: "bg-destructive",
-  error: "bg-destructive",
-  offline: "bg-faint",
-  needsSetup: "bg-faint",
-  disabled: "bg-faint",
-};
 
 function statusLabel(status: SyncStatus): string {
   switch (status) {
@@ -50,15 +41,21 @@ function statusLabel(status: SyncStatus): string {
   }
 }
 
-/** The compact glyph in the top-bar trigger: a spinner, the conflict icon, or a tone dot. */
+/** The compact glyph in the top-bar trigger. */
 function TriggerGlyph({ status }: { status: SyncStatus }) {
   switch (status) {
     case "syncing":
-      return <Spinner className="size-3 text-success" />;
+      return <Spinner className="size-3.5 text-success" />;
+    case "clean":
+    case "synced":
+      return <CloudCheck className="size-3.5 text-success" />;
+    case "offline":
+      return <CloudOff className="size-3.5 text-muted-foreground" />;
     case "conflict":
-      return <IconGitMerge className="size-3 text-destructive" />;
+    case "error":
+      return <CloudAlert className="size-3.5 text-destructive" />;
     default:
-      return <span className={cn("size-1.5 rounded-full", TONE[status])} />;
+      return <CloudUpload className="size-3.5 text-warning" />;
   }
 }
 
@@ -67,14 +64,14 @@ function StatusIcon({ status }: { status: SyncStatus }) {
   switch (status) {
     case "clean":
     case "synced":
-      return <IconCloudCheck className="size-4 text-success" />;
+      return <CloudCheck className="size-4 text-success" />;
     case "offline":
-      return <IconCloudOff className="size-4 text-muted-foreground" />;
+      return <CloudOff className="size-4 text-muted-foreground" />;
     case "conflict":
     case "error":
-      return <IconAlertTriangle className="size-4 text-destructive" />;
+      return <CloudAlert className="size-4 text-destructive" />;
     default:
-      return <IconCloudUp className="size-4 text-warning" />;
+      return <CloudUpload className="size-4 text-warning" />;
   }
 }
 
@@ -96,14 +93,20 @@ export function SyncStatus({
   // Not a backed-up project: offer setup.
   if (!isRepo || !remoteUrl) {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onSetup}
-        className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground"
-      >
-        <IconCloudUp className="size-3.5" /> Back up to GitHub
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Back up to GitHub"
+            onClick={onSetup}
+            className="text-muted-foreground"
+          >
+            <CloudUpload className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Back up to GitHub</TooltipContent>
+      </Tooltip>
     );
   }
 
@@ -111,15 +114,16 @@ export function SyncStatus({
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground"
-        >
-          <TriggerGlyph status={status} />
-          {label}
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label={label}>
+              <TriggerGlyph status={status} />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
       <PopoverContent align="start" className="w-72">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">

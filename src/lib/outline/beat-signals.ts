@@ -1,7 +1,7 @@
 // beat-signals.ts -- presentation-agnostic continuity-health signal for a beat.
 //
-// Mirrors the SEV_DOT severity coloring used by the right-panel ContinuityTab so
-// the storyboard card and the detail rail read continuity health the same way.
+// Shared continuity severity colors keep the storyboard card and detail rail
+// aligned.
 
 import type { Character, ContinuityFlag, ContinuitySeverity } from "@/lib/types";
 

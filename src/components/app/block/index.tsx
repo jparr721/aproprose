@@ -7,7 +7,7 @@
 
 import { memo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
-import { IconClipboardText, IconCopy, IconGripVertical } from "@tabler/icons-react";
+import { ClipboardList as IconClipboardText, Copy as IconCopy, GripVertical as IconGripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -164,7 +164,7 @@ function BlockImpl({
           // color transition applies.
           style={
             {
-              "--dnd-transform": CSS.Transform.toString(transform),
+              "--dnd-transform": CSS.Translate.toString(transform),
               "--dnd-transition": transition,
             } as CSSProperties
           }

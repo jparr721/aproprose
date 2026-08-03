@@ -7,7 +7,7 @@ David snorted. "He's not wrong."
 
 Terrence looked at them both, then down at the backpack. "I hate that I know you're trying to help."`;
 
-describe("structurePassage on the reported Muse dump", () => {
+describe("structurePassage on the reported structure dump", () => {
   it("produces one block per paragraph unit, dialogue where quoted", () => {
     const cast = [
       { id: "c-brian", name: "Brian", color: "#000", role: "" },

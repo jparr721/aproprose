@@ -1,16 +1,24 @@
-// top-bar.tsx — the application chrome: sidebar toggle, document identity, build
+// top-bar.tsx — the application chrome: sidebar toggle, document identity, save
 // status, panel toggles, settings, the Compile CTA, and (off-macOS) window
 // controls. Project switching now lives in the sidebar header, not here.
 
 import { useState, useEffect } from "react";
 import {
-  IconFileTypePdf,
-  IconLayoutSidebarRight,
-  IconPlayerPlayFilled,
-} from "@tabler/icons-react";
+  FileText,
+  PanelRight,
+  Play,
+  Save,
+  SaveCheck,
+  SaveOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { KeybindingHint } from "@/components/app/keybinding-hint";
 import { SyncStatus } from "@/components/app/sync-status";
 import { WindowControls } from "@/components/app/window-controls";
@@ -25,60 +33,49 @@ import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
-function BuildBadge() {
-  const status = useProjectStore((s) => s.compile.status);
-  const errors = useProjectStore((s) => s.compile.errors);
-  const at = useProjectStore((s) => s.compile.at);
-  const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
+function SaveStatus() {
+  const chapterDirty = useProjectStore((s) => s.chapterDirty);
+  const saving = useProjectStore((s) => s.saving);
+  const saveError = useProjectStore((s) => s.saveError);
 
-  const tone =
-    status === "clean"
-      ? "bg-success"
-      : status === "error"
-        ? "bg-destructive"
-        : status === "compiling"
-          ? "bg-warning"
-          : "bg-faint";
+  const state = saving
+    ? {
+        label: "Saving",
+        tooltip: "Saving",
+        icon: <Spinner className="size-3.5 text-warning" />,
+      }
+    : saveError
+      ? {
+          label: "Save failed",
+          tooltip: saveError,
+          icon: <SaveOff className="size-3.5 text-destructive" />,
+        }
+      : chapterDirty
+        ? {
+            label: "Unsaved changes",
+            tooltip: "Unsaved changes",
+            icon: <Save className="size-3.5 text-warning" />,
+          }
+        : {
+            label: "Saved",
+            tooltip: "Saved",
+            icon: <SaveCheck className="size-3.5 text-success" />,
+          };
 
-  const label =
-    status === "clean"
-      ? at
-        ? "build clean"
-        : "loaded"
-      : status === "error"
-        ? `${errors.length || "build"} error${errors.length === 1 ? "" : "s"}`
-        : status === "compiling"
-          ? "compiling"
-          : "not built";
-
-  const inner = (
-    <>
-      {status === "compiling" ? (
-        <Spinner className="size-3 text-warning" />
-      ) : (
-        <span className={cn("size-1.5 rounded-full", tone)} />
-      )}
-      {label}
-    </>
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="status"
+          aria-label={state.label}
+          className="flex size-6 items-center justify-center text-muted-foreground"
+        >
+          {state.icon}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{state.tooltip}</TooltipContent>
+    </Tooltip>
   );
-
-  const base =
-    "flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground";
-
-  if (status === "error") {
-    return (
-      <button
-        type="button"
-        aria-label="View build errors"
-        onClick={() => setBuildErrorsOpen(true)}
-        className={cn(base, "cursor-pointer transition-colors hover:bg-accent")}
-      >
-        {inner}
-      </button>
-    );
-  }
-
-  return <span className={base}>{inner}</span>;
 }
 
 export function TopBar() {
@@ -127,7 +124,7 @@ export function TopBar() {
         IS_MAC && sidebarState === "collapsed" && "pl-24",
       )}
     >
-      {/* Left: sidebar toggle, document identity, build status. */}
+      {/* Left: sidebar toggle, document identity, save status. */}
       <div className="flex min-w-0 flex-1 items-center gap-3" data-tauri-drag-region>
         <SidebarTrigger className="-ml-1 text-muted-foreground" />
 
@@ -146,7 +143,7 @@ export function TopBar() {
           </div>
         ) : null}
 
-        <BuildBadge />
+        <SaveStatus />
         {project ? (
           <SyncStatus onReview={() => setReviewOpen(true)} onSetup={() => setSetupOpen(true)} />
         ) : null}
@@ -154,16 +151,19 @@ export function TopBar() {
 
       {/* Center: the Compile CTA. */}
       {project ? (
-        <Button
-          size="sm"
-          onClick={() => void compileNow()}
-          disabled={compiling}
-          className="px-3"
-        >
-          {compiling ? <Spinner /> : <IconPlayerPlayFilled />}
-          Compile
-          <KeybindingHint keybinding={KEYBINDINGS.COMPILE} className="ml-0.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              aria-label="Compile"
+              onClick={() => void compileNow()}
+              disabled={compiling}
+            >
+              {compiling ? <Spinner className="size-3.5" /> : <Play className="size-3.5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Compile</TooltipContent>
+        </Tooltip>
       ) : null}
 
       {/* Right: panel toggles + window controls. */}
@@ -180,14 +180,14 @@ export function TopBar() {
                 pdfOpen && !focus && "border-accent-ink/30 bg-accent text-accent-foreground",
               )}
             >
-              <IconFileTypePdf /> PDF
+              <FileText /> PDF
               <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} className="ml-0.5" />
             </Button>
             {/* Right-panel toggle, mirroring the left SidebarTrigger (⌘⇧A). */}
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Toggle assistant panel"
+              aria-label="Toggle AI Console"
               aria-pressed={aiOpen && !focus}
               onClick={toggleAi}
               className={cn(
@@ -195,8 +195,8 @@ export function TopBar() {
                 aiOpen && !focus && "bg-accent text-foreground",
               )}
             >
-              <IconLayoutSidebarRight />
-              <span className="sr-only">Toggle assistant panel</span>
+              <PanelRight />
+              <span className="sr-only">Toggle AI Console</span>
             </Button>
           </>
         ) : null}

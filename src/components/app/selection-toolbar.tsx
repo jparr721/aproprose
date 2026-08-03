@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { IconScissors, IconBold, IconItalic } from "@tabler/icons-react";
+import { Scissors as IconScissors, Bold as IconBold, Italic as IconItalic } from "lucide-react";
 import { toggleInlineWrap, type InlineMarker } from "@/lib/blocks/format";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";

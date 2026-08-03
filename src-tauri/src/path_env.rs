@@ -4,9 +4,9 @@
 //! the minimal `PATH` that `launchd`/`systemd`/the display manager hands the app
 //! (typically just `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's interactive
 //! shell `PATH`. User-installed tools then become invisible to every child
-//! process we spawn: `latexmk`/`pdflatex` (`compile.rs`), the Codex/Claude CLIs
-//! (`ai_cli.rs`), and `git`/`gh` (`git.rs`). Running the app from a terminal
-//! hides this because the process inherits the terminal's full `PATH`.
+//! process we spawn: `latexmk`/`pdflatex` (`compile.rs`) and `git`/`gh`
+//! (`git.rs`). Running the app from a terminal hides this because the process
+//! inherits the terminal's full `PATH`.
 //!
 //! `repair_path` runs once at startup, before any child is spawned. Unless our
 //! stdout is already a terminal (a strong signal we were started from a shell
@@ -53,7 +53,7 @@ pub fn repair_path() {
         Err(reason) => {
             eprintln!(
                 "aproprose: PATH recovery skipped - {reason}; installed tools \
-                 (latexmk, gh, codex) may be invisible to the app"
+                 (latexmk, git, gh) may be invisible to the app"
             );
             return;
         }

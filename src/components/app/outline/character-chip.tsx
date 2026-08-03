@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { X as IconX } from "lucide-react";
 import { ColorDot } from "@/components/app/color-dot";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";

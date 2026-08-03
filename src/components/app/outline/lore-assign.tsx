@@ -3,7 +3,7 @@
 // Mirrors character-assign.tsx: assigned entries render as removable LoreChips;
 // the "+ Lore" menu toggles membership (staying open across toggles).
 
-import { IconBook, IconPlus } from "@tabler/icons-react";
+import { Book as IconBook, Plus as IconPlus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,

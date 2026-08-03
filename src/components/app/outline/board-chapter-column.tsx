@@ -1,6 +1,10 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { IconChevronRight, IconMessages, IconPlus } from "@tabler/icons-react";
+import {
+  IconChevronRight,
+  IconMessages,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { BoardCard } from "@/components/app/outline/board-card";
 import { CharacterChip } from "@/components/app/outline/character-chip";
@@ -10,15 +14,17 @@ import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import type { ChapterRef } from "@/lib/types";
 
 export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: number }) {
   const { chapterRef, index } = props;
+  const project = useProjectStore((s) => s.project);
   const ch = useProjectStore((s) => getChapterOutline(s.meta.chapters, chapterRef.id));
   const characters = useProjectStore((s) => s.meta.characters);
   const addCard = useProjectStore((s) => s.addCard);
   const openChapter = useOutlineBoardStore((s) => s.openChapter);
-  const openChapterGuide = useOutlineBoardStore((s) => s.openChapterGuide);
+  const openOutlineAgent = useViewStore((s) => s.openOutlineAgent);
   const { setNodeRef } = useDroppable({ id: cardColumnId(chapterRef.id) });
   const cast = beatCharacters(ch.characterIds, characters);
 
@@ -40,7 +46,12 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
             variant="ghost"
             size="sm"
             className="ml-auto h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => openChapterGuide(chapterRef.id)}
+            onClick={() => {
+              if (project === null) {
+                throw new Error("Open a project before planning an outline.");
+              }
+              openOutlineAgent(project.root, chapterRef.id);
+            }}
           >
             <IconMessages className="size-3.5" /> Plan with AI
           </Button>

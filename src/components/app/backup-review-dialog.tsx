@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { PatchDiff } from "@pierre/diffs/react";
-import { IconChevronRight } from "@tabler/icons-react";
+import { ChevronRight as IconChevronRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,

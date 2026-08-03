@@ -4,13 +4,13 @@
 // SidebarProvider), so it arrives through CommandContext rather than a store.
 
 import {
-  IconColumns2,
-  IconColumns3,
-  IconFileText,
-  IconLayoutSidebar,
-  IconSparkles,
-  IconViewfinder,
-} from "@tabler/icons-react";
+  Columns2 as IconColumns2,
+  Columns3 as IconColumns3,
+  FileText as IconFileText,
+  PanelLeft as IconLayoutSidebar,
+  Sparkles as IconSparkles,
+  Focus as IconViewfinder,
+} from "lucide-react";
 import { useViewStore } from "@/stores/view-store";
 import type { LayoutMode } from "@/lib/types";
 import type { Command } from "./types";
@@ -38,7 +38,7 @@ export const viewCommands: Command[] = [
   {
     id: "view.toggle-ai",
     group: "View",
-    title: "Toggle AI panel",
+    title: "Toggle AI Console",
     icon: IconSparkles,
     keybindingId: "TOGGLE_AI",
     run: () => useViewStore.getState().toggleAi(),

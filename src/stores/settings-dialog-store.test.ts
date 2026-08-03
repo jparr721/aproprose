@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useSettingsDialogStore, SETTINGS_TABS } from "@/stores/settings-dialog-store";
 
 beforeEach(() =>
-  useSettingsDialogStore.setState({ open: false, tab: SETTINGS_TABS.APPEARANCE }),
+  useSettingsDialogStore.setState({
+    open: false,
+    tab: SETTINGS_TABS.APPEARANCE,
+    aiTarget: null,
+  }),
 );
 
 describe("settings-dialog-store", () => {
@@ -20,10 +24,22 @@ describe("settings-dialog-store", () => {
   });
 
   it("openWithTab opens on the requested tab", () => {
+    useSettingsDialogStore.getState().openAiSettings("key");
     useSettingsDialogStore.getState().openWithTab(SETTINGS_TABS.STATS);
     const s = useSettingsDialogStore.getState();
     expect(s.open).toBe(true);
     expect(s.tab).toBe(SETTINGS_TABS.STATS);
+    expect(s.aiTarget).toBeNull();
+  });
+
+  it("opens AI settings with the prescribed focus target", () => {
+    useSettingsDialogStore.getState().openAiSettings("model");
+
+    expect(useSettingsDialogStore.getState()).toMatchObject({
+      open: true,
+      tab: SETTINGS_TABS.AI,
+      aiTarget: "model",
+    });
   });
 
   it("setTab changes the tab without opening or closing", () => {

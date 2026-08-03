@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { KEYBINDINGS, toHotkeyString, keybindingParts } from "@/lib/keybindings";
+import {
+  KEYBINDINGS,
+  keybindingParts,
+  toHotkeyString,
+  toHotkeyStrings,
+} from "@/lib/keybindings";
 
 describe("keybindings registry", () => {
   it("binds split-block to mod+shift+enter", () => {
@@ -34,6 +39,8 @@ describe("block nav/edit keybindings", () => {
     expect(toHotkeyString(KEYBINDINGS.NAV_PREV_BLOCK)).toBe("up");
     expect(toHotkeyString(KEYBINDINGS.NAV_NEXT_BLOCK)).toBe("down");
     expect(toHotkeyString(KEYBINDINGS.EDIT_BLOCK)).toBe("i");
+    expect(toHotkeyString(KEYBINDINGS.DELETE_BLOCK)).toBe("delete");
+    expect(toHotkeyStrings(KEYBINDINGS.DELETE_BLOCK)).toEqual(["delete", "backspace"]);
     expect(toHotkeyString(KEYBINDINGS.EXIT_BLOCK)).toBe("escape");
   });
 

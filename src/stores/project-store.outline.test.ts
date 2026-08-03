@@ -1,12 +1,139 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/tauri", () => ({
+  compileProject: vi.fn(),
+  openProject: vi.fn(),
+  createProject: vi.fn(),
+  writeSkeleton: vi.fn(),
+  deleteChapterCmd: vi.fn(),
+  migrateToManaged: vi.fn(),
+  pickProjectDir: vi.fn(),
+  readAppData: vi.fn().mockResolvedValue(null),
+  readPdf: vi.fn().mockResolvedValue(null),
+  readProjectMeta: vi.fn().mockResolvedValue(null),
+  readTextFile: vi.fn(),
+  writeAppData: vi.fn().mockResolvedValue(undefined),
+  writeProjectMeta: vi.fn().mockResolvedValue(undefined),
+  writeTextFile: vi.fn(),
+}));
+
+import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
-import type { GuidedOutlinePlan } from "@/lib/types";
+import { writeProjectMeta } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
+import type {
+  Card,
+  ProjectInfo,
+  SculptChange,
+  SculptProposal,
+} from "@/lib/types";
+
+const cardFixture = (): Card => ({
+  id: "card-1",
+  title: "Arrival",
+  intention: "Set the stakes",
+  characterIds: [],
+  loreIds: [],
+  continuityFlags: [],
+});
+
+const projectFixture = (root: string): ProjectInfo => ({
+  root,
+  name: "Book",
+  mainFile: "main.tex",
+  title: "Book",
+  author: "Author",
+  metadata: {
+    title: "Book",
+    subtitle: "",
+    author: "Author",
+    publisher: "",
+    isbn: "",
+  },
+  chapters: [
+    {
+      id: "ch1",
+      label: "I",
+      title: "Chapter One",
+      file: "chapter-one.tex",
+      wordCount: 0,
+    },
+  ],
+});
+
+const buildPendingOutlineFixture = (
+  changes: SculptChange[],
+  cards: Card[],
+) => {
+  const raw: SculptProposal = {
+    chapterId: "ch1",
+    summary: "Strengthen the arrival",
+    changes,
+  };
+  return buildOutlinePendingProposal({
+    run: {
+      id: "run-1",
+      projectRoot: "/book",
+      mode: "edit",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      userMessageId: "user-1",
+      attachments: [],
+      startedAt: "2026-07-30T00:00:00.000Z",
+    } satisfies AgentRun,
+    raw,
+    cards,
+    currentPending: null,
+    originatingMessageId: "assistant-1",
+    makeId: (() => {
+      let index = -1;
+      return () => {
+        index += 1;
+        return index === 0 ? "proposal-1" : `change-${index - 1}`;
+      };
+    })(),
+    now: "2026-07-30T00:01:00.000Z",
+  });
+};
+
+const pendingOutlineFixture = () =>
+  buildPendingOutlineFixture(
+    [
+      {
+        kind: "rewrite",
+        cardId: "card-1",
+        title: "Hard arrival",
+        intention: null,
+        toIndex: null,
+        reason: "Raise the stakes",
+      },
+    ],
+    [cardFixture()],
+  );
 
 beforeEach(() => {
+  vi.mocked(writeProjectMeta).mockClear();
   useProjectStore.setState({
-    project: null,
-    meta: { version: 2, characters: [], lore: [], statuses: {}, outline: { premise: "" }, chapters: {} },
+    project: projectFixture("/book"),
+    meta: {
+      version: 2,
+      characters: [],
+      lore: [],
+      statuses: {},
+      outline: { premise: "" },
+      chapters: {
+        ch1: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: [],
+          cards: [cardFixture()],
+        },
+      },
+    },
   } as never);
 });
 
@@ -36,7 +163,11 @@ describe("card + chapter actions", () => {
   it("adds and edits a card", () => {
     const id = useProjectStore.getState().addCard("ch1");
     useProjectStore.getState().editCard("ch1", id, { title: "Hello" });
-    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe("Hello");
+    expect(
+      useProjectStore
+        .getState()
+        .meta.chapters.ch1.cards.find((card) => card.id === id)?.title,
+    ).toBe("Hello");
   });
   it("moves a card between chapters", () => {
     const id = useProjectStore.getState().addCard("ch1");
@@ -56,36 +187,215 @@ describe("card + chapter actions", () => {
     useProjectStore.getState().removeCharacterFromChapter("ch1", "c1");
     expect(useProjectStore.getState().meta.chapters.ch1.characterIds).toEqual(["c2"]);
   });
+});
 
-  it("applies a reviewed guided plan in one outline update", () => {
-    const plan: GuidedOutlinePlan = {
-      chapterId: "ch1",
-      summary: "The invitation becomes a threat.",
-      act: "setup",
-      plotPoint: "inciting",
-      premise: "Mara is invited to the winter court.",
-      goal: "Decline without insulting the queen.",
-      conflict: "The invitation already names her as an attendee.",
-      turn: "Mara decides to attend under a false name.",
-      characterIds: ["mara"],
-      beats: [
+describe("agent outline proposals", () => {
+  it("applies selected changes in one metadata write and returns one undo token", () => {
+    const proposal = pendingOutlineFixture();
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe(
+      "Hard arrival",
+    );
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(true);
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("refuses undo after a later outline mutation", () => {
+    const proposal = pendingOutlineFixture();
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    useProjectStore.getState().setChapterField("ch1", { goal: "Changed later" });
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(false);
+  });
+
+  it("rejects an unknown selected change id before applying known changes", () => {
+    const proposal = pendingOutlineFixture();
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(proposal, ["change-0", "unknown"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["unknown"],
+      reason: "unknown-selection",
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
+  it("rejects a mismatched outline precondition without writing metadata", () => {
+    const addProposal = buildPendingOutlineFixture(
+      [
         {
-          sourceCardId: null,
-          title: "The courier waits",
-          intention: "Make a polite refusal impossible.",
-          characterIds: ["mara"],
-          loreIds: [],
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    const targetProposal = pendingOutlineFixture();
+    const mismatchedProposal = {
+      ...addProposal,
+      changes: [
+        {
+          ...addProposal.changes[0],
+          precondition: targetProposal.changes[0].precondition,
         },
       ],
     };
+    const before = useProjectStore.getState().meta;
 
-    useProjectStore.getState().applyGuidedOutlinePlan("ch1", plan);
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(mismatchedProposal, ["change-0"]);
 
-    expect(useProjectStore.getState().meta.chapters.ch1).toMatchObject({
-      act: "setup",
-      plotPoint: "inciting",
-      goal: "Decline without insulting the queen.",
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "mismatched-precondition",
     });
-    expect(useProjectStore.getState().meta.chapters.ch1.cards[0].title).toBe("The courier waits");
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it("rejects conflicting selected targets without a partial mutation", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "remove",
+          cardId: "card-1",
+          title: null,
+          intention: null,
+          toIndex: null,
+          reason: "Remove",
+        },
+      ],
+      [cardFixture()],
+    );
+    const conflictingProposal = {
+      ...proposal,
+      changes: [
+        proposal.changes[0],
+        {
+          ...proposal.changes[0],
+          id: "change-1",
+          change: {
+            ...proposal.changes[0].change,
+            reason: "Remove again",
+          },
+        },
+      ],
+    };
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        conflictingProposal,
+        conflictingProposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0", "change-1"],
+      reason: "conflicting-changes",
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy malformed add without writing metadata", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    const malformed = {
+      ...proposal,
+      changes: [
+        {
+          ...proposal.changes[0],
+          change: { ...proposal.changes[0].change, cardId: "legacy-card-id" },
+        },
+      ],
+    };
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(malformed, ["change-0"]);
+
+    expect(result).toEqual({
+      status: "invalid",
+      invalidChangeIds: ["change-0"],
+      reason: "apply-failed",
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it("rejects an add-only proposal after its chapter is deleted", () => {
+    const proposal = buildPendingOutlineFixture(
+      [
+        {
+          kind: "add",
+          cardId: null,
+          title: "New beat",
+          intention: "Escalate",
+          toIndex: null,
+          reason: "Add pressure",
+        },
+      ],
+      [cardFixture()],
+    );
+    useProjectStore.setState({
+      project: { ...projectFixture("/book"), chapters: [] },
+    } as never);
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(
+        proposal,
+        proposal.changes.map((change) => change.id),
+      );
+
+    expect(result).toEqual({
+      status: "stale",
+      staleChangeIds: ["change-0"],
+    });
+    expect(useProjectStore.getState().meta).toEqual(before);
   });
 });

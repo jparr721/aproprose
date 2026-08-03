@@ -1,54 +1,91 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/ai/cli-provider", () => ({
-  createCliModel: vi.fn((kind: string) => ({ provider: kind, modelId: `${kind}-cli` })),
+const mocks = vi.hoisted(() => ({
+  createOpenAI: vi.fn(),
+  createOpenRouter: vi.fn(),
+  openAiProvider: vi.fn(),
+  openRouterProvider: vi.fn(),
+  getAiConfig: vi.fn(),
+  tauriFetch: vi.fn(),
 }));
-vi.mock("@/lib/tauri", () => ({ getAiConfig: vi.fn() }));
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
-import { getModel, supportsTools } from "@/lib/ai/model";
-import { useSettingsStore } from "@/stores/settings-store";
-import { createCliModel } from "@/lib/ai/cli-provider";
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: mocks.createOpenAI,
+}));
 
-const mockCreateCliModel = createCliModel as unknown as ReturnType<typeof vi.fn>;
+vi.mock("@openrouter/ai-sdk-provider", () => ({
+  createOpenRouter: mocks.createOpenRouter,
+}));
+
+vi.mock("@/lib/tauri", () => ({
+  getAiConfig: mocks.getAiConfig,
+}));
+
+vi.mock("@tauri-apps/plugin-http", () => ({
+  fetch: mocks.tauriFetch,
+}));
+
+import { getModel, resetAiProvider } from "@/lib/ai/model";
 
 beforeEach(() => {
-  mockCreateCliModel.mockClear();
-  useSettingsStore.setState({ aiProvider: "openai", aiModel: null });
+  resetAiProvider();
+  mocks.openAiProvider.mockReset();
+  mocks.openRouterProvider.mockReset();
+  mocks.createOpenAI.mockReset().mockReturnValue(mocks.openAiProvider);
+  mocks.createOpenRouter.mockReset().mockReturnValue(mocks.openRouterProvider);
+  mocks.getAiConfig.mockReset().mockImplementation(async (provider: string) => ({
+    apiKey: provider === "openrouter" ? "openrouter-key" : "openai-key",
+  }));
+  mocks.tauriFetch.mockReset();
 });
 
-describe("getModel provider routing", () => {
-  it("returns the codex CLI model when aiProvider is codex", async () => {
-    useSettingsStore.setState({ aiProvider: "codex" });
-    const model = await getModel();
-    expect(mockCreateCliModel).toHaveBeenCalledWith("codex");
-    expect((model as { provider: string }).provider).toBe("codex");
+describe("getModel", () => {
+  it("builds the explicitly selected OpenAI model through the configured provider", async () => {
+    const expected = { provider: "openai", modelId: "gpt-4.1-mini" };
+    mocks.openAiProvider.mockReturnValue(expected);
+
+    await expect(getModel("openai", "gpt-4.1-mini")).resolves.toBe(expected);
+    expect(mocks.getAiConfig).toHaveBeenCalledExactlyOnceWith("openai");
+    expect(mocks.createOpenAI).toHaveBeenCalledWith({
+      apiKey: "openai-key",
+      fetch: mocks.tauriFetch,
+    });
+    expect(mocks.openAiProvider).toHaveBeenCalledWith("gpt-4.1-mini");
   });
 
-  it("returns the claude CLI model when aiProvider is claude", async () => {
-    useSettingsStore.setState({ aiProvider: "claude" });
-    const model = await getModel();
-    expect(mockCreateCliModel).toHaveBeenCalledWith("claude");
-    expect((model as { provider: string }).provider).toBe("claude");
+  it("builds OpenRouter models through the OpenRouter AI SDK provider", async () => {
+    const expected = {
+      provider: "openrouter",
+      modelId: "anthropic/claude-sonnet-4",
+    };
+    mocks.openRouterProvider.mockReturnValue(expected);
+
+    await expect(
+      getModel("openrouter", "anthropic/claude-sonnet-4"),
+    ).resolves.toBe(expected);
+    expect(mocks.getAiConfig).toHaveBeenCalledExactlyOnceWith("openrouter");
+    expect(mocks.createOpenRouter).toHaveBeenCalledWith({
+      apiKey: "openrouter-key",
+      compatibility: "strict",
+      fetch: mocks.tauriFetch,
+    });
+    expect(mocks.openRouterProvider).toHaveBeenCalledWith(
+      "anthropic/claude-sonnet-4",
+    );
   });
 
-  it("throws on openai without a selected model", async () => {
-    useSettingsStore.setState({ aiProvider: "openai", aiModel: null });
-    await expect(getModel()).rejects.toThrow(/Select an AI model/);
-    expect(mockCreateCliModel).not.toHaveBeenCalled();
-  });
-});
+  it("reuses each provider until resetAiProvider is called", async () => {
+    await getModel("openai", "gpt-4.1-mini");
+    await getModel("openai", "gpt-5");
+    await getModel("openrouter", "anthropic/claude-sonnet-4");
+    await getModel("openrouter", "google/gemini-2.5-pro");
+    expect(mocks.createOpenAI).toHaveBeenCalledOnce();
+    expect(mocks.createOpenRouter).toHaveBeenCalledOnce();
 
-describe("supportsTools", () => {
-  it("is true for the OpenAI provider", () => {
-    useSettingsStore.setState({ aiProvider: "openai" });
-    expect(supportsTools()).toBe(true);
-  });
-
-  it("is false for the CLI providers, which drop tool messages", () => {
-    useSettingsStore.setState({ aiProvider: "codex" });
-    expect(supportsTools()).toBe(false);
-    useSettingsStore.setState({ aiProvider: "claude" });
-    expect(supportsTools()).toBe(false);
+    resetAiProvider();
+    await getModel("openai", "gpt-4.1-mini");
+    await getModel("openrouter", "anthropic/claude-sonnet-4");
+    expect(mocks.createOpenAI).toHaveBeenCalledTimes(2);
+    expect(mocks.createOpenRouter).toHaveBeenCalledTimes(2);
   });
 });

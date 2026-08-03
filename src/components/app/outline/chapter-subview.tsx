@@ -1,6 +1,5 @@
-import { IconMessages, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconMessages, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -18,11 +17,11 @@ import {
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { CharacterAssign } from "@/components/app/outline/character-assign";
 import { LoreAssign } from "@/components/app/outline/lore-assign";
-import { GuidedOutline } from "@/components/app/outline/guided-outline";
 import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-point-badge";
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import type { ActKind, BeatType } from "@/lib/types";
 
 const NONE = "__none__";
@@ -36,9 +35,8 @@ const SPINE: { key: "premise" | "goal" | "conflict" | "turn"; label: string; pla
 
 export function ChapterSubview() {
   const chapterId = useOutlineBoardStore((s) => s.openChapterId);
-  const chapterView = useOutlineBoardStore((s) => s.chapterView);
   const closeChapter = useOutlineBoardStore((s) => s.closeChapter);
-  const setChapterView = useOutlineBoardStore((s) => s.setChapterView);
+  const project = useProjectStore((s) => s.project);
   const chapterRef = useProjectStore((s) => s.project?.chapters.find((c) => c.id === chapterId));
   const ch = useProjectStore((s) => (chapterId ? getChapterOutline(s.meta.chapters, chapterId) : null));
   const renameChapter = useProjectStore((s) => s.renameChapter);
@@ -54,11 +52,12 @@ export function ChapterSubview() {
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
-  if (!chapterId || !ch || !chapterRef) return null;
+  const openOutlineAgent = useViewStore((s) => s.openOutlineAgent);
+  if (!chapterId || !ch || !chapterRef || !project) return null;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -74,147 +73,134 @@ export function ChapterSubview() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <ButtonGroup>
-          <Button
-            size="sm"
-            variant={chapterView === "edit" ? "default" : "outline"}
-            onClick={() => setChapterView("edit")}
-          >
-            <IconPencil /> Edit outline
-          </Button>
-          <Button
-            size="sm"
-            variant={chapterView === "guide" ? "default" : "outline"}
-            onClick={() => setChapterView("guide")}
-          >
-            <IconMessages /> Plan with AI
-          </Button>
-        </ButtonGroup>
+        <Button
+          onClick={() => openOutlineAgent(project.root, chapterId)}
+          size="sm"
+          variant="outline"
+        >
+          <IconMessages /> Plan with AI
+        </Button>
       </div>
 
-      {chapterView === "guide" ? (
-        <GuidedOutline chapterId={chapterId} />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex flex-col gap-4 p-4">
-            <TypographyEyebrow>Chapter Title</TypographyEyebrow>
-            <Input
-              value={chapterRef.title}
-              onChange={(e) => void renameChapter(chapterRef.id, e.target.value)}
-            />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex flex-col gap-4 p-4">
+          <TypographyEyebrow>Chapter Title</TypographyEyebrow>
+          <Input
+            value={chapterRef.title}
+            onChange={(e) => void renameChapter(chapterRef.id, e.target.value)}
+          />
 
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="flex flex-col gap-1">
-                <TypographyEyebrow>Act</TypographyEyebrow>
-                <Select
-                  value={ch.act ?? NONE}
-                  onValueChange={(v) => setChapterAct(chapterId, v === NONE ? null : (v as ActKind))}
-                >
-                  <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>Unassigned</SelectItem>
-                    {ACT_ORDER.map((a) => (
-                      <SelectItem key={a} value={a}>{ACT_TITLES[a]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="flex flex-col gap-1">
-                <TypographyEyebrow>Structural beat</TypographyEyebrow>
-                <Select
-                  value={ch.plotPoint ?? NONE}
-                  onValueChange={(v) => setChapterPlotPoint(chapterId, v === NONE ? null : (v as BeatType))}
-                >
-                  <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>None</SelectItem>
-                    {BEAT_TYPE_ORDER.map((t) => (
-                      <SelectItem key={t} value={t}>{BEAT_TYPE_LABEL[t]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <span className="ml-auto text-xs text-faint">{chapterRef.wordCount.toLocaleString()} words</span>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <TypographyEyebrow>Characters</TypographyEyebrow>
-              <CharacterAssign
-                assignedIds={ch.characterIds}
-                onAdd={(id) => addCharacterToChapter(chapterId, id)}
-                onRemove={(id) => removeCharacterFromChapter(chapterId, id)}
-              />
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {SPINE.map((f) => (
-                <label key={f.key} className="flex flex-col gap-1.5">
-                  <TypographyEyebrow>{f.label}</TypographyEyebrow>
-                  <Textarea
-                    value={ch[f.key]}
-                    onChange={(e) => setChapterField(chapterId, { [f.key]: e.target.value })}
-                    placeholder={f.placeholder}
-                    rows={f.key === "conflict" ? 3 : 2}
-                    className="resize-y"
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-baseline gap-2 border-t border-border pt-4">
-              <TypographyEyebrow>Plot elements</TypographyEyebrow>
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              {ch.cards.map((card) => (
-                <Card key={card.id}>
-                  <CardHeader>
-                    <TypographyEyebrow>Element Focus</TypographyEyebrow>
-                    <Input
-                      value={card.title}
-                      onChange={(e) => editCard(chapterId, card.id, { title: e.target.value })}
-                      placeholder="Card title"
-                    />
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2 p-3">
-                    <TypographyEyebrow>Element Goal</TypographyEyebrow>
-                    <Textarea
-                      value={card.intention}
-                      onChange={(e) => editCard(chapterId, card.id, { intention: e.target.value })}
-                      placeholder="What does this beat accomplish?"
-                      rows={2}
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-col gap-1.5">
-                        <CharacterAssign
-                          assignedIds={card.characterIds}
-                          onAdd={(id) => addCharacterToCard(chapterId, card.id, id)}
-                          onRemove={(id) => removeCharacterFromCard(chapterId, card.id, id)}
-                        />
-                        <LoreAssign
-                          assignedIds={card.loreIds}
-                          onAdd={(id) => addLoreToCard(chapterId, card.id, id)}
-                          onRemove={(id) => removeLoreFromCard(chapterId, card.id, id)}
-                        />
-                      </div>
-                      <Button variant="destructive" onClick={() => removeCard(chapterId, card.id)}>
-                        <IconTrash /> Remove card
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-              <Button
-                variant="outline"
-                className="justify-start border-dashed text-muted-foreground"
-                onClick={() => addCard(chapterId)}
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1">
+              <TypographyEyebrow>Act</TypographyEyebrow>
+              <Select
+                value={ch.act ?? NONE}
+                onValueChange={(v) => setChapterAct(chapterId, v === NONE ? null : (v as ActKind))}
               >
-                <IconPlus className="size-4" /> Add card
-              </Button>
-            </div>
+                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Unassigned</SelectItem>
+                  {ACT_ORDER.map((a) => (
+                    <SelectItem key={a} value={a}>{ACT_TITLES[a]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <TypographyEyebrow>Structural beat</TypographyEyebrow>
+              <Select
+                value={ch.plotPoint ?? NONE}
+                onValueChange={(v) => setChapterPlotPoint(chapterId, v === NONE ? null : (v as BeatType))}
+              >
+                <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>None</SelectItem>
+                  {BEAT_TYPE_ORDER.map((t) => (
+                    <SelectItem key={t} value={t}>{BEAT_TYPE_LABEL[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <span className="ml-auto text-xs text-faint">{chapterRef.wordCount.toLocaleString()} words</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <TypographyEyebrow>Characters</TypographyEyebrow>
+            <CharacterAssign
+              assignedIds={ch.characterIds}
+              onAdd={(id) => addCharacterToChapter(chapterId, id)}
+              onRemove={(id) => removeCharacterFromChapter(chapterId, id)}
+            />
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {SPINE.map((f) => (
+              <label key={f.key} className="flex flex-col gap-1.5">
+                <TypographyEyebrow>{f.label}</TypographyEyebrow>
+                <Textarea
+                  value={ch[f.key]}
+                  onChange={(e) => setChapterField(chapterId, { [f.key]: e.target.value })}
+                  placeholder={f.placeholder}
+                  rows={f.key === "conflict" ? 3 : 2}
+                  className="resize-y"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="flex items-baseline gap-2 border-t border-border pt-4">
+            <TypographyEyebrow>Plot elements</TypographyEyebrow>
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            {ch.cards.map((card) => (
+              <Card key={card.id}>
+                <CardHeader>
+                  <TypographyEyebrow>Element Focus</TypographyEyebrow>
+                  <Input
+                    value={card.title}
+                    onChange={(e) => editCard(chapterId, card.id, { title: e.target.value })}
+                    placeholder="Card title"
+                  />
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2 p-3">
+                  <TypographyEyebrow>Element Goal</TypographyEyebrow>
+                  <Textarea
+                    value={card.intention}
+                    onChange={(e) => editCard(chapterId, card.id, { intention: e.target.value })}
+                    placeholder="What does this beat accomplish?"
+                    rows={2}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-col gap-1.5">
+                      <CharacterAssign
+                        assignedIds={card.characterIds}
+                        onAdd={(id) => addCharacterToCard(chapterId, card.id, id)}
+                        onRemove={(id) => removeCharacterFromCard(chapterId, card.id, id)}
+                      />
+                      <LoreAssign
+                        assignedIds={card.loreIds}
+                        onAdd={(id) => addLoreToCard(chapterId, card.id, id)}
+                        onRemove={(id) => removeLoreFromCard(chapterId, card.id, id)}
+                      />
+                    </div>
+                    <Button variant="destructive" onClick={() => removeCard(chapterId, card.id)}>
+                      <IconTrash /> Remove card
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            <Button
+              variant="outline"
+              className="justify-start border-dashed text-muted-foreground"
+              onClick={() => addCard(chapterId)}
+            >
+              <IconPlus className="size-4" /> Add card
+            </Button>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -486,6 +486,8 @@ export interface PromptInputMessage {
   files: FileUIPart[];
 }
 
+export type PromptInputSubmissionResult = "submitted" | "failed";
+
 export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
   "onSubmit" | "onError"
@@ -508,7 +510,10 @@ export type PromptInputProps = Omit<
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>
-  ) => void | Promise<void>;
+  ) =>
+    | void
+    | PromptInputSubmissionResult
+    | Promise<void | PromptInputSubmissionResult>;
 };
 
 export const PromptInput = ({
@@ -853,12 +858,6 @@ export const PromptInput = ({
             return (formData.get("message") as string) || "";
           })();
 
-      // Reset form immediately after capturing text to avoid race condition
-      // where user input during async blob conversion would be lost
-      if (!usingProvider) {
-        form.reset();
-      }
-
       try {
         // Convert blob URLs to data URLs asynchronously
         const convertedFiles: FileUIPart[] = await Promise.all(
@@ -880,19 +879,27 @@ export const PromptInput = ({
         // Handle both sync and async onSubmit
         if (result instanceof Promise) {
           try {
-            await result;
-            clear();
-            if (usingProvider) {
-              controller.textInput.clear();
+            const submission = await result;
+            if (submission !== "failed") {
+              clear();
+              if (usingProvider) {
+                controller.textInput.clear();
+              } else {
+                form.reset();
+              }
             }
           } catch {
             // Don't clear on error - user may want to retry
           }
         } else {
           // Sync function completed without throwing, clear inputs
-          clear();
-          if (usingProvider) {
-            controller.textInput.clear();
+          if (result !== "failed") {
+            clear();
+            if (usingProvider) {
+              controller.textInput.clear();
+            } else {
+              form.reset();
+            }
           }
         }
       } catch {

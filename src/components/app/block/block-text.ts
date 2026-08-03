@@ -2,6 +2,15 @@
 // and a whole block rendered as readable plain text (the "Copy block" action).
 
 import type { Block as BlockT, Character } from "@/lib/types";
+import { carriesTailContent } from "@/lib/blocks/dialogue";
+
+export function blockHasContent(block: BlockT): boolean {
+  return (
+    block.text.trim().length > 0 ||
+    (block.title !== undefined && block.title.trim().length > 0) ||
+    carriesTailContent(block)
+  );
+}
 
 export function findSpeaker(block: BlockT, characters: Character[]): Character | undefined {
   return block.speaker ? characters.find((c) => c.id === block.speaker) : undefined;

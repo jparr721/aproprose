@@ -47,14 +47,17 @@ import {
 import { copyText } from "@/lib/clipboard";
 import type {
   AgentFailure,
+  AgentSessionId,
   AgentSettingsTarget,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
-  useAgentConsoleStore,
+  agentSessionStore,
+  useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
@@ -67,6 +70,7 @@ export interface AgentMessageProps {
     failure?: AgentFailure;
   }>;
   onOpenSettings: (target: AgentSettingsTarget) => void;
+  sessionId?: AgentSessionId;
 }
 
 type AgentMessagePart = AgentUIMessage["parts"][number];
@@ -299,14 +303,13 @@ function renderPart(
   }
 }
 
-function retryUserMessageId(message: AgentUIMessage): string {
+function retryUserMessageId(message: AgentUIMessage, sessionId: AgentSessionId): string {
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     throw new Error(`Agent message metadata is missing: ${message.id}`);
   }
   if (messageMetadata.retryOf !== null) return messageMetadata.retryOf;
-  const original = useAgentConsoleStore
-    .getState()
+  const original = agentSessionStore(sessionId).getState()
     .messages.find((candidate) => {
       if (candidate.role !== "user" || candidate.metadata === undefined) {
         return false;
@@ -324,11 +327,13 @@ export function AgentMessage({
   onNavigateSnapshot,
   onRetry,
   onOpenSettings,
+  sessionId: requestedSessionId,
 }: AgentMessageProps) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
-  const authorMutationsDisabled = useAgentConsoleStore(
+  const authorMutationsDisabled = useAgentSessionStore(sessionId,
     (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
   const [retryFailure, setRetryFailure] = useState<AgentFailure | null>(null);
@@ -363,7 +368,7 @@ export function AgentMessage({
     .join("\n\n");
   const retry = (): void => {
     setRetryFailure(null);
-    void onRetry(retryUserMessageId(message))
+    void onRetry(retryUserMessageId(message, sessionId))
       .then((outcome) => {
         if (outcome.status === "failure") setRetryFailure(outcome.failure ?? null);
       })

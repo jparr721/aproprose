@@ -92,6 +92,7 @@ const buildPendingOutlineFixture = (
         return index === 0 ? "proposal-1" : `change-${index - 1}`;
       };
     })(),
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 };
@@ -120,7 +121,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,
@@ -150,16 +151,32 @@ describe("runMigrations", () => {
     expect(m.chapters.ch1.goal).toBe("g");
   });
   it("passes a new-shape blob through", () => {
-    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X", overview: "" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.act).toBe("setup");
   });
   it("backfills characterIds on chapters that predate the field", () => {
-    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X", overview: "" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.characterIds).toEqual([]);
   });
 });
 
 describe("card + chapter actions", () => {
+  it("persists story overview edits", () => {
+    useProjectStore.getState().setOverview("A courier exposes the crown.");
+
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "A courier exposes the crown.",
+    );
+    const persisted = JSON.parse(
+      vi.mocked(writeProjectMeta).mock.calls[0][1] as string,
+    ) as { outline: { premise: string; overview: string } };
+    expect(writeProjectMeta).toHaveBeenCalledWith("/book", expect.any(String));
+    expect(persisted.outline).toEqual({
+      premise: "",
+      overview: "A courier exposes the crown.",
+    });
+  });
+
   it("adds and edits a card", () => {
     const id = useProjectStore.getState().addCard("ch1");
     useProjectStore.getState().editCard("ch1", id, { title: "Hello" });

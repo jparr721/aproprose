@@ -56,12 +56,16 @@ import { pathHash } from "@/lib/path-hash";
 import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
+import { deleteOutlineAgentSession } from "@/stores/agent-console-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
-import { projectMetaFingerprint } from "@/lib/ai/agent-context";
+import {
+  projectMetaFingerprint,
+  storyOverviewFingerprint,
+} from "@/lib/ai/agent-context";
 import {
   conflictingTargetChangeIds,
   invalidProposalCorrelationIds,
@@ -85,6 +89,7 @@ import {
   applySculpt as applySculptModel,
   editCard as editCardModel,
   editChapterField,
+  editOverview,
   editPremise,
   getChapterOutline,
   moveCardToChapter as moveCardToChapterModel,
@@ -114,7 +119,7 @@ interface CompileState {
 }
 
 export function defaultOutline(): Outline {
-  return { premise: "" };
+  return { premise: "", overview: "" };
 }
 
 
@@ -293,6 +298,7 @@ interface ProjectState {
 
   // outline (global)
   setPremise: (premise: string) => void;
+  setOverview: (overview: string) => void;
   // cards
   addCard: (chapterId: string) => string;
   removeCard: (chapterId: string, cardId: string) => void;
@@ -792,6 +798,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           persistMeta(meta);
           return { meta };
         });
+        deleteOutlineAgentSession(id);
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
@@ -962,6 +969,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const state = get();
+      const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
         state.project.root !== proposal.projectRoot ||
@@ -972,8 +980,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
+      const selectableChanges = [
+        ...proposal.changes,
+        ...(overviewChange ? [{ id: overviewChange.id }] : []),
+      ];
       const invalidChangeIds = invalidSelectedChangeIds(
-        proposal.changes,
+        selectableChanges,
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
@@ -984,6 +996,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const selected = new Set(changeIds);
+      const appliesOverview =
+        overviewChange !== null && selected.has(overviewChange.id);
+      if (
+        appliesOverview &&
+        storyOverviewFingerprint(state.meta.outline.overview) !==
+          overviewChange!.sourceFingerprint
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: [overviewChange!.id],
+        };
+      }
       const selectedProposal = {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
@@ -1026,7 +1050,27 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       if (changes.length > 0) {
-        set(manuscriptProposalMutation(state, outcome.blocks));
+        const meta = appliesOverview
+          ? {
+              ...state.meta,
+              outline: editOverview(
+                state.meta.outline,
+                overviewChange!.after,
+              ),
+            }
+          : state.meta;
+        if (appliesOverview) persistMeta(meta);
+        set({ ...manuscriptProposalMutation(state, outcome.blocks), meta });
+      } else if (appliesOverview) {
+        const meta = {
+          ...state.meta,
+          outline: editOverview(
+            state.meta.outline,
+            overviewChange!.after,
+          ),
+        };
+        persistMeta(meta);
+        set({ meta });
       }
       return { status: "applied", appliedChangeIds: changeIds };
     },
@@ -1526,6 +1570,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
+    setOverview: (overview) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editOverview(s.meta.outline, overview) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
     addCard: (chapterId) => {
       const { chapters, cardId } = addCardModel(get().meta.chapters, chapterId);
       set((s) => {
@@ -1647,6 +1698,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const state = get();
+      const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
         state.project.root !== proposal.projectRoot ||
@@ -1656,8 +1708,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
+      const selectableChanges = [
+        ...proposal.changes,
+        ...(overviewChange ? [{ id: overviewChange.id }] : []),
+      ];
       const invalidChangeIds = invalidSelectedChangeIds(
-        proposal.changes,
+        selectableChanges,
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
@@ -1672,6 +1728,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         proposal.chapterId,
       );
       const selected = new Set(changeIds);
+      const appliesOverview =
+        overviewChange !== null && selected.has(overviewChange.id);
+      if (
+        appliesOverview &&
+        storyOverviewFingerprint(state.meta.outline.overview) !==
+          overviewChange!.sourceFingerprint
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: [overviewChange!.id],
+        };
+      }
       const selectedProposal = {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
@@ -1710,7 +1778,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "apply-failed",
         };
       }
-      const meta = { ...before, chapters };
+      const meta = {
+        ...before,
+        chapters,
+        ...(appliesOverview
+          ? {
+              outline: editOverview(
+                before.outline,
+                overviewChange!.after,
+              ),
+            }
+          : {}),
+      };
       const undoToken: OutlineUndoToken = {
         id: uid(),
         projectRoot: state.project.root,

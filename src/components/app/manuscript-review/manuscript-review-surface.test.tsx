@@ -286,7 +286,7 @@ function metaFixture(): ProjectMeta {
     characters,
     lore: [],
     statuses: {},
-    outline: { premise: "" },
+    outline: { premise: "", overview: "" },
     chapters: {},
   };
 }

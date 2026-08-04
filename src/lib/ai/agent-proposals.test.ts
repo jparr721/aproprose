@@ -3,6 +3,7 @@ import {
   AgentProposalError,
   buildManuscriptPendingProposal,
   buildOutlinePendingProposal,
+  buildOverviewPendingProposal,
   invalidProposalCorrelationIds,
   materializeManuscriptChanges,
   validateManuscriptChanges,
@@ -87,6 +88,7 @@ const buildManuscript = (
     currentPending: null,
     originatingMessageId: "assistant-1",
     makeId: () => "generated-id",
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 
@@ -272,6 +274,48 @@ describe("proposal change correlation", () => {
   });
 });
 
+describe("story overview proposals", () => {
+  it("builds an overview-only proposal with its own source fingerprint", () => {
+    const proposal = buildOverviewPendingProposal({
+      run: run({ kind: "conversation", targetChapterId: null }),
+      summary: "Update the central conflict",
+      overview: "Mara must expose the harbor conspiracy before her brother is tried.",
+      reason: "The brother's arrest changes the stakes.",
+      currentOverview: "Mara investigates the harbor.",
+      originatingMessageId: "assistant-1",
+      makeId: () => "overview-id",
+      now: "2026-08-04T00:00:00.000Z",
+    });
+
+    expect(proposal).toMatchObject({
+      kind: "overview",
+      chapterId: null,
+      changes: [],
+      overviewChange: {
+        id: "overview-id",
+        before: "Mara investigates the harbor.",
+        after: "Mara must expose the harbor conspiracy before her brother is tried.",
+      },
+    });
+    expect(proposal.overviewChange.sourceFingerprint).not.toBe("");
+  });
+
+  it("rejects an overview replacement above 2,000 characters", () => {
+    expect(() =>
+      buildOverviewPendingProposal({
+        run: run({ kind: "conversation", targetChapterId: null }),
+        summary: "Too long",
+        overview: "x".repeat(2001),
+        reason: "Too detailed",
+        currentOverview: "",
+        originatingMessageId: "assistant-1",
+        makeId: () => "overview-id",
+        now: "2026-08-04T00:00:00.000Z",
+      }),
+    ).toThrow(/2000 characters or fewer/);
+  });
+});
+
 describe("proposal task boundaries", () => {
   it("rejects duplicate manuscript targets before creating pending changes", () => {
     const rewrite: BlockChange = {
@@ -324,6 +368,7 @@ describe("proposal task boundaries", () => {
         currentPending: null,
         originatingMessageId: "assistant-1",
         makeId: () => "generated-id",
+        currentOverview: "",
         now: "2026-07-30T00:01:00.000Z",
       }),
     ).toThrow(/invalid outline change/);
@@ -361,6 +406,7 @@ describe("proposal task boundaries", () => {
         currentPending: null,
         originatingMessageId: "assistant-1",
         makeId: () => "generated-id",
+        currentOverview: "",
         now: "2026-07-30T00:01:00.000Z",
       }),
     ).toThrow(/same outline card/);
@@ -468,6 +514,7 @@ describe("proposal task boundaries", () => {
       currentPending: null,
       originatingMessageId: "assistant-1",
       makeId: () => "generated-id",
+      currentOverview: "",
       now: "2026-07-30T00:01:00.000Z",
     });
     expect(proposal.kind).toBe("outline");
@@ -725,6 +772,7 @@ describe("proposal preconditions", () => {
       currentPending: null,
       originatingMessageId: "assistant-1",
       makeId: () => "generated-id",
+      currentOverview: "",
       now: "2026-07-30T00:01:00.000Z",
     });
     expect(validateOutlineChanges(proposal, [...cards, { ...cards[0], id: "c2" }]))
@@ -745,6 +793,7 @@ describe("proposal preconditions", () => {
         currentPending: current as PendingProposal,
         originatingMessageId: "assistant-2",
         makeId: () => "replacement-id",
+        currentOverview: "",
         now: "2026-07-30T00:02:00.000Z",
       }),
     ).toThrow(/pending proposal does not match/);
@@ -764,6 +813,7 @@ describe("proposal preconditions", () => {
         currentPending: current as PendingProposal,
         originatingMessageId: "assistant-2",
         makeId: () => "replacement-id",
+        currentOverview: "",
         now: "2026-07-30T00:02:00.000Z",
       }),
     ).toThrow(/pending proposal does not match/);

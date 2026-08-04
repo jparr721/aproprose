@@ -29,14 +29,19 @@ import {
 } from "@/components/ui/typography";
 import { retryAgentTurn } from "@/lib/ai/agent-controller";
 import { navigateToContextSnapshot } from "@/lib/ai/agent-navigation";
-import type { AgentPersistenceIssue, AgentTask } from "@/lib/ai/agent-types";
+import {
+  PROJECT_AGENT_SESSION,
+  type AgentPersistenceIssue,
+  type AgentSessionId,
+  type AgentTask,
+} from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
-  useAgentConsoleStore,
+  useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import {
   resetAgentConversation,
-  retryAgentPersistence,
+  retryAgentSessionPersistence,
 } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import {
@@ -44,13 +49,19 @@ import {
 } from "@/stores/settings-dialog-store";
 import { useViewStore } from "@/stores/view-store";
 
-function AgentPersistenceBanner({ issue }: { issue: AgentPersistenceIssue }) {
+function AgentPersistenceBanner({
+  issue,
+  sessionId,
+}: {
+  issue: AgentPersistenceIssue;
+  sessionId: AgentSessionId;
+}) {
   const [actionError, setActionError] = useState<string | null>(null);
   const saveFailed = issue.kind === "save";
 
   const retry = (): void => {
     setActionError(null);
-    void retryAgentPersistence().catch(() => {
+    void retryAgentSessionPersistence(issue.projectRoot, sessionId).catch(() => {
       setActionError(
         "AI conversation still could not be saved. Check storage access and retry.",
       );
@@ -65,7 +76,7 @@ function AgentPersistenceBanner({ issue }: { issue: AgentPersistenceIssue }) {
       );
     };
     try {
-      resetAgentConversation(issue.projectRoot).catch(reportResetFailure);
+      resetAgentConversation(issue.projectRoot, sessionId).catch(reportResetFailure);
     } catch {
       reportResetFailure();
     }
@@ -142,8 +153,6 @@ export function AgentConsole() {
 function AgentConsoleRoute() {
   const project = useProjectStore((state) => state.project);
   const activeChapterId = useProjectStore((state) => state.activeChapterId);
-  const section = useViewStore((state) => state.agentSection);
-  const outlineOpen = useViewStore((state) => state.outlineOpen);
   const activeChapter =
     project === null || activeChapterId === null
       ? undefined
@@ -156,33 +165,6 @@ function AgentConsoleRoute() {
         : `${project.name} / ${activeChapter.label}. ${activeChapter.title}`;
   const close = (): void => useViewStore.getState().setAiOpen(false);
 
-  if (
-    outlineOpen &&
-    section.kind === "outline" &&
-    project !== null &&
-    section.projectRoot === project.root
-  ) {
-    const chapter = project.chapters.find(
-      (candidate) => candidate.id === section.chapterId,
-    );
-    if (chapter === undefined) {
-      throw new Error(`Outline chapter not found: ${section.chapterId}`);
-    }
-    return (
-      <AgentSection
-        ariaLabel="Outline Planner"
-        closeLabel="Close Outline Planner"
-        contextLabel={`${project.name} / ${chapter.label}. ${chapter.title}`}
-        emptyDescription="Describe the story you want for this chapter. The agent will ask for clarification when needed, then stage separate plot-point ideas for individual review."
-        emptyTitle="Plan this chapter"
-        onClose={close}
-        placeholder="Describe this chapter or request more plot points"
-        task={{ kind: "outline-sculpt", chapterId: chapter.id }}
-        title="Outline Planner"
-      />
-    );
-  }
-
   return (
     <AgentSection
       ariaLabel="AI Console"
@@ -192,6 +174,7 @@ function AgentConsoleRoute() {
       emptyTitle="Ask about this project"
       onClose={close}
       placeholder="Ask about your manuscript"
+      sessionId={PROJECT_AGENT_SESSION}
       task={null}
       title="AI Console"
     />
@@ -206,6 +189,7 @@ export interface AgentSectionProps {
   emptyTitle: string;
   onClose: () => void;
   placeholder: string;
+  sessionId: AgentSessionId;
   task: AgentTask | null;
   title: string;
 }
@@ -226,19 +210,22 @@ function AgentSectionContent({
   emptyTitle,
   onClose,
   placeholder,
+  sessionId,
   task,
   title,
 }: AgentSectionProps) {
-  const messages = useAgentConsoleStore((state) => state.messages);
-  const summary = useAgentConsoleStore((state) => state.summary);
-  const pendingProposal = useAgentConsoleStore(
+  const messages = useAgentSessionStore(sessionId, (state) => state.messages);
+  const summary = useAgentSessionStore(sessionId, (state) => state.summary);
+  const pendingProposal = useAgentSessionStore(
+    sessionId,
     (state) => state.pendingProposal,
   );
-  const persistenceIssue = useAgentConsoleStore(
+  const persistenceIssue = useAgentSessionStore(
+    sessionId,
     (state) => state.persistenceIssue,
   );
   const project = useProjectStore((state) => state.project);
-  const ownershipStatus = useAgentConsoleStore((state) =>
+  const ownershipStatus = useAgentSessionStore(sessionId, (state) =>
     agentConsoleOwnershipStatus(state, project?.root ?? null),
   );
   const openAiSettings = (target: "key" | "model"): void => {
@@ -268,7 +255,7 @@ function AgentSectionContent({
         </Button>
       </header>
       {persistenceIssue === null ? null : (
-        <AgentPersistenceBanner issue={persistenceIssue} />
+        <AgentPersistenceBanner issue={persistenceIssue} sessionId={sessionId} />
       )}
       {ownershipStatus === "ready" ? (
         <>
@@ -278,11 +265,12 @@ function AgentSectionContent({
             messages={messages}
             onNavigateSnapshot={navigateToContextSnapshot}
             onOpenSettings={openAiSettings}
-            onRetry={retryAgentTurn}
+            onRetry={(messageId) => retryAgentTurn(messageId, sessionId)}
+            sessionId={sessionId}
             summary={summary}
           />
-          {pendingProposal === null ? null : <ReviewTray />}
-          <AgentComposer placeholder={placeholder} task={task} />
+          {pendingProposal === null ? null : <ReviewTray sessionId={sessionId} />}
+          <AgentComposer placeholder={placeholder} sessionId={sessionId} task={task} />
         </>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2">

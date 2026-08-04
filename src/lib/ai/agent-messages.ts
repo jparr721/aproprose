@@ -183,6 +183,11 @@ const agentToolDescriptors: Record<AgentToolName, AgentToolDescriptor> = {
     targetFallback: "Outline proposal",
     itemName: "change",
   },
+  stage_overview_proposal: {
+    title: "Stage story overview proposal",
+    targetFallback: "Story overview",
+    itemName: "change",
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

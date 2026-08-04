@@ -4,6 +4,8 @@ import type {
   ManuscriptPendingProposal,
   OutlinePendingChange,
   OutlinePendingProposal,
+  OverviewPendingChange,
+  OverviewPendingProposal,
   PendingProposal,
   PendingProposalToolValue,
   SourceLocator,
@@ -15,7 +17,9 @@ import {
   cardFingerprint,
   cardSnapshotText,
   outlineOrderFingerprint,
+  storyOverviewFingerprint,
 } from "@/lib/ai/agent-context";
+import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import { sanitizeProposal, sanitizeSculpt } from "@/lib/ai/operations";
 import type {
   Block,
@@ -66,11 +70,13 @@ const OUTLINE_PRECONDITION_BY_CHANGE = {
 
 type ProposalCorrelationInput =
   | Pick<ManuscriptPendingProposal, "kind" | "changes">
-  | Pick<OutlinePendingProposal, "kind" | "changes">;
+  | Pick<OutlinePendingProposal, "kind" | "changes">
+  | Pick<OverviewPendingProposal, "kind" | "changes">;
 
 export function invalidProposalCorrelationIds(
   proposal: ProposalCorrelationInput,
 ): string[] {
+  if (proposal.kind === "overview") return [];
   if (proposal.kind === "manuscript") {
     return proposal.changes.flatMap((item) =>
       MANUSCRIPT_PRECONDITION_BY_CHANGE[item.change.kind] ===
@@ -84,6 +90,28 @@ export function invalidProposalCorrelationIds(
       ? []
       : [item.id],
   );
+}
+
+function overviewPendingChange(args: {
+  before: string;
+  after: string | null | undefined;
+  reason: string;
+  makeId: () => string;
+}): OverviewPendingChange | null {
+  if (args.after === null || args.after === undefined) return null;
+  if (args.after.length > STORY_OVERVIEW_MAX_CHARS) {
+    throw new AgentProposalError(
+      "invalid-proposal",
+      `Story overview must be ${STORY_OVERVIEW_MAX_CHARS} characters or fewer.`,
+    );
+  }
+  return {
+    id: args.makeId(),
+    before: args.before,
+    after: args.after,
+    reason: args.reason,
+    sourceFingerprint: storyOverviewFingerprint(args.before),
+  };
 }
 
 export function assertProposalCorrelation(
@@ -315,6 +343,8 @@ export function buildManuscriptPendingProposal(args: {
   originatingMessageId: string;
   makeId: () => string;
   now: string;
+  currentOverview: string;
+  overviewReplacement?: string | null;
 }): ManuscriptPendingProposal {
   const task = args.run.task;
   assertManuscriptTask(args.run, args.currentPending);
@@ -373,6 +403,12 @@ export function buildManuscriptPendingProposal(args: {
       "A manuscript proposal cannot change the same manuscript source more than once.",
     );
   }
+  const overviewChange = overviewPendingChange({
+    before: args.currentOverview,
+    after: args.overviewReplacement,
+    reason: sanitized.summary,
+    makeId: args.makeId,
+  });
   return {
     id: proposalId,
     kind: "manuscript",
@@ -382,6 +418,7 @@ export function buildManuscriptPendingProposal(args: {
     createdAt: args.now,
     originatingMessageId: args.originatingMessageId,
     changes,
+    ...(overviewChange === null ? {} : { overviewChange }),
   };
 }
 
@@ -393,6 +430,8 @@ export function buildOutlinePendingProposal(args: {
   originatingMessageId: string;
   makeId: () => string;
   now: string;
+  currentOverview: string;
+  overviewReplacement?: string | null;
 }): OutlinePendingProposal {
   assertOutlineTask(args.run, args.currentPending);
   const chapterId =
@@ -433,6 +472,12 @@ export function buildOutlinePendingProposal(args: {
       "An outline proposal cannot change the same outline card more than once.",
     );
   }
+  const overviewChange = overviewPendingChange({
+    before: args.currentOverview,
+    after: args.overviewReplacement,
+    reason: sanitized.summary,
+    makeId: args.makeId,
+  });
   return {
     id: proposalId,
     kind: "outline",
@@ -442,6 +487,42 @@ export function buildOutlinePendingProposal(args: {
     createdAt: args.now,
     originatingMessageId: args.originatingMessageId,
     changes,
+    ...(overviewChange === null ? {} : { overviewChange }),
+  };
+}
+
+export function buildOverviewPendingProposal(args: {
+  run: AgentRun;
+  summary: string;
+  overview: string;
+  reason: string;
+  currentOverview: string;
+  originatingMessageId: string;
+  makeId: () => string;
+  now: string;
+}): OverviewPendingProposal {
+  const change = overviewPendingChange({
+    before: args.currentOverview,
+    after: args.overview,
+    reason: args.reason,
+    makeId: args.makeId,
+  });
+  if (change === null) {
+    throw new AgentProposalError(
+      "invalid-proposal",
+      "An overview-only proposal requires a replacement.",
+    );
+  }
+  return {
+    id: args.makeId(),
+    kind: "overview",
+    projectRoot: args.run.projectRoot,
+    chapterId: null,
+    summary: args.summary,
+    createdAt: args.now,
+    originatingMessageId: args.originatingMessageId,
+    changes: [],
+    overviewChange: change,
   };
 }
 
@@ -619,5 +700,6 @@ export function pendingProposalForModel(
       change: item.change,
       precondition: item.precondition,
     })),
+    ...(proposal.overviewChange ? { overviewChange: proposal.overviewChange } : {}),
   };
 }

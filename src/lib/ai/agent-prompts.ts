@@ -1,4 +1,5 @@
-import type { AgentMode, AgentTask } from "@/lib/ai/agent-types";
+import type { AgentMode, AgentSessionId, AgentTask } from "@/lib/ai/agent-types";
+import { agentSessionProfile } from "@/lib/ai/agent-types";
 import {
   renderEditingPreference,
   renderVoicePreference,
@@ -6,6 +7,7 @@ import {
 
 export const WRITING_MODE_MARKER = "APROPROSE WRITING MODE";
 export const EDIT_MODE_MARKER = "APROPROSE EDIT MODE";
+export const OUTLINE_PLANNING_MARKER = "APROPROSE OUTLINE PLANNING";
 
 export const CLEAN_DIRECTIVE =
   "Clean the selected prose conservatively. Preserve meaning, voice, and structure unless a change is required.";
@@ -58,6 +60,8 @@ When the author requests manuscript or outline changes, stage one complete propo
 
 If the author's desired outcome, constraints, or meaning are unclear, ask concise clarification questions before staging changes. Make every proposal change independently reviewable. Do not treat discussed or rejected ideas as approved.
 
+After material changes, check whether the story overview must change. Propose a concise high-level replacement only when the premise, central conflict, stakes, major arcs or relationships, world rules, broad direction, or ending intent changed. Do not update it for prose polish or minor beats. Keep it under 2,000 characters and do not turn it into a chapter recap. Include the replacement in the manuscript or outline proposal when related, or use an overview-only proposal when no other source change is needed.
+
 Read and preserve existing later prose. Use exact source ids returned by tools. A pending proposal is a complete workspace: read it before a follow-up, then stage one complete replacement.`;
 
 const WRITING_MODE_INSTRUCTIONS = `${WRITING_MODE_MARKER}
@@ -67,6 +71,10 @@ Favor continuation, scene expansion, exploration, and bridges that preserve the 
 const EDIT_MODE_INSTRUCTIONS = `${EDIT_MODE_MARKER}
 
 Favor conservative revision, critique, continuity, cleanup, and restructuring. Change as little as possible to satisfy the request and keep every write reviewable.`;
+
+const OUTLINE_PLANNING_INSTRUCTIONS = `${OUTLINE_PLANNING_MARKER}
+
+Collaborate as a story planner. Ground every suggestion in the frozen target chapter, its current neighbors, and the ordered whole-novel outline. Stage reviewable outline changes only when the author has supplied enough direction.`;
 
 function taskInstructions(task: AgentTask): string {
   if (task.kind === "bridge") {
@@ -98,11 +106,15 @@ export function buildAgentInstructions(args: {
   task: AgentTask;
   styleGuide: string;
   editingRules: string;
+  sessionId: AgentSessionId;
 }): string {
+  const profile = agentSessionProfile(args.sessionId, args.mode);
   const modeInstructions =
-    args.mode === "writing"
-      ? WRITING_MODE_INSTRUCTIONS
-      : EDIT_MODE_INSTRUCTIONS;
+    profile.kind === "outline"
+      ? OUTLINE_PLANNING_INSTRUCTIONS
+      : profile.mode === "writing"
+        ? WRITING_MODE_INSTRUCTIONS
+        : EDIT_MODE_INSTRUCTIONS;
   return [
     BASE_AGENT_INSTRUCTIONS,
     modeInstructions,

@@ -156,6 +156,7 @@ const manuscriptProposal = (
     currentPending: null,
     originatingMessageId: "assistant-1",
     makeId: idFactory(),
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 
@@ -170,6 +171,7 @@ const outlineProposal = (
     currentPending: null,
     originatingMessageId: "assistant-1",
     makeId: idFactory(),
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 
@@ -214,7 +216,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,
@@ -294,6 +296,44 @@ describe("proposal decisions", () => {
       changeCount: 2,
       text: "Accepted all 2 manuscript changes.",
     });
+  });
+
+  it("applies outline and overview changes in one reviewed metadata write", () => {
+    const proposal = buildOutlinePendingProposal({
+      run: runFixture({ kind: "outline-sculpt", chapterId: "ch1" }),
+      raw: {
+        chapterId: "ch1",
+        summary: "Change the turn and stakes",
+        changes: [outlineRewrite()],
+      },
+      cards: initialCards(),
+      currentPending: null,
+      originatingMessageId: "assistant-1",
+      makeId: idFactory(),
+      now: "2026-08-04T00:00:00.000Z",
+      currentOverview: "Mara arrives.",
+      overviewReplacement: "Mara arrives and risks her brother to expose the conspiracy.",
+    });
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        outline: { ...state.meta.outline, overview: "Mara arrives." },
+      },
+    }));
+    setPending(proposal);
+
+    acceptAllProposalChanges(proposal);
+
+    expect(useProjectStore.getState().meta).toMatchObject({
+      outline: {
+        overview: "Mara arrives and risks her brother to expose the conspiracy.",
+      },
+      chapters: {
+        ch1: { cards: [expect.objectContaining({ title: "Hard arrival" })] },
+      },
+    });
+    expect(writeProjectMeta).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
   });
 
   it("rejects one change without writing project state", () => {
@@ -835,5 +875,33 @@ describe("proposalStaleChangeIds", () => {
     }));
 
     expect(proposalStaleChangeIds(proposal)).toEqual(new Set(["change-0"]));
+  });
+
+  it("marks only the overview replacement stale when its source changed", () => {
+    const proposal = buildOutlinePendingProposal({
+      run: runFixture({ kind: "outline-sculpt", chapterId: "ch1" }),
+      raw: {
+        chapterId: "ch1",
+        summary: "Update the overview",
+        changes: [outlineRewrite()],
+      },
+      cards: initialCards(),
+      currentPending: null,
+      originatingMessageId: "assistant-1",
+      makeId: idFactory(),
+      now: "2026-08-04T00:00:00.000Z",
+      currentOverview: "Before",
+      overviewReplacement: "After",
+    });
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        outline: { ...state.meta.outline, overview: "Author edit" },
+      },
+    }));
+
+    expect(proposalStaleChangeIds(proposal)).toEqual(
+      new Set([proposal.overviewChange?.id]),
+    );
   });
 });

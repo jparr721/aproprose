@@ -6,7 +6,7 @@ const blob = (flags: unknown[]) => ({
   characters: [],
   lore: [],
   statuses: {},
-  outline: { premise: "" },
+  outline: { premise: "", overview: "" },
   chapters: {
     ch1: {
       act: null, plotPoint: null, premise: "", goal: "", conflict: "", turn: "",
@@ -17,8 +17,8 @@ const blob = (flags: unknown[]) => ({
 });
 
 describe("v3 migration (continuity flag blockIds)", () => {
-  it("is registered: CURRENT_VERSION is 3", () => {
-    expect(CURRENT_VERSION).toBe(3);
+  it("preserves the v3 migration while later migrations advance the current version", () => {
+    expect(CURRENT_VERSION).toBe(4);
   });
 
   it("backfills blockIds: [] on persisted flags that lack it", () => {
@@ -26,7 +26,7 @@ describe("v3 migration (continuity flag blockIds)", () => {
     expect(m.chapters.ch1.cards[0].continuityFlags).toEqual([
       { sev: "warn", tag: "Cast", text: "Who is present?", blockIds: [] },
     ]);
-    expect(m.version).toBe(3);
+    expect(m.version).toBe(CURRENT_VERSION);
   });
 
   it("preserves blockIds already present on a flag (round-trip safety)", () => {

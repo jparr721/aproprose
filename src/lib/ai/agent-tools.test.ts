@@ -113,6 +113,7 @@ function environment(): AgentToolEnvironment {
     getPendingProposal: vi.fn().mockReturnValue(null),
     buildManuscriptProposal: vi.fn().mockReturnValue(pending),
     buildOutlineProposal: vi.fn().mockReturnValue(pendingOutline),
+    buildOverviewProposal: vi.fn(),
     replacePendingProposal: vi.fn(),
   };
 }
@@ -129,6 +130,7 @@ describe("createAgentTools", () => {
       "run_critique",
       "stage_manuscript_proposal",
       "stage_outline_proposal",
+      "stage_overview_proposal",
     ]);
   });
 });

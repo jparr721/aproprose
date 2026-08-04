@@ -44,11 +44,18 @@ export interface AgentToolEnvironment {
   buildManuscriptProposal: (input: {
     summary: string;
     changes: BlockChange[];
+    overview?: string | null;
   }) => Extract<PendingProposal, { kind: "manuscript" }>;
   buildOutlineProposal: (input: {
     summary: string;
     changes: SculptChange[];
+    overview?: string | null;
   }) => Extract<PendingProposal, { kind: "outline" }>;
+  buildOverviewProposal: (input: {
+    summary: string;
+    overview: string;
+    reason: string;
+  }) => Extract<PendingProposal, { kind: "overview" }>;
   replacePendingProposal: (proposal: PendingProposal) => void;
 }
 
@@ -103,10 +110,17 @@ const pendingInputSchema = z.object({ proposalId: z.string() });
 const manuscriptStageSchema = z.object({
   summary: z.string(),
   changes: z.array(manuscriptChangeSchema),
+  overview: z.string().nullable().optional(),
 });
 const outlineStageSchema = z.object({
   summary: z.string(),
   changes: z.array(outlineChangeSchema),
+  overview: z.string().nullable().optional(),
+});
+const overviewStageSchema = z.object({
+  summary: z.string(),
+  overview: z.string(),
+  reason: z.string(),
 });
 
 export function createAgentToolHandlers(env: AgentToolEnvironment) {
@@ -210,9 +224,12 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
       return runtimeOutput(
         {
           label: "Read pending proposal",
-          target: pending.chapterId,
-          detail: countLabel(pending.changes.length, "change"),
-          itemCount: pending.changes.length,
+          target: pending.chapterId ?? "Story overview",
+          detail: countLabel(
+            pending.changes.length + (pending.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: pending.changes.length + (pending.overviewChange ? 1 : 0),
         },
         value,
       );
@@ -227,10 +244,16 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
         {
           label: "Stage manuscript proposal",
           target: proposal.chapterId,
-          detail: countLabel(proposal.changes.length, "change"),
-          itemCount: proposal.changes.length,
+          detail: countLabel(
+            proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
         },
-        { proposalId: proposal.id, changeCount: proposal.changes.length },
+        {
+          proposalId: proposal.id,
+          changeCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+        },
       );
     },
     stageOutline: async (input: z.infer<typeof outlineStageSchema>) => {
@@ -241,10 +264,29 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
         {
           label: "Stage outline proposal",
           target: proposal.chapterId,
-          detail: countLabel(proposal.changes.length, "change"),
-          itemCount: proposal.changes.length,
+          detail: countLabel(
+            proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
         },
-        { proposalId: proposal.id, changeCount: proposal.changes.length },
+        {
+          proposalId: proposal.id,
+          changeCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+        },
+      );
+    },
+    stageOverview: async (input: z.infer<typeof overviewStageSchema>) => {
+      const proposal = env.buildOverviewProposal(input);
+      env.replacePendingProposal(proposal);
+      return runtimeOutput(
+        {
+          label: "Stage story overview proposal",
+          target: "Story overview",
+          detail: "1 change",
+          itemCount: 1,
+        },
+        { proposalId: proposal.id, changeCount: 1 },
       );
     },
   };
@@ -306,6 +348,12 @@ export function createAgentTools(env: AgentToolEnvironment) {
         "Validate and replace the complete pending outline proposal. This never writes the outline.",
       inputSchema: outlineStageSchema,
       execute: handlers.stageOutline,
+    }),
+    stage_overview_proposal: tool({
+      description:
+        "Stage an independently reviewable replacement for the concise story overview without changing manuscript or outline cards.",
+      inputSchema: overviewStageSchema,
+      execute: handlers.stageOverview,
     }),
   };
 }

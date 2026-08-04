@@ -189,10 +189,12 @@ export interface ChapterOutline {
   cards: Card[];
 }
 
-/** The whole-novel spine: just the global logline now. */
+/** The whole-novel spine. */
 export interface Outline {
   /** Global logline. "" if blank. */
   premise: string;
+  /** Concise living summary of the premise, conflict, stakes, and major arcs. */
+  overview: string;
 }
 
 /** The shape returned by the Rust `open_project` command. */
@@ -224,7 +226,7 @@ export interface ProjectMeta {
   lore: LoreEntry[];
   /** chapter id -> status override. */
   statuses: Record<string, ChapterStatus>;
-  /** The global logline. */
+  /** The global logline and living story overview. */
   outline: Outline;
   /** chapter id -> that chapter's planning entry (sparse; lazily created). */
   chapters: Record<string, ChapterOutline>;

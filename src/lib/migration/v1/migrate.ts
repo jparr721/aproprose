@@ -66,7 +66,7 @@ export function migrateLegacyMeta(m: MetaBlob): ProjectMeta {
     characters: m.characters,
     lore: m.lore,
     statuses: m.statuses,
-    outline: { premise: m.outline?.premise ?? "" },
+    outline: { premise: m.outline?.premise ?? "", overview: "" },
     chapters,
   };
 }
@@ -79,7 +79,7 @@ export function migrateV1(meta: MetaBlob): ProjectMeta {
       characters: meta.characters,
       lore: meta.lore,
       statuses: meta.statuses,
-      outline: { premise: meta.outline?.premise ?? "" },
+      outline: { premise: meta.outline?.premise ?? "", overview: "" },
       chapters: Object.fromEntries(
         Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
       ),

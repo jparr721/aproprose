@@ -22,10 +22,6 @@ export type GuardedActionResult<Result> =
   | { status: "ran"; value: Result }
   | { status: "canceled" };
 
-export type AgentSectionTarget =
-  | { kind: "project" }
-  | { kind: "outline"; projectRoot: string; chapterId: string };
-
 interface PendingGuardedAction {
   run: () => void;
   cancel: () => void;
@@ -33,7 +29,6 @@ interface PendingGuardedAction {
 
 interface ViewState {
   aiOpen: boolean;
-  agentSection: AgentSectionTarget;
   pdfOpen: boolean;
   /** Whether the full-page Outline storyboard replaces the editor (persisted). */
   outlineOpen: boolean;
@@ -51,7 +46,6 @@ interface ViewState {
   toggleAi: () => void;
   setAiOpen: (open: boolean) => void;
   openAiConsole: () => void;
-  openOutlineAgent: (projectRoot: string, chapterId: string) => void;
   togglePdf: () => void;
   toggleOutline: () => void;
   openOutline: () => void;
@@ -93,7 +87,6 @@ export const useViewStore = create<ViewState>()(
   persist(
     (set, get) => ({
       aiOpen: true,
-      agentSection: { kind: "project" },
       pdfOpen: false,
       outlineOpen: false,
       manuscriptReviewProposalId: null,
@@ -108,13 +101,6 @@ export const useViewStore = create<ViewState>()(
       setAiOpen: (aiOpen) => set({ aiOpen }),
       openAiConsole: () =>
         set({
-          agentSection: { kind: "project" },
-          aiOpen: true,
-          focus: false,
-        }),
-      openOutlineAgent: (projectRoot, chapterId) =>
-        set({
-          agentSection: { kind: "outline", projectRoot, chapterId },
           aiOpen: true,
           focus: false,
         }),
@@ -125,9 +111,7 @@ export const useViewStore = create<ViewState>()(
           return {
             outlineOpen,
             focus: false,
-            ...(outlineOpen
-              ? { manuscriptReviewProposalId: null }
-              : { agentSection: { kind: "project" } as const }),
+            ...(outlineOpen ? { manuscriptReviewProposalId: null } : {}),
           };
         }),
       openOutline: () =>
@@ -138,7 +122,6 @@ export const useViewStore = create<ViewState>()(
         }),
       openManuscriptReview: (manuscriptReviewProposalId) =>
         set({
-          agentSection: { kind: "project" },
           manuscriptReviewProposalId,
           outlineOpen: false,
           focus: false,

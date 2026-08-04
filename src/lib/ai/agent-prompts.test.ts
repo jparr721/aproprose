@@ -4,6 +4,7 @@ import {
   CRITIQUE_SYSTEM,
   EDIT_MODE_MARKER,
   WRITING_MODE_MARKER,
+  OUTLINE_PLANNING_MARKER,
   buildAgentInstructions,
 } from "@/lib/ai/agent-prompts";
 
@@ -13,6 +14,7 @@ const build = (mode: "writing" | "edit") =>
     task: { kind: "conversation", targetChapterId: "ch1" },
     styleGuide: "Close third person.",
     editingRules: "No throat-clearing.",
+    sessionId: { kind: "project" },
   });
 
 describe("buildAgentInstructions", () => {
@@ -44,12 +46,27 @@ describe("buildAgentInstructions", () => {
       task: { kind: "outline-sculpt", chapterId: "ch1" },
       styleGuide: "",
       editingRules: "",
+      sessionId: { kind: "project" },
     });
 
     expect(instructions).toContain("ask concise clarification questions");
     expect(instructions).toContain("initial set of plot-point ideas");
     expect(instructions).toContain("independently reviewable change");
     expect(instructions).toContain("chapter ch1");
+  });
+
+  it("uses the fixed planner profile without project writing or edit modes", () => {
+    const instructions = buildAgentInstructions({
+      mode: "edit",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      styleGuide: "",
+      editingRules: "",
+      sessionId: { kind: "outline", chapterId: "ch1" },
+    });
+
+    expect(instructions).toContain(OUTLINE_PLANNING_MARKER);
+    expect(instructions).not.toContain(WRITING_MODE_MARKER);
+    expect(instructions).not.toContain(EDIT_MODE_MARKER);
   });
 });
 

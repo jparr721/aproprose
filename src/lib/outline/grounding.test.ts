@@ -10,11 +10,11 @@ const roster: Character[] = [
 
 describe("renderStoryStructure", () => {
   it("returns null when nothing is filled", () => {
-    expect(renderStoryStructure({ outline: { premise: "" }, chapters: {}, characters: [], activeChapterId: null })).toBeNull();
+    expect(renderStoryStructure({ outline: { premise: "", overview: "" }, chapters: {}, characters: [], activeChapterId: null })).toBeNull();
   });
   it("renders premise + chapter act + arc + cards", () => {
     const out = renderStoryStructure({
-      outline: { premise: "A logline." },
+      outline: { premise: "A logline.", overview: "" },
       chapters: {
         ch1: {
           ...emptyChapterOutline(),
@@ -34,7 +34,7 @@ describe("renderStoryStructure", () => {
   });
   it("omits the act line when the chapter has no act", () => {
     const out = renderStoryStructure({
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: { ch1: { ...emptyChapterOutline(), goal: "G" } },
       characters: [],
       activeChapterId: "ch1",
@@ -44,7 +44,7 @@ describe("renderStoryStructure", () => {
   });
   it("renders the expected cast (resolved names) when the chapter has one", () => {
     const out = renderStoryStructure({
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: { ch1: { ...emptyChapterOutline(), characterIds: ["c1", "c2", "missing"] } },
       characters: roster,
       activeChapterId: "ch1",
@@ -54,7 +54,7 @@ describe("renderStoryStructure", () => {
   it("emits no cast line for an empty or fully-dangling cast", () => {
     expect(
       renderStoryStructure({
-        outline: { premise: "" },
+        outline: { premise: "", overview: "" },
         chapters: { ch1: { ...emptyChapterOutline(), characterIds: ["missing"] } },
         characters: roster,
         activeChapterId: "ch1",

@@ -175,7 +175,7 @@ const meta: ProjectMeta = {
   characters: [],
   lore: [],
   statuses: {},
-  outline: { premise: "" },
+  outline: { premise: "", overview: "" },
   chapters: {
     "chapter-1": {
       act: null,
@@ -220,6 +220,7 @@ function manuscriptProposal(): ManuscriptPendingProposal {
     },
     blocks,
     currentPending: null,
+    currentOverview: "",
     originatingMessageId: "assistant-1",
     makeId: () => (nextId++ === 0 ? "proposal-1" : "change-1"),
     now: "2026-08-01T00:01:00.000Z",

@@ -129,6 +129,7 @@ const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
         return index === 0 ? "proposal-1" : `change-${index - 1}`;
       };
     })(),
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 

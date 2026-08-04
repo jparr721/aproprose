@@ -166,6 +166,7 @@ const manuscriptProposal = (
     raw: { chapterId: "ch1", summary: "Revise the opening", changes },
     blocks,
     currentPending: null,
+    currentOverview: "",
     originatingMessageId: "assistant-1",
     makeId: idFactory(),
     now: "2026-07-30T00:01:00.000Z",
@@ -188,6 +189,7 @@ const outlineProposal = (
     raw: { chapterId: "ch1", summary: "Strengthen the outline", changes },
     cards,
     currentPending: null,
+    currentOverview: "",
     originatingMessageId: "assistant-1",
     makeId: idFactory(),
     now: "2026-07-30T00:01:00.000Z",
@@ -265,7 +267,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,

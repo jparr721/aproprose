@@ -50,7 +50,7 @@ describe("v1 migration", () => {
 describe("new-shape pass-through", () => {
   it("preserves chapters, cards, lore, and characters in new-shape blobs", () => {
     const m = runMigrations({
-      outline: { premise: "X" },
+      outline: { premise: "X", overview: "" },
       chapters: {
         ch1: { act: "setup", plotPoint: "inciting", premise: "P", goal: "G", conflict: "C", turn: "T", characterIds: ["c1"], cards: [
           { id: "card1", title: "Beat", intention: "do it", characterIds: ["c1"], loreIds: ["l1"], continuityFlags: [] },
@@ -80,7 +80,7 @@ describe("v2 migration (lore backfill)", () => {
       characters: [],
       lore: [{ id: "l1", title: "Tile" }],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {},
     });
     expect(m.lore[0]).toMatchObject({ id: "l1", title: "Tile", description: "", characterIds: [], tags: [] });
@@ -92,7 +92,7 @@ describe("v2 migration (lore backfill)", () => {
       characters: [],
       lore: [{ id: "l1", title: "Tile", description: "A tile", characterIds: ["c1"], tags: ["magic"] }],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {},
     });
     expect(m.lore[0]).toMatchObject({ id: "l1", title: "Tile", description: "A tile", characterIds: ["c1"], tags: ["magic"] });
@@ -111,18 +111,18 @@ describe("runMigrations edge cases", () => {
     expect(m.version).toBe(CURRENT_VERSION);
   });
   it("no-ops for CURRENT_VERSION blob", () => {
-    const input = { version: CURRENT_VERSION, characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: {} };
+    const input = { version: CURRENT_VERSION, characters: [], lore: [], statuses: {}, outline: { premise: "X", overview: "" }, chapters: {} };
     const m = runMigrations(input);
     expect(m.version).toBe(CURRENT_VERSION);
     expect(m.outline.premise).toBe("X");
   });
   it("handles corrupt version field by falling back to 0", () => {
-    const m = runMigrations({ version: "not-a-number", characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: {} });
+    const m = runMigrations({ version: "not-a-number", characters: [], lore: [], statuses: {}, outline: { premise: "X", overview: "" }, chapters: {} });
     expect(m.version).toBe(CURRENT_VERSION);
     expect(m.outline.premise).toBe("X");
   });
   it("handles corrupt chapters field by falling back to empty", () => {
-    const m = runMigrations({ version: 0, characters: [], lore: [], statuses: {}, outline: { premise: "X" }, chapters: "not-an-object" });
+    const m = runMigrations({ version: 0, characters: [], lore: [], statuses: {}, outline: { premise: "X", overview: "" }, chapters: "not-an-object" });
     expect(m.chapters).toEqual({});
     expect(m.version).toBe(CURRENT_VERSION);
   });

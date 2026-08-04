@@ -13,6 +13,31 @@ import type {
 
 export type AgentMode = "writing" | "edit";
 
+export type AgentSessionId =
+  | { kind: "project" }
+  | { kind: "outline"; chapterId: string };
+
+export type AgentSessionProfile =
+  | { kind: "project"; mode: AgentMode }
+  | { kind: "outline"; mode: "planning"; chapterId: string };
+
+export const PROJECT_AGENT_SESSION: AgentSessionId = { kind: "project" };
+
+export function agentSessionKey(sessionId: AgentSessionId): string {
+  return sessionId.kind === "project"
+    ? "project"
+    : `outline:${sessionId.chapterId}`;
+}
+
+export function agentSessionProfile(
+  sessionId: AgentSessionId,
+  mode: AgentMode,
+): AgentSessionProfile {
+  return sessionId.kind === "project"
+    ? { kind: "project", mode }
+    : { kind: "outline", mode: "planning", chapterId: sessionId.chapterId };
+}
+
 export type DraftContextRef =
   | { kind: "block"; chapterId: string; blockId: string }
   | { kind: "outline-card"; chapterId: string; cardId: string }
@@ -150,32 +175,52 @@ export interface OutlinePendingChange {
   precondition: OutlinePrecondition;
 }
 
+export interface OverviewPendingChange {
+  id: string;
+  before: string;
+  after: string;
+  reason: string;
+  sourceFingerprint: string;
+}
+
 interface PendingProposalBase {
   id: string;
   projectRoot: string;
-  chapterId: string;
+  chapterId: string | null;
   summary: string;
   createdAt: string;
   originatingMessageId: string;
+  overviewChange?: OverviewPendingChange | null;
 }
 
 export interface ManuscriptPendingProposal extends PendingProposalBase {
   kind: "manuscript";
+  chapterId: string;
   changes: ManuscriptPendingChange[];
 }
 
 export interface OutlinePendingProposal extends PendingProposalBase {
   kind: "outline";
+  chapterId: string;
   changes: OutlinePendingChange[];
+}
+
+export interface OverviewPendingProposal extends PendingProposalBase {
+  kind: "overview";
+  chapterId: null;
+  changes: [];
+  overviewChange: OverviewPendingChange;
 }
 
 export type PendingProposal =
   | ManuscriptPendingProposal
-  | OutlinePendingProposal;
+  | OutlinePendingProposal
+  | OverviewPendingProposal;
 
 export type PersistedPendingProposal =
   | Omit<ManuscriptPendingProposal, "projectRoot">
-  | Omit<OutlinePendingProposal, "projectRoot">;
+  | Omit<OutlinePendingProposal, "projectRoot">
+  | Omit<OverviewPendingProposal, "projectRoot">;
 
 export type AgentProposalApplyResult =
   | { status: "applied"; appliedChangeIds: string[] }
@@ -345,6 +390,7 @@ export interface ChapterToolValue {
 
 export interface OutlineToolValue {
   premise: string;
+  overview: string;
   characters: Array<{
     id: string;
     name: string;
@@ -396,13 +442,14 @@ export interface ConversationContextToolValue {
 export interface PendingProposalToolValue {
   id: string;
   kind: PendingProposal["kind"];
-  chapterId: string;
+  chapterId: string | null;
   summary: string;
   changes: Array<{
     id: string;
     change: BlockChange | SculptChange;
     precondition: ManuscriptPrecondition | OutlinePrecondition;
   }>;
+  overviewChange?: OverviewPendingChange | null;
 }
 
 export interface AgentUiTools {
@@ -435,11 +482,15 @@ export interface AgentUiTools {
     output: AgentToolOutput<PendingProposalToolValue>;
   };
   stage_manuscript_proposal: {
-    input: { summary: string; changes: BlockChange[] };
+    input: { summary: string; changes: BlockChange[]; overview?: string | null };
     output: AgentToolOutput<{ proposalId: string; changeCount: number }>;
   };
   stage_outline_proposal: {
-    input: { summary: string; changes: SculptChange[] };
+    input: { summary: string; changes: SculptChange[]; overview?: string | null };
+    output: AgentToolOutput<{ proposalId: string; changeCount: number }>;
+  };
+  stage_overview_proposal: {
+    input: { summary: string; overview: string; reason: string };
     output: AgentToolOutput<{ proposalId: string; changeCount: number }>;
   };
 }

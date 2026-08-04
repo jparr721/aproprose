@@ -149,7 +149,6 @@ beforeEach(async () => {
     blocks: [],
   });
   useViewStore.setState({
-    agentSection: { kind: "project" },
     aiOpen: true,
     focus: false,
   });
@@ -193,49 +192,6 @@ describe("AgentConsole shell", () => {
     expect(composer.previousElementSibling).toBe(tray);
     expect(tray.parentElement).toBe(shell);
     expect(screen.queryByText(project.root)).toBeNull();
-  });
-
-  it("reuses the console system as a prompt-led outline planner", () => {
-    useViewStore.setState({
-      outlineOpen: true,
-      agentSection: {
-        kind: "outline",
-        projectRoot: project.root,
-        chapterId: "chapter-1",
-      },
-    });
-
-    render(<AgentConsole />);
-
-    expect(screen.getByRole("region", { name: "Outline Planner" })).toBeTruthy();
-    expect(screen.getByText("Plan this chapter")).toBeTruthy();
-    expect(
-      screen.getByText(/ask for clarification when needed/),
-    ).toBeTruthy();
-    expect(
-      screen.getByPlaceholderText(
-        "Describe this chapter or request more plot points",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("Quiet Novel / 1. The Crossing")).toBeTruthy();
-  });
-
-  it("keeps outline planning scoped to the storyboard", () => {
-    useViewStore.setState({
-      outlineOpen: false,
-      agentSection: {
-        kind: "outline",
-        projectRoot: project.root,
-        chapterId: "chapter-1",
-      },
-    });
-
-    render(<AgentConsole />);
-
-    expect(screen.getByRole("region", { name: "AI Console" })).toBeTruthy();
-    expect(
-      screen.queryByRole("region", { name: "Outline Planner" }),
-    ).toBeNull();
   });
 
   it("keeps header, banner, tray, and composer outside the scroll contract", () => {

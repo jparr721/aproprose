@@ -20,6 +20,7 @@ import { resolveModelContextWindow } from "@/lib/ai/models";
 import { buildAgentInstructions } from "@/lib/ai/agent-prompts";
 import {
   buildManuscriptPendingProposal,
+  buildOverviewPendingProposal,
   buildOutlinePendingProposal,
 } from "@/lib/ai/agent-proposals";
 import {
@@ -36,6 +37,7 @@ import type {
   AgentMessageMetadata,
   AgentMode,
   AgentRun,
+  AgentSessionId,
   AgentTask,
   AgentUIMessage,
   ChapterToolValue,
@@ -49,6 +51,7 @@ import type {
   PendingProposal,
   ProposalEventData,
 } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
   agentFailureDiagnosticCode,
   failureFromError,
@@ -60,6 +63,7 @@ import { uid } from "@/lib/id";
 import { parseChapter } from "@/lib/latex";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 import { getChapterOutline } from "@/lib/outline/model";
+import { buildOutlinePlannerGrounding } from "@/lib/outline/planner-grounding";
 import {
   appendAgentFailureLog,
   readTextFile,
@@ -77,7 +81,9 @@ import type {
 import {
   type AgentDraftContextResolution,
   agentConsoleOwnershipStatus,
-  requireAgentConsoleProject,
+  agentSessionStore,
+  requireAgentSessionProject,
+  useAgentRunCoordinatorStore,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -111,6 +117,7 @@ export type AgentSubmissionOutcome =
 
 interface ActiveController {
   projectRoot: string;
+  sessionId: AgentSessionId;
   runId: string;
   userMessageId: string;
   assistantMessageId: string;
@@ -172,6 +179,7 @@ function storeContextResolutions(
 
 interface SubmissionCapture {
   projectRoot: string;
+  sessionId: AgentSessionId;
   project: ProjectInfo;
   meta: ProjectMeta;
   mode: AgentMode;
@@ -199,6 +207,13 @@ interface SubmissionCapture {
     run: AgentRun,
     userMessage: AgentUIMessage,
   ) => void;
+}
+
+class OutlinePlannerGroundingError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "OutlinePlannerGroundingError";
+  }
 }
 
 interface ErrorWithDetails extends Error {
@@ -677,6 +692,59 @@ function captureTaskAndTarget(args: {
   };
 }
 
+async function resolveOutlinePlannerGrounding(
+  capture: SubmissionCapture,
+  target: LoadedChapter | null,
+): Promise<string | null> {
+  if (capture.sessionId.kind !== "outline") return null;
+  const chapterId = capture.sessionId.chapterId;
+  const index = capture.project.chapters.findIndex(
+    (chapter) => chapter.id === chapterId,
+  );
+  if (index < 0) {
+    throw new OutlinePlannerGroundingError(
+      `Outline planner chapter not found: ${chapterId}`,
+    );
+  }
+  if (target === null || target.chapterId !== chapterId) {
+    throw new OutlinePlannerGroundingError(
+      `Outline planner grounding failed for chapter ${chapterId} at target source ${chapterId}: frozen target did not match the planner session.`,
+    );
+  }
+  const previousRef = capture.project.chapters[index - 1] ?? null;
+  const nextRef = capture.project.chapters[index + 1] ?? null;
+  const load = async (
+    source: "target" | "previous" | "next",
+    sourceChapterId: string,
+  ): Promise<LoadedChapter> => {
+    try {
+      return await loadChapterSnapshot(
+        capture.project,
+        sourceChapterId,
+        capture.activeChapter,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new OutlinePlannerGroundingError(
+        `Outline planner grounding failed for chapter ${chapterId} at ${source} source ${sourceChapterId}: ${message}`,
+        { cause: error },
+      );
+    }
+  };
+  const [previous, next] = await Promise.all([
+    previousRef === null ? Promise.resolve(null) : load("previous", previousRef.id),
+    nextRef === null ? Promise.resolve(null) : load("next", nextRef.id),
+  ]);
+  return buildOutlinePlannerGrounding({
+    chapters: capture.project.chapters,
+    meta: capture.meta,
+    targetChapterId: chapterId,
+    target,
+    previous,
+    next,
+  });
+}
+
 async function loadExactTaskAndTarget(args: {
   project: ProjectInfo;
   activeChapter: LoadedChapter | null;
@@ -712,6 +780,7 @@ function outlineValue(
   }
   return {
     premise: meta.outline.premise,
+    overview: meta.outline.overview,
     characters: meta.characters.map((character) => ({ ...character })),
     chapters: selected.map((chapter) => {
       const outline = getChapterOutline(meta.chapters, chapter.id);
@@ -989,6 +1058,14 @@ function runFailure(
   provider: AiProvider,
   phase: AgentFailurePhase,
 ): AgentFailure {
+  if (error instanceof OutlinePlannerGroundingError) {
+    return {
+      reason: "tool",
+      message: error.message,
+      action: "retry",
+      settingsTarget: null,
+    };
+  }
   return failureFromError(error, provider, phase);
 }
 
@@ -1067,17 +1144,25 @@ export function createAgentController(
 ) {
   let activeController: ActiveController | null = null;
 
-  const ownsRun = (projectRoot: string, runId: string): boolean => {
+  const ownsRun = (
+    projectRoot: string,
+    runId: string,
+    sessionId: AgentSessionId,
+  ): boolean => {
     if (
       activeController === null ||
       activeController.projectRoot !== projectRoot ||
-      activeController.runId !== runId
+      activeController.runId !== runId ||
+      activeController.sessionId.kind !== sessionId.kind ||
+      (activeController.sessionId.kind === "outline" &&
+        sessionId.kind === "outline" &&
+        activeController.sessionId.chapterId !== sessionId.chapterId)
     ) {
       return false;
     }
     const project = useProjectStore.getState().project;
     if (project === null || project.root !== projectRoot) return false;
-    const consoleState = useAgentConsoleStore.getState();
+    const consoleState = agentSessionStore(sessionId).getState();
     if (
       agentConsoleOwnershipStatus(consoleState, projectRoot) !== "ready"
     ) {
@@ -1090,9 +1175,13 @@ export function createAgentController(
     );
   };
 
-  const checkToolRun = (projectRoot: string, runId: string): void => {
+  const checkToolRun = (
+    projectRoot: string,
+    runId: string,
+    sessionId: AgentSessionId,
+  ): void => {
     activeController?.controller.signal.throwIfAborted();
-    if (!ownsRun(projectRoot, runId)) {
+    if (!ownsRun(projectRoot, runId, sessionId)) {
       throw taggedError(
         "tool",
         new Error(`Agent tool no longer owns run: ${runId}`),
@@ -1111,6 +1200,7 @@ export function createAgentController(
     history: AgentUIMessage[];
     assistantMessageId: string;
     signal: AbortSignal;
+    sessionId: AgentSessionId;
   }): AgentToolEnvironment => {
     const chapterSnapshots = new Map<string, ChapterToolValue>();
     if (args.targetChapter !== null) {
@@ -1127,7 +1217,7 @@ export function createAgentController(
       });
     }
     const requireTarget = (chapterId: string): LoadedChapter => {
-      checkToolRun(args.run.projectRoot, args.run.id);
+      checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
       if (
         args.targetChapter === null ||
         args.targetChapter.chapterId !== chapterId
@@ -1140,14 +1230,14 @@ export function createAgentController(
       return args.targetChapter;
     };
     const currentPending = (): PendingProposal | null => {
-      checkToolRun(args.run.projectRoot, args.run.id);
-      return useAgentConsoleStore.getState().pendingProposal;
+      checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
+      return agentSessionStore(args.sessionId).getState().pendingProposal;
     };
     return {
       run: args.run,
       signal: args.signal,
       readChapter: async (chapterId) => {
-        checkToolRun(args.run.projectRoot, args.run.id);
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
         const cached = chapterSnapshots.get(chapterId);
         if (cached !== undefined) return structuredClone(cached);
         try {
@@ -1156,7 +1246,7 @@ export function createAgentController(
             chapterId,
             args.targetChapter,
           );
-          checkToolRun(args.run.projectRoot, args.run.id);
+          checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
           const snapshot: ChapterToolValue = {
             chapterId: chapter.chapterId,
             title: chapter.title,
@@ -1176,11 +1266,11 @@ export function createAgentController(
         }
       },
       readOutline: async (chapterId) => {
-        checkToolRun(args.run.projectRoot, args.run.id);
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
         return outlineValue(args.project, args.meta, chapterId);
       },
       readLore: async (query) => {
-        checkToolRun(args.run.projectRoot, args.run.id);
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
         return loreValue(args.meta, query);
       },
       runCritique: async (chapterId, focus, signal) => {
@@ -1197,7 +1287,7 @@ export function createAgentController(
               },
             },
           );
-          checkToolRun(args.run.projectRoot, args.run.id);
+          checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
           return result;
         } catch (error) {
           if (isAbortError(error)) throw error;
@@ -1218,7 +1308,7 @@ export function createAgentController(
               },
             },
           );
-          checkToolRun(args.run.projectRoot, args.run.id);
+          checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
           return result;
         } catch (error) {
           if (isAbortError(error)) throw error;
@@ -1226,7 +1316,7 @@ export function createAgentController(
         }
       },
       readConversationContext: (messageIds) => {
-        checkToolRun(args.run.projectRoot, args.run.id);
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
         return conversationValue(args.history, messageIds);
       },
       getPendingProposal: currentPending,
@@ -1248,6 +1338,8 @@ export function createAgentController(
             originatingMessageId: args.assistantMessageId,
             makeId: dependencies.id,
             now: dependencies.now(),
+            currentOverview: args.meta.outline.overview,
+            overviewReplacement: input.overview,
           });
         } catch (error) {
           throw taggedError("tool", error);
@@ -1272,15 +1364,33 @@ export function createAgentController(
             originatingMessageId: args.assistantMessageId,
             makeId: dependencies.id,
             now: dependencies.now(),
+            currentOverview: args.meta.outline.overview,
+            overviewReplacement: input.overview,
+          });
+        } catch (error) {
+          throw taggedError("tool", error);
+        }
+      },
+      buildOverviewProposal: (input) => {
+        try {
+          return buildOverviewPendingProposal({
+            run: args.run,
+            summary: input.summary,
+            overview: input.overview,
+            reason: input.reason,
+            currentOverview: args.meta.outline.overview,
+            originatingMessageId: args.assistantMessageId,
+            makeId: dependencies.id,
+            now: dependencies.now(),
           });
         } catch (error) {
           throw taggedError("tool", error);
         }
       },
       replacePendingProposal: (proposal) => {
-        if (!ownsRun(args.run.projectRoot, args.run.id)) return;
+        if (!ownsRun(args.run.projectRoot, args.run.id, args.sessionId)) return;
         useViewStore.getState().closeManuscriptReview();
-        useAgentConsoleStore.getState().replacePendingProposal(proposal);
+        agentSessionStore(args.sessionId).getState().replacePendingProposal(proposal);
         const projectState = useProjectStore.getState();
         if (
           proposal.kind === "manuscript" &&
@@ -1294,8 +1404,8 @@ export function createAgentController(
     };
   };
 
-  const cancelPreflight = (): void => {
-    useAgentConsoleStore.setState({
+  const cancelPreflight = (sessionId: AgentSessionId): void => {
+    agentSessionStore(sessionId).setState({
       activeRun: null,
       runStatus: "idle",
       runError: null,
@@ -1306,10 +1416,10 @@ export function createAgentController(
     active: ActiveController,
     reason: "stopped" | "project-switch" | "app-exit",
   ): void => {
-    const state = useAgentConsoleStore.getState();
+    const state = agentSessionStore(active.sessionId).getState();
     const activeRun = state.activeRun;
     if (activeRun === null || activeRun.id !== active.runId) {
-      cancelPreflight();
+      cancelPreflight(active.sessionId);
       return;
     }
     const assistant = [...state.messages]
@@ -1338,6 +1448,7 @@ export function createAgentController(
       reason,
       interruptedAt: dependencies.now(),
     });
+    useAgentRunCoordinatorStore.getState().finish(active.sessionId);
   };
 
   const runSubmission = async (
@@ -1347,8 +1458,18 @@ export function createAgentController(
     const userMessageId = dependencies.id();
     const assistantMessageId = dependencies.id();
     const abortController = new AbortController();
+    const sessionStore = agentSessionStore(capture.sessionId);
+    if (!useAgentRunCoordinatorStore.getState().begin(capture.sessionId)) {
+      const failure = runFailure(
+        new Error("Another agent session is already running."),
+        capture.provider,
+        null,
+      );
+      sessionStore.setState({ runError: failure });
+      return { status: "failure", failure };
+    }
     try {
-      useAgentConsoleStore.getState().beginPreflight();
+      sessionStore.getState().beginPreflight();
     } catch (error) {
       const refusal = runFailure(error, capture.provider, null);
       await persistAgentFailure(
@@ -1363,17 +1484,20 @@ export function createAgentController(
           diagnostic: error,
         }),
       );
-      useAgentConsoleStore.setState({ runError: refusal });
+      sessionStore.setState({ runError: refusal });
+      useAgentRunCoordinatorStore.getState().finish(capture.sessionId);
       return { status: "failure", failure: refusal };
     }
     activeController = {
       projectRoot: capture.projectRoot,
+      sessionId: capture.sessionId,
       runId,
       userMessageId,
       assistantMessageId,
       controller: abortController,
     };
-    const ownsCurrentRun = () => ownsRun(capture.projectRoot, runId);
+    const ownsCurrentRun = () =>
+      ownsRun(capture.projectRoot, runId, capture.sessionId);
     let enteredRun = false;
     let latestAssistant: AgentUIMessage | null = null;
     let failurePhase: AgentFailurePhase = null;
@@ -1394,7 +1518,7 @@ export function createAgentController(
             diagnostic: failure.message,
           }),
         );
-        useAgentConsoleStore.getState().failPreflight(failure);
+        sessionStore.getState().failPreflight(failure);
         return { status: "failure", failure };
       }
       const [attachmentsResult, targetResult] = await Promise.allSettled([
@@ -1415,9 +1539,24 @@ export function createAgentController(
         );
       }
       if (targetResult.status === "rejected") {
+        if (capture.sessionId.kind === "outline") {
+          const chapterId = capture.sessionId.chapterId;
+          const message =
+            targetResult.reason instanceof Error
+              ? targetResult.reason.message
+              : String(targetResult.reason);
+          throw new OutlinePlannerGroundingError(
+            `Outline planner grounding failed for chapter ${chapterId} at target source ${chapterId}: ${message}`,
+            { cause: targetResult.reason },
+          );
+        }
         throw targetResult.reason;
       }
       const frozen = targetResult.value;
+      const plannerGrounding = await resolveOutlinePlannerGrounding(
+        capture,
+        frozen.chapter,
+      );
 
       const model = await dependencies.getModel(
         capture.provider,
@@ -1446,7 +1585,7 @@ export function createAgentController(
         if (!ownsCurrentRun()) return { status: "stopped" };
         summary = compacted.summary;
         if (summary !== null && summary !== capture.summary) {
-          useAgentConsoleStore.getState().setSummary(summary);
+          sessionStore.getState().setSummary(summary);
         }
       }
       if (!ownsCurrentRun()) return { status: "stopped" };
@@ -1471,12 +1610,17 @@ export function createAgentController(
         user,
       ];
       failurePhase = null;
-      const instructions = buildAgentInstructions({
+      const baseInstructions = buildAgentInstructions({
         mode: run.mode,
         task: run.task,
         styleGuide: capture.styleGuide,
         editingRules: capture.editingRules,
+        sessionId: capture.sessionId,
       });
+      const instructions =
+        plannerGrounding === null
+          ? baseInstructions
+          : `${baseInstructions}\n\n${plannerGrounding}`;
       const environment = toolEnvironment({
         run,
         model,
@@ -1488,11 +1632,12 @@ export function createAgentController(
         history: capture.messages,
         assistantMessageId,
         signal: abortController.signal,
+        sessionId: capture.sessionId,
       });
       capture.enterRun(run, user);
       enteredRun = true;
       if (!ownsCurrentRun()) return { status: "stopped" };
-      useAgentConsoleStore.getState().markStreaming();
+      sessionStore.getState().markStreaming();
 
       const result = await dependencies.stream({
         model,
@@ -1513,9 +1658,7 @@ export function createAgentController(
             retryOf: capture.retryOf,
             failure: null,
           });
-          useAgentConsoleStore
-            .getState()
-            .upsertAssistantMessage(latestAssistant);
+          sessionStore.getState().upsertAssistantMessage(latestAssistant);
         },
         onToolFailure: async (failure) => {
           await persistAgentFailure(
@@ -1538,7 +1681,7 @@ export function createAgentController(
         retryOf: capture.retryOf,
         failure: null,
       });
-      useAgentConsoleStore
+      sessionStore
         .getState()
         .finishRun(settledAssistantMessage(completed), result.usage);
       return { status: "success" };
@@ -1551,7 +1694,7 @@ export function createAgentController(
         return { status: "stopped" };
       }
       const failure = runFailure(error, capture.provider, failurePhase);
-      const activeRun = useAgentConsoleStore.getState().activeRun;
+      const activeRun = sessionStore.getState().activeRun;
       await persistAgentFailure(
         dependencies.recordFailure,
         runFailureLogEntry({
@@ -1576,7 +1719,7 @@ export function createAgentController(
         runId,
       });
       if (!enteredRun) {
-        useAgentConsoleStore.getState().failPreflight(failure);
+        sessionStore.getState().failPreflight(failure);
       } else {
         if (activeRun === null) return { status: "stopped" };
         const base =
@@ -1603,9 +1746,7 @@ export function createAgentController(
           retryOf: capture.retryOf,
           failure,
         });
-        useAgentConsoleStore
-          .getState()
-          .failRun(settledAssistantMessage(failed), failure);
+        sessionStore.getState().failRun(settledAssistantMessage(failed), failure);
       }
       return { status: "failure", failure };
     } finally {
@@ -1614,7 +1755,10 @@ export function createAgentController(
         activeController.runId === runId
       ) {
         activeController = null;
-        void refreshAttachedDraftSources();
+        useAgentRunCoordinatorStore.getState().finish(capture.sessionId);
+        if (capture.sessionId.kind === "project") {
+          void refreshAttachedDraftSources();
+        }
       }
     }
   };
@@ -1652,6 +1796,7 @@ export function createAgentController(
     text: string;
     task: AgentTask;
     retryOf: string | null;
+    sessionId: AgentSessionId;
   }): Omit<
     SubmissionCapture,
     "resolveTaskAndTarget" | "resolveAttachments" | "enterRun"
@@ -1660,7 +1805,7 @@ export function createAgentController(
     const project = projectState.project;
     if (project === null) throw new Error("Open a project before running the agent.");
     const settings = useSettingsStore.getState();
-    const consoleState = useAgentConsoleStore.getState();
+    const consoleState = agentSessionStore(args.sessionId).getState();
     const task = structuredClone(args.task);
     const pendingProposal =
       consoleState.pendingProposal === null
@@ -1674,6 +1819,7 @@ export function createAgentController(
     );
     return {
       projectRoot: project.root,
+      sessionId: args.sessionId,
       project: frozenProject,
       meta: structuredClone(projectState.meta),
       mode: args.mode,
@@ -1700,18 +1846,21 @@ export function createAgentController(
 
   const submitAgentDraft = async (
     task: AgentTask,
+    requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const requestedProject = useProjectStore.getState().project;
     if (requestedProject === null) {
       throw new Error("Open a project before running the agent.");
     }
-    requireAgentConsoleProject(requestedProject.root);
+    requireAgentSessionProject(sessionId, requestedProject.root);
     const projectState = useProjectStore.getState();
     const project = projectState.project;
     if (project === null || project.root !== requestedProject.root) {
       throw new Error("The active project changed before the agent could run.");
     }
-    const consoleState = useAgentConsoleStore.getState();
+    const sessionStore = agentSessionStore(sessionId);
+    const consoleState = sessionStore.getState();
     const settings = useSettingsStore.getState();
     const submittedDraft = consoleState.captureDraft();
     const attachments = structuredClone(submittedDraft.attachments);
@@ -1738,6 +1887,7 @@ export function createAgentController(
     });
     const capture: SubmissionCapture = {
       projectRoot: project.root,
+      sessionId,
       project: frozenProject,
       meta: structuredClone(projectState.meta),
       mode: consoleState.mode,
@@ -1768,16 +1918,14 @@ export function createAgentController(
         meta: structuredClone(projectState.meta),
         messages: structuredClone(consoleState.messages),
         publish: (resolved) => {
-          useAgentConsoleStore.getState().applyDraftContextResolution(
+          sessionStore.getState().applyDraftContextResolution(
             submittedDraft.attachments,
             storeContextResolutions(resolved),
           );
         },
       }),
       enterRun: (run, user) => {
-        useAgentConsoleStore
-          .getState()
-          .beginDraftRun(run, user, submittedDraft);
+        sessionStore.getState().beginDraftRun(run, user, submittedDraft);
       },
     };
     return runSubmission(capture);
@@ -1785,7 +1933,9 @@ export function createAgentController(
 
   const submitAgentRequest = async (
     request: Extract<AgentIntent, { kind: "run" }>,
+    requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const frozenRequest = structuredClone(request);
     if (
       frozenRequest.text.trim() === "" &&
@@ -1797,7 +1947,7 @@ export function createAgentController(
     if (project === null) {
       throw new Error("Open a project before running the agent.");
     }
-    requireAgentConsoleProject(project.root);
+    requireAgentSessionProject(sessionId, project.root);
     if (useProjectStore.getState().project?.root !== project.root) {
       throw new Error("The active project changed before the agent could run.");
     }
@@ -1806,6 +1956,7 @@ export function createAgentController(
       text: frozenRequest.text,
       task: frozenRequest.task,
       retryOf: null,
+      sessionId,
     });
     const taskTarget = captureTaskAndTarget({
       project: base.project,
@@ -1813,7 +1964,8 @@ export function createAgentController(
       task: base.task,
       pendingProposal: base.pendingProposal,
     });
-    const consoleState = useAgentConsoleStore.getState();
+    const sessionStore = agentSessionStore(sessionId);
+    const consoleState = sessionStore.getState();
     const attachments: CapturedContextAttachment[] =
       frozenRequest.refs.map((ref) => ({ ref, revision: null }));
     return runSubmission({
@@ -1830,32 +1982,45 @@ export function createAgentController(
         publish: () => undefined,
       }),
       enterRun: (run, user) => {
-        useAgentConsoleStore.getState().beginRun(run, user);
+        sessionStore.getState().beginRun(run, user);
       },
     });
   };
 
-  const stopAgentRun = (): void => {
+  const stopAgentRun = (
+    requestedSessionId?: AgentSessionId,
+  ): void => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const active = activeController;
-    if (active === null) return;
+    if (
+      active === null ||
+      active.sessionId.kind !== sessionId.kind ||
+      (active.sessionId.kind === "outline" &&
+        sessionId.kind === "outline" &&
+        active.sessionId.chapterId !== sessionId.chapterId)
+    ) return;
     interruptVisibleRun(active, "stopped");
     active.controller.abort();
     activeController = null;
-    void refreshAttachedDraftSources();
+    useAgentRunCoordinatorStore.getState().finish(sessionId);
+    if (sessionId.kind === "project") void refreshAttachedDraftSources();
   };
 
   const retryAgentTurn = async (
     userMessageId: string,
+    requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const project = useProjectStore.getState().project;
     if (project === null) {
       throw new Error("Open a project before running the agent.");
     }
-    requireAgentConsoleProject(project.root);
+    requireAgentSessionProject(sessionId, project.root);
     if (useProjectStore.getState().project?.root !== project.root) {
       throw new Error("The active project changed before the agent could run.");
     }
-    const consoleState = useAgentConsoleStore.getState();
+    const sessionStore = agentSessionStore(sessionId);
+    const consoleState = sessionStore.getState();
     const original = consoleState.messages.find(
       (message) => message.id === userMessageId && message.role === "user",
     );
@@ -1891,6 +2056,7 @@ export function createAgentController(
       text,
       task: originalMetadata.task,
       retryOf: userMessageId,
+      sessionId,
     });
     return runSubmission({
       ...base,
@@ -1906,18 +2072,23 @@ export function createAgentController(
         snapshots: snapshots.map((snapshot) => ({ ...snapshot })),
       }),
       enterRun: (run, user) => {
-        useAgentConsoleStore.getState().beginRun(run, user);
+        sessionStore.getState().beginRun(run, user);
       },
     });
   };
 
-  const recordProposalEvent = (event: ProposalEventData): void => {
+  const recordProposalEvent = (
+    event: ProposalEventData,
+    requestedSessionId?: AgentSessionId,
+  ): void => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const project = useProjectStore.getState().project;
     if (project === null) {
       throw new Error("Open a project before recording a proposal decision.");
     }
-    requireAgentConsoleProject(project.root);
-    const mode = useAgentConsoleStore.getState().mode;
+    requireAgentSessionProject(sessionId, project.root);
+    const sessionStore = agentSessionStore(sessionId);
+    const mode = sessionStore.getState().mode;
     const createdAt = dependencies.now();
     const message: AgentUIMessage = {
       id: dependencies.id(),
@@ -1939,7 +2110,7 @@ export function createAgentController(
         },
       ],
     };
-    useAgentConsoleStore.getState().appendLocalMessage(message);
+    sessionStore.getState().appendLocalMessage(message);
   };
 
   const abortAgentRunForProjectSwitch = (
@@ -1959,7 +2130,7 @@ export function createAgentController(
     if (requestedProject === null) {
       throw new Error("Open a project before adding agent context.");
     }
-    requireAgentConsoleProject(requestedProject.root);
+    requireAgentSessionProject(PROJECT_AGENT_SESSION, requestedProject.root);
     const projectState = useProjectStore.getState();
     if (projectState.project?.root !== requestedProject.root) {
       throw new Error("The active project changed before context could load.");
@@ -2034,7 +2205,7 @@ export function createAgentController(
       if (project === null) {
         throw new Error("Open a project before using the agent console.");
       }
-      requireAgentConsoleProject(project.root);
+      requireAgentSessionProject(PROJECT_AGENT_SESSION, project.root);
       if (frozenIntent.kind === "focus") {
         useAgentConsoleStore.getState().setMode(frozenIntent.mode);
         return;

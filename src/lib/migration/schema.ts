@@ -84,8 +84,9 @@ export const metaBlobSchema = z.object({
   statuses: z.record(z.string(), z.enum(["active", "draft", "outline", "planned"]).catch("active")).catch({}),
   outline: z.object({
     premise: z.string().catch(""),
+    overview: z.string().catch(""),
     acts: z.array(legacyActSchema).optional(),
-  }).passthrough().catch({ premise: "" }),
+  }).passthrough().catch({ premise: "", overview: "" }),
   chapters: z.record(z.string(), chapterOutlineSchema).optional(),
   chapterBeats: z.record(z.string(), legacyChapterBeatSchema).optional(),
 }).passthrough();

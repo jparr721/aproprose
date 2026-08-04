@@ -27,6 +27,7 @@ import { TypographyEyebrow } from "@/components/ui/typography";
 import { ActBand } from "@/components/app/outline/act-band";
 import { resolveCardDrop } from "@/lib/outline/board-dnd";
 import { actPacing } from "@/lib/outline/model";
+import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import { useProjectStore } from "@/stores/project-store";
 import type { ActKind, ChapterRef } from "@/lib/types";
 
@@ -50,7 +51,9 @@ function groupIntoRuns(chapters: ChapterRef[], actOf: (id: string) => ActKind | 
 
 export function OutlineBoard() {
   const premise = useProjectStore((s) => s.meta.outline.premise);
+  const overview = useProjectStore((s) => s.meta.outline.overview);
   const setPremise = useProjectStore((s) => s.setPremise);
+  const setOverview = useProjectStore((s) => s.setOverview);
   const chapters = useProjectStore((s) => s.project?.chapters ?? []);
   const chapterOutlines = useProjectStore((s) => s.meta.chapters);
   const moveCardToChapter = useProjectStore((s) => s.moveCardToChapter);
@@ -84,6 +87,15 @@ export function OutlineBoard() {
           onChange={(e) => setPremise(e.target.value)}
           placeholder="What is this book about?"
           rows={2}
+          className="resize-y"
+        />
+        <TypographyEyebrow>Story Overview</TypographyEyebrow>
+        <Textarea
+          value={overview}
+          onChange={(event) => setOverview(event.target.value)}
+          placeholder="Summarize the premise, central conflict, stakes, major arcs, and ending intent."
+          rows={5}
+          maxLength={STORY_OVERVIEW_MAX_CHARS}
           className="resize-y"
         />
       </div>

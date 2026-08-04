@@ -75,8 +75,11 @@ import type {
   ProjectMeta,
 } from "@/lib/types";
 import {
+  agentSessionStore,
+  clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
+  useAgentRunCoordinatorStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -173,7 +176,7 @@ const outlineChapter: ChapterOutline = {
 function projectMeta(): ProjectMeta {
   return {
     ...EMPTY_META,
-    outline: { premise: "A detective is trapped." },
+    outline: { premise: "A detective is trapped.", overview: "" },
     chapters: { ch1: outlineChapter },
     lore: [
       {
@@ -467,6 +470,8 @@ function compactionMessages(payloadLength: number): AgentUIMessage[] {
 }
 
 beforeEach(() => {
+  clearOutlineAgentSessions();
+  useAgentRunCoordinatorStore.setState({ activeSessionKey: null });
   mocks.generateText.mockReset().mockResolvedValue({ text: "Compacted history" });
   mocks.readTextFile.mockReset().mockImplementation(async (_root, path) => {
     if (path === "chapters/two.tex") {
@@ -502,6 +507,113 @@ beforeEach(() => {
   });
   useViewStore.setState(useViewStore.getInitialState(), true);
   useViewStore.setState({ aiOpen: false });
+});
+
+describe("outline planner sessions", () => {
+  it("injects frozen target and neighbor grounding while retaining arbitrary reads", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        outline: {
+          premise: state.meta.outline.premise,
+          overview: "The detective must escape before the house resets.",
+        },
+      },
+    }));
+    let instructions = "";
+    let arbitraryChapterText: string[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      const chapter = await input.environment.readChapter("ch1");
+      arbitraryChapterText = chapter.blocks.map((block) => block.text);
+      return successfulResult(input, "Planned");
+    });
+    const controller = createAgentController(dependencies);
+
+    await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(instructions).toContain("APROPROSE OUTLINE PLANNING");
+    expect(instructions).toContain("OUTLINE PLANNER GROUNDING");
+    expect(instructions).toContain(
+      '"storyOverview": "The detective must escape before the house resets."',
+    );
+    expect(instructions).toContain('"chapterId": "ch1"');
+    expect(instructions).toContain('"chapterId": "ch2"');
+    expect(instructions).toContain('"next": null');
+    expect(arbitraryChapterText).toEqual([
+      "Disk first.",
+      "Disk middle.",
+      "Disk final.",
+    ]);
+  });
+
+  it("reports the exact planner grounding source when preflight fails", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    mocks.readTextFile.mockRejectedValueOnce(new Error("chapter file missing"));
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+
+    const outcome = await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(outcome).toMatchObject({
+      status: "failure",
+      failure: {
+        message: expect.stringContaining(
+          "Outline planner grounding failed for chapter ch2 at target source ch2: chapter file missing",
+        ),
+      },
+    });
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
 });
 
 describe("dispatchAgentIntent", () => {
@@ -1476,7 +1588,10 @@ describe("frozen run preflight", () => {
     useProjectStore.setState((state) => ({
       meta: {
         ...state.meta,
-        outline: { premise: "Initial outline premise" },
+        outline: {
+          premise: "Initial outline premise",
+          overview: "Initial story overview",
+        },
         chapters: {
           ...state.meta.chapters,
           ch2: {
@@ -1546,7 +1661,7 @@ describe("frozen run preflight", () => {
       },
       meta: {
         ...current.meta,
-        outline: { premise: "Changed outline premise" },
+        outline: { premise: "Changed outline premise", overview: "" },
         chapters: {
           ...current.meta.chapters,
           ch2: {
@@ -1587,6 +1702,7 @@ describe("frozen run preflight", () => {
     ]);
     expect(frozenOutline).toMatchObject({
       premise: "Initial outline premise",
+      overview: "Initial story overview",
       chapters: [
         {
           chapterId: "ch2",

@@ -6,19 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
-import { useViewStore } from "@/stores/view-store";
 
 afterEach(() => cleanup());
 
 beforeEach(() => {
   useOutlineBoardStore.setState({
     openChapterId: null,
+    chapterView: "manual",
     highlightedCardId: null,
-  });
-  useViewStore.setState({
-    agentSection: { kind: "project" },
-    aiOpen: false,
-    focus: false,
   });
   useProjectStore.setState({
     project: {
@@ -30,7 +25,7 @@ beforeEach(() => {
       ],
     },
     meta: {
-      characters: [], lore: [], statuses: {}, outline: { premise: "" },
+      characters: [], lore: [], statuses: {}, outline: { premise: "", overview: "" },
       chapters: {
         ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] },
         ch2: { act: "confrontation", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] },
@@ -47,22 +42,30 @@ describe("OutlineBoard", () => {
     expect(screen.getByText("Setup")).toBeTruthy();
     expect(screen.getByText("Confrontation")).toBeTruthy();
   });
+
+  it("edits the story overview", () => {
+    render(<OutlineBoard />);
+    const overview = screen.getByPlaceholderText(/summarize the premise/i);
+
+    fireEvent.change(overview, {
+      target: { value: "A courier risks a civil war to expose the crown." },
+    });
+
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "A courier risks a civil war to expose the crown.",
+    );
+  });
 });
 
 describe("BoardChapterColumn planning", () => {
-  it("opens the prompt-led shared agent section without starting a run", () => {
+  it("opens the chapter planner without starting a run", () => {
     render(<OutlineBoard />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Plan with AI" })[0]);
 
-    expect(useViewStore.getState()).toMatchObject({
-      agentSection: {
-        kind: "outline",
-        projectRoot: "/x",
-        chapterId: "ch1",
-      },
-      aiOpen: true,
-      focus: false,
+    expect(useOutlineBoardStore.getState()).toMatchObject({
+      openChapterId: "ch1",
+      chapterView: "planner",
     });
     expect(screen.getByText("Quiet Town")).toBeTruthy();
   });

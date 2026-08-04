@@ -11,8 +11,10 @@ import {
 import { TypographyMuted } from "@/components/ui/typography";
 import type {
   AgentUIMessage,
+  AgentSessionId,
   ConversationSummary,
 } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 
 export interface AgentConversationProps
   extends Pick<
@@ -23,6 +25,7 @@ export interface AgentConversationProps
   summary: ConversationSummary | null;
   emptyTitle: string;
   emptyDescription: string;
+  sessionId?: AgentSessionId;
 }
 
 export function AgentConversation({
@@ -33,7 +36,9 @@ export function AgentConversation({
   onOpenSettings,
   emptyTitle,
   emptyDescription,
+  sessionId: requestedSessionId,
 }: AgentConversationProps) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
   return (
     <Conversation className="min-h-0">
       <ConversationContent scrollClassName="overflow-y-auto">
@@ -50,6 +55,7 @@ export function AgentConversation({
               onNavigateSnapshot={onNavigateSnapshot}
               onOpenSettings={onOpenSettings}
               onRetry={onRetry}
+              sessionId={sessionId}
             />,
             summary?.throughMessageId === message.id ? (
               <TypographyMuted key={`compaction-${message.id}`}>

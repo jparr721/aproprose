@@ -244,7 +244,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,

@@ -455,7 +455,7 @@ describe("agent console authoring flows", () => {
       },
       meta: {
         ...state.meta,
-        outline: { premise: "A ledger pulls Mara toward the harbor." },
+        outline: { premise: "A ledger pulls Mara toward the harbor.", overview: "" },
         characters: [
           { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
         ],
@@ -1093,6 +1093,7 @@ describe("agent console authoring flows", () => {
           },
           value: {
             premise: "",
+            overview: "",
             characters: [],
             chapters: [
               {

@@ -19,13 +19,18 @@ import { convertAgentMessagesToModel } from "@/lib/ai/agent-messages";
 import { resetAiProvider } from "@/lib/ai/model";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentSessionStore,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import {
   AgentPersistenceError,
+  agentSessionCollectionKey,
   agentStateKey,
   emptyPersistedAgentState,
   fromAgentSnapshot,
   loadAgentState,
+  loadAgentSessionCollection,
   resetAgentConversation,
   retryAgentPersistence,
   saveAgentState,
@@ -2847,5 +2852,63 @@ describe("agent persistence", () => {
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
     expect(tauri.writeAppData).not.toHaveBeenCalled();
     persistence.unmount();
+  });
+
+  it("migrates a v3 conversation into only the project session", async () => {
+    const legacy = {
+      ...emptyPersistedAgentState(),
+      draftText: "Existing project chat",
+    };
+    tauri.readAppData.mockResolvedValueOnce(null);
+
+    const collection = await loadAgentSessionCollection("/books/legacy", legacy);
+
+    expect(collection.project.draftText).toBe("Existing project chat");
+    expect(collection.outlines).toEqual({});
+  });
+
+  it("isolates one corrupt planner session from the remaining collection", async () => {
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:good": {
+          ...emptyPersistedAgentState(),
+          draftText: "Good planner",
+        },
+        "outline:bad": { v: 3, draftText: 42 },
+      },
+    });
+
+    const collection = await loadAgentSessionCollection(
+      "/books/planners",
+      emptyPersistedAgentState(),
+    );
+
+    expect(collection.outlines.good.draftText).toBe("Good planner");
+    expect(collection.outlines.bad).toEqual(emptyPersistedAgentState());
+    expect(collection.corruptOutlineChapterIds).toEqual(["bad"]);
+  });
+
+  it("flushes planner sessions before switching projects", async () => {
+    const firstRoot = "/books/first";
+    await transitionAgentProject(firstRoot);
+    const sessionId = { kind: "outline" as const, chapterId: "chapter-1" };
+    const planner = agentSessionStore(sessionId);
+    planner.getState().hydrate(firstRoot, emptyPersistedAgentState());
+    planner.getState().setDraftText("Planner draft");
+    tauri.writeAppData.mockClear();
+
+    await transitionAgentProject("/books/second");
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(firstRoot),
+    );
+    expect(collectionWrite?.[1]).toMatchObject({
+      v: 1,
+      sessions: {
+        "outline:chapter-1": { draftText: "Planner draft" },
+      },
+    });
   });
 });

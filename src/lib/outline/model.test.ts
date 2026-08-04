@@ -5,12 +5,14 @@ import {
   addCharacterToChapter,
   applySculpt,
   editCard,
+  editOverview,
   emptyChapterOutline,
   moveCardToChapter,
   moveCardWithin,
   removeCard,
   removeCharacterFromChapter,
   setChapterAct,
+  STORY_OVERVIEW_MAX_CHARS,
 } from "@/lib/outline/model";
 import type { ChapterOutline, ChapterRef, SculptProposal } from "@/lib/types";
 
@@ -116,5 +118,22 @@ describe("chapter cast", () => {
     const seeded = addCharacterToChapter({}, "ch1", "c1");
     addCharacterToChapter(seeded, "ch1", "c2");
     expect(seeded.ch1.characterIds).toEqual(["c1"]);
+  });
+});
+
+describe("story overview", () => {
+  it("updates the overview without changing the logline", () => {
+    expect(
+      editOverview({ premise: "Logline", overview: "Before" }, "After"),
+    ).toEqual({ premise: "Logline", overview: "After" });
+  });
+
+  it("rejects replacements longer than the explicit limit", () => {
+    expect(() =>
+      editOverview(
+        { premise: "", overview: "" },
+        "x".repeat(STORY_OVERVIEW_MAX_CHARS + 1),
+      ),
+    ).toThrow(/2000 characters or fewer/);
   });
 });

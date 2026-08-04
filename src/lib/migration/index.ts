@@ -10,9 +10,10 @@ import type { ProjectMeta } from "@/lib/types";
 import { migrateV1 } from "@/lib/migration/v1/migrate";
 import { migrateV2 } from "@/lib/migration/v2/migrate";
 import { migrateV3 } from "@/lib/migration/v3/migrate";
+import { migrateV4 } from "@/lib/migration/v4/migrate";
 
 /** Bump whenever a migration is added. */
-export const CURRENT_VERSION = 3;
+export const CURRENT_VERSION = 4;
 
 type Migration = (meta: MetaBlob) => ProjectMeta;
 
@@ -20,6 +21,7 @@ const migrations: Record<number, Migration> = {
   1: migrateV1,
   2: migrateV2,
   3: migrateV3,
+  4: migrateV4,
 };
 
 export const EMPTY_META: ProjectMeta = {
@@ -27,7 +29,7 @@ export const EMPTY_META: ProjectMeta = {
   characters: [],
   lore: [],
   statuses: {},
-  outline: { premise: "" },
+  outline: { premise: "", overview: "" },
   chapters: {},
 };
 

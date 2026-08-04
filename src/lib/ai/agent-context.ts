@@ -72,6 +72,10 @@ export function projectMetaFingerprint(meta: ProjectMeta): string {
   return fnv1a(JSON.stringify(meta));
 }
 
+export function storyOverviewFingerprint(overview: string): string {
+  return fnv1a(JSON.stringify(overview));
+}
+
 export function findingFingerprint(
   finding: CritiqueNote | ContinuityFlag,
 ): string {

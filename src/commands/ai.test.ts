@@ -76,7 +76,7 @@ const meta: ProjectMeta = {
   characters: [],
   lore: [],
   statuses: {},
-  outline: { premise: "" },
+  outline: { premise: "", overview: "" },
   chapters: {
     "chapter-1": {
       act: null,

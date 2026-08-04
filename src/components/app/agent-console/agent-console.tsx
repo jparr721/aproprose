@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X as IconX } from "lucide-react";
+import { IconX } from "@tabler/icons-react";
 import { AgentComposer } from "@/components/app/agent-console/agent-composer";
 import { AgentConversation } from "@/components/app/agent-console/agent-conversation";
 import { ReviewTray } from "@/components/app/agent-console/review-tray";
@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/typography";
 import { retryAgentTurn } from "@/lib/ai/agent-controller";
 import { navigateToContextSnapshot } from "@/lib/ai/agent-navigation";
-import type { AgentPersistenceIssue } from "@/lib/ai/agent-types";
+import type { AgentPersistenceIssue, AgentTask } from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
   useAgentConsoleStore,
@@ -134,12 +134,99 @@ export function AgentConsole() {
     <AiConsoleErrorBoundary
       onClose={() => useViewStore.getState().setAiOpen(false)}
     >
-      <AgentConsoleContent />
+      <AgentConsoleRoute />
     </AiConsoleErrorBoundary>
   );
 }
 
-function AgentConsoleContent() {
+function AgentConsoleRoute() {
+  const project = useProjectStore((state) => state.project);
+  const activeChapterId = useProjectStore((state) => state.activeChapterId);
+  const section = useViewStore((state) => state.agentSection);
+  const activeChapter =
+    project === null || activeChapterId === null
+      ? undefined
+      : project.chapters.find((candidate) => candidate.id === activeChapterId);
+  const projectContextLabel =
+    project === null
+      ? "No project"
+      : activeChapter === undefined
+        ? project.name
+        : `${project.name} / ${activeChapter.label}. ${activeChapter.title}`;
+  const close = (): void => useViewStore.getState().setAiOpen(false);
+
+  if (
+    section.kind === "outline" &&
+    project !== null &&
+    section.projectRoot === project.root
+  ) {
+    const chapter = project.chapters.find(
+      (candidate) => candidate.id === section.chapterId,
+    );
+    if (chapter === undefined) {
+      throw new Error(`Outline chapter not found: ${section.chapterId}`);
+    }
+    return (
+      <AgentSection
+        ariaLabel="Outline Planner"
+        closeLabel="Close Outline Planner"
+        contextLabel={`${project.name} / ${chapter.label}. ${chapter.title}`}
+        emptyDescription="Describe the story you want for this chapter. The agent will ask for clarification when needed, then stage separate plot-point ideas for individual review."
+        emptyTitle="Plan this chapter"
+        onClose={close}
+        placeholder="Describe this chapter or request more plot points"
+        task={{ kind: "outline-sculpt", chapterId: chapter.id }}
+        title="Outline Planner"
+      />
+    );
+  }
+
+  return (
+    <AgentSection
+      ariaLabel="AI Console"
+      closeLabel="Close AI Console"
+      contextLabel={projectContextLabel}
+      emptyDescription="Add manuscript context or ask a project question."
+      emptyTitle="Ask about this project"
+      onClose={close}
+      placeholder="Ask about your manuscript"
+      task={null}
+      title="AI Console"
+    />
+  );
+}
+
+export interface AgentSectionProps {
+  ariaLabel: string;
+  closeLabel: string;
+  contextLabel: string;
+  emptyDescription: string;
+  emptyTitle: string;
+  onClose: () => void;
+  placeholder: string;
+  task: AgentTask | null;
+  title: string;
+}
+
+export function AgentSection(props: AgentSectionProps) {
+  return (
+    <AiConsoleErrorBoundary onClose={props.onClose}>
+      <AgentSectionContent {...props} />
+    </AiConsoleErrorBoundary>
+  );
+}
+
+function AgentSectionContent({
+  ariaLabel,
+  closeLabel,
+  contextLabel,
+  emptyDescription,
+  emptyTitle,
+  onClose,
+  placeholder,
+  task,
+  title,
+}: AgentSectionProps) {
   const messages = useAgentConsoleStore((state) => state.messages);
   const summary = useAgentConsoleStore((state) => state.summary);
   const pendingProposal = useAgentConsoleStore(
@@ -149,39 +236,28 @@ function AgentConsoleContent() {
     (state) => state.persistenceIssue,
   );
   const project = useProjectStore((state) => state.project);
-  const activeChapterId = useProjectStore((state) => state.activeChapterId);
   const ownershipStatus = useAgentConsoleStore((state) =>
     agentConsoleOwnershipStatus(state, project?.root ?? null),
   );
-  const setAiOpen = useViewStore((state) => state.setAiOpen);
-  const chapter =
-    project === null || activeChapterId === null
-      ? undefined
-      : project.chapters.find((candidate) => candidate.id === activeChapterId);
-  const contextLabel =
-    project === null
-      ? "No project"
-      : chapter === undefined
-        ? project.name
-        : `${project.name} / ${chapter.label}. ${chapter.title}`;
   const openAiSettings = (target: "key" | "model"): void => {
     useSettingsDialogStore.getState().openAiSettings(target);
   };
 
   return (
     <section
-      aria-label="AI Console"
+      aria-label={ariaLabel}
       className="flex h-full min-h-0 min-w-0 flex-col bg-background"
       data-agent-console
+      data-agent-section
     >
       <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <div className="min-w-0">
-          <TypographyLarge>AI Console</TypographyLarge>
+          <TypographyLarge>{title}</TypographyLarge>
           <TypographyMuted className="truncate">{contextLabel}</TypographyMuted>
         </div>
         <Button
-          aria-label="Close AI Console"
-          onClick={() => setAiOpen(false)}
+          aria-label={closeLabel}
+          onClick={onClose}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -195,6 +271,8 @@ function AgentConsoleContent() {
       {ownershipStatus === "ready" ? (
         <>
           <AgentConversation
+            emptyDescription={emptyDescription}
+            emptyTitle={emptyTitle}
             messages={messages}
             onNavigateSnapshot={navigateToContextSnapshot}
             onOpenSettings={openAiSettings}
@@ -202,7 +280,7 @@ function AgentConsoleContent() {
             summary={summary}
           />
           {pendingProposal === null ? null : <ReviewTray />}
-          <AgentComposer />
+          <AgentComposer placeholder={placeholder} task={task} />
         </>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2">

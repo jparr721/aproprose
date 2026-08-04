@@ -1,4 +1,4 @@
-import { Plus as IconPlus, Trash as IconTrash } from "lucide-react";
+import { IconMessages, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,7 @@ import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import type { ActKind, BeatType } from "@/lib/types";
 
 const NONE = "__none__";
@@ -35,6 +36,7 @@ const SPINE: { key: "premise" | "goal" | "conflict" | "turn"; label: string; pla
 export function ChapterSubview() {
   const chapterId = useOutlineBoardStore((s) => s.openChapterId);
   const closeChapter = useOutlineBoardStore((s) => s.closeChapter);
+  const project = useProjectStore((s) => s.project);
   const chapterRef = useProjectStore((s) => s.project?.chapters.find((c) => c.id === chapterId));
   const ch = useProjectStore((s) => (chapterId ? getChapterOutline(s.meta.chapters, chapterId) : null));
   const renameChapter = useProjectStore((s) => s.renameChapter);
@@ -50,25 +52,35 @@ export function ChapterSubview() {
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
-  if (!chapterId || !ch || !chapterRef) return null;
+  const openOutlineAgent = useViewStore((s) => s.openOutlineAgent);
+  if (!chapterId || !ch || !chapterRef || !project) return null;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <Breadcrumb className="border-b border-border px-4 py-3">
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild onClick={closeChapter}>
-              <BreadcrumbItem>
-                Storyboard
-              </BreadcrumbItem>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{chapterRef.title}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild onClick={closeChapter}>
+                <BreadcrumbItem>
+                  Storyboard
+                </BreadcrumbItem>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{chapterRef.title}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        <Button
+          onClick={() => openOutlineAgent(project.root, chapterId)}
+          size="sm"
+          variant="outline"
+        >
+          <IconMessages /> Plan with AI
+        </Button>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex flex-col gap-4 p-4">

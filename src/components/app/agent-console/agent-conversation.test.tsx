@@ -43,6 +43,8 @@ function renderConversation(
 ) {
   return render(
     <AgentConversation
+      emptyDescription="Add manuscript context or ask a project question."
+      emptyTitle="Ask about this project"
       messages={messages}
       summary={summary}
       onNavigateSnapshot={vi.fn().mockResolvedValue(true)}
@@ -146,6 +148,8 @@ describe("AgentConversation", () => {
     render(
       <div className="flex h-48 flex-col">
         <AgentConversation
+          emptyDescription="Add manuscript context or ask a project question."
+          emptyTitle="Ask about this project"
           messages={[textMessage("assistant-scroll", "assistant", "Transcript row")]}
           summary={null}
           onNavigateSnapshot={vi.fn().mockResolvedValue(true)}

@@ -1,37 +1,32 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { ChevronRight as IconChevronRight, Plus as IconPlus, WandSparkles as IconWand } from "lucide-react";
+import {
+  IconChevronRight,
+  IconMessages,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { BoardCard } from "@/components/app/outline/board-card";
 import { CharacterChip } from "@/components/app/outline/character-chip";
 import { PlotPointBadge } from "@/components/app/outline/plot-point-badge";
-import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
-import { OUTLINE_SCULPT_DIRECTIVE } from "@/lib/ai/agent-prompts";
 import { cardColumnId } from "@/lib/outline/board-dnd";
 import { beatCharacters } from "@/lib/outline/beat-signals";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import type { ChapterRef } from "@/lib/types";
 
 export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: number }) {
   const { chapterRef, index } = props;
+  const project = useProjectStore((s) => s.project);
   const ch = useProjectStore((s) => getChapterOutline(s.meta.chapters, chapterRef.id));
   const characters = useProjectStore((s) => s.meta.characters);
   const addCard = useProjectStore((s) => s.addCard);
   const openChapter = useOutlineBoardStore((s) => s.openChapter);
+  const openOutlineAgent = useViewStore((s) => s.openOutlineAgent);
   const { setNodeRef } = useDroppable({ id: cardColumnId(chapterRef.id) });
   const cast = beatCharacters(ch.characterIds, characters);
-
-  const runSculpt = () => {
-    void dispatchAgentIntent({
-      kind: "run",
-      mode: "edit",
-      text: OUTLINE_SCULPT_DIRECTIVE,
-      refs: [],
-      task: { kind: "outline-sculpt", chapterId: chapterRef.id },
-    });
-  };
 
   return (
     <div className="flex w-72 shrink-0 flex-col gap-2">
@@ -51,9 +46,14 @@ export function BoardChapterColumn(props: { chapterRef: ChapterRef; index: numbe
             variant="ghost"
             size="sm"
             className="ml-auto h-6 px-2 text-xs text-muted-foreground"
-            onClick={runSculpt}
+            onClick={() => {
+              if (project === null) {
+                throw new Error("Open a project before planning an outline.");
+              }
+              openOutlineAgent(project.root, chapterRef.id);
+            }}
           >
-            <IconWand className="size-3.5" /> Sculpt
+            <IconMessages className="size-3.5" /> Plan with AI
           </Button>
         </div>
         {cast.length > 0 ? (

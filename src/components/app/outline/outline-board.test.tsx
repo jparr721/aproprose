@@ -1,16 +1,7 @@
 // @vitest-environment happy-dom
 //
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentIntent } from "@/lib/ai/agent-types";
-
-const controller = vi.hoisted(() => ({
-  dispatchAgentIntent: vi.fn<(intent: AgentIntent) => Promise<void>>(),
-}));
-
-vi.mock("@/lib/ai/agent-controller", () => ({
-  dispatchAgentIntent: controller.dispatchAgentIntent,
-}));
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { useProjectStore } from "@/stores/project-store";
@@ -20,13 +11,14 @@ import { useViewStore } from "@/stores/view-store";
 afterEach(() => cleanup());
 
 beforeEach(() => {
-  controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
-    useViewStore.getState().openAiConsole();
-  });
-  useViewStore.setState({ aiOpen: false, focus: false });
   useOutlineBoardStore.setState({
     openChapterId: null,
     highlightedCardId: null,
+  });
+  useViewStore.setState({
+    agentSection: { kind: "project" },
+    aiOpen: false,
+    focus: false,
   });
   useProjectStore.setState({
     project: {
@@ -57,23 +49,23 @@ describe("OutlineBoard", () => {
   });
 });
 
-describe("BoardChapterColumn Sculpt", () => {
-  it("dispatches an immediate Edit run and keeps the board visible", () => {
+describe("BoardChapterColumn planning", () => {
+  it("opens the prompt-led shared agent section without starting a run", () => {
     render(<OutlineBoard />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Sculpt" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Plan with AI" })[0]);
 
-    expect(controller.dispatchAgentIntent).toHaveBeenCalledWith({
-      kind: "run",
-      mode: "edit",
-      text: "Review and reshape this chapter outline for clarity, causality, pacing, and escalation.",
-      refs: [],
-      task: { kind: "outline-sculpt", chapterId: "ch1" },
+    expect(useViewStore.getState()).toMatchObject({
+      agentSection: {
+        kind: "outline",
+        projectRoot: "/x",
+        chapterId: "ch1",
+      },
+      aiOpen: true,
+      focus: false,
     });
-    expect(useViewStore.getState().aiOpen).toBe(true);
     expect(screen.getByText("Quiet Town")).toBeTruthy();
   });
-
 });
 
 describe("BoardCard agent navigation highlight", () => {

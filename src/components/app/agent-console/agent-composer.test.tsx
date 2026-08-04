@@ -139,12 +139,12 @@ const sources: Record<string, DraftContextSource> = {
   ),
 };
 
-const pendingProposal: PendingProposal = {
-  id: "proposal-1",
-  kind: "manuscript",
+const pendingOutlineProposal: PendingProposal = {
+  id: "outline-proposal-1",
+  kind: "outline",
   projectRoot: project.root,
   chapterId: "chapter-1",
-  summary: "Tighten the crossing",
+  summary: "Plan the crossing",
   createdAt: "2026-07-30T12:00:00.000Z",
   originatingMessageId: "assistant-1",
   changes: [],
@@ -235,7 +235,7 @@ afterEach(() => {
 
 describe("AgentComposer mode controls", () => {
   it("uses stock grouped Buttons and mode descendant selectors", () => {
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     const group = screen.getByRole("group", { name: "Agent mode" });
     const writing = within(group).getByRole("button", { name: "Writing" });
@@ -281,7 +281,7 @@ describe("AgentComposer mode controls", () => {
       activeRun: run,
       runStatus: "streaming",
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
@@ -293,7 +293,7 @@ describe("AgentComposer mode controls", () => {
 
 describe("AgentComposer draft behavior", () => {
   it("exposes the empty composer as the named AI Console textbox", () => {
-    const { container } = render(<AgentComposer />);
+    const { container } = render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect(
       screen.getByRole("textbox", { name: "Message AI Console" }),
@@ -305,7 +305,7 @@ describe("AgentComposer draft behavior", () => {
 
   it("keeps the AI Console textbox name when it contains text", () => {
     useAgentConsoleStore.getState().setDraftText("Ask about the crossing");
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     const textbox = screen.getByRole("textbox", {
       name: "Message AI Console",
@@ -315,7 +315,7 @@ describe("AgentComposer draft behavior", () => {
 
   it("keeps textarea text controlled by the console store", () => {
     useAgentConsoleStore.getState().setDraftText("Ask about the crossing");
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
 
     expect(textarea.value).toBe("Ask about the crossing");
@@ -340,7 +340,7 @@ describe("AgentComposer draft behavior", () => {
         projectRoot: project.root,
       },
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(
       true,
@@ -386,7 +386,7 @@ describe("AgentComposer draft behavior", () => {
       draftContextRefs: [firstRef],
       draftContextSources: sources,
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(
       true,
@@ -417,7 +417,7 @@ describe("AgentComposer draft behavior", () => {
       draftContextRefs: [firstRef, secondRef],
       draftContextSources: sources,
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     fireEvent.click(
       screen.getByRole("button", { name: "Remove Opening paragraph" }),
@@ -446,7 +446,7 @@ describe("AgentComposer draft behavior", () => {
       );
       await completion.promise;
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
@@ -476,7 +476,7 @@ describe("AgentComposer draft behavior", () => {
         projectRoot: project.root,
       },
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
 
     expect(textarea.disabled).toBe(true);
@@ -490,7 +490,7 @@ describe("AgentComposer draft behavior", () => {
   });
 
   it("blocks blank submissions and accepts an attachment-only draft", async () => {
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     const textarea = screen.getByRole("textbox");
     const form = textarea.closest("form");
     if (form === null) throw new Error("PromptInput form is missing");
@@ -531,7 +531,7 @@ describe("AgentComposer draft behavior", () => {
       state.failPreflight(failure);
       return { status: "failure" as const, failure };
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
@@ -562,7 +562,7 @@ describe("AgentComposer draft behavior", () => {
         settingsTarget: null,
       },
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect(screen.getByRole("alert").textContent).toBe(
       "The AI request could not be completed. Check your connection and retry.",
@@ -587,7 +587,7 @@ describe("AgentComposer draft behavior", () => {
         settingsTarget: "key",
       },
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect(screen.getByRole("alert").textContent).toBe(
       "Add an OpenAI key, then submit again.",
@@ -626,7 +626,7 @@ describe("AgentComposer draft behavior", () => {
         settingsTarget: "model",
       },
     });
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect(screen.getByRole("alert").textContent).toBe(
       "Choose a model for OpenRouter, then submit again.",
@@ -648,7 +648,7 @@ describe("AgentComposer draft behavior", () => {
 describe("AgentComposer submission task", () => {
   it("targets the active chapter for a conversation turn", async () => {
     useAgentConsoleStore.getState().setDraftText("What should happen next?");
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
@@ -660,19 +660,50 @@ describe("AgentComposer submission task", () => {
     );
   });
 
+  it("submits the task supplied by a reusable agent section", async () => {
+    useAgentConsoleStore.getState().setDraftText(
+      "The courier refuses the summons, then learns her brother was taken.",
+    );
+    render(
+      <AgentComposer
+        placeholder="Describe this chapter or request more plot points"
+        task={{ kind: "outline-sculpt", chapterId: "chapter-1" }}
+      />,
+    );
+
+    expect(
+      screen.getByPlaceholderText(
+        "Describe this chapter or request more plot points",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() =>
+      expect(controller.submitAgentDraft).toHaveBeenCalledWith({
+        kind: "outline-sculpt",
+        chapterId: "chapter-1",
+      } satisfies AgentTask),
+    );
+  });
+
   it("uses the pending proposal workspace for a follow-up turn", async () => {
     useAgentConsoleStore.setState({
-      draftText: "Keep the first line but shorten the rest.",
-      pendingProposal,
+      draftText: "Keep the refusal and add a consequence after it.",
+      pendingProposal: pendingOutlineProposal,
     });
-    render(<AgentComposer />);
+    render(
+      <AgentComposer
+        placeholder="Describe this chapter or request more plot points"
+        task={{ kind: "outline-sculpt", chapterId: "chapter-1" }}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() =>
       expect(controller.submitAgentDraft).toHaveBeenCalledWith({
         kind: "proposal-follow-up",
-        proposalId: "proposal-1",
+        proposalId: "outline-proposal-1",
       } satisfies AgentTask),
     );
   });
@@ -680,7 +711,7 @@ describe("AgentComposer submission task", () => {
 
 describe("AgentComposer context usage", () => {
   it("shows zero context usage before the first response", () => {
-    render(<AgentComposer />);
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     expect(screen.getByRole("button", { name: /0%/ }).textContent).toContain(
       "0%",
@@ -689,7 +720,7 @@ describe("AgentComposer context usage", () => {
 
   it("renders latest usage, context window, and provider-qualified model IDs", async () => {
     useAgentConsoleStore.setState({ lastUsage: usage });
-    const rendered = render(<AgentComposer />);
+    const rendered = render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
     const trigger = screen.getByRole("button", { name: /30%/ });
     if (trigger === null) throw new Error("Context trigger is missing");
@@ -703,7 +734,7 @@ describe("AgentComposer context usage", () => {
         lastUsage: { ...usage, modelId: "openai:gpt-4o" },
       });
     });
-    rendered.rerender(<AgentComposer />);
+    rendered.rerender(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     fireEvent.pointerEnter(screen.getByRole("button", { name: /30%/ }));
 
     expect(screen.getByText("Model: openai:gpt-4o")).toBeTruthy();
@@ -714,7 +745,7 @@ describe("AgentComposer context usage", () => {
         lastUsage: { ...usage, modelId: "anthropic/claude-sonnet-4" },
       });
     });
-    rendered.rerender(<AgentComposer />);
+    rendered.rerender(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
     fireEvent.pointerEnter(screen.getByRole("button", { name: /30%/ }));
 
     expect(screen.getByText("Model: anthropic:claude-sonnet-4")).toBeTruthy();

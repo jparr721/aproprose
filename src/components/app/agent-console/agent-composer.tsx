@@ -39,7 +39,12 @@ import {
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
 
-export function AgentComposer() {
+export interface AgentComposerProps {
+  task: AgentTask | null;
+  placeholder: string;
+}
+
+export function AgentComposer({ task, placeholder }: AgentComposerProps) {
   const mode = useAgentConsoleStore((state) => state.mode);
   const setMode = useAgentConsoleStore((state) => state.setMode);
   const draftText = useAgentConsoleStore((state) => state.draftText);
@@ -110,17 +115,18 @@ export function AgentComposer() {
     ) {
       return "failed";
     }
-    const task: AgentTask =
+    const initialTask: AgentTask = task ?? {
+      kind: "conversation",
+      targetChapterId: useProjectStore.getState().activeChapterId,
+    };
+    const submittedTask: AgentTask =
       consoleState.pendingProposal === null
-        ? {
-            kind: "conversation",
-            targetChapterId: useProjectStore.getState().activeChapterId,
-          }
+        ? initialTask
         : {
             kind: "proposal-follow-up",
             proposalId: consoleState.pendingProposal.id,
           };
-    const outcome = await submitAgentDraft(task);
+    const outcome = await submitAgentDraft(submittedTask);
     return outcome.status === "failure" ? "failed" : "submitted";
   };
 
@@ -199,7 +205,7 @@ export function AgentComposer() {
             aria-label="Message AI Console"
             disabled={blocksTargetEditing}
             onChange={(event) => setDraftText(event.currentTarget.value)}
-            placeholder="Ask about your manuscript"
+            placeholder={placeholder}
             value={draftText}
           />
         </PromptInputBody>

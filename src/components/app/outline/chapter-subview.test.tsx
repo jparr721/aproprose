@@ -5,11 +5,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChapterSubview } from "@/components/app/outline/chapter-subview";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
+import { useViewStore } from "@/stores/view-store";
 
 afterEach(() => cleanup());
 
 beforeEach(() => {
-  useOutlineBoardStore.setState({ openChapterId: "ch1" } as never);
+  useOutlineBoardStore.setState({
+    openChapterId: "ch1",
+    highlightedCardId: null,
+  });
+  useViewStore.setState({
+    agentSection: { kind: "project" },
+    aiOpen: false,
+    focus: false,
+  });
   useProjectStore.setState({
     project: {
       root: "/x", name: "n", mainFile: "m", title: null, author: null,
@@ -36,5 +45,21 @@ describe("ChapterSubview", () => {
     render(<ChapterSubview />);
     fireEvent.click(screen.getByRole("button", { name: /add card/i }));
     expect(useProjectStore.getState().meta.chapters.ch1.cards).toHaveLength(1);
+  });
+
+  it("opens prompt-led planning in the shared AI dock", () => {
+    render(<ChapterSubview />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
+    expect(useViewStore.getState()).toMatchObject({
+      agentSection: {
+        kind: "outline",
+        projectRoot: "/x",
+        chapterId: "ch1",
+      },
+      aiOpen: true,
+      focus: false,
+    });
+    expect(screen.getByDisplayValue("What the Letter Said")).toBeTruthy();
   });
 });

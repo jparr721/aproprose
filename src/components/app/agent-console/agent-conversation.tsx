@@ -21,6 +21,8 @@ export interface AgentConversationProps
   > {
   messages: AgentUIMessage[];
   summary: ConversationSummary | null;
+  emptyTitle: string;
+  emptyDescription: string;
 }
 
 export function AgentConversation({
@@ -29,14 +31,16 @@ export function AgentConversation({
   onNavigateSnapshot,
   onRetry,
   onOpenSettings,
+  emptyTitle,
+  emptyDescription,
 }: AgentConversationProps) {
   return (
     <Conversation className="min-h-0">
       <ConversationContent scrollClassName="overflow-y-auto">
         {messages.length === 0 ? (
           <ConversationEmptyState
-            description="Add manuscript context or ask a project question."
-            title="Ask about this project"
+            description={emptyDescription}
+            title={emptyTitle}
           />
         ) : (
           messages.flatMap((message) => [

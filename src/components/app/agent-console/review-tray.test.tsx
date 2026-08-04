@@ -228,6 +228,8 @@ function ConversationWithReview() {
   return (
     <div className="flex h-96 flex-col">
       <AgentConversation
+        emptyDescription="Add manuscript context or ask a project question."
+        emptyTitle="Ask about this project"
         messages={messages}
         onNavigateSnapshot={async () => true}
         onOpenSettings={() => undefined}

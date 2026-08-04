@@ -17,6 +17,18 @@ describe("view-store outline toggle", () => {
     expect(useViewStore.getState().outlineOpen).toBe(false);
   });
 
+  it("exits outline planning when the storyboard closes", () => {
+    useViewStore.getState().toggleOutline();
+    useViewStore.getState().openOutlineAgent("/novel", "chapter-1");
+
+    useViewStore.getState().toggleOutline();
+
+    expect(useViewStore.getState()).toMatchObject({
+      outlineOpen: false,
+      agentSection: { kind: "project" },
+    });
+  });
+
   it("toggleOutline clears focus but leaves pdfOpen independent", () => {
     useViewStore.setState({ focus: true, pdfOpen: true });
     useViewStore.getState().toggleOutline();

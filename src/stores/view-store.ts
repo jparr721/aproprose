@@ -125,7 +125,9 @@ export const useViewStore = create<ViewState>()(
           return {
             outlineOpen,
             focus: false,
-            ...(outlineOpen ? { manuscriptReviewProposalId: null } : {}),
+            ...(outlineOpen
+              ? { manuscriptReviewProposalId: null }
+              : { agentSection: { kind: "project" } as const }),
           };
         }),
       openOutline: () =>
@@ -136,6 +138,7 @@ export const useViewStore = create<ViewState>()(
         }),
       openManuscriptReview: (manuscriptReviewProposalId) =>
         set({
+          agentSection: { kind: "project" },
           manuscriptReviewProposalId,
           outlineOpen: false,
           focus: false,

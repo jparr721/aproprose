@@ -150,6 +150,11 @@ describe("view-store manuscript review lifecycle", () => {
 
   it("opens a manuscript review without changing AI or PDF visibility", () => {
     useViewStore.setState({
+      agentSection: {
+        kind: "outline",
+        projectRoot: "/novel",
+        chapterId: "chapter-1",
+      },
       aiOpen: false,
       pdfOpen: true,
       outlineOpen: true,
@@ -159,6 +164,7 @@ describe("view-store manuscript review lifecycle", () => {
     useViewStore.getState().openManuscriptReview("proposal-1");
 
     expect(useViewStore.getState()).toMatchObject({
+      agentSection: { kind: "project" },
       manuscriptReviewProposalId: "proposal-1",
       aiOpen: false,
       pdfOpen: true,

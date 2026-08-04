@@ -143,6 +143,7 @@ function AgentConsoleRoute() {
   const project = useProjectStore((state) => state.project);
   const activeChapterId = useProjectStore((state) => state.activeChapterId);
   const section = useViewStore((state) => state.agentSection);
+  const outlineOpen = useViewStore((state) => state.outlineOpen);
   const activeChapter =
     project === null || activeChapterId === null
       ? undefined
@@ -156,6 +157,7 @@ function AgentConsoleRoute() {
   const close = (): void => useViewStore.getState().setAiOpen(false);
 
   if (
+    outlineOpen &&
     section.kind === "outline" &&
     project !== null &&
     section.projectRoot === project.root

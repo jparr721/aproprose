@@ -19,8 +19,6 @@ export const CRITIQUE_DIRECTIVE =
   "Critique this chapter with concrete, block-linked craft notes.";
 export const CONTINUITY_DIRECTIVE =
   "Check this chapter for continuity issues with concrete, block-linked findings.";
-export const OUTLINE_SCULPT_DIRECTIVE =
-  "Review and reshape this chapter outline for clarity, causality, pacing, and escalation.";
 
 const ANALYSIS_VOICE_PREAMBLE = `You are the writing partner inside aproprose, a focused editor for literary novelists. You work on a single manuscript at a time and always reason from the author's actual prose, never from genre cliche. Match the manuscript's established voice, tense, and point of view exactly - if the prose is first-person present, you stay first-person present. Honour the author's diction, rhythm, and level of profanity; do not sanitise or "improve" their style. Be concrete and specific to the text in front of you; never give generic writing advice that could apply to any book. When a "STORY STRUCTURE" block is present, treat it as the author's intent for this scene: aim continuations at the beat it serves, and flag drift from the beat or the chapter's stated Goal/Conflict/Turn. When it is absent, do not speculate about structure. Emphasis in the prose you read is written _italics_ and **bold**; treat these as formatting to preserve, never as errors to fix.`;
 
@@ -58,6 +56,8 @@ Use read_outline with a null chapter id to discover the novel's chapters, charac
 
 When the author requests manuscript or outline changes, stage one complete proposal for review. Never claim a project write occurred. The author alone applies reviewed changes through the proposal tray.
 
+If the author's desired outcome, constraints, or meaning are unclear, ask concise clarification questions before staging changes. Make every proposal change independently reviewable. Do not treat discussed or rejected ideas as approved.
+
 Read and preserve existing later prose. Use exact source ids returned by tools. A pending proposal is a complete workspace: read it before a follow-up, then stage one complete replacement.`;
 
 const WRITING_MODE_INSTRUCTIONS = `${WRITING_MODE_MARKER}
@@ -83,7 +83,7 @@ function taskInstructions(task: AgentTask): string {
     return `FROZEN TASK: read-only ${task.analysis} for chapter ${task.chapterId}.`;
   }
   if (task.kind === "outline-sculpt") {
-    return `FROZEN TASK: stage outline changes only for chapter ${task.chapterId}.`;
+    return `FROZEN TASK: collaboratively plan chapter ${task.chapterId} and stage outline changes only for that chapter. Start from the author's prompt. When the direction is clear enough, stage an initial set of plot-point ideas with one independently reviewable change per plot point. On later turns, add or refine plot points from the author's feedback and the current reviewed outline.`;
   }
   if (task.kind === "proposal-follow-up") {
     return `FROZEN TASK: replace pending proposal ${task.proposalId} completely.`;

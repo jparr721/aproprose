@@ -37,6 +37,20 @@ describe("buildAgentInstructions", () => {
       expect(instructions).toContain("No throat-clearing.");
     }
   });
+
+  it("keeps outline planning clarifying and individually reviewable", () => {
+    const instructions = buildAgentInstructions({
+      mode: "writing",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      styleGuide: "",
+      editingRules: "",
+    });
+
+    expect(instructions).toContain("ask concise clarification questions");
+    expect(instructions).toContain("initial set of plot-point ideas");
+    expect(instructions).toContain("independently reviewable change");
+    expect(instructions).toContain("chapter ch1");
+  });
 });
 
 describe("analysis prompts", () => {

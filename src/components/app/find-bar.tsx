@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/input-group";
 import { useFindStore } from "@/stores/find-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 
 function OptionToggle({
   active,
@@ -50,7 +51,9 @@ function OptionToggle({
 }
 
 export function FindBar() {
-  const open = useFindStore((s) => s.open);
+  const open = useSearchSurfaceStore((state) => state.openSurface === "editor");
+  const focusRevision = useSearchSurfaceStore((state) => state.focusRevision);
+  const closeSurface = useSearchSurfaceStore((state) => state.close);
   const query = useFindStore((s) => s.query);
   const replacement = useFindStore((s) => s.replacement);
   const caseSensitive = useFindStore((s) => s.caseSensitive);
@@ -60,7 +63,6 @@ export function FindBar() {
   const matches = useFindStore((s) => s.matches);
   const currentIndex = useFindStore((s) => s.currentIndex);
   const error = useFindStore((s) => s.error);
-  const focusTick = useFindStore((s) => s.focusTick);
   const setQuery = useFindStore((s) => s.setQuery);
   const setReplacement = useFindStore((s) => s.setReplacement);
   const toggleCase = useFindStore((s) => s.toggleCase);
@@ -71,12 +73,20 @@ export function FindBar() {
   const scrollToCurrent = useFindStore((s) => s.scrollToCurrent);
   const next = useFindStore((s) => s.next);
   const prev = useFindStore((s) => s.prev);
-  const close = useFindStore((s) => s.close);
+  const clearResults = useFindStore((s) => s.clearResults);
   const replaceCurrent = useFindStore((s) => s.replaceCurrent);
   const replaceAll = useFindStore((s) => s.replaceAll);
 
   const blocks = useProjectStore((s) => s.blocks);
   const inputRef = useRef<HTMLInputElement>(null);
+  const close = (): void => {
+    clearResults();
+    closeSurface("editor");
+  };
+
+  useEffect(() => {
+    if (!open) clearResults();
+  }, [open, clearResults]);
 
   // Re-derive matches whenever the query, options, or the underlying blocks change
   // (so live edits / AI changes keep the highlight honest).
@@ -84,22 +94,22 @@ export function FindBar() {
     if (open) recompute();
   }, [open, blocks, query, caseSensitive, wholeWord, regex, recompute]);
 
-  // Center the active match when the SEARCH changes (query / options / a fresh
-  // Cmd+F) but NOT when `blocks` change, so typing in another block with find open
+  // Center the active match when the search changes (query / options / a fresh
+  // open) but NOT when `blocks` change, so typing in another block with find open
   // doesn't yank the viewport. Declared after the recompute effect, and zustand's
   // set is synchronous, so the current index is already fresh here.
   useEffect(() => {
     if (open) scrollToCurrent();
-  }, [open, query, caseSensitive, wholeWord, regex, focusTick, scrollToCurrent]);
+  }, [open, query, caseSensitive, wholeWord, regex, focusRevision, scrollToCurrent]);
 
-  // Focus + select the query on open and on every Cmd+F (focusTick).
+  // Focus + select the query on open and on every global Find command.
   useEffect(() => {
     if (!open) return;
     const el = inputRef.current;
     if (!el) return;
     el.focus();
     el.select();
-  }, [open, focusTick]);
+  }, [open, focusRevision]);
 
   if (!open) return null;
 

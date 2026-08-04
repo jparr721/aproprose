@@ -23,6 +23,9 @@ describe("keybindings registry", () => {
     expect(keybindingParts(KEYBINDINGS.OPEN_COMMAND_PALETTE, true)).toEqual(["⌘", "K"]);
     expect(keybindingParts(KEYBINDINGS.OPEN_COMMAND_PALETTE, false)).toEqual(["⌃", "K"]);
   });
+  it("describes find as scoped to the active pane", () => {
+    expect(KEYBINDINGS.OPEN_FIND.description).toBe("Find in the active pane");
+  });
 });
 
 describe("inline format keybindings", () => {

@@ -50,7 +50,7 @@ import {
   useProjectStore,
 } from "@/stores/project-store";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
-import { useFindStore } from "@/stores/find-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
@@ -186,6 +186,7 @@ export function Editor() {
   const editing = useProjectStore((s) => s.editing);
   const select = useProjectStore((s) => s.select);
   const reorderBlock = useProjectStore((s) => s.reorderBlock);
+  const activateSearchSurface = useSearchSurfaceStore((state) => state.activate);
   const pendingProposal = useAgentConsoleStore((s) => s.pendingProposal);
   const manuscriptReviewProposalId = useViewStore(
     (s) => s.manuscriptReviewProposalId,
@@ -351,17 +352,6 @@ export function Editor() {
     historyOptions,
   );
 
-  // Find & replace across the chapter's blocks. Cmd+F opens the widget (and
-  // re-selects the query on repeat); the widget owns its own Enter/Esc keys.
-  useKeybindingWithOptions(
-    KEYBINDING_IDS.OPEN_FIND,
-    () => {
-      if (manuscriptReviewIsActive()) return;
-      useFindStore.getState().openFind();
-    },
-    authoringOptions,
-  );
-
   // Block nav/edit modal keys. `↑`/`↓`/`i` are non-chord, so they're inert while
   // a textarea is focused (edit mode); the `!editing` gate is belt-and-suspenders
   // and powers on-screen hints. All four bow out of the AI panel / dialogs.
@@ -502,7 +492,12 @@ export function Editor() {
   }
 
   return (
-    <div className="relative h-full min-h-0">
+    <div
+      className="relative h-full min-h-0"
+      data-search-surface="editor"
+      onPointerDownCapture={() => activateSearchSurface("editor")}
+      onFocusCapture={() => activateSearchSurface("editor")}
+    >
       {activeReview === null ? <FindBar /> : null}
       {activeReview === null ? (
         <AlertDialog

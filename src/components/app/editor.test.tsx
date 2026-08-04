@@ -117,7 +117,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
-import { useFindStore } from "@/stores/find-store";
+import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
@@ -307,7 +307,11 @@ beforeEach(() => {
   controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
     useViewStore.getState().openAiConsole();
   });
-  useFindStore.getState().close();
+  useSearchSurfaceStore.setState({
+    activeSurface: "editor",
+    openSurface: null,
+    focusRevision: 0,
+  });
   useViewStore.setState({
     aiOpen: false,
     focus: false,
@@ -557,7 +561,7 @@ describe("Editor manuscript review activation", () => {
     }
   });
 
-  it("blocks save, find, split, and formatting shortcuts during manuscript review", () => {
+  it("blocks save, split, and formatting shortcuts during manuscript review", () => {
     const compileNow = vi
       .spyOn(useProjectStore.getState(), "compileNow")
       .mockImplementation(async () => {
@@ -574,10 +578,6 @@ describe("Editor manuscript review activation", () => {
     act(() => invokeKeybinding(KEYBINDING_IDS.SAVE_CHAPTER));
     expect(useProjectStore.getState().blocks).toBe(beforeSave);
     expect(compileNow).not.toHaveBeenCalled();
-
-    expectKeybindingEnabled(KEYBINDING_IDS.OPEN_FIND, false);
-    act(() => invokeKeybinding(KEYBINDING_IDS.OPEN_FIND));
-    expect(useFindStore.getState().open).toBe(false);
 
     for (const testCase of [
       { id: KEYBINDING_IDS.SPLIT_BLOCK, start: 5, end: 5 },
@@ -643,7 +643,6 @@ describe("Editor manuscript review activation", () => {
     expectKeybindingEnabled(KEYBINDING_IDS.UNDO, true);
     expectKeybindingEnabled(KEYBINDING_IDS.NAV_NEXT_BLOCK, true);
     expectKeybindingEnabled(KEYBINDING_IDS.EDIT_BLOCK, true);
-    expectKeybindingEnabled(KEYBINDING_IDS.OPEN_FIND, true);
 
     act(() => invokeDictation("Thunder answered"));
     expect(useProjectStore.getState().blocks[0].text).toBe(
@@ -662,7 +661,5 @@ describe("Editor manuscript review activation", () => {
     act(() => invokeKeybinding(KEYBINDING_IDS.EDIT_BLOCK));
     expect(useProjectStore.getState().editing).toBe(true);
 
-    act(() => invokeKeybinding(KEYBINDING_IDS.OPEN_FIND));
-    expect(useFindStore.getState().open).toBe(true);
   });
 });

@@ -1240,9 +1240,25 @@ export async function loadAgentSessionCollection(
 }
 
 export async function saveAgentSessionCollection(root: string): Promise<void> {
-  const sessions: Record<string, PersistedAgentSnapshot> = {
+  const raw = await readAppData<unknown>(agentSessionCollectionKey(root));
+  const persisted =
+    raw === null ? null : persistedAgentSessionCollectionSchema.parse(raw);
+  const sessions: Record<string, unknown> = {
+    ...(persisted?.sessions ?? {}),
     project: await snapshotForSession(PROJECT_AGENT_SESSION),
   };
+  const project = useProjectStore.getState().project;
+  if (project?.root === root) {
+    const liveChapterIds = new Set(project.chapters.map((chapter) => chapter.id));
+    for (const key of Object.keys(sessions)) {
+      if (
+        key.startsWith("outline:") &&
+        !liveChapterIds.has(key.slice("outline:".length))
+      ) {
+        delete sessions[key];
+      }
+    }
+  }
   for (const [chapterId, store] of outlineAgentSessionEntries()) {
     if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
       continue;

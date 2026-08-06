@@ -33,6 +33,7 @@ import {
   loadAgentSessionCollection,
   resetAgentConversation,
   retryAgentPersistence,
+  saveAgentSessionCollection,
   saveAgentState,
   toAgentSnapshot,
   transitionAgentProject,
@@ -2910,5 +2911,107 @@ describe("agent persistence", () => {
         "outline:chapter-1": { draftText: "Planner draft" },
       },
     });
+  });
+
+  it("preserves planner sessions that have not been opened since restart", async () => {
+    const root = "/books/planners";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+          {
+            id: "chapter-2",
+            label: "2",
+            title: "Two",
+            file: "chapters/two.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    const openPlanner = agentSessionStore({
+      kind: "outline",
+      chapterId: "chapter-1",
+    });
+    openPlanner.getState().hydrate(root, {
+      ...emptyPersistedAgentState(),
+      draftText: "Open planner draft",
+    });
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:chapter-2": {
+          ...emptyPersistedAgentState(),
+          draftText: "Unopened planner draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentSessionCollectionKey(root),
+      expect.objectContaining({
+        sessions: expect.objectContaining({
+          "outline:chapter-1": expect.objectContaining({
+            draftText: "Open planner draft",
+          }),
+          "outline:chapter-2": expect.objectContaining({
+            draftText: "Unopened planner draft",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("removes persisted planner sessions for deleted chapters", async () => {
+    const root = "/books/planners";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:deleted-chapter": {
+          ...emptyPersistedAgentState(),
+          draftText: "Deleted planner draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(root),
+    );
+    expect(collectionWrite?.[1]).not.toHaveProperty(
+      "sessions.outline:deleted-chapter",
+    );
   });
 });

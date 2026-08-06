@@ -64,6 +64,7 @@ import { parseChapter } from "@/lib/latex";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 import { getChapterOutline } from "@/lib/outline/model";
 import { buildOutlinePlannerGrounding } from "@/lib/outline/planner-grounding";
+import type { OutlinePlannerGroundingInput } from "@/lib/outline/planner-grounding";
 import {
   appendAgentFailureLog,
   readTextFile,
@@ -692,10 +693,10 @@ function captureTaskAndTarget(args: {
   };
 }
 
-async function resolveOutlinePlannerGrounding(
+async function resolveOutlinePlannerGroundingInput(
   capture: SubmissionCapture,
   target: LoadedChapter | null,
-): Promise<string | null> {
+): Promise<OutlinePlannerGroundingInput | null> {
   if (capture.sessionId.kind !== "outline") return null;
   const chapterId = capture.sessionId.chapterId;
   const index = capture.project.chapters.findIndex(
@@ -735,14 +736,14 @@ async function resolveOutlinePlannerGrounding(
     previousRef === null ? Promise.resolve(null) : load("previous", previousRef.id),
     nextRef === null ? Promise.resolve(null) : load("next", nextRef.id),
   ]);
-  return buildOutlinePlannerGrounding({
+  return {
     chapters: capture.project.chapters,
     meta: capture.meta,
     targetChapterId: chapterId,
     target,
     previous,
     next,
-  });
+  };
 }
 
 async function loadExactTaskAndTarget(args: {
@@ -1375,6 +1376,7 @@ export function createAgentController(
         try {
           return buildOverviewPendingProposal({
             run: args.run,
+            currentPending: currentPending(),
             summary: input.summary,
             overview: input.overview,
             reason: input.reason,
@@ -1553,7 +1555,7 @@ export function createAgentController(
         throw targetResult.reason;
       }
       const frozen = targetResult.value;
-      const plannerGrounding = await resolveOutlinePlannerGrounding(
+      const plannerGroundingInput = await resolveOutlinePlannerGroundingInput(
         capture,
         frozen.chapter,
       );
@@ -1568,6 +1570,13 @@ export function createAgentController(
         modelId,
       );
       if (!ownsCurrentRun()) return { status: "stopped" };
+      const plannerGrounding =
+        plannerGroundingInput === null
+          ? null
+          : buildOutlinePlannerGrounding(
+              plannerGroundingInput,
+              Math.max(1, Math.floor(contextWindow / 2)),
+            );
 
       let summary = capture.summary;
       failurePhase = "compaction";

@@ -493,6 +493,7 @@ export function buildOutlinePendingProposal(args: {
 
 export function buildOverviewPendingProposal(args: {
   run: AgentRun;
+  currentPending: PendingProposal | null;
   summary: string;
   overview: string;
   reason: string;
@@ -501,6 +502,22 @@ export function buildOverviewPendingProposal(args: {
   makeId: () => string;
   now: string;
 }): OverviewPendingProposal {
+  if (args.run.task.kind === "chapter-analysis") {
+    throw new AgentProposalError(
+      "task-boundary",
+      "A chapter-analysis task is read-only for story overview changes.",
+    );
+  }
+  if (
+    args.run.task.kind === "proposal-follow-up" &&
+    (args.currentPending === null ||
+      args.currentPending.id !== args.run.task.proposalId)
+  ) {
+    throw new AgentProposalError(
+      "proposal-mismatch",
+      "The pending proposal does not match this follow-up run.",
+    );
+  }
   const change = overviewPendingChange({
     before: args.currentOverview,
     after: args.overview,

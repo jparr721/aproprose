@@ -572,6 +572,49 @@ describe("outline planner sessions", () => {
     ]);
   });
 
+  it("bounds planner manuscript grounding against the selected model context", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    mocks.readTextFile.mockResolvedValue(
+      "HEAD TARGET_TAIL_SHOULD_NOT_REACH_THE_MODEL",
+    );
+    let instructions = "";
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      return successfulResult(input, "Planned");
+    });
+    dependencies.getContextWindow = async () => 24;
+    const controller = createAgentController(dependencies);
+
+    await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(instructions).toContain('"truncated": true');
+    expect(instructions).not.toContain("TARGET_TAIL_SHOULD_NOT_REACH_THE_MODEL");
+  });
+
   it("reports the exact planner grounding source when preflight fails", async () => {
     const sessionId = { kind: "outline" as const, chapterId: "ch2" };
     agentSessionStore(sessionId).getState().hydrate(

@@ -22,25 +22,34 @@ export interface OutlinePlannerGroundingInput {
 
 function manuscriptChapter(
   chapter: OutlinePlannerManuscriptChapter | null,
-): { chapterId: string; title: string; prose: string } | null {
+  maxCharacters: number,
+): {
+  chapterId: string;
+  title: string;
+  prose: string;
+  truncated: boolean;
+} | null {
   if (chapter === null) return null;
+  const prose = chapter.blocks
+    .filter(
+      (block) =>
+        block.type === "narration" ||
+        block.type === "dialogue" ||
+        block.type === "chapter",
+    )
+    .map((block) => block.text)
+    .join("\n\n");
   return {
     chapterId: chapter.chapterId,
     title: chapter.title,
-    prose: chapter.blocks
-      .filter(
-        (block) =>
-          block.type === "narration" ||
-          block.type === "dialogue" ||
-          block.type === "chapter",
-      )
-      .map((block) => block.text)
-      .join("\n\n"),
+    prose: prose.slice(0, maxCharacters),
+    truncated: prose.length > maxCharacters,
   };
 }
 
 export function buildOutlinePlannerGrounding(
   input: OutlinePlannerGroundingInput,
+  maxManuscriptCharacters: number,
 ): string {
   const targetIndex = input.chapters.findIndex(
     (chapter) => chapter.id === input.targetChapterId,
@@ -71,6 +80,22 @@ export function buildOutlinePlannerGrounding(
       chapter.cards.flatMap((card) => card.loreIds),
     ),
   );
+  const manuscriptSources = [input.previous, input.target, input.next];
+  const presentManuscriptCount = manuscriptSources.filter(
+    (chapter) => chapter !== null,
+  ).length;
+  const baseChapterBudget =
+    presentManuscriptCount === 0
+      ? 0
+      : Math.floor(maxManuscriptCharacters / presentManuscriptCount);
+  let remainingCharacters =
+    maxManuscriptCharacters - baseChapterBudget * presentManuscriptCount;
+  const manuscriptBudgets = manuscriptSources.map((chapter) => {
+    if (chapter === null) return 0;
+    const extraCharacter = remainingCharacters > 0 ? 1 : 0;
+    remainingCharacters -= extraCharacter;
+    return baseChapterBudget + extraCharacter;
+  });
   const value = {
     logline: input.meta.outline.premise,
     storyOverview: input.meta.outline.overview,
@@ -89,9 +114,9 @@ export function buildOutlinePlannerGrounding(
     characters: input.meta.characters,
     linkedLore: input.meta.lore.filter((entry) => linkedLoreIds.has(entry.id)),
     manuscript: {
-      previous: manuscriptChapter(input.previous),
-      target: manuscriptChapter(input.target),
-      next: manuscriptChapter(input.next),
+      previous: manuscriptChapter(input.previous, manuscriptBudgets[0]),
+      target: manuscriptChapter(input.target, manuscriptBudgets[1]),
+      next: manuscriptChapter(input.next, manuscriptBudgets[2]),
     },
   };
   return `OUTLINE PLANNER GROUNDING\n${JSON.stringify(value, null, 2)}`;

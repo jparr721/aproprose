@@ -59,7 +59,8 @@ function proposalStageSucceeded({
       (part) =>
         part.type === "tool-result" &&
         (part.toolName === "stage_manuscript_proposal" ||
-          part.toolName === "stage_outline_proposal"),
+          part.toolName === "stage_outline_proposal" ||
+          part.toolName === "stage_overview_proposal"),
     ) ?? false
   );
 }

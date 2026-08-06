@@ -34,7 +34,7 @@ describe("buildOutlinePlannerGrounding", () => {
       previous: manuscript("a"),
       target: manuscript("b"),
       next: manuscript("c"),
-    });
+    }, 1_000);
 
     expect(grounding).toContain('"number": 2');
     expect(grounding).toContain('"prose": "Prose a"');
@@ -49,7 +49,7 @@ describe("buildOutlinePlannerGrounding", () => {
       previous: null,
       target: manuscript("a"),
       next: manuscript("b"),
-    });
+    }, 1_000);
     const last = buildOutlinePlannerGrounding({
       chapters,
       meta,
@@ -57,7 +57,7 @@ describe("buildOutlinePlannerGrounding", () => {
       previous: manuscript("b"),
       target: manuscript("c"),
       next: null,
-    });
+    }, 1_000);
 
     expect(first).toContain('"previous": null');
     expect(last).toContain('"next": null');
@@ -78,7 +78,7 @@ describe("buildOutlinePlannerGrounding", () => {
       previous: null,
       target: manuscript("new"),
       next: manuscript("a"),
-    });
+    }, 1_000);
 
     expect(grounding).toContain('"number": 1');
     expect(grounding).toContain('"previous": null');
@@ -94,7 +94,7 @@ describe("buildOutlinePlannerGrounding", () => {
       previous: manuscript("c"),
       target: manuscript("a"),
       next: manuscript("b"),
-    });
+    }, 1_000);
 
     expect(grounding).toContain('"number": 2');
     expect(grounding).toContain('"prose": "Prose c"');
@@ -110,7 +110,45 @@ describe("buildOutlinePlannerGrounding", () => {
         previous: manuscript("a"),
         target: manuscript("b"),
         next: manuscript("c"),
-      }),
+      }, 1_000),
     ).toThrow("Outline planner chapter not found: b");
+  });
+
+  it("limits the combined neighbor manuscript text to the supplied budget", () => {
+    const longManuscript = (chapterId: string) => ({
+      chapterId,
+      title: chapterId.toUpperCase(),
+      blocks: [
+        {
+          type: "narration" as const,
+          text: `HEAD-${chapterId}-TAIL-${chapterId}`,
+        },
+      ],
+    });
+
+    const grounding = buildOutlinePlannerGrounding({
+      chapters,
+      meta,
+      targetChapterId: "b",
+      previous: longManuscript("a"),
+      target: longManuscript("b"),
+      next: longManuscript("c"),
+    }, 18);
+    const value = JSON.parse(grounding.split("\n").slice(1).join("\n")) as {
+      manuscript: Record<
+        "previous" | "target" | "next",
+        { prose: string; truncated: boolean }
+      >;
+    };
+    const manuscriptChapters = Object.values(value.manuscript);
+
+    expect(
+      manuscriptChapters.reduce(
+        (total, chapter) => total + chapter.prose.length,
+        0,
+      ),
+    ).toBeLessThanOrEqual(18);
+    expect(manuscriptChapters.every((chapter) => chapter.truncated)).toBe(true);
+    expect(grounding).not.toContain("TAIL");
   });
 });

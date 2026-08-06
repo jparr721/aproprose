@@ -150,6 +150,26 @@ function manuscriptStageToolCallResult(
   ]);
 }
 
+function overviewStageToolCallResult(): LanguageModelV3StreamResult {
+  return streamResult([
+    {
+      type: "tool-call",
+      toolCallId: "call-stage-overview",
+      toolName: "stage_overview_proposal",
+      input: JSON.stringify({
+        summary: "Update the overview",
+        overview: "The stakes now reach the whole city.",
+        reason: "The central conflict changed.",
+      }),
+    },
+    {
+      type: "finish",
+      finishReason: { unified: "tool-calls", raw: "tool_calls" },
+      usage,
+    },
+  ]);
+}
+
 function makeEnvironment(): AgentToolEnvironment {
   return {
     run,
@@ -170,6 +190,9 @@ function makeEnvironment(): AgentToolEnvironment {
     },
     buildOutlineProposal: () => {
       throw new Error("Unexpected outline proposal");
+    },
+    buildOverviewProposal: () => {
+      throw new Error("Unexpected overview proposal");
     },
     replacePendingProposal: () => {
       throw new Error("Unexpected proposal replacement");
@@ -326,6 +349,47 @@ describe("streamAgentRun", () => {
 
     expect(modelCalls).toBe(2);
     expect(stagingAttempts).toBe(2);
+    expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
+  });
+
+  it("stops after a successful overview proposal is staged", async () => {
+    let modelCalls = 0;
+    const proposal: PendingProposal = {
+      id: "overview-proposal-1",
+      kind: "overview",
+      projectRoot: "/book",
+      chapterId: null,
+      summary: "Update the overview",
+      createdAt: "2026-08-05T12:00:00.000Z",
+      originatingMessageId: "assistant-1",
+      changes: [],
+      overviewChange: {
+        id: "overview-change-1",
+        before: "The conflict is local.",
+        after: "The stakes now reach the whole city.",
+        reason: "The central conflict changed.",
+        sourceFingerprint: "overview-source",
+      },
+    };
+    const replacePendingProposal = vi.fn();
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        modelCalls += 1;
+        return overviewStageToolCallResult();
+      },
+    });
+    const input = makeRuntimeInput(model);
+
+    await streamAgentRun({
+      ...input,
+      environment: {
+        ...input.environment,
+        buildOverviewProposal: () => proposal,
+        replacePendingProposal,
+      },
+    });
+
+    expect(modelCalls).toBe(1);
     expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
   });
 

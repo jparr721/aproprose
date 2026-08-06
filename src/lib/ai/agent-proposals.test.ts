@@ -278,6 +278,7 @@ describe("story overview proposals", () => {
   it("builds an overview-only proposal with its own source fingerprint", () => {
     const proposal = buildOverviewPendingProposal({
       run: run({ kind: "conversation", targetChapterId: null }),
+      currentPending: null,
       summary: "Update the central conflict",
       overview: "Mara must expose the harbor conspiracy before her brother is tried.",
       reason: "The brother's arrest changes the stakes.",
@@ -304,6 +305,7 @@ describe("story overview proposals", () => {
     expect(() =>
       buildOverviewPendingProposal({
         run: run({ kind: "conversation", targetChapterId: null }),
+        currentPending: null,
         summary: "Too long",
         overview: "x".repeat(2001),
         reason: "Too detailed",
@@ -313,6 +315,45 @@ describe("story overview proposals", () => {
         now: "2026-08-04T00:00:00.000Z",
       }),
     ).toThrow(/2000 characters or fewer/);
+  });
+
+  it("rejects overview staging from a read-only chapter analysis", () => {
+    expect(() =>
+      buildOverviewPendingProposal({
+        run: run({
+          kind: "chapter-analysis",
+          chapterId: "ch1",
+          analysis: "critique",
+        }),
+        currentPending: null,
+        summary: "Rewrite the overview",
+        overview: "A changed story overview.",
+        reason: "The analysis found a different direction.",
+        currentOverview: "The current story overview.",
+        originatingMessageId: "assistant-1",
+        makeId: () => "overview-id",
+        now: "2026-08-04T00:00:00.000Z",
+      }),
+    ).toThrow(/read-only/);
+  });
+
+  it("rejects an overview follow-up when the pending proposal changed", () => {
+    expect(() =>
+      buildOverviewPendingProposal({
+        run: run({
+          kind: "proposal-follow-up",
+          proposalId: "expected-proposal",
+        }),
+        currentPending: null,
+        summary: "Rewrite the overview",
+        overview: "A changed story overview.",
+        reason: "The direction changed.",
+        currentOverview: "The current story overview.",
+        originatingMessageId: "assistant-1",
+        makeId: () => "overview-id",
+        now: "2026-08-04T00:00:00.000Z",
+      }),
+    ).toThrow(/pending proposal does not match/);
   });
 });
 

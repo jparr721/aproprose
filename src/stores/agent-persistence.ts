@@ -598,6 +598,7 @@ let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionCollectionSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const outlineHydrations = new Map<string, Promise<void>>();
+const sessionCollectionSaveQueues = new Map<string, Promise<void>>();
 let activeRevision = 0;
 let persistedRevision = 0;
 let revisionSequence = 0;
@@ -1240,7 +1241,7 @@ export async function loadAgentSessionCollection(
   };
 }
 
-export async function saveAgentSessionCollection(root: string): Promise<void> {
+async function saveAgentSessionCollectionNow(root: string): Promise<void> {
   const raw = await readAppData<unknown>(agentSessionCollectionKey(root));
   const persisted =
     raw === null ? null : persistedAgentSessionCollectionSchema.parse(raw);
@@ -1273,6 +1274,20 @@ export async function saveAgentSessionCollection(root: string): Promise<void> {
     v: 1,
     sessions,
   });
+}
+
+export function saveAgentSessionCollection(root: string): Promise<void> {
+  const previous = sessionCollectionSaveQueues.get(root) ?? Promise.resolve();
+  const save = previous
+    .catch(() => undefined)
+    .then(() => saveAgentSessionCollectionNow(root));
+  const tracked = save.finally(() => {
+    if (sessionCollectionSaveQueues.get(root) === tracked) {
+      sessionCollectionSaveQueues.delete(root);
+    }
+  });
+  sessionCollectionSaveQueues.set(root, tracked);
+  return tracked;
 }
 
 async function hydrateAgentOutlineSessionOwned(

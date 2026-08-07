@@ -3086,6 +3086,52 @@ describe("agent persistence", () => {
     );
   });
 
+  it("serializes planner writes so an older completion cannot overwrite a newer snapshot", async () => {
+    const root = "/books/serialized-planner-saves";
+    useProjectStore.setState({ project: project(root) });
+    useAgentConsoleStore.getState().hydrate(root, emptyPersistedAgentState());
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "serialized-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().setDraftText("Older planner draft");
+    const disk = new Map<string, unknown>();
+    const firstWrite = deferred<void>();
+    const secondWrite = deferred<void>();
+    let writeIndex = 0;
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key, value) => {
+      const completion = writeIndex === 0 ? firstWrite : secondWrite;
+      writeIndex += 1;
+      await completion.promise;
+      disk.set(key, structuredClone(value));
+    });
+
+    const olderSave = saveAgentSessionCollection(root);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    planner.getState().setDraftText("Newer planner draft");
+    const newerSave = saveAgentSessionCollection(root);
+
+    expect(tauri.readAppData).toHaveBeenCalledOnce();
+    expect(tauri.writeAppData).toHaveBeenCalledOnce();
+    firstWrite.resolve(undefined);
+    await vi.waitFor(() => expect(tauri.readAppData).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    secondWrite.resolve(undefined);
+    await Promise.all([olderSave, newerSave]);
+
+    expect(disk.get(agentSessionCollectionKey(root))).toMatchObject({
+      sessions: {
+        "outline:serialized-planner": {
+          draftText: "Newer planner draft",
+        },
+      },
+    });
+  });
+
   it("removes persisted planner sessions for deleted chapters", async () => {
     const root = "/books/planners";
     useProjectStore.setState({

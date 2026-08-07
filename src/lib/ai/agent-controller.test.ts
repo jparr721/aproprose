@@ -670,6 +670,48 @@ describe("outline planner sessions", () => {
     ]);
   });
 
+  it("grounds a follow-up to an overview-only proposal in the planner chapter", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(sessionId);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const proposal: PendingProposal = {
+      id: "overview-proposal",
+      kind: "overview",
+      projectRoot: "/book",
+      chapterId: null,
+      summary: "Clarify the story direction",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "assistant-overview",
+      changes: [],
+      overviewChange: {
+        id: "overview-change",
+        before: "",
+        after: "The detective must escape before the house resets.",
+        reason: "Make the central pressure explicit",
+        sourceFingerprint: "overview-source",
+      },
+    };
+    outlineStore.getState().replacePendingProposal(proposal);
+    outlineStore.getState().setDraftText("Develop the next beat.");
+    let instructions = "";
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      return successfulResult(input, "Planned");
+    });
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentDraft(
+        { kind: "proposal-follow-up", proposalId: proposal.id },
+        sessionId,
+      ),
+    ).resolves.toEqual({ status: "success" });
+
+    expect(dependencies.stream).toHaveBeenCalledOnce();
+    expect(instructions).toContain("OUTLINE PLANNER GROUNDING");
+    expect(instructions).toContain('"chapterId": "ch2"');
+  });
+
   it("bounds planner manuscript grounding against the selected model context", async () => {
     const sessionId = { kind: "outline" as const, chapterId: "ch2" };
     agentSessionStore(sessionId).getState().hydrate(

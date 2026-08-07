@@ -624,6 +624,7 @@ async function resolveDraftContext(args: DraftContextCapture & {
 function targetChapterId(
   task: AgentTask,
   pendingProposal: PendingProposal | null,
+  sessionId: AgentSessionId,
 ): string | null {
   if (task.kind === "conversation") return task.targetChapterId;
   if (task.kind === "proposal-follow-up") {
@@ -633,7 +634,8 @@ function targetChapterId(
     ) {
       throw new Error(`Pending proposal not found: ${task.proposalId}`);
     }
-    return pendingProposal.chapterId;
+    return pendingProposal.chapterId ??
+      (sessionId.kind === "outline" ? sessionId.chapterId : null);
   }
   return task.chapterId;
 }
@@ -659,12 +661,13 @@ function captureTaskAndTarget(args: {
   activeChapter: LoadedChapter | null;
   task: AgentTask;
   pendingProposal: PendingProposal | null;
+  sessionId: AgentSessionId;
 }): {
   task: AgentTask;
   resolve: SubmissionCapture["resolveTaskAndTarget"];
 } {
   const task = structuredClone(args.task);
-  const chapterId = targetChapterId(task, args.pendingProposal);
+  const chapterId = targetChapterId(task, args.pendingProposal, args.sessionId);
   if (chapterId === null) {
     return {
       task,
@@ -750,9 +753,10 @@ async function loadExactTaskAndTarget(args: {
   activeChapter: LoadedChapter | null;
   task: AgentTask;
   pendingProposal: PendingProposal | null;
+  sessionId: AgentSessionId;
 }): Promise<{ task: AgentTask; chapter: LoadedChapter | null }> {
   const task = structuredClone(args.task);
-  const chapterId = targetChapterId(task, args.pendingProposal);
+  const chapterId = targetChapterId(task, args.pendingProposal, args.sessionId);
   return {
     task,
     chapter:
@@ -1323,7 +1327,11 @@ export function createAgentController(
       },
       getPendingProposal: currentPending,
       buildManuscriptProposal: (input) => {
-        const chapterId = targetChapterId(args.run.task, currentPending());
+        const chapterId = targetChapterId(
+          args.run.task,
+          currentPending(),
+          args.sessionId,
+        );
         if (chapterId === null) {
           throw taggedError(
             "tool",
@@ -1348,7 +1356,11 @@ export function createAgentController(
         }
       },
       buildOutlineProposal: (input) => {
-        const chapterId = targetChapterId(args.run.task, currentPending());
+        const chapterId = targetChapterId(
+          args.run.task,
+          currentPending(),
+          args.sessionId,
+        );
         if (chapterId === null) {
           throw taggedError(
             "tool",
@@ -1890,6 +1902,7 @@ export function createAgentController(
       activeChapter,
       task: frozenTask,
       pendingProposal,
+      sessionId,
     });
     const capture: SubmissionCapture = {
       projectRoot: project.root,
@@ -1969,6 +1982,7 @@ export function createAgentController(
       activeChapter: base.activeChapter,
       task: base.task,
       pendingProposal: base.pendingProposal,
+      sessionId,
     });
     const sessionStore = agentSessionStore(sessionId);
     const consoleState = sessionStore.getState();
@@ -2066,6 +2080,7 @@ export function createAgentController(
           activeChapter: base.activeChapter,
           task: base.task,
           pendingProposal: base.pendingProposal,
+          sessionId,
         }),
       resolveAttachments: async () => ({
         refs,

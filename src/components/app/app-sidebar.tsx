@@ -120,10 +120,9 @@ export function AppSidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openLoreSheet = useLoreSheetStore((s) => s.open);
 
-  // The Outline toggle is guarded (a dirty chapter stages the unsaved-edits
-  // dialog first). Bind the chord co-located with the action, mirroring the
-  // top bar's TOGGLE_PDF. The button below calls the same guarded toggle.
-  useKeybinding(KEYBINDING_IDS.TOGGLE_OUTLINE, () => guard(toggleOutline));
+  // Outline only changes the visible authoring surface. The editor stays mounted,
+  // so dirty chapter state does not need the destructive-navigation guard.
+  useKeybinding(KEYBINDING_IDS.TOGGLE_OUTLINE, toggleOutline);
 
   if (!project) return null;
 
@@ -263,7 +262,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => guard(toggleOutline)}>
+            <SidebarMenuButton onClick={toggleOutline}>
               <IconLayoutList />
               <span>Outline</span>
             </SidebarMenuButton>

@@ -24,6 +24,9 @@ vi.mock("@/components/app/outline/outline-pane", () => ({
 }));
 
 import { Workspace } from "@/App";
+import { AppSidebar } from "@/components/app/app-sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
 import {
   EMPTY_AGENT_STATE,
@@ -62,11 +65,14 @@ beforeEach(() => {
     pdfOpen: true,
     outlineOpen: false,
     focus: false,
+    pending: null,
     rightPanelWidth: 388,
   });
   useProjectStore.setState({
     project,
+    meta: EMPTY_META,
     activeChapterId: "chapter-1",
+    chapterDirty: false,
   });
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
@@ -115,5 +121,37 @@ describe("Workspace", () => {
     expect(screen.getByText("PDF Pane")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "AI Console" })).toBeNull();
     expect(useViewStore.getState().aiOpen).toBe(false);
+  });
+
+  it("keeps the editor mounted behind Outline while the AI Console remains open", () => {
+    useProjectStore.setState({ chapterDirty: true });
+    useViewStore.setState({ outlineOpen: true, aiOpen: true });
+
+    render(<Workspace />);
+
+    const editor = screen.getByText("Editor Pane");
+    expect(editor.parentElement?.classList.contains("hidden")).toBe(true);
+    expect(screen.getByText("Outline Pane")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "AI Console" })).toBeTruthy();
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+  });
+});
+
+describe("AppSidebar", () => {
+  it("opens Outline without guarding a dirty editor", () => {
+    useProjectStore.setState({ chapterDirty: true });
+    render(
+      <SidebarProvider>
+        <AppSidebar />
+      </SidebarProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Outline" }));
+
+    expect(useViewStore.getState()).toMatchObject({
+      outlineOpen: true,
+      pending: null,
+    });
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
   });
 });

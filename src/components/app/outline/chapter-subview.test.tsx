@@ -87,6 +87,7 @@ describe("ChapterSubview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
     fireEvent.click(screen.getByRole("button", { name: "Manual" }));
 
+    expect(agent.stopAgentRun).toHaveBeenCalledTimes(1);
     expect(agent.stopAgentRun).toHaveBeenCalledWith({
       kind: "outline",
       chapterId: "ch1",

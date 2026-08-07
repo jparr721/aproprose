@@ -2733,6 +2733,25 @@ describe("proposal staging lifecycle", () => {
     await run.finish();
   });
 
+  it("stages an active manuscript proposal without closing an open Outline", async () => {
+    const run = await captureToolRun();
+    const proposal = manuscriptProposalFixture(
+      "background-proposal",
+      "/book",
+      "ch1",
+    );
+    useViewStore.setState({ outlineOpen: true, manuscriptReviewProposalId: null });
+
+    run.input.environment.replacePendingProposal(proposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState()).toMatchObject({
+      outlineOpen: true,
+      manuscriptReviewProposalId: null,
+    });
+    await run.finish();
+  });
+
   it("keeps an inactive chapter proposal pending without opening review", async () => {
     const run = await captureToolRun();
     const proposal = manuscriptProposalFixture(

@@ -1392,16 +1392,18 @@ export function createAgentController(
       },
       replacePendingProposal: (proposal) => {
         if (!ownsRun(args.run.projectRoot, args.run.id, args.sessionId)) return;
-        useViewStore.getState().closeManuscriptReview();
+        const viewState = useViewStore.getState();
+        viewState.closeManuscriptReview();
         agentSessionStore(args.sessionId).getState().replacePendingProposal(proposal);
         const projectState = useProjectStore.getState();
         if (
+          !viewState.outlineOpen &&
           proposal.kind === "manuscript" &&
           projectState.project !== null &&
           projectState.project.root === proposal.projectRoot &&
           projectState.activeChapterId === proposal.chapterId
         ) {
-          useViewStore.getState().openManuscriptReview(proposal.id);
+          viewState.openManuscriptReview(proposal.id);
         }
       },
     };

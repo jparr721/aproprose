@@ -76,23 +76,13 @@ export function ChapterSubview() {
 
   const sessionId = { kind: "outline" as const, chapterId };
 
-  const leavePlanner = (): void => {
-    stopAgentRun(sessionId);
-    showManual();
-  };
-
-  const close = (): void => {
-    if (chapterView === "planner") stopAgentRun(sessionId);
-    closeChapter();
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink asChild onClick={close}>
+              <BreadcrumbLink asChild onClick={closeChapter}>
                 <BreadcrumbItem>
                   Storyboard
                 </BreadcrumbItem>
@@ -106,7 +96,7 @@ export function ChapterSubview() {
         </Breadcrumb>
         <ButtonGroup aria-label="Chapter planning view">
           <Button
-            onClick={leavePlanner}
+            onClick={showManual}
             size="sm"
             variant={chapterView === "manual" ? "default" : "outline"}
           >
@@ -130,7 +120,7 @@ export function ChapterSubview() {
             contextLabel={`${project.name} / ${chapterRef.label}. ${chapterRef.title}`}
             emptyDescription="Describe the story you want for this chapter. The planner can use the surrounding manuscript and stage plot changes for review."
             emptyTitle="Plan this chapter"
-            onClose={leavePlanner}
+            onClose={showManual}
             placeholder="Describe this chapter or request more plot points"
             sessionId={sessionId}
             task={{ kind: "outline-sculpt", chapterId }}

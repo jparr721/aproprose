@@ -36,6 +36,7 @@ import type {
 import type { ProjectInfo } from "@/lib/types";
 import {
   agentSessionStore,
+  clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -217,6 +218,7 @@ function resetConsoleState(): void {
 }
 
 beforeEach(() => {
+  clearOutlineAgentSessions();
   resetConsoleState();
   useProjectStore.setState({
     project,

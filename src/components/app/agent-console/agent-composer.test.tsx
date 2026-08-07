@@ -35,9 +35,11 @@ import type {
 } from "@/lib/ai/agent-types";
 import type { ProjectInfo } from "@/lib/types";
 import {
+  agentSessionStore,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
+import { emptyPersistedAgentState } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import {
   SETTINGS_TABS,
@@ -292,6 +294,22 @@ describe("AgentComposer mode controls", () => {
 });
 
 describe("AgentComposer draft behavior", () => {
+  it("keeps the project composer editable while an outline session runs", () => {
+    const outlineSession = { kind: "outline" as const, chapterId: "chapter-1" };
+    const outlineStore = agentSessionStore(outlineSession);
+    outlineStore.getState().hydrate(project.root, emptyPersistedAgentState());
+    outlineStore.getState().beginPreflight();
+    useAgentConsoleStore.getState().setDraftText("Continue the current chapter.");
+
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
   it("exposes the empty composer as the named AI Console textbox", () => {
     const { container } = render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 

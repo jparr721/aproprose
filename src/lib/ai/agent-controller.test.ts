@@ -42,6 +42,7 @@ import {
   stopAgentRun as stopProductionAgentRun,
   submitAgentRequest as submitProductionAgentRequest,
   type AgentControllerDependencies,
+  type AgentSubmissionOutcome,
 } from "@/lib/ai/agent-controller";
 import {
   blockFingerprint,
@@ -58,6 +59,7 @@ import type {
   AgentIntent,
   AgentMessageMetadata,
   AgentRun,
+  AgentSessionId,
   AgentTask,
   AgentUIMessage,
   ContextSnapshot,
@@ -79,8 +81,9 @@ import {
   clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
-  useAgentRunCoordinatorStore,
+  type AgentConsoleStore,
 } from "@/stores/agent-console-store";
+import { emptyPersistedAgentState } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -372,6 +375,61 @@ async function captureToolRun(): Promise<CapturedToolRun> {
   };
 }
 
+interface ConcurrentRuns {
+  controller: ReturnType<typeof createAgentController>;
+  outlineSession: Extract<AgentSessionId, { kind: "outline" }>;
+  outlineStore: AgentConsoleStore;
+  projectPending: Deferred<StreamAgentRunResult>;
+  outlinePending: Deferred<StreamAgentRunResult>;
+  projectInput: StreamAgentRunInput;
+  outlineInput: StreamAgentRunInput;
+  projectSubmission: Promise<AgentSubmissionOutcome>;
+  outlineSubmission: Promise<AgentSubmissionOutcome>;
+}
+
+async function startConcurrentProjectAndOutlineRuns(): Promise<ConcurrentRuns> {
+  const projectPending = deferred<StreamAgentRunResult>();
+  const outlinePending = deferred<StreamAgentRunResult>();
+  const inputs: StreamAgentRunInput[] = [];
+  const dependencies = makeDependencies(async (input) => {
+    inputs.push(input);
+    return input.run.task.kind === "outline-sculpt"
+      ? outlinePending.promise
+      : projectPending.promise;
+  });
+  const controller = createAgentController(dependencies);
+  const outlineSession = { kind: "outline" as const, chapterId: "ch2" };
+  const outlineStore = agentSessionStore(outlineSession);
+  outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+  useAgentConsoleStore.getState().setDraftText("Revise the current chapter.");
+  outlineStore.getState().setDraftText("Plan the next chapter.");
+
+  const projectSubmission = controller.submitAgentDraft(conversationTask("ch1"));
+  await vi.waitFor(() => expect(inputs).toHaveLength(1));
+  const outlineSubmission = controller.submitAgentDraft(
+    { kind: "outline-sculpt", chapterId: "ch2" },
+    outlineSession,
+  );
+  await vi.waitFor(() => expect(inputs).toHaveLength(2));
+
+  const projectInput = inputs.find((input) => input.run.task.kind !== "outline-sculpt");
+  const outlineInput = inputs.find((input) => input.run.task.kind === "outline-sculpt");
+  if (projectInput === undefined || outlineInput === undefined) {
+    throw new Error("Expected both concurrent run inputs");
+  }
+  return {
+    controller,
+    outlineSession,
+    outlineStore,
+    projectPending,
+    outlinePending,
+    projectInput,
+    outlineInput,
+    projectSubmission,
+    outlineSubmission,
+  };
+}
+
 function originalTurn(
   snapshots: ContextSnapshot[],
 ): { run: AgentRun; messages: AgentUIMessage[] } {
@@ -471,7 +529,6 @@ function compactionMessages(payloadLength: number): AgentUIMessage[] {
 
 beforeEach(() => {
   clearOutlineAgentSessions();
-  useAgentRunCoordinatorStore.setState({ activeSessionKey: null });
   mocks.generateText.mockReset().mockResolvedValue({ text: "Compacted history" });
   mocks.readTextFile.mockReset().mockImplementation(async (_root, path) => {
     if (path === "chapters/two.tex") {
@@ -510,6 +567,47 @@ beforeEach(() => {
 });
 
 describe("outline planner sessions", () => {
+  it("runs the project console and an outline planner concurrently", async () => {
+    const projectPending = deferred<StreamAgentRunResult>();
+    const outlinePending = deferred<StreamAgentRunResult>();
+    const inputs: StreamAgentRunInput[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      inputs.push(input);
+      return input.run.task.kind === "outline-sculpt"
+        ? outlinePending.promise
+        : projectPending.promise;
+    });
+    const controller = createAgentController(dependencies);
+    const outlineSession = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(outlineSession);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    useAgentConsoleStore.getState().setDraftText("Revise the current chapter.");
+    outlineStore.getState().setDraftText("Plan the next chapter.");
+
+    const projectSubmission = controller.submitAgentDraft(conversationTask("ch1"));
+    await vi.waitFor(() => expect(inputs).toHaveLength(1));
+    const outlineSubmission = controller.submitAgentDraft(
+      { kind: "outline-sculpt", chapterId: "ch2" },
+      outlineSession,
+    );
+    await vi.waitFor(() => expect(inputs).toHaveLength(2));
+
+    expect(useAgentConsoleStore.getState().runStatus).toBe("streaming");
+    expect(outlineStore.getState().runStatus).toBe("streaming");
+
+    const projectInput = inputs.find((input) => input.run.task.kind !== "outline-sculpt");
+    const outlineInput = inputs.find((input) => input.run.task.kind === "outline-sculpt");
+    if (projectInput === undefined || outlineInput === undefined) {
+      throw new Error("Expected both concurrent run inputs");
+    }
+    projectPending.resolve(successfulResult(projectInput, "Project finished"));
+    outlinePending.resolve(successfulResult(outlineInput, "Outline finished"));
+    await expect(Promise.all([projectSubmission, outlineSubmission])).resolves.toEqual([
+      { status: "success" },
+      { status: "success" },
+    ]);
+  });
+
   it("injects frozen target and neighbor grounding while retaining arbitrary reads", async () => {
     const sessionId = { kind: "outline" as const, chapterId: "ch2" };
     agentSessionStore(sessionId).getState().hydrate(
@@ -2062,6 +2160,45 @@ describe("frozen run preflight", () => {
 });
 
 describe("run settlement and cancellation", () => {
+  it("stops one session without interrupting the other", async () => {
+    const runs = await startConcurrentProjectAndOutlineRuns();
+    runs.controller.stopAgentRun(runs.outlineSession);
+
+    expect(runs.outlineStore.getState().runStatus).toBe("idle");
+    expect(runs.outlineInput.signal.aborted).toBe(true);
+    expect(useAgentConsoleStore.getState().runStatus).toBe("streaming");
+    expect(runs.projectInput.signal.aborted).toBe(false);
+
+    runs.outlinePending.resolve(
+      successfulResult(runs.outlineInput, "Ignored outline finish"),
+    );
+    runs.projectPending.resolve(
+      successfulResult(runs.projectInput, "Project finished"),
+    );
+    await expect(runs.outlineSubmission).resolves.toEqual({ status: "stopped" });
+    await expect(runs.projectSubmission).resolves.toEqual({ status: "success" });
+  });
+
+  it("aborts every active session for a project switch", async () => {
+    const runs = await startConcurrentProjectAndOutlineRuns();
+    runs.controller.abortAgentRunForProjectSwitch("/book", "project-switch");
+
+    expect(runs.projectInput.signal.aborted).toBe(true);
+    expect(runs.outlineInput.signal.aborted).toBe(true);
+    expect(useAgentConsoleStore.getState().interruptedRun?.reason).toBe("project-switch");
+    expect(runs.outlineStore.getState().interruptedRun?.reason).toBe("project-switch");
+
+    runs.projectPending.resolve(
+      successfulResult(runs.projectInput, "Ignored project finish"),
+    );
+    runs.outlinePending.resolve(
+      successfulResult(runs.outlineInput, "Ignored outline finish"),
+    );
+    await expect(
+      Promise.all([runs.projectSubmission, runs.outlineSubmission]),
+    ).resolves.toEqual([{ status: "stopped" }, { status: "stopped" }]);
+  });
+
   it("keeps text and attachments added while streaming", async () => {
     const pending = deferred<StreamAgentRunResult>();
     let captured: StreamAgentRunInput | null = null;

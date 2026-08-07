@@ -51,7 +51,7 @@ import type {
   PendingProposal,
   ProposalEventData,
 } from "@/lib/ai/agent-types";
-import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
+import { agentSessionKey, PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
   agentFailureDiagnosticCode,
   failureFromError,
@@ -84,7 +84,6 @@ import {
   agentConsoleOwnershipStatus,
   agentSessionStore,
   requireAgentSessionProject,
-  useAgentRunCoordinatorStore,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -1143,21 +1142,23 @@ function settledAssistantMessage(message: AgentUIMessage): AgentUIMessage {
 export function createAgentController(
   dependencies: AgentControllerDependencies,
 ) {
-  let activeController: ActiveController | null = null;
+  const activeControllers = new Map<string, ActiveController>();
+
+  const activeControllerFor = (
+    sessionId: AgentSessionId,
+  ): ActiveController | null =>
+    activeControllers.get(agentSessionKey(sessionId)) ?? null;
 
   const ownsRun = (
     projectRoot: string,
     runId: string,
     sessionId: AgentSessionId,
   ): boolean => {
+    const activeController = activeControllerFor(sessionId);
     if (
       activeController === null ||
       activeController.projectRoot !== projectRoot ||
-      activeController.runId !== runId ||
-      activeController.sessionId.kind !== sessionId.kind ||
-      (activeController.sessionId.kind === "outline" &&
-        sessionId.kind === "outline" &&
-        activeController.sessionId.chapterId !== sessionId.chapterId)
+      activeController.runId !== runId
     ) {
       return false;
     }
@@ -1181,7 +1182,7 @@ export function createAgentController(
     runId: string,
     sessionId: AgentSessionId,
   ): void => {
-    activeController?.controller.signal.throwIfAborted();
+    activeControllerFor(sessionId)?.controller.signal.throwIfAborted();
     if (!ownsRun(projectRoot, runId, sessionId)) {
       throw taggedError(
         "tool",
@@ -1450,7 +1451,6 @@ export function createAgentController(
       reason,
       interruptedAt: dependencies.now(),
     });
-    useAgentRunCoordinatorStore.getState().finish(active.sessionId);
   };
 
   const runSubmission = async (
@@ -1461,15 +1461,6 @@ export function createAgentController(
     const assistantMessageId = dependencies.id();
     const abortController = new AbortController();
     const sessionStore = agentSessionStore(capture.sessionId);
-    if (!useAgentRunCoordinatorStore.getState().begin(capture.sessionId)) {
-      const failure = runFailure(
-        new Error("Another agent session is already running."),
-        capture.provider,
-        null,
-      );
-      sessionStore.setState({ runError: failure });
-      return { status: "failure", failure };
-    }
     try {
       sessionStore.getState().beginPreflight();
     } catch (error) {
@@ -1487,17 +1478,16 @@ export function createAgentController(
         }),
       );
       sessionStore.setState({ runError: refusal });
-      useAgentRunCoordinatorStore.getState().finish(capture.sessionId);
       return { status: "failure", failure: refusal };
     }
-    activeController = {
+    activeControllers.set(agentSessionKey(capture.sessionId), {
       projectRoot: capture.projectRoot,
       sessionId: capture.sessionId,
       runId,
       userMessageId,
       assistantMessageId,
       controller: abortController,
-    };
+    });
     const ownsCurrentRun = () =>
       ownsRun(capture.projectRoot, runId, capture.sessionId);
     let enteredRun = false;
@@ -1697,7 +1687,12 @@ export function createAgentController(
     } catch (error) {
       if (!ownsCurrentRun()) return { status: "stopped" };
       if (isAbortError(error)) {
-        if (activeController !== null) {
+        const activeController = activeControllerFor(capture.sessionId);
+        if (
+          activeController !== null &&
+          activeController.projectRoot === capture.projectRoot &&
+          activeController.runId === runId
+        ) {
           interruptVisibleRun(activeController, "stopped");
         }
         return { status: "stopped" };
@@ -1759,12 +1754,12 @@ export function createAgentController(
       }
       return { status: "failure", failure };
     } finally {
+      const activeController = activeControllerFor(capture.sessionId);
       if (
         activeController?.projectRoot === capture.projectRoot &&
         activeController.runId === runId
       ) {
-        activeController = null;
-        useAgentRunCoordinatorStore.getState().finish(capture.sessionId);
+        activeControllers.delete(agentSessionKey(capture.sessionId));
         if (capture.sessionId.kind === "project") {
           void refreshAttachedDraftSources();
         }
@@ -2000,18 +1995,12 @@ export function createAgentController(
     requestedSessionId?: AgentSessionId,
   ): void => {
     const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
-    const active = activeController;
-    if (
-      active === null ||
-      active.sessionId.kind !== sessionId.kind ||
-      (active.sessionId.kind === "outline" &&
-        sessionId.kind === "outline" &&
-        active.sessionId.chapterId !== sessionId.chapterId)
-    ) return;
+    const sessionKey = agentSessionKey(sessionId);
+    const active = activeControllers.get(sessionKey);
+    if (active === undefined) return;
+    activeControllers.delete(sessionKey);
     interruptVisibleRun(active, "stopped");
     active.controller.abort();
-    activeController = null;
-    useAgentRunCoordinatorStore.getState().finish(sessionId);
     if (sessionId.kind === "project") void refreshAttachedDraftSources();
   };
 
@@ -2127,11 +2116,12 @@ export function createAgentController(
     reason: "project-switch" | "app-exit",
   ): void => {
     invalidateDraftSourceRefreshes();
-    const active = activeController;
-    if (active === null || active.projectRoot !== projectRoot) return;
-    interruptVisibleRun(active, reason);
-    active.controller.abort();
-    activeController = null;
+    for (const [sessionKey, active] of [...activeControllers.entries()]) {
+      if (active.projectRoot !== projectRoot) continue;
+      interruptVisibleRun(active, reason);
+      active.controller.abort();
+      activeControllers.delete(sessionKey);
+    }
   };
 
   const resolveAgentDraftContext = async (): Promise<void> => {

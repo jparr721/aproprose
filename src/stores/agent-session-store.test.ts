@@ -9,7 +9,6 @@ import {
   agentSessionStore,
   clearOutlineAgentSessions,
   useAgentConsoleStore,
-  useAgentRunCoordinatorStore,
 } from "@/stores/agent-console-store";
 import { emptyPersistedAgentState } from "@/stores/agent-persistence";
 
@@ -54,7 +53,6 @@ describe("agent sessions", () => {
   beforeEach(() => {
     clearOutlineAgentSessions();
     useAgentConsoleStore.getState().resetProject();
-    useAgentRunCoordinatorStore.setState({ activeSessionKey: null });
     hydrate(PROJECT_AGENT_SESSION);
   });
 
@@ -140,18 +138,17 @@ describe("agent sessions", () => {
     });
   });
 
-  it("allows only one active model run across sessions", () => {
-    const first = { kind: "outline" as const, chapterId: "chapter-1" };
-    const second = { kind: "outline" as const, chapterId: "chapter-2" };
-    hydrate(first);
+  it("allows distinct sessions to own independent run transitions", () => {
+    const outline = { kind: "outline" as const, chapterId: "chapter-1" };
+    hydrate(outline);
 
-    expect(useAgentRunCoordinatorStore.getState().begin(first)).toBe(true);
-    agentSessionStore(first).getState().beginPreflight();
-    expect(useAgentRunCoordinatorStore.getState().begin(second)).toBe(false);
-    expect(useAgentRunCoordinatorStore.getState().begin(PROJECT_AGENT_SESSION)).toBe(false);
+    useAgentConsoleStore.getState().beginPreflight();
+    agentSessionStore(outline).getState().beginPreflight();
 
-    agentSessionStore(first).setState({ runStatus: "idle" });
-    useAgentRunCoordinatorStore.getState().finish(first);
-    expect(useAgentRunCoordinatorStore.getState().begin(second)).toBe(true);
+    expect(useAgentConsoleStore.getState().runStatus).toBe("submitted");
+    expect(agentSessionStore(outline).getState().runStatus).toBe("submitted");
+    expect(() => agentSessionStore(outline).getState().beginPreflight()).toThrow(
+      "An agent run is already active",
+    );
   });
 });

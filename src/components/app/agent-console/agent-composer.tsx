@@ -29,13 +29,12 @@ import {
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import { agentFailureActionLabel } from "@/lib/ai/agent-failure";
 import type { AgentSessionId, AgentTask } from "@/lib/ai/agent-types";
-import { agentSessionKey, PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
 import {
   agentConsoleOwnershipStatus,
   agentSessionStore,
   useAgentSessionStore,
-  useAgentRunCoordinatorStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
@@ -70,9 +69,6 @@ export function AgentComposer({
   const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
   const runError = useAgentSessionStore(sessionId, (state) => state.runError);
   const lastUsage = useAgentSessionStore(sessionId, (state) => state.lastUsage);
-  const activeSessionKey = useAgentRunCoordinatorStore(
-    (state) => state.activeSessionKey,
-  );
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
@@ -105,9 +101,7 @@ export function AgentComposer({
   const usedTokens = lastUsage === null ? 0 : lastUsage.totalTokens;
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
-  const blocksTargetEditing =
-    ownershipStatus !== "ready" ||
-    (activeSessionKey !== null && activeSessionKey !== agentSessionKey(sessionId));
+  const blocksTargetEditing = ownershipStatus !== "ready";
 
   const handleSubmit = async (): Promise<"submitted" | "failed"> => {
     if (

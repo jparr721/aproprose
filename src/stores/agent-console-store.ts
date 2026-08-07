@@ -24,7 +24,6 @@ import type {
   PersistedUsage,
   SubmittedAgentDraft,
 } from "@/lib/ai/agent-types";
-import { agentSessionKey } from "@/lib/ai/agent-types";
 
 export type AgentPersistenceTransitionKind = "load" | "recovery" | "reset";
 
@@ -365,35 +364,6 @@ export function requireAgentSessionProject(
     throw new AgentConsoleOwnershipError();
   }
 }
-
-interface AgentRunCoordinatorState {
-  activeSessionKey: string | null;
-  begin: (sessionId: AgentSessionId) => boolean;
-  finish: (sessionId: AgentSessionId) => void;
-}
-
-export const useAgentRunCoordinatorStore = create<AgentRunCoordinatorState>()(
-  (set, get) => ({
-    activeSessionKey: null,
-    begin: (sessionId) => {
-      if (get().activeSessionKey !== null) {
-        const projectActive = useAgentConsoleStore.getState().runStatus !== "idle";
-        const outlineActive = outlineAgentSessionEntries().some(
-          ([, store]) => store.getState().runStatus !== "idle",
-        );
-        if (projectActive || outlineActive) return false;
-        set({ activeSessionKey: null });
-      }
-      set({ activeSessionKey: agentSessionKey(sessionId) });
-      return true;
-    },
-    finish: (sessionId) => {
-      if (get().activeSessionKey === agentSessionKey(sessionId)) {
-        set({ activeSessionKey: null });
-      }
-    },
-  }),
-);
 
 const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => ({
   ...EMPTY_AGENT_STATE,

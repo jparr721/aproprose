@@ -25,6 +25,7 @@ vi.mock("sonner", () => ({
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
+import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
@@ -1299,6 +1300,56 @@ describe("setSelection", () => {
 });
 
 describe("applyAgentManuscriptProposal", () => {
+  it("applies a selected overview change while another chapter is active", () => {
+    const proposalBlocks = [mkBlock({ id: "a", text: "A" })];
+    const activeBlocks = [mkBlock({ id: "b", text: "B" })];
+    const proposal = {
+      ...pendingManuscriptFixture(proposalBlocks, [
+        rewriteFixture("a", "A revised"),
+      ]),
+      overviewChange: {
+        id: "overview-change",
+        before: "",
+        after: "The courier exposes the crown.",
+        reason: "Clarify the story direction",
+        sourceFingerprint: storyOverviewFingerprint(""),
+      },
+    };
+    const baseProject = projectFixture("/book");
+    useProjectStore.setState({
+      project: {
+        ...baseProject,
+        chapters: [
+          ...baseProject.chapters,
+          {
+            id: "ch2",
+            label: "II",
+            title: "Chapter Two",
+            file: "chapter-two.tex",
+            wordCount: 2,
+          },
+        ],
+      },
+      activeChapterId: "ch2",
+      blocks: activeBlocks,
+      past: [],
+    } as never);
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentManuscriptProposal(proposal, [proposal.overviewChange.id]);
+
+    expect(result).toEqual({
+      status: "applied",
+      appliedChangeIds: ["overview-change"],
+    });
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "The courier exposes the crown.",
+    );
+    expect(useProjectStore.getState().blocks).toEqual(activeBlocks);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
   it("applies all selected changes as one editor undo step", () => {
     const blocks = [
       mkBlock({ id: "a", text: "A" }),

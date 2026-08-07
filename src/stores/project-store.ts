@@ -972,11 +972,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
-        state.project.root !== proposal.projectRoot ||
-        state.activeChapterId !== proposal.chapterId ||
-        !state.project.chapters.some(
-          (chapter) => chapter.id === proposal.chapterId,
-        )
+        state.project.root !== proposal.projectRoot
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
@@ -1012,6 +1008,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
       };
+      if (
+        selectedProposal.changes.length > 0 &&
+        (state.activeChapterId !== proposal.chapterId ||
+          !state.project.chapters.some(
+            (chapter) => chapter.id === proposal.chapterId,
+          ))
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
       const stale = validateManuscriptChanges(selectedProposal, state.blocks);
       if (stale.length > 0) {
         return {
@@ -1701,10 +1709,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
-        state.project.root !== proposal.projectRoot ||
-        !state.project.chapters.some(
-          (chapter) => chapter.id === proposal.chapterId,
-        )
+        state.project.root !== proposal.projectRoot
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
@@ -1723,10 +1728,6 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "unknown-selection",
         };
       }
-      const chapter = getChapterOutline(
-        state.meta.chapters,
-        proposal.chapterId,
-      );
       const selected = new Set(changeIds);
       const appliesOverview =
         overviewChange !== null && selected.has(overviewChange.id);
@@ -1744,7 +1745,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
       };
-      const stale = validateOutlineChanges(selectedProposal, chapter.cards);
+      if (
+        selectedProposal.changes.length > 0 &&
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
+      const cards = selectedProposal.changes.length === 0
+        ? []
+        : getChapterOutline(state.meta.chapters, proposal.chapterId).cards;
+      const stale = validateOutlineChanges(selectedProposal, cards);
       if (stale.length > 0) {
         return {
           status: "stale",
@@ -1765,12 +1780,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const before = state.meta;
-      const chapters = applyOutlineChangesStrict(
-        before.chapters,
-        proposal.chapterId,
-        proposal.summary,
-        selectedProposal.changes,
-      );
+      const chapters = selectedProposal.changes.length === 0
+        ? before.chapters
+        : applyOutlineChangesStrict(
+            before.chapters,
+            proposal.chapterId,
+            proposal.summary,
+            selectedProposal.changes,
+          );
       if (chapters === null) {
         return {
           status: "invalid",

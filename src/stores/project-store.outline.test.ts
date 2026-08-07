@@ -18,6 +18,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
 import { writeProjectMeta } from "@/lib/tauri";
@@ -207,6 +208,45 @@ describe("card + chapter actions", () => {
 });
 
 describe("agent outline proposals", () => {
+  it("applies a selected overview change after the proposal chapter is deleted", () => {
+    const proposal = {
+      ...pendingOutlineFixture(),
+      overviewChange: {
+        id: "overview-change",
+        before: "",
+        after: "The courier exposes the crown.",
+        reason: "Clarify the story direction",
+        sourceFingerprint: storyOverviewFingerprint(""),
+      },
+    };
+    useProjectStore.setState((state) => ({
+      project: {
+        ...projectFixture("/book"),
+        chapters: [],
+      },
+      meta: {
+        ...state.meta,
+        chapters: {},
+      },
+    }));
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(proposal, [proposal.overviewChange.id]);
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "The courier exposes the crown.",
+    );
+    expect(useProjectStore.getState().meta.chapters).toEqual({});
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(true);
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
   it("applies selected changes in one metadata write and returns one undo token", () => {
     const proposal = pendingOutlineFixture();
     const before = useProjectStore.getState().meta;

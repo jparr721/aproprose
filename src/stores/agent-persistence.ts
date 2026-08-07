@@ -1695,8 +1695,16 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       agentConsoleOwnershipStatus(store.getState(), oldRoot) === "ready",
     );
   writableRoot = null;
-  if (ownsOldConsole && oldRoot !== null) {
-    abortAgentRunForProjectSwitch(oldRoot, "project-switch");
+  const rootsWithActiveSessions = new Set<string>();
+  if (oldRoot !== null) rootsWithActiveSessions.add(oldRoot);
+  for (const [, store] of outlineAgentSessionEntries()) {
+    const activeProjectRoot = store.getState().activeProjectRoot;
+    if (activeProjectRoot !== null) {
+      rootsWithActiveSessions.add(activeProjectRoot);
+    }
+  }
+  for (const root of rootsWithActiveSessions) {
+    abortAgentRunForProjectSwitch(root, "project-switch");
   }
   const oldSource =
     oldRootWasWritable || oldRootWasRecovering
@@ -1953,14 +1961,15 @@ export function useAgentPersistence(): void {
     const onPageHide = (): void => {
       clearSaveTimer();
       const state = useAgentConsoleStore.getState();
-      const root = state.activeProjectRoot;
+      const root =
+        useProjectStore.getState().project?.root ?? state.activeProjectRoot;
+      if (root === null) return;
+      abortAgentRunForProjectSwitch(root, "app-exit");
       if (
-        root === null ||
         agentConsoleOwnershipStatus(state, root) !== "ready"
       ) {
         return;
       }
-      abortAgentRunForProjectSwitch(root, "app-exit");
       clearSaveTimer();
       if (writableRoot !== root) return;
       void captureActiveSnapshot(root);

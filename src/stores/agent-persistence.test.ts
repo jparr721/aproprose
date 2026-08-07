@@ -50,6 +50,12 @@ const tauri = vi.hoisted(() => ({
   writeAppData: vi.fn(),
 }));
 
+const controller = vi.hoisted(() => ({
+  abortAgentRunForProjectSwitch: vi.fn<
+    (root: string, reason: "project-switch" | "app-exit") => void
+  >(),
+}));
+
 vi.mock("@/lib/tauri", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tauri")>();
   return {
@@ -57,6 +63,17 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
     getAiConfig: tauri.getAiConfig,
     readAppData: tauri.readAppData,
     writeAppData: tauri.writeAppData,
+  };
+});
+
+vi.mock("@/lib/ai/agent-controller", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ai/agent-controller")>();
+  controller.abortAgentRunForProjectSwitch.mockImplementation(
+    actual.abortAgentRunForProjectSwitch,
+  );
+  return {
+    ...actual,
+    abortAgentRunForProjectSwitch: controller.abortAgentRunForProjectSwitch,
   };
 });
 
@@ -260,6 +277,7 @@ async function resetPersistence(): Promise<void> {
   useSettingsStore.setState({ aiModel: null });
   resetAiProvider();
   tauri.getAiConfig.mockReset();
+  controller.abortAgentRunForProjectSwitch.mockClear();
   tauri.readAppData.mockClear();
   tauri.writeAppData.mockClear();
 }
@@ -1575,6 +1593,35 @@ describe("agent persistence", () => {
     });
   });
 
+  it("aborts an active planner when the project console is unavailable during a switch", async () => {
+    const root = "/books/planner-with-unavailable-console";
+    useProjectStore.setState({ project: project(root) });
+    useAgentConsoleStore.setState({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: null,
+      persistenceIssue: {
+        kind: "load",
+        projectRoot: root,
+        message: "Project conversation unavailable",
+      },
+    });
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "switch-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    controller.abortAgentRunForProjectSwitch.mockClear();
+
+    await transitionAgentProject("/books/next");
+
+    expect(controller.abortAgentRunForProjectSwitch).toHaveBeenCalledWith(
+      root,
+      "project-switch",
+    );
+  });
+
   it("retries the immutable old-root snapshot after a switch save fails", async () => {
     await transitionAgentProject("/books/old");
     useAgentConsoleStore.getState().setDraftText("Captured old draft");
@@ -2291,6 +2338,38 @@ describe("agent persistence", () => {
     config.resolve({ apiKey: "test-key" });
     await submission;
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+    persistence.unmount();
+  });
+
+  it("aborts an active planner on page hide when the project console is unavailable", async () => {
+    const root = "/books/pagehide-planner-with-unavailable-console";
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root),
+    );
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      persistenceIssue: {
+        kind: "corrupt",
+        projectRoot: root,
+        message: "Project conversation is corrupt",
+      },
+    });
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "pagehide-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    controller.abortAgentRunForProjectSwitch.mockClear();
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(controller.abortAgentRunForProjectSwitch).toHaveBeenCalledWith(
+      root,
+      "app-exit",
+    );
     persistence.unmount();
   });
 

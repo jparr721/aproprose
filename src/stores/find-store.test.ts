@@ -54,7 +54,6 @@ const setText = (id: string, text: string): void =>
 
 beforeEach(() => {
   useFindStore.setState({
-    open: false,
     query: "",
     replacement: "",
     caseSensitive: false,
@@ -64,14 +63,13 @@ beforeEach(() => {
     matches: [],
     currentIndex: -1,
     error: null,
-    focusTick: 0,
   });
 });
 
 describe("recompute", () => {
   it("derives matches from the project blocks and selects the first", () => {
     seed([mkBlock("a", "the cat sat"), mkBlock("b", "cat and cat")]);
-    useFindStore.setState({ open: true, query: "cat" });
+    useFindStore.setState({ query: "cat" });
     useFindStore.getState().recompute();
     const s = useFindStore.getState();
     expect(s.matches).toEqual([
@@ -85,7 +83,7 @@ describe("recompute", () => {
 
   it("keeps the user on the same match across an edit that shifts indices", () => {
     seed([mkBlock("a", "cat"), mkBlock("b", "cat cat")]);
-    useFindStore.setState({ open: true, query: "cat" });
+    useFindStore.setState({ query: "cat" });
     useFindStore.getState().recompute();
     useFindStore.getState().next(); // index 1 -> { b, 0 }
     expect(useFindStore.getState().currentIndex).toBe(1);
@@ -104,7 +102,7 @@ describe("recompute", () => {
 
   it("clamps the current index when matches shrink", () => {
     seed([mkBlock("a", "cat cat cat")]);
-    useFindStore.setState({ open: true, query: "cat" });
+    useFindStore.setState({ query: "cat" });
     useFindStore.getState().recompute();
     useFindStore.getState().next();
     useFindStore.getState().next();
@@ -121,7 +119,7 @@ describe("recompute", () => {
 describe("next / prev", () => {
   it("wraps around in both directions", () => {
     seed([mkBlock("a", "cat cat")]);
-    useFindStore.setState({ open: true, query: "cat" });
+    useFindStore.setState({ query: "cat" });
     useFindStore.getState().recompute();
     expect(useFindStore.getState().currentIndex).toBe(0);
     useFindStore.getState().next();
@@ -134,7 +132,7 @@ describe("next / prev", () => {
 
   it("no-ops when there are no matches", () => {
     seed([mkBlock("a", "dog")]);
-    useFindStore.setState({ open: true, query: "cat" });
+    useFindStore.setState({ query: "cat" });
     useFindStore.getState().recompute();
     expect(useFindStore.getState().currentIndex).toBe(-1);
     useFindStore.getState().next();
@@ -146,7 +144,7 @@ describe("next / prev", () => {
 describe("replaceCurrent", () => {
   it("replaces the current match and advances to the next", () => {
     seed([mkBlock("a", "cat cat")]);
-    useFindStore.setState({ open: true, query: "cat", replacement: "dog" });
+    useFindStore.setState({ query: "cat", replacement: "dog" });
     useFindStore.getState().recompute();
     useFindStore.getState().replaceCurrent();
     expect(useProjectStore.getState().blocks[0].text).toBe("dog cat");
@@ -157,7 +155,7 @@ describe("replaceCurrent", () => {
 
   it("advances past a replacement that itself contains the query (no re-hit)", () => {
     seed([mkBlock("a", "cat cat")]);
-    useFindStore.setState({ open: true, query: "cat", replacement: "cats" });
+    useFindStore.setState({ query: "cat", replacement: "cats" });
     useFindStore.getState().recompute();
     useFindStore.getState().replaceCurrent();
     expect(useProjectStore.getState().blocks[0].text).toBe("cats cat");
@@ -173,7 +171,7 @@ describe("replaceCurrent", () => {
     // The regex template "$2$1" is 4 chars but expands to 2 ("ba"); advancing by the
     // template length would skip the match at offset 2 onto the one at offset 4.
     seed([mkBlock("a", "ababab")]);
-    useFindStore.setState({ open: true, query: "(a)(b)", replacement: "$2$1", regex: true });
+    useFindStore.setState({ query: "(a)(b)", replacement: "$2$1", regex: true });
     useFindStore.getState().recompute();
     useFindStore.getState().replaceCurrent();
     expect(useProjectStore.getState().blocks[0].text).toBe("baabab");
@@ -189,7 +187,7 @@ describe("replaceCurrent", () => {
 describe("replaceAll", () => {
   it("rewrites every match in one edit and re-derives the now-empty match set", () => {
     seed([mkBlock("a", "cat cat"), mkBlock("b", "a cat")]);
-    useFindStore.setState({ open: true, query: "cat", replacement: "dog" });
+    useFindStore.setState({ query: "cat", replacement: "dog" });
     useFindStore.getState().recompute();
     useFindStore.getState().replaceAll();
     const blocks = useProjectStore.getState().blocks;
@@ -201,7 +199,7 @@ describe("replaceAll", () => {
 
   it("surfaces an invalid-regex error instead of silently doing nothing", () => {
     seed([mkBlock("a", "abc")]);
-    useFindStore.setState({ open: true, query: "(", replacement: "x", regex: true });
+    useFindStore.setState({ query: "(", replacement: "x", regex: true });
     useFindStore.getState().replaceAll();
     expect(useFindStore.getState().error).toBeTruthy();
     expect(useProjectStore.getState().blocks[0].text).toBe("abc");

@@ -17,7 +17,6 @@ import {
 } from "@/lib/blocks/find";
 
 interface FindState extends FindOptions {
-  open: boolean;
   query: string;
   replacement: string;
   /** Whether the Replace row is revealed. */
@@ -27,11 +26,8 @@ interface FindState extends FindOptions {
   currentIndex: number;
   /** Invalid-regex message, or null. */
   error: string | null;
-  /** Bumped to focus + select the query input (the widget consumes it). */
-  focusTick: number;
 
-  openFind: () => void;
-  close: () => void;
+  clearResults: () => void;
   setQuery: (query: string) => void;
   setReplacement: (replacement: string) => void;
   toggleCase: () => void;
@@ -78,7 +74,6 @@ export const useFindStore = create<FindState>((set, get) => {
   };
 
   return {
-    open: false,
     query: "",
     replacement: "",
     caseSensitive: false,
@@ -88,11 +83,13 @@ export const useFindStore = create<FindState>((set, get) => {
     matches: [],
     currentIndex: -1,
     error: null,
-    focusTick: 0,
 
-    openFind: () => set((s) => ({ open: true, focusTick: s.focusTick + 1 })),
-    // Keep query / replacement / options for the next open; just drop live matches.
-    close: () => set({ open: false, matches: [], currentIndex: -1, error: null }),
+    clearResults: () =>
+      set({
+        matches: [],
+        currentIndex: -1,
+        error: null,
+      }),
 
     setQuery: (query) => set({ query }),
     setReplacement: (replacement) => set({ replacement }),

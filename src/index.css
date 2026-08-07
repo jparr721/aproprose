@@ -1,3 +1,4 @@
+@import "pdfjs-dist/web/pdf_viewer.css" layer(pdfjs);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -5,6 +6,15 @@
 @import "@fontsource-variable/lora";
 
 @custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+}
+
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+}
 
 /* ───────────────────────────────────────────────────────────────────────────
  * Theme tokens.
@@ -275,6 +285,35 @@
 }
 
 @layer utilities {
+  .aproprose-pdf-viewer {
+    --pdfViewer-padding-bottom: 1rem;
+    --page-margin: 1rem auto 0;
+    --page-border: 1px solid var(--border);
+    --page-bg-color: var(--sheet);
+    padding-inline: 1rem;
+  }
+
+  .aproprose-pdf-viewer .page {
+    margin: var(--page-margin);
+    border-radius: 2px;
+    box-shadow: 0 10px 15px -3px
+      color-mix(in oklch, var(--foreground) 12%, transparent);
+    overflow: hidden;
+  }
+
+  .aproprose-pdf-viewer .textLayer .highlight {
+    --highlight-bg-color: color-mix(
+      in oklch,
+      var(--accent-ink) 22%,
+      transparent
+    );
+    --highlight-selected-bg-color: color-mix(
+      in oklch,
+      var(--accent-ink) 42%,
+      transparent
+    );
+  }
+
   /* a slow, calm caret/cursor blink reused by the editor + streaming AI */
   @keyframes ap-blink {
     50% {

@@ -800,6 +800,84 @@ describe("outline planner sessions", () => {
 });
 
 describe("dispatchAgentIntent", () => {
+  it("adds findings to the requested planner draft without changing the project draft", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(sessionId);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const findingsMessage: AgentUIMessage = {
+      id: "planner-findings",
+      role: "assistant",
+      metadata: metadata(
+        {
+          id: "planner-run",
+          projectRoot: "/book",
+          mode: "writing",
+          task: { kind: "chapter-analysis", chapterId: "ch2", analysis: "critique" },
+          userMessageId: "planner-user",
+          attachments: [],
+          startedAt: "2026-07-30T12:00:00.000Z",
+        },
+        "complete",
+        null,
+      ),
+      parts: [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch2",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The turn arrives before the setup lands.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+    outlineStore.setState({ messages: [findingsMessage] });
+    useAgentConsoleStore.getState().addDraftContextRefs([blockRef("b1", "ch1")]);
+    const controller = createAgentController(makeDependencies(null));
+
+    await controller.dispatchAgentIntent(
+      {
+        kind: "add-context",
+        refs: [
+          {
+            kind: "finding",
+            chapterId: "ch2",
+            findingId: "planner-findings:0",
+          },
+        ],
+      },
+      sessionId,
+    );
+
+    expect(outlineStore.getState().draftContextRefs).toEqual([
+      {
+        kind: "finding",
+        chapterId: "ch2",
+        findingId: "planner-findings:0",
+      },
+    ]);
+    expect(
+      outlineStore.getState().draftContextSources[
+        "finding:ch2:planner-findings:0"
+      ],
+    ).toMatchObject({
+      available: true,
+      label: "Pacing",
+      preview: "The turn arrives before the setup lands.",
+    });
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
+      blockRef("b1", "ch1"),
+    ]);
+    expect(useViewStore.getState().aiOpen).toBe(false);
+  });
+
   it("opens the console and resolves add-context without starting a run", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);

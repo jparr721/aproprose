@@ -2141,17 +2141,20 @@ export function createAgentController(
     }
   };
 
-  const resolveAgentDraftContext = async (): Promise<void> => {
+  const resolveAgentDraftContext = async (
+    sessionId: AgentSessionId,
+  ): Promise<void> => {
     const requestedProject = useProjectStore.getState().project;
     if (requestedProject === null) {
       throw new Error("Open a project before adding agent context.");
     }
-    requireAgentSessionProject(PROJECT_AGENT_SESSION, requestedProject.root);
+    requireAgentSessionProject(sessionId, requestedProject.root);
     const projectState = useProjectStore.getState();
     if (projectState.project?.root !== requestedProject.root) {
       throw new Error("The active project changed before context could load.");
     }
-    const state = useAgentConsoleStore.getState();
+    const sessionStore = agentSessionStore(sessionId);
+    const state = sessionStore.getState();
     const capturedDraft = state.captureDraft();
     const frozenProject = cloneProject(requestedProject);
     const activeChapter = captureActiveChapter(
@@ -2169,7 +2172,7 @@ export function createAgentController(
     });
     const ownsContextProject = (): boolean => {
       const currentProject = useProjectStore.getState().project;
-      const currentConsole = useAgentConsoleStore.getState();
+      const currentConsole = sessionStore.getState();
       return (
         currentProject !== null &&
         currentProject.root === requestedProject.root &&
@@ -2190,54 +2193,63 @@ export function createAgentController(
       throw error;
     }
     if (ownsContextProject()) {
-      useAgentConsoleStore.getState().applyDraftContextResolution(
+      sessionStore.getState().applyDraftContextResolution(
         capturedDraft.attachments,
         storeContextResolutions(resolved),
       );
     }
   };
 
-  const addAgentContext = async (refs: DraftContextRef[]): Promise<void> => {
-    useAgentConsoleStore.getState().addDraftContextRefs(refs);
-    await resolveAgentDraftContext();
+  const addAgentContext = async (
+    refs: DraftContextRef[],
+    sessionId: AgentSessionId,
+  ): Promise<void> => {
+    agentSessionStore(sessionId).getState().addDraftContextRefs(refs);
+    await resolveAgentDraftContext(sessionId);
   };
 
   const prefillAgentDraft = async (
     intent: Extract<AgentIntent, { kind: "prefill" }>,
+    sessionId: AgentSessionId,
   ): Promise<void> => {
-    const store = useAgentConsoleStore.getState();
+    const store = agentSessionStore(sessionId).getState();
     store.setMode(intent.mode);
     store.setDraftText(intent.text);
     store.setDraftContextRefs(intent.refs);
-    await resolveAgentDraftContext();
+    await resolveAgentDraftContext(sessionId);
   };
 
-  const dispatchAgentIntent = async (intent: AgentIntent): Promise<void> => {
+  const dispatchAgentIntent = async (
+    intent: AgentIntent,
+    requestedSessionId?: AgentSessionId,
+  ): Promise<void> => {
+    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+    const sessionStore = agentSessionStore(sessionId);
     const frozenIntent = structuredClone(intent);
-    useViewStore.getState().openAiConsole();
-    useAgentConsoleStore.setState({ runError: null });
+    if (sessionId.kind === "project") useViewStore.getState().openAiConsole();
+    sessionStore.setState({ runError: null });
     try {
       const project = useProjectStore.getState().project;
       if (project === null) {
         throw new Error("Open a project before using the agent console.");
       }
-      requireAgentSessionProject(PROJECT_AGENT_SESSION, project.root);
+      requireAgentSessionProject(sessionId, project.root);
       if (frozenIntent.kind === "focus") {
-        useAgentConsoleStore.getState().setMode(frozenIntent.mode);
+        sessionStore.getState().setMode(frozenIntent.mode);
         return;
       }
       if (frozenIntent.kind === "add-context") {
-        await addAgentContext(frozenIntent.refs);
+        await addAgentContext(frozenIntent.refs, sessionId);
         return;
       }
       if (frozenIntent.kind === "prefill") {
-        await prefillAgentDraft(frozenIntent);
+        await prefillAgentDraft(frozenIntent, sessionId);
         return;
       }
-      useAgentConsoleStore.getState().setMode(frozenIntent.mode);
-      await submitAgentRequest(frozenIntent);
+      sessionStore.getState().setMode(frozenIntent.mode);
+      await submitAgentRequest(frozenIntent, sessionId);
     } catch (error) {
-      if (useAgentConsoleStore.getState().runError === null) {
+      if (sessionStore.getState().runError === null) {
         const failure = runFailure(
           error,
           useSettingsStore.getState().aiProvider,
@@ -2258,7 +2270,7 @@ export function createAgentController(
             }),
           );
         }
-        useAgentConsoleStore.setState({ runError: failure });
+        sessionStore.setState({ runError: failure });
       }
     }
   };

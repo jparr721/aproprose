@@ -203,9 +203,11 @@ function ToolActivity({
 function Findings({
   entries,
   disabled,
+  sessionId,
 }: {
   entries: FlattenedMessageFinding[];
   disabled: boolean;
+  sessionId: AgentSessionId;
 }) {
   return entries.map((entry) => {
     const finding = entry.finding;
@@ -222,16 +224,19 @@ function Findings({
             <Button
               disabled={disabled}
               onClick={() => {
-                void dispatchAgentIntent({
-                  kind: "add-context",
-                  refs: [
-                    {
-                      kind: "finding",
-                      chapterId: entry.chapterId,
-                      findingId: entry.id,
-                    },
-                  ],
-                });
+                void dispatchAgentIntent(
+                  {
+                    kind: "add-context",
+                    refs: [
+                      {
+                        kind: "finding",
+                        chapterId: entry.chapterId,
+                        findingId: entry.id,
+                      },
+                    ],
+                  },
+                  sessionId,
+                );
               }}
               size="sm"
               type="button"
@@ -256,6 +261,7 @@ function renderPart(
   messageMetadata: AgentMessageMetadata,
   findings: FlattenedMessageFinding[],
   authorMutationsDisabled: boolean,
+  sessionId: AgentSessionId,
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>,
 ): ReactNode {
   const key = `${message.id}:part:${index}`;
@@ -286,6 +292,7 @@ function renderPart(
           disabled={authorMutationsDisabled}
           entries={findings.filter((entry) => entry.partIndex === index)}
           key={key}
+          sessionId={sessionId}
         />
       );
     case "data-proposal-event":
@@ -408,6 +415,7 @@ export function AgentMessage({
               messageMetadata,
               findings,
               authorMutationsDisabled,
+              sessionId,
               onNavigateSnapshot,
             )
           ),

@@ -29,6 +29,7 @@ import {
   agentStateKey,
   emptyPersistedAgentState,
   fromAgentSnapshot,
+  hydrateAgentOutlineSession,
   loadAgentState,
   loadAgentSessionCollection,
   resetAgentConversation,
@@ -2889,6 +2890,37 @@ describe("agent persistence", () => {
     expect(collection.outlines.good.draftText).toBe("Good planner");
     expect(collection.outlines.bad).toEqual(emptyPersistedAgentState());
     expect(collection.corruptOutlineChapterIds).toEqual(["bad"]);
+  });
+
+  it("keeps overlapping planner hydration from resetting an active run", async () => {
+    const root = "/books/overlapping-planner-hydration";
+    const chapterId = "overlap-chapter";
+    const read = deferred<unknown>();
+    tauri.readAppData.mockReturnValue(read.promise);
+    useProjectStore.setState({ project: project(root) });
+    const planner = agentSessionStore({ kind: "outline", chapterId });
+    planner.getState().resetProject();
+
+    const firstHydration = hydrateAgentOutlineSession(root, chapterId);
+    const secondHydration = hydrateAgentOutlineSession(root, chapterId);
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    read.resolve({
+      v: 1,
+      sessions: {
+        [`outline:${chapterId}`]: {
+          ...emptyPersistedAgentState(),
+          draftText: "Stale hydration draft",
+        },
+      },
+    });
+    await Promise.all([firstHydration, secondHydration]);
+
+    expect(tauri.readAppData).toHaveBeenCalledTimes(1);
+    expect(planner.getState()).toMatchObject({
+      runStatus: "submitted",
+      draftText: "",
+    });
   });
 
   it("flushes planner sessions before switching projects", async () => {

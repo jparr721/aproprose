@@ -597,6 +597,7 @@ const failedSaves = new Map<string, FailedAgentSave>();
 let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionCollectionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const outlineHydrations = new Map<string, Promise<void>>();
 let activeRevision = 0;
 let persistedRevision = 0;
 let revisionSequence = 0;
@@ -1274,17 +1275,30 @@ export async function saveAgentSessionCollection(root: string): Promise<void> {
   });
 }
 
-export async function hydrateAgentOutlineSession(
+async function hydrateAgentOutlineSessionOwned(
   root: string,
   chapterId: string,
 ): Promise<void> {
   const sessionId = { kind: "outline" as const, chapterId };
   const store = agentSessionStore(sessionId);
   if (agentConsoleOwnershipStatus(store.getState(), root) === "ready") return;
+  const ownsHydration = (): boolean => {
+    const state = store.getState();
+    return (
+      useProjectStore.getState().project?.root === root &&
+      state.runStatus === "idle" &&
+      state.activeRun === null &&
+      outlineAgentSessionEntries().some(
+        ([candidateChapterId, candidateStore]) =>
+          candidateChapterId === chapterId && candidateStore === store,
+      )
+    );
+  };
   let raw: unknown;
   try {
     raw = await readAppData<unknown>(agentSessionCollectionKey(root));
   } catch (error) {
+    if (!ownsHydration()) return;
     store.getState().hydrate(root, emptyPersistedAgentState());
     store.getState().setPersistenceIssue({
       kind: "load",
@@ -1293,7 +1307,7 @@ export async function hydrateAgentOutlineSession(
     });
     return;
   }
-  if (useProjectStore.getState().project?.root !== root) return;
+  if (!ownsHydration()) return;
   const collection = persistedAgentSessionCollectionSchema.safeParse(raw);
   const snapshot = collection.success
     ? collection.data.sessions[`outline:${chapterId}`]
@@ -1303,11 +1317,14 @@ export async function hydrateAgentOutlineSession(
     return;
   }
   try {
-    store.getState().hydrate(
+    const restored = restoreAgentSnapshot(
       root,
-      restoreAgentSnapshot(root, await parseAgentSnapshot(snapshot)),
+      await parseAgentSnapshot(snapshot),
     );
+    if (!ownsHydration()) return;
+    store.getState().hydrate(root, restored);
   } catch (error) {
+    if (!ownsHydration()) return;
     store.getState().hydrate(root, emptyPersistedAgentState());
     store.getState().setPersistenceIssue({
       kind: "corrupt",
@@ -1315,6 +1332,24 @@ export async function hydrateAgentOutlineSession(
       message: errorMessage(error),
     });
   }
+}
+
+export function hydrateAgentOutlineSession(
+  root: string,
+  chapterId: string,
+): Promise<void> {
+  const key = JSON.stringify([root, chapterId]);
+  const current = outlineHydrations.get(key);
+  if (current !== undefined) return current;
+  const hydration = hydrateAgentOutlineSessionOwned(root, chapterId).finally(
+    () => {
+      if (outlineHydrations.get(key) === hydration) {
+        outlineHydrations.delete(key);
+      }
+    },
+  );
+  outlineHydrations.set(key, hydration);
+  return hydration;
 }
 
 export async function fromAgentSnapshot(

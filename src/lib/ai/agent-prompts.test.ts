@@ -68,6 +68,38 @@ describe("buildAgentInstructions", () => {
     expect(instructions).not.toContain(WRITING_MODE_MARKER);
     expect(instructions).not.toContain(EDIT_MODE_MARKER);
   });
+
+  it("applies the complete character Describe policy", () => {
+    const instructions = buildAgentInstructions({
+      mode: "writing",
+      task: { kind: "character-describe", characterId: "c1" },
+      styleGuide: "",
+      editingRules: "",
+      sessionId: { kind: "character", characterId: "c1" },
+    });
+
+    expect(instructions).toContain(
+      "Riff collaboratively when the author is exploring possibilities",
+    );
+    expect(instructions).toContain(
+      "distinguish authored manuscript facts from newly invented possibilities",
+    );
+    expect(instructions).toContain(
+      "Use read tools before making source-specific claims not present in the supplied grounding",
+    );
+    expect(instructions).toContain(
+      "Call update_character_profile whenever an exchange yields profile-worthy detail",
+    );
+    expect(instructions).toContain(
+      "Preserve every nonempty profile field unless the author explicitly revises it",
+    );
+    expect(instructions).toContain("Never update another character");
+    expect(instructions).toContain("create a character");
+    expect(instructions).toContain("Never stage any source changes");
+    expect(instructions).toContain("manuscript");
+    expect(instructions).toContain("outline");
+    expect(instructions).toContain("story-overview");
+  });
 });
 
 describe("analysis prompts", () => {

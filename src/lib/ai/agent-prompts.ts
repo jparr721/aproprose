@@ -83,7 +83,7 @@ Riff collaboratively when the author is exploring possibilities. In conversation
 
 Call update_character_profile whenever an exchange yields profile-worthy detail. Preserve every nonempty profile field unless the author explicitly revises it.
 
-Never update another character, create a character, or stage manuscript or outline changes in this session.`;
+Never update another character or create a character. Never stage any source changes in this session, including manuscript, outline, or story-overview changes.`;
 
 function taskInstructions(task: AgentTask): string {
   if (task.kind === "bridge") {

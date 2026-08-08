@@ -3,18 +3,20 @@ import {
   blockFingerprint,
   blockOrderFingerprint,
   cardFingerprint,
+  characterProfileFingerprint,
   contextSnapshotToSourcePart,
   findBridgeSuccessor,
   flattenMessageFindings,
   resolveDraftSnapshots,
   resolveSnapshotBlock,
+  storyFieldsFingerprint,
 } from "@/lib/ai/agent-context";
 import type {
   AgentUIMessage,
   ContextSourceResolver,
   DraftContextRef,
 } from "@/lib/ai/agent-types";
-import type { Block, Card } from "@/lib/types";
+import type { Block, Card, CharacterProfile, Outline } from "@/lib/types";
 
 const prose = (id: string, text: string): Block => ({
   id,
@@ -31,6 +33,15 @@ const card: Card = {
   characterIds: [],
   loreIds: [],
   continuityFlags: [],
+};
+
+const profile: CharacterProfile = {
+  appearance: "Gray eyes",
+  mannerisms: "Counts doorways",
+  motivations: "Find the missing map",
+  relationships: "Trusts Mara",
+  history: "Raised near the harbor",
+  voice: "Precise and restrained",
 };
 
 describe("agent source fingerprints", () => {
@@ -54,6 +65,29 @@ describe("agent source fingerprints", () => {
     expect(blockOrderFingerprint([prose("a", "A"), prose("b", "B")])).not.toBe(
       blockOrderFingerprint([prose("b", "B"), prose("a", "A")]),
     );
+  });
+
+  it("tracks character profile fields independent of object identity", () => {
+    expect(characterProfileFingerprint({ ...profile })).toBe(
+      characterProfileFingerprint(profile),
+    );
+    expect(
+      characterProfileFingerprint({ ...profile, voice: "Quick and sardonic" }),
+    ).not.toBe(characterProfileFingerprint(profile));
+  });
+
+  it("tracks changes to either global story field", () => {
+    const outline: Outline = {
+      premise: "A cartographer searches for a vanished island.",
+      overview: "The search uncovers a conspiracy in the royal navy.",
+    };
+
+    expect(
+      storyFieldsFingerprint({ ...outline, premise: "The island returns." }),
+    ).not.toBe(storyFieldsFingerprint(outline));
+    expect(
+      storyFieldsFingerprint({ ...outline, overview: "The navy closes in." }),
+    ).not.toBe(storyFieldsFingerprint(outline));
   });
 });
 

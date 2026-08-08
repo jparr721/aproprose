@@ -1148,6 +1148,7 @@ export function createAgentController(
   dependencies: AgentControllerDependencies,
 ) {
   const activeControllers = new Map<string, ActiveController>();
+  const activeRunError = "An agent run is already active";
 
   const activeControllerFor = (
     sessionId: AgentSessionId,
@@ -1477,6 +1478,7 @@ export function createAgentController(
     const abortController = new AbortController();
     const sessionStore = agentSessionStore(capture.sessionId);
     try {
+      if (activeControllers.size > 0) throw new Error(activeRunError);
       sessionStore.getState().beginPreflight();
     } catch (error) {
       const refusal = runFailure(error, capture.provider, null);

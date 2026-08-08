@@ -21,7 +21,9 @@ import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
 import {
   agentSessionStore,
+  characterAgentSessionEntries,
   clearCharacterAgentSessions,
+  deleteCharacterAgentSession,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import {
@@ -3094,6 +3096,65 @@ describe("agent persistence", () => {
     await hydrateAgentCharacterSession(root, "c1");
 
     expect(agentSessionStore(sessionId).getState().messages).toHaveLength(2);
+  });
+
+  it("does not recreate a deleted character session when an in-flight save settles", async () => {
+    const root = "/books/deleted-character-save";
+    useProjectStore.setState({
+      project: project(root),
+      meta: {
+        ...EMPTY_META,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+            profile: {
+              appearance: "",
+              mannerisms: "",
+              motivations: "",
+              relationships: "",
+              history: "",
+              voice: "",
+            },
+          },
+        ],
+      },
+    });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root),
+    );
+    tauri.writeAppData.mockClear();
+    const pendingWrite = deferred<void>();
+    tauri.writeAppData.mockImplementation((key: string) =>
+      key === agentSessionCollectionKey(root)
+        ? pendingWrite.promise
+        : Promise.resolve(),
+    );
+    vi.useFakeTimers();
+    const session = agentSessionStore({
+      kind: "character",
+      characterId: "c1",
+    });
+    session.getState().hydrate(root, emptyPersistedAgentState());
+    session.getState().setDraftText("Character draft");
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() =>
+      expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentSessionCollectionKey(root),
+        expect.anything(),
+      ),
+    );
+
+    deleteCharacterAgentSession("c1");
+    pendingWrite.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(characterAgentSessionEntries()).toEqual([]);
+    vi.useRealTimers();
+    persistence.unmount();
   });
 
   it("flushes planner sessions before switching projects", async () => {

@@ -25,6 +25,7 @@ import { pathHash } from "@/lib/path-hash";
 import { legacyAgentFailure } from "@/lib/ai/agent-failure";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import {
+  type AgentConsoleStore,
   type AgentPersistenceTransitionCapture,
   AgentConsoleOwnershipError,
   agentSessionStore,
@@ -761,7 +762,7 @@ function clearSessionCollectionSaveTimer(): void {
 }
 
 function scheduleAgentSessionCollectionSave(
-  requestedSessionId?: ScopedAgentSessionId,
+  requestedStore?: AgentConsoleStore,
 ): void {
   clearSessionCollectionSaveTimer();
   const root = useAgentConsoleStore.getState().activeProjectRoot;
@@ -771,21 +772,18 @@ function scheduleAgentSessionCollectionSave(
     if (writableRoot !== root) return;
     void saveAgentSessionCollection(root).then(
       () => {
-        if (requestedSessionId === undefined) return;
-        const store = agentSessionStore(requestedSessionId);
-        if (store.getState().persistenceIssue?.kind === "save") {
-          store.getState().setPersistenceIssue(null);
+        if (requestedStore === undefined) return;
+        if (requestedStore.getState().persistenceIssue?.kind === "save") {
+          requestedStore.getState().setPersistenceIssue(null);
         }
       },
       (error) => {
-        if (requestedSessionId !== undefined) {
-          agentSessionStore(requestedSessionId)
-            .getState()
-            .setPersistenceIssue({
-              kind: "save",
-              projectRoot: root,
-              message: errorMessage(error),
-            });
+        if (requestedStore !== undefined) {
+          requestedStore.getState().setPersistenceIssue({
+            kind: "save",
+            projectRoot: root,
+            message: errorMessage(error),
+          });
         }
         logPersistenceFailure(root, error);
       },
@@ -2077,10 +2075,7 @@ export function useAgentPersistence(): void {
           chapterId,
           store.subscribe((state, previous) => {
             if (!persistedFieldsChanged(state, previous)) return;
-            scheduleAgentSessionCollectionSave({
-              kind: "outline",
-              chapterId,
-            });
+            scheduleAgentSessionCollectionSave(store);
           }),
         );
       }
@@ -2100,10 +2095,7 @@ export function useAgentPersistence(): void {
           characterId,
           store.subscribe((state, previous) => {
             if (!persistedFieldsChanged(state, previous)) return;
-            scheduleAgentSessionCollectionSave({
-              kind: "character",
-              characterId,
-            });
+            scheduleAgentSessionCollectionSave(store);
           }),
         );
       }

@@ -31,7 +31,10 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
   };
 });
 
-import { AgentConsole } from "@/components/app/agent-console/agent-console";
+import {
+  AgentConsole,
+  AgentSection,
+} from "@/components/app/agent-console/agent-console";
 import type {
   AgentMessageMetadata,
   AgentPersistenceIssue,
@@ -43,6 +46,7 @@ import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
 import {
   EMPTY_AGENT_STATE,
+  agentSessionStore,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import {
@@ -231,6 +235,39 @@ describe("AgentConsole shell", () => {
       expect(getComputedStyle(region).overflowY).not.toBe("auto");
       expect(getComputedStyle(region).overflowY).not.toBe("scroll");
     }
+  });
+
+  it("does not render review proposals for character sessions", () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    agentSessionStore(sessionId).setState({
+      ...EMPTY_AGENT_STATE,
+      activeProjectRoot: project.root,
+      hydratedProjectRoot: project.root,
+      pendingProposal: proposal,
+      requestedProjectRoot: project.root,
+    });
+
+    render(
+      <AgentSection
+        ariaLabel="Character Describe"
+        closeLabel="Close Character Describe"
+        contextLabel="Quiet Novel / Mara"
+        emptyDescription="Describe Mara"
+        emptyTitle="Describe Mara"
+        onClose={vi.fn()}
+        placeholder="Describe Mara or explore new details"
+        sessionId={sessionId}
+        task={{ kind: "character-describe", characterId: "c1" }}
+        title="Character Describe"
+      />,
+    );
+
+    expect(screen.queryByText("Tighten the crossing")).toBeNull();
+    expect(
+      screen
+        .getByRole("region", { name: "Character Describe" })
+        .querySelector("[data-agent-review-tray]"),
+    ).toBeNull();
   });
 
   it("hides and reopens the same conversation, draft, mode, attachments, and proposal", () => {

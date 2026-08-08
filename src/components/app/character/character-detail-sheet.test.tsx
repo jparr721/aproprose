@@ -1,7 +1,19 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const agent = vi.hoisted(() => ({
+  hydrateAgentCharacterSession: vi.fn(),
+  stopAgentRun: vi.fn(),
+}));
 
 vi.mock("@/lib/storage", () => ({
   tauriStateStorage: {
@@ -11,22 +23,39 @@ vi.mock("@/lib/storage", () => ({
   },
 }));
 
-vi.mock("@/lib/tauri", () => ({
-  compileProject: vi.fn(),
-  openProject: vi.fn(),
-  createProject: vi.fn(),
-  writeSkeleton: vi.fn(),
-  deleteChapterCmd: vi.fn(),
-  migrateToManaged: vi.fn(),
-  pickProjectDir: vi.fn(),
-  readAppData: vi.fn().mockResolvedValue(null),
-  readPdf: vi.fn().mockResolvedValue(null),
-  readProjectMeta: vi.fn().mockResolvedValue(null),
-  readTextFile: vi.fn(),
-  writeAppData: vi.fn().mockResolvedValue(undefined),
-  writeProjectMeta: vi.fn().mockResolvedValue(undefined),
-  writeTextFile: vi.fn(),
-}));
+vi.mock("@/lib/tauri", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tauri")>();
+  return {
+    ...actual,
+    compileProject: vi.fn(),
+    openProject: vi.fn(),
+    createProject: vi.fn(),
+    writeSkeleton: vi.fn(),
+    deleteChapterCmd: vi.fn(),
+    migrateToManaged: vi.fn(),
+    pickProjectDir: vi.fn(),
+    readAppData: vi.fn().mockResolvedValue(null),
+    readPdf: vi.fn().mockResolvedValue(null),
+    readProjectMeta: vi.fn().mockResolvedValue(null),
+    readTextFile: vi.fn(),
+    writeAppData: vi.fn().mockResolvedValue(undefined),
+    writeProjectMeta: vi.fn().mockResolvedValue(undefined),
+    writeTextFile: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/ai/agent-controller", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ai/agent-controller")>();
+  return { ...actual, stopAgentRun: agent.stopAgentRun };
+});
+
+vi.mock("@/stores/agent-persistence", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/agent-persistence")>();
+  return {
+    ...actual,
+    hydrateAgentCharacterSession: agent.hydrateAgentCharacterSession,
+  };
+});
 
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { CharacterDetailSheet } from "@/components/app/character/character-detail-sheet";
@@ -34,11 +63,16 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { CHARACTER_COLORS } from "@/lib/characters/colors";
 import { CURRENT_VERSION } from "@/lib/migration";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
+import {
+  agentSessionStore,
+  clearCharacterAgentSessions,
+  EMPTY_AGENT_STATE,
+} from "@/stores/agent-console-store";
 import { useCharacterSheetStore } from "@/stores/character-sheet-store";
 import { useProjectStore } from "@/stores/project-store";
 
 const project = {
-  root: "/books/quiet-novel",
+  root: "/book",
   name: "Quiet Novel",
   mainFile: "main.tex",
   title: "Quiet Novel",
@@ -63,6 +97,10 @@ const profile = {
 };
 
 beforeEach(() => {
+  agent.hydrateAgentCharacterSession.mockReset();
+  agent.hydrateAgentCharacterSession.mockResolvedValue(undefined);
+  agent.stopAgentRun.mockReset();
+  clearCharacterAgentSessions();
   useCharacterSheetStore.setState({ characterId: null, view: "manual" });
   useProjectStore.setState({
     project,
@@ -89,6 +127,19 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("CharacterDetailSheet", () => {
+  function renderDescribeView(characterId: string): void {
+    const sessionId = { kind: "character" as const, characterId };
+    agentSessionStore(sessionId).setState({
+      ...EMPTY_AGENT_STATE,
+      activeProjectRoot: project.root,
+      hydratedProjectRoot: project.root,
+      requestedProjectRoot: project.root,
+    });
+    render(<CharacterDetailSheet />);
+    act(() => useCharacterSheetStore.getState().open(characterId));
+    fireEvent.click(screen.getByRole("button", { name: "Describe with AI" }));
+  }
+
   it("opens from a sidebar character and edits every structured field", () => {
     render(<AppSidebar />, { wrapper: SidebarProvider });
     fireEvent.click(screen.getByRole("button", { name: /Mara/ }));
@@ -142,5 +193,66 @@ describe("CharacterDetailSheet", () => {
       role: "Archivist",
       color: CHARACTER_COLORS[1],
     });
+  });
+
+  it("hydrates the selected character session and renders its agent surface", async () => {
+    renderDescribeView("c1");
+
+    await waitFor(() => {
+      expect(agent.hydrateAgentCharacterSession).toHaveBeenCalledWith(
+        "/book",
+        "c1",
+      );
+    });
+    expect(agent.hydrateAgentCharacterSession).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: "Describe with AI" }).dataset.variant,
+    ).toBe("default");
+    expect(screen.getByRole("button", { name: "Manual" }).dataset.variant).toBe(
+      "outline",
+    );
+    expect(screen.getByLabelText("Character Describe")).toBeTruthy();
+    expect(
+      screen.getByPlaceholderText("Describe Mara or explore new details"),
+    ).toBeTruthy();
+  });
+
+  it("stops the character run when returning to Manual", () => {
+    renderDescribeView("c1");
+    fireEvent.click(screen.getByRole("button", { name: "Manual" }));
+
+    expect(agent.stopAgentRun).toHaveBeenCalledTimes(1);
+    expect(agent.stopAgentRun).toHaveBeenCalledWith({
+      kind: "character",
+      characterId: "c1",
+    });
+  });
+
+  it("stops the character run when closing the sheet", () => {
+    renderDescribeView("c1");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(agent.stopAgentRun).toHaveBeenCalledTimes(1);
+    expect(agent.stopAgentRun).toHaveBeenCalledWith({
+      kind: "character",
+      characterId: "c1",
+    });
+  });
+
+  it("shows live character tool updates when returning to Manual", () => {
+    renderDescribeView("c1");
+    act(() => {
+      useProjectStore.getState().updateCharacter("c1", {
+        profile: {
+          ...profile,
+          appearance: "Tall, with a silver braid.",
+        },
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Manual" }));
+
+    expect(
+      (screen.getByLabelText("Appearance") as HTMLTextAreaElement).value,
+    ).toBe("Tall, with a silver braid.");
   });
 });

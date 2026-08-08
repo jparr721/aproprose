@@ -269,7 +269,9 @@ function AgentSectionContent({
             sessionId={sessionId}
             summary={summary}
           />
-          {pendingProposal === null ? null : <ReviewTray sessionId={sessionId} />}
+          {sessionId.kind === "character" || pendingProposal === null ? null : (
+            <ReviewTray sessionId={sessionId} />
+          )}
           <AgentComposer placeholder={placeholder} sessionId={sessionId} task={task} />
         </>
       ) : (

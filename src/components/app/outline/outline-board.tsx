@@ -25,6 +25,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { TypographyEyebrow } from "@/components/ui/typography";
 import { ActBand } from "@/components/app/outline/act-band";
+import { StoryRefreshStatus } from "@/components/app/outline/story-refresh-status";
 import { resolveCardDrop } from "@/lib/outline/board-dnd";
 import { actPacing } from "@/lib/outline/model";
 import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
@@ -81,6 +82,7 @@ export function OutlineBoard() {
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex flex-col p-4 space-y-2">
+        <StoryRefreshStatus />
         <TypographyEyebrow>Logline</TypographyEyebrow>
         <Textarea
           value={premise}

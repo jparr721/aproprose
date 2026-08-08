@@ -81,6 +81,7 @@ interface EvidenceLocator {
   sourceId: string;
   order: number;
   fingerprint: string;
+  previewText: string;
 }
 
 type CharacterProfileField = keyof CharacterProfile;
@@ -130,7 +131,7 @@ interface ProjectKnowledge {
 }
 ```
 
-Evidence uses the existing source-locator pattern rather than trusting a parsed block ID alone. The ID supports exact matches during the current session, while order and content fingerprint allow later resolution after blocks are reparsed.
+Evidence uses the existing source-locator pattern rather than trusting a parsed block ID alone. The ID supports exact matches during the current session, while order and content fingerprint allow later resolution after blocks are reparsed. `previewText` stores at most 240 characters from the source block so candidate review does not need another filesystem read.
 
 The knowledge store does not persist runtime status, active promises, abort controllers, or queued jobs.
 

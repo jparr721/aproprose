@@ -222,6 +222,62 @@ describe("story chunk analysis", () => {
     });
   });
 
+  it("generates the same observation ID for permuted source IDs", async () => {
+    const baseInput = mapInputFixture();
+    const input = {
+      ...baseInput,
+      chunk: {
+        ...baseInput.chunk,
+        blocks: [
+          ...baseInput.chunk.blocks,
+          {
+            locator: {
+              chapterId: "ch1",
+              sourceId: "b2",
+              order: 1,
+              fingerprint: "fp-b2",
+              previewText: "She checks the back door next.",
+            },
+            type: "narration" as const,
+            text: "She checks the back door next.",
+            speakerId: null,
+          },
+        ],
+      },
+    };
+    const outputFor = (sourceIds: string[]) => ({
+      ...emptyMapOutput(),
+      characterObservations: [
+        {
+          characterId: "c1",
+          field: "mannerisms",
+          detail: "Mara checks every lock twice.",
+          sourceIds,
+        },
+      ],
+    });
+    vi.mocked(generateText)
+      .mockResolvedValueOnce({ output: outputFor(["b1", "b2"]) } as never)
+      .mockResolvedValueOnce({ output: outputFor(["b2", "b1"]) } as never);
+
+    const first = await analyzeStoryChunk(
+      input,
+      aiOptions(new AbortController().signal),
+    );
+    const second = await analyzeStoryChunk(
+      input,
+      aiOptions(new AbortController().signal),
+    );
+
+    expect(second.characterObservations[0].id).toBe(
+      first.characterObservations[0].id,
+    );
+    expect(second.characterObservations[0].evidence.map(({ sourceId }) => sourceId)).toEqual([
+      "b1",
+      "b2",
+    ]);
+  });
+
   it("forwards abort and retries one failed generation", async () => {
     const abort = new AbortController();
     vi.mocked(generateText)

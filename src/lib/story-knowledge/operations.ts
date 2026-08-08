@@ -210,13 +210,10 @@ function resolveEvidence(
   ) {
     return null;
   }
-  return uniqueSourceIds.map((sourceId) => {
-    const locator = locatorBySourceId.get(sourceId);
-    if (locator === undefined) {
-      throw new Error(`Missing offered evidence locator for source ${sourceId}`);
-    }
-    return { ...locator };
-  });
+  const citedSourceIds = new Set(uniqueSourceIds);
+  return [...locatorBySourceId.entries()].flatMap(([sourceId, locator]) =>
+    citedSourceIds.has(sourceId) ? [{ ...locator }] : [],
+  );
 }
 
 function observationId(

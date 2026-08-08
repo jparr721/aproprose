@@ -202,8 +202,10 @@ export function candidateEvidenceFingerprint(
   name: string,
   evidence: EvidenceLocator[],
 ): string {
-  const fingerprints = [...new Set(sortedEvidenceFingerprints(evidence))];
-  return textFingerprint(JSON.stringify([normalize(name), fingerprints]));
+  const locatorKeys = [
+    ...new Set(evidence.map((locator) => evidenceLocatorKey(locator))),
+  ].sort();
+  return textFingerprint(JSON.stringify([normalize(name), locatorKeys]));
 }
 
 export function eligibleUnknownCharacterGroups(

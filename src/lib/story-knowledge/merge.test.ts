@@ -251,4 +251,17 @@ describe("candidate evidence fingerprints", () => {
       candidateEvidenceFingerprint("Inez", [secondEvidence]),
     );
   });
+
+  it("distinguishes locator identity when content fingerprints match", () => {
+    const original = evidence("ch1", "b1", "same-content");
+    const otherChapter = evidence("ch2", "b1", "same-content");
+    const otherSource = evidence("ch1", "b2", "same-content");
+
+    expect(candidateEvidenceFingerprint("Inez", [original])).not.toBe(
+      candidateEvidenceFingerprint("Inez", [otherChapter]),
+    );
+    expect(candidateEvidenceFingerprint("Inez", [original])).not.toBe(
+      candidateEvidenceFingerprint("Inez", [otherSource]),
+    );
+  });
 });

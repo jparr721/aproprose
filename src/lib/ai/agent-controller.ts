@@ -627,6 +627,7 @@ function targetChapterId(
   sessionId: AgentSessionId,
 ): string | null {
   if (task.kind === "conversation") return task.targetChapterId;
+  if (task.kind === "character-describe") return null;
   if (task.kind === "proposal-follow-up") {
     if (
       pendingProposal === null ||

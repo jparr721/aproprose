@@ -190,7 +190,12 @@ function cardLocator(cards: Card[], sourceId: string): SourceLocator {
 
 function targetChapter(run: AgentRun): string | null {
   if (run.task.kind === "conversation") return run.task.targetChapterId;
-  if (run.task.kind === "proposal-follow-up") return null;
+  if (
+    run.task.kind === "proposal-follow-up" ||
+    run.task.kind === "character-describe"
+  ) {
+    return null;
+  }
   return run.task.chapterId;
 }
 

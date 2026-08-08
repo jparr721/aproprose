@@ -4,9 +4,13 @@ import type {
   AgentUIMessage,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
-import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
+import {
+  agentSessionKey,
+  PROJECT_AGENT_SESSION,
+} from "@/lib/ai/agent-types";
 import {
   agentSessionStore,
+  clearCharacterAgentSessions,
   clearOutlineAgentSessions,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -54,6 +58,18 @@ describe("agent sessions", () => {
     clearOutlineAgentSessions();
     useAgentConsoleStore.getState().resetProject();
     hydrate(PROJECT_AGENT_SESSION);
+  });
+
+  it("keys character sessions independently", () => {
+    clearCharacterAgentSessions();
+    expect(agentSessionKey({ kind: "character", characterId: "c1" })).toBe(
+      "character:c1",
+    );
+    expect(
+      agentSessionStore({ kind: "character", characterId: "c1" }),
+    ).not.toBe(
+      agentSessionStore({ kind: "character", characterId: "c2" }),
+    );
   });
 
   it("isolates project and per-chapter conversation state", () => {

@@ -96,6 +96,9 @@ function taskInstructions(task: AgentTask): string {
   if (task.kind === "proposal-follow-up") {
     return `FROZEN TASK: replace pending proposal ${task.proposalId} completely.`;
   }
+  if (task.kind === "character-describe") {
+    return "FROZEN TASK: conversation with no write target.";
+  }
   return task.targetChapterId === null
     ? "FROZEN TASK: conversation with no write target."
     : `FROZEN TASK: conversation may stage changes only for chapter ${task.targetChapterId}.`;

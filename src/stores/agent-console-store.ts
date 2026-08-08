@@ -925,16 +925,30 @@ export const useAgentConsoleStore = create<AgentConsoleState>()(
 export type AgentConsoleStore = StoreApi<AgentConsoleState>;
 
 const outlineAgentStores = new Map<string, AgentConsoleStore>();
+const characterAgentStores = new Map<string, AgentConsoleStore>();
 const agentSessionRegistryListeners = new Set<() => void>();
 
 export function agentSessionStore(sessionId: AgentSessionId): AgentConsoleStore {
-  if (sessionId.kind === "project") return useAgentConsoleStore;
-  const current = outlineAgentStores.get(sessionId.chapterId);
-  if (current !== undefined) return current;
-  const created = createStore<AgentConsoleState>()(createAgentConsoleState);
-  outlineAgentStores.set(sessionId.chapterId, created);
-  agentSessionRegistryListeners.forEach((listener) => listener());
-  return created;
+  switch (sessionId.kind) {
+    case "project":
+      return useAgentConsoleStore;
+    case "outline": {
+      const current = outlineAgentStores.get(sessionId.chapterId);
+      if (current !== undefined) return current;
+      const created = createStore<AgentConsoleState>()(createAgentConsoleState);
+      outlineAgentStores.set(sessionId.chapterId, created);
+      agentSessionRegistryListeners.forEach((listener) => listener());
+      return created;
+    }
+    case "character": {
+      const current = characterAgentStores.get(sessionId.characterId);
+      if (current !== undefined) return current;
+      const created = createStore<AgentConsoleState>()(createAgentConsoleState);
+      characterAgentStores.set(sessionId.characterId, created);
+      agentSessionRegistryListeners.forEach((listener) => listener());
+      return created;
+    }
+  }
 }
 
 export function outlineAgentSessionEntries(): Array<[
@@ -953,6 +967,25 @@ export function deleteOutlineAgentSession(chapterId: string): void {
 export function clearOutlineAgentSessions(): void {
   if (outlineAgentStores.size === 0) return;
   outlineAgentStores.clear();
+  agentSessionRegistryListeners.forEach((listener) => listener());
+}
+
+export function characterAgentSessionEntries(): Array<[
+  string,
+  AgentConsoleStore,
+]> {
+  return [...characterAgentStores.entries()];
+}
+
+export function deleteCharacterAgentSession(characterId: string): void {
+  if (characterAgentStores.delete(characterId)) {
+    agentSessionRegistryListeners.forEach((listener) => listener());
+  }
+}
+
+export function clearCharacterAgentSessions(): void {
+  if (characterAgentStores.size === 0) return;
+  characterAgentStores.clear();
   agentSessionRegistryListeners.forEach((listener) => listener());
 }
 

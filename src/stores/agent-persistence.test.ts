@@ -21,6 +21,7 @@ import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
 import {
   agentSessionStore,
+  clearCharacterAgentSessions,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import {
@@ -29,6 +30,7 @@ import {
   agentStateKey,
   emptyPersistedAgentState,
   fromAgentSnapshot,
+  hydrateAgentCharacterSession,
   hydrateAgentOutlineSession,
   loadAgentState,
   loadAgentSessionCollection,
@@ -296,6 +298,27 @@ afterEach(() => {
 });
 
 describe("agent persistence", () => {
+  it("rejects a persisted character describe task whose ID is blank", async () => {
+    const raw = persistedState("", [
+      {
+        ...textMessage(
+          "character-user",
+          "user",
+          "Describe Mara.",
+          "complete",
+        ),
+        metadata: {
+          ...metadata,
+          task: { kind: "character-describe", characterId: "" },
+        },
+      },
+    ]);
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: "/books/one" },
+    });
+  });
+
   it("recovers a completed outputless assistant run as a retryable error", async () => {
     const zeroUsage: PersistedUsage = {
       modelId: "gpt-5.6-luna",
@@ -3002,6 +3025,77 @@ describe("agent persistence", () => {
     });
   });
 
+  it("round trips character conversations in the scoped session collection", async () => {
+    const root = "/book";
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const disk = new Map<string, unknown>();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key, value) => {
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({
+      project: project(root),
+      meta: {
+        ...EMPTY_META,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+            profile: {
+              appearance: "",
+              mannerisms: "",
+              motivations: "",
+              relationships: "",
+              history: "",
+              voice: "",
+            },
+          },
+        ],
+      },
+    });
+    useAgentConsoleStore.getState().hydrate(root, emptyPersistedAgentState());
+    const character = agentSessionStore(sessionId);
+    character.getState().hydrate(root, emptyPersistedAgentState());
+    character.setState({
+      messages: [
+        {
+          ...textMessage(
+            "character-user",
+            "user",
+            "Describe Mara.",
+            "complete",
+          ),
+          metadata: {
+            ...metadata,
+            task: { kind: "character-describe", characterId: "c1" },
+          },
+        },
+        {
+          ...textMessage(
+            "character-assistant",
+            "assistant",
+            "Mara is precise.",
+            "complete",
+          ),
+          metadata: {
+            ...metadata,
+            task: { kind: "character-describe", characterId: "c1" },
+          },
+        },
+      ],
+    });
+
+    await saveAgentSessionCollection(root);
+    clearCharacterAgentSessions();
+    await hydrateAgentCharacterSession(root, "c1");
+
+    expect(agentSessionStore(sessionId).getState().messages).toHaveLength(2);
+  });
+
   it("flushes planner sessions before switching projects", async () => {
     const firstRoot = "/books/first";
     await transitionAgentProject(firstRoot);
@@ -3169,6 +3263,62 @@ describe("agent persistence", () => {
     );
     expect(collectionWrite?.[1]).not.toHaveProperty(
       "sessions.outline:deleted-chapter",
+    );
+  });
+
+  it("prunes deleted character sessions while preserving outline sessions", async () => {
+    const root = "/books/character-pruning";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    const deletedCharacter = agentSessionStore({
+      kind: "character",
+      characterId: "deleted-character",
+    });
+    deletedCharacter.getState().hydrate(root, {
+      ...emptyPersistedAgentState(),
+      draftText: "Live deleted character draft",
+    });
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:chapter-1": {
+          ...emptyPersistedAgentState(),
+          draftText: "Retained outline draft",
+        },
+        "character:deleted-character": {
+          ...emptyPersistedAgentState(),
+          draftText: "Deleted character draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(root),
+    );
+    expect(collectionWrite?.[1]).toHaveProperty(
+      "sessions.outline:chapter-1.draftText",
+      "Retained outline draft",
+    );
+    expect(collectionWrite?.[1]).not.toHaveProperty(
+      "sessions.character:deleted-character",
     );
   });
 });

@@ -15,27 +15,47 @@ export type AgentMode = "writing" | "edit";
 
 export type AgentSessionId =
   | { kind: "project" }
-  | { kind: "outline"; chapterId: string };
+  | { kind: "outline"; chapterId: string }
+  | { kind: "character"; characterId: string };
 
 export type AgentSessionProfile =
   | { kind: "project"; mode: AgentMode }
-  | { kind: "outline"; mode: "planning"; chapterId: string };
+  | { kind: "outline"; mode: "planning"; chapterId: string }
+  | { kind: "character"; mode: "describing"; characterId: string };
 
 export const PROJECT_AGENT_SESSION: AgentSessionId = { kind: "project" };
 
 export function agentSessionKey(sessionId: AgentSessionId): string {
-  return sessionId.kind === "project"
-    ? "project"
-    : `outline:${sessionId.chapterId}`;
+  switch (sessionId.kind) {
+    case "project":
+      return "project";
+    case "outline":
+      return `outline:${sessionId.chapterId}`;
+    case "character":
+      return `character:${sessionId.characterId}`;
+  }
 }
 
 export function agentSessionProfile(
   sessionId: AgentSessionId,
   mode: AgentMode,
 ): AgentSessionProfile {
-  return sessionId.kind === "project"
-    ? { kind: "project", mode }
-    : { kind: "outline", mode: "planning", chapterId: sessionId.chapterId };
+  switch (sessionId.kind) {
+    case "project":
+      return { kind: "project", mode };
+    case "outline":
+      return {
+        kind: "outline",
+        mode: "planning",
+        chapterId: sessionId.chapterId,
+      };
+    case "character":
+      return {
+        kind: "character",
+        mode: "describing",
+        characterId: sessionId.characterId,
+      };
+  }
 }
 
 export type DraftContextRef =
@@ -99,6 +119,7 @@ export type AgentTask =
       analysis: "critique" | "continuity";
     }
   | { kind: "outline-sculpt"; chapterId: string }
+  | { kind: "character-describe"; characterId: string }
   | { kind: "proposal-follow-up"; proposalId: string };
 
 export interface AgentRun {

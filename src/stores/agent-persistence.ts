@@ -17,7 +17,10 @@ import type {
   PersistedPendingProposal,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
-import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
+import {
+  agentSessionKey,
+  PROJECT_AGENT_SESSION,
+} from "@/lib/ai/agent-types";
 import { pathHash } from "@/lib/path-hash";
 import { legacyAgentFailure } from "@/lib/ai/agent-failure";
 import { readAppData, writeAppData } from "@/lib/tauri";
@@ -26,6 +29,8 @@ import {
   AgentConsoleOwnershipError,
   agentSessionStore,
   agentConsoleOwnershipStatus,
+  characterAgentSessionEntries,
+  clearCharacterAgentSessions,
   clearOutlineAgentSessions,
   outlineAgentSessionEntries,
   subscribeAgentSessionRegistry,
@@ -70,6 +75,12 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("outline-sculpt"),
       chapterId: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("character-describe"),
+      characterId: z.string().min(1),
     })
     .strict(),
   z
@@ -548,7 +559,9 @@ const persistedAgentSessionCollectionSchema = z
 interface LoadedAgentSessionCollection {
   project: PersistedAgentState;
   outlines: Record<string, PersistedAgentState>;
+  characters: Record<string, PersistedAgentState>;
   corruptOutlineChapterIds: string[];
+  corruptCharacterIds: string[];
 }
 
 type AgentSnapshotSource = Pick<
@@ -563,6 +576,8 @@ type AgentSnapshotSource = Pick<
   | "lastUsage"
   | "interruptedRun"
 >;
+
+type ScopedAgentSessionId = Exclude<AgentSessionId, { kind: "project" }>;
 
 interface FailedRecoveryState {
   source: AgentSnapshotSource;
@@ -598,6 +613,7 @@ let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionCollectionSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const outlineHydrations = new Map<string, Promise<void>>();
+const characterHydrations = new Map<string, Promise<void>>();
 const sessionCollectionSaveQueues = new Map<string, Promise<void>>();
 let activeRevision = 0;
 let persistedRevision = 0;
@@ -745,9 +761,8 @@ function clearSessionCollectionSaveTimer(): void {
 }
 
 function scheduleAgentSessionCollectionSave(
-  requestedChapterId?: string | null,
+  requestedSessionId?: ScopedAgentSessionId,
 ): void {
-  const chapterId = requestedChapterId ?? null;
   clearSessionCollectionSaveTimer();
   const root = useAgentConsoleStore.getState().activeProjectRoot;
   if (root === null || writableRoot !== root) return;
@@ -756,15 +771,15 @@ function scheduleAgentSessionCollectionSave(
     if (writableRoot !== root) return;
     void saveAgentSessionCollection(root).then(
       () => {
-        if (chapterId === null) return;
-        const store = agentSessionStore({ kind: "outline", chapterId });
+        if (requestedSessionId === undefined) return;
+        const store = agentSessionStore(requestedSessionId);
         if (store.getState().persistenceIssue?.kind === "save") {
           store.getState().setPersistenceIssue(null);
         }
       },
       (error) => {
-        if (chapterId !== null) {
-          agentSessionStore({ kind: "outline", chapterId })
+        if (requestedSessionId !== undefined) {
+          agentSessionStore(requestedSessionId)
             .getState()
             .setPersistenceIssue({
               kind: "save",
@@ -927,7 +942,7 @@ export function resetAgentConversation(
   requestedSessionId?: AgentSessionId,
 ): Promise<void> {
   const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
-  if (sessionId.kind === "outline") {
+  if (sessionId.kind !== "project") {
     const store = agentSessionStore(sessionId);
     if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
       throw new AgentConsoleOwnershipError();
@@ -1201,7 +1216,9 @@ export async function loadAgentSessionCollection(
     return {
       project: migratedProject,
       outlines: {},
+      characters: {},
       corruptOutlineChapterIds: [],
+      corruptCharacterIds: [],
     };
   }
   const parsedCollection = persistedAgentSessionCollectionSchema.safeParse(raw);
@@ -1209,7 +1226,9 @@ export async function loadAgentSessionCollection(
     return {
       project: migratedProject,
       outlines: {},
+      characters: {},
       corruptOutlineChapterIds: [],
+      corruptCharacterIds: [],
     };
   }
   const collection = parsedCollection.data;
@@ -1219,25 +1238,44 @@ export async function loadAgentSessionCollection(
     project = restoreAgentSnapshot(root, await parseAgentSnapshot(projectRaw));
   }
   const outlines: Record<string, PersistedAgentState> = {};
+  const characters: Record<string, PersistedAgentState> = {};
   const corruptOutlineChapterIds: string[] = [];
+  const corruptCharacterIds: string[] = [];
   for (const [key, snapshot] of Object.entries(collection.sessions)) {
-    if (!key.startsWith("outline:")) continue;
-    const chapterId = key.slice("outline:".length);
-    if (chapterId.length === 0) continue;
-    try {
-      outlines[chapterId] = restoreAgentSnapshot(
-        root,
-        await parseAgentSnapshot(snapshot),
-      );
-    } catch {
-      outlines[chapterId] = emptyPersistedAgentState();
-      corruptOutlineChapterIds.push(chapterId);
+    if (key.startsWith("outline:")) {
+      const chapterId = key.slice("outline:".length);
+      if (chapterId.length === 0) continue;
+      try {
+        outlines[chapterId] = restoreAgentSnapshot(
+          root,
+          await parseAgentSnapshot(snapshot),
+        );
+      } catch {
+        outlines[chapterId] = emptyPersistedAgentState();
+        corruptOutlineChapterIds.push(chapterId);
+      }
+      continue;
+    }
+    if (key.startsWith("character:")) {
+      const characterId = key.slice("character:".length);
+      if (characterId.length === 0) continue;
+      try {
+        characters[characterId] = restoreAgentSnapshot(
+          root,
+          await parseAgentSnapshot(snapshot),
+        );
+      } catch {
+        characters[characterId] = emptyPersistedAgentState();
+        corruptCharacterIds.push(characterId);
+      }
     }
   }
   return {
     project,
     outlines,
+    characters,
     corruptOutlineChapterIds,
+    corruptCharacterIds,
   };
 }
 
@@ -1249,13 +1287,29 @@ async function saveAgentSessionCollectionNow(root: string): Promise<void> {
     ...(persisted?.sessions ?? {}),
     project: await snapshotForSession(PROJECT_AGENT_SESSION),
   };
-  const project = useProjectStore.getState().project;
+  const projectState = useProjectStore.getState();
+  const project = projectState.project;
+  const liveChapterIds =
+    project?.root === root
+      ? new Set(project.chapters.map((chapter) => chapter.id))
+      : null;
+  const liveCharacterIds =
+    project?.root === root
+      ? new Set(projectState.meta.characters.map((character) => character.id))
+      : null;
   if (project?.root === root) {
-    const liveChapterIds = new Set(project.chapters.map((chapter) => chapter.id));
     for (const key of Object.keys(sessions)) {
       if (
         key.startsWith("outline:") &&
+        liveChapterIds !== null &&
         !liveChapterIds.has(key.slice("outline:".length))
+      ) {
+        delete sessions[key];
+      }
+      if (
+        key.startsWith("character:") &&
+        liveCharacterIds !== null &&
+        !liveCharacterIds.has(key.slice("character:".length))
       ) {
         delete sessions[key];
       }
@@ -1268,6 +1322,21 @@ async function saveAgentSessionCollectionNow(root: string): Promise<void> {
     sessions[`outline:${chapterId}`] = await snapshotForSession({
       kind: "outline",
       chapterId,
+    });
+  }
+  for (const [characterId, store] of characterAgentSessionEntries()) {
+    if (
+      liveCharacterIds !== null &&
+      !liveCharacterIds.has(characterId)
+    ) {
+      continue;
+    }
+    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
+      continue;
+    }
+    sessions[`character:${characterId}`] = await snapshotForSession({
+      kind: "character",
+      characterId,
     });
   }
   await writeAppData(agentSessionCollectionKey(root), {
@@ -1290,11 +1359,28 @@ export function saveAgentSessionCollection(root: string): Promise<void> {
   return tracked;
 }
 
-async function hydrateAgentOutlineSessionOwned(
+function scopedAgentSessionIsRegistered(
+  sessionId: ScopedAgentSessionId,
+  store: ReturnType<typeof agentSessionStore>,
+): boolean {
+  switch (sessionId.kind) {
+    case "outline":
+      return outlineAgentSessionEntries().some(
+        ([chapterId, candidateStore]) =>
+          chapterId === sessionId.chapterId && candidateStore === store,
+      );
+    case "character":
+      return characterAgentSessionEntries().some(
+        ([characterId, candidateStore]) =>
+          characterId === sessionId.characterId && candidateStore === store,
+      );
+  }
+}
+
+async function hydrateAgentScopedSessionOwned(
   root: string,
-  chapterId: string,
+  sessionId: ScopedAgentSessionId,
 ): Promise<void> {
-  const sessionId = { kind: "outline" as const, chapterId };
   const store = agentSessionStore(sessionId);
   if (agentConsoleOwnershipStatus(store.getState(), root) === "ready") return;
   const ownsHydration = (): boolean => {
@@ -1303,10 +1389,7 @@ async function hydrateAgentOutlineSessionOwned(
       useProjectStore.getState().project?.root === root &&
       state.runStatus === "idle" &&
       state.activeRun === null &&
-      outlineAgentSessionEntries().some(
-        ([candidateChapterId, candidateStore]) =>
-          candidateChapterId === chapterId && candidateStore === store,
-      )
+      scopedAgentSessionIsRegistered(sessionId, store)
     );
   };
   let raw: unknown;
@@ -1325,7 +1408,7 @@ async function hydrateAgentOutlineSessionOwned(
   if (!ownsHydration()) return;
   const collection = persistedAgentSessionCollectionSchema.safeParse(raw);
   const snapshot = collection.success
-    ? collection.data.sessions[`outline:${chapterId}`]
+    ? collection.data.sessions[agentSessionKey(sessionId)]
     : undefined;
   if (snapshot === undefined) {
     store.getState().hydrate(root, emptyPersistedAgentState());
@@ -1356,7 +1439,10 @@ export function hydrateAgentOutlineSession(
   const key = JSON.stringify([root, chapterId]);
   const current = outlineHydrations.get(key);
   if (current !== undefined) return current;
-  const hydration = hydrateAgentOutlineSessionOwned(root, chapterId).finally(
+  const hydration = hydrateAgentScopedSessionOwned(
+    root,
+    { kind: "outline", chapterId },
+  ).finally(
     () => {
       if (outlineHydrations.get(key) === hydration) {
         outlineHydrations.delete(key);
@@ -1364,6 +1450,25 @@ export function hydrateAgentOutlineSession(
     },
   );
   outlineHydrations.set(key, hydration);
+  return hydration;
+}
+
+export function hydrateAgentCharacterSession(
+  root: string,
+  characterId: string,
+): Promise<void> {
+  const key = JSON.stringify([root, characterId]);
+  const current = characterHydrations.get(key);
+  if (current !== undefined) return current;
+  const hydration = hydrateAgentScopedSessionOwned(
+    root,
+    { kind: "character", characterId },
+  ).finally(() => {
+    if (characterHydrations.get(key) === hydration) {
+      characterHydrations.delete(key);
+    }
+  });
+  characterHydrations.set(key, hydration);
   return hydration;
 }
 
@@ -1704,15 +1809,22 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     consoleBeforeSwitch.persistenceTransition.projectRoot === oldRoot;
   const oldRootWasRecovering =
     ownsOldConsole && recoveryRoot === oldRoot && !resetOwnsOldRoot;
-  const oldRootHasOutlineSessions =
+  const oldRootHasScopedSessions =
     oldRoot !== null &&
-    outlineAgentSessionEntries().some(([, store]) =>
-      agentConsoleOwnershipStatus(store.getState(), oldRoot) === "ready",
+    [...outlineAgentSessionEntries(), ...characterAgentSessionEntries()].some(
+      ([, store]) =>
+        agentConsoleOwnershipStatus(store.getState(), oldRoot) === "ready",
     );
   writableRoot = null;
   const rootsWithActiveSessions = new Set<string>();
   if (oldRoot !== null) rootsWithActiveSessions.add(oldRoot);
   for (const [, store] of outlineAgentSessionEntries()) {
+    const activeProjectRoot = store.getState().activeProjectRoot;
+    if (activeProjectRoot !== null) {
+      rootsWithActiveSessions.add(activeProjectRoot);
+    }
+  }
+  for (const [, store] of characterAgentSessionEntries()) {
     const activeProjectRoot = store.getState().activeProjectRoot;
     if (activeProjectRoot !== null) {
       rootsWithActiveSessions.add(activeProjectRoot);
@@ -1763,7 +1875,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       recordRecoveryState(oldRoot, oldSource, oldRevision);
     }
 
-    if (oldRoot !== null && oldRootHasOutlineSessions) {
+    if (oldRoot !== null && oldRootHasScopedSessions) {
       try {
         await saveAgentSessionCollection(oldRoot);
       } catch (error) {
@@ -1777,6 +1889,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     if (!ownsTargetConsole) {
       useAgentConsoleStore.getState().resetProject();
       clearOutlineAgentSessions();
+      clearCharacterAgentSessions();
     }
     if (
       !useAgentConsoleStore
@@ -1939,12 +2052,16 @@ export function useAgentPersistence(): void {
           activeRevision = nextRevision();
         }
         scheduleAgentSave();
-        if (outlineAgentSessionEntries().length > 0) {
+        if (
+          outlineAgentSessionEntries().length > 0 ||
+          characterAgentSessionEntries().length > 0
+        ) {
           scheduleAgentSessionCollectionSave();
         }
       },
     );
     const outlineUnsubscribes = new Map<string, () => void>();
+    const characterUnsubscribes = new Map<string, () => void>();
     const subscribeOutlineSessions = (): void => {
       const liveChapterIds = new Set(
         outlineAgentSessionEntries().map(([chapterId]) => chapterId),
@@ -1960,14 +2077,42 @@ export function useAgentPersistence(): void {
           chapterId,
           store.subscribe((state, previous) => {
             if (!persistedFieldsChanged(state, previous)) return;
-            scheduleAgentSessionCollectionSave(chapterId);
+            scheduleAgentSessionCollectionSave({
+              kind: "outline",
+              chapterId,
+            });
+          }),
+        );
+      }
+    };
+    const subscribeCharacterSessions = (): void => {
+      const liveCharacterIds = new Set(
+        characterAgentSessionEntries().map(([characterId]) => characterId),
+      );
+      for (const [characterId, unsubscribe] of characterUnsubscribes) {
+        if (liveCharacterIds.has(characterId)) continue;
+        unsubscribe();
+        characterUnsubscribes.delete(characterId);
+      }
+      for (const [characterId, store] of characterAgentSessionEntries()) {
+        if (characterUnsubscribes.has(characterId)) continue;
+        characterUnsubscribes.set(
+          characterId,
+          store.subscribe((state, previous) => {
+            if (!persistedFieldsChanged(state, previous)) return;
+            scheduleAgentSessionCollectionSave({
+              kind: "character",
+              characterId,
+            });
           }),
         );
       }
     };
     subscribeOutlineSessions();
+    subscribeCharacterSessions();
     const unsubscribeRegistry = subscribeAgentSessionRegistry(() => {
       subscribeOutlineSessions();
+      subscribeCharacterSessions();
       scheduleAgentSessionCollectionSave();
     });
     const onVisibilityChange = (): void => {
@@ -1980,15 +2125,16 @@ export function useAgentPersistence(): void {
         useProjectStore.getState().project?.root ?? state.activeProjectRoot;
       if (root === null) return;
       abortAgentRunForProjectSwitch(root, "app-exit");
-      if (
-        agentConsoleOwnershipStatus(state, root) !== "ready"
-      ) {
+      if (agentConsoleOwnershipStatus(state, root) !== "ready") {
         return;
       }
       clearSaveTimer();
       if (writableRoot !== root) return;
       void captureActiveSnapshot(root);
-      if (outlineAgentSessionEntries().length > 0) {
+      if (
+        outlineAgentSessionEntries().length > 0 ||
+        characterAgentSessionEntries().length > 0
+      ) {
         void saveAgentSessionCollection(root).catch((error) => {
           logPersistenceFailure(root, error);
         });
@@ -2004,6 +2150,7 @@ export function useAgentPersistence(): void {
       unsubscribeConsole();
       unsubscribeRegistry();
       outlineUnsubscribes.forEach((unsubscribe) => unsubscribe());
+      characterUnsubscribes.forEach((unsubscribe) => unsubscribe());
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onPageHide);
     };

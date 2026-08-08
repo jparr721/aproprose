@@ -18,7 +18,7 @@ const blob = (flags: unknown[]) => ({
 
 describe("v3 migration (continuity flag blockIds)", () => {
   it("preserves the v3 migration while later migrations advance the current version", () => {
-    expect(CURRENT_VERSION).toBe(4);
+    expect(CURRENT_VERSION).toBe(5);
   });
 
   it("backfills blockIds: [] on persisted flags that lack it", () => {

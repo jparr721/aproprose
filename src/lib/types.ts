@@ -116,12 +116,94 @@ export interface OpenOutcome {
   detectedChapters: number | null;
 }
 
+export interface CharacterProfile {
+  appearance: string;
+  mannerisms: string;
+  motivations: string;
+  relationships: string;
+  history: string;
+  voice: string;
+}
+
+export type CharacterProfileField = keyof CharacterProfile;
+
+export interface EvidenceLocator {
+  chapterId: string;
+  sourceId: string;
+  order: number;
+  fingerprint: string;
+  previewText: string;
+}
+
+export interface CharacterObservation {
+  id: string;
+  characterId: string;
+  field: CharacterProfileField;
+  detail: string;
+  evidence: EvidenceLocator[];
+}
+
+export interface UnknownCharacterObservation {
+  id: string;
+  name: string;
+  role: string;
+  details: Partial<CharacterProfile>;
+  evidence: EvidenceLocator[];
+}
+
+export interface ChapterKnowledge {
+  sourceFingerprint: string;
+  summary: string;
+  premiseSignals: string[];
+  conflictSignals: string[];
+  stakeSignals: string[];
+  arcSignals: string[];
+  endingSignals: string[];
+  characterObservations: CharacterObservation[];
+  unknownCharacterObservations: UnknownCharacterObservation[];
+}
+
+export interface CharacterCandidate {
+  id: string;
+  evidenceFingerprint: string;
+  name: string;
+  role: string;
+  profile: CharacterProfile;
+  evidence: EvidenceLocator[];
+}
+
+export interface CharacterFieldAddition {
+  field: CharacterProfileField;
+  text: string;
+  observationIds: string[];
+}
+
+export interface CharacterFieldCorrection {
+  field: CharacterProfileField;
+  replaceExact: string;
+  replacement: string;
+  observationIds: string[];
+}
+
+export interface CharacterKnowledgePatch {
+  additions: CharacterFieldAddition[];
+  corrections: CharacterFieldCorrection[];
+}
+
+export interface ProjectKnowledge {
+  chapters: Record<string, ChapterKnowledge>;
+  characterCandidates: CharacterCandidate[];
+  dismissedCandidateFingerprints: string[];
+  appliedCharacterObservationIds: Record<string, string[]>;
+}
+
 export interface Character {
   id: string;
   name: string;
   /** A CSS color string (hex) used for the speaker dot / avatar. */
   color: string;
   role: string;
+  profile: CharacterProfile;
 }
 
 /** A worldbuilding entry in the project's lore index.
@@ -230,6 +312,7 @@ export interface ProjectMeta {
   outline: Outline;
   /** chapter id -> that chapter's planning entry (sparse; lazily created). */
   chapters: Record<string, ChapterOutline>;
+  knowledge: ProjectKnowledge;
 }
 
 /** A previously opened project, for the recents list / switcher. */

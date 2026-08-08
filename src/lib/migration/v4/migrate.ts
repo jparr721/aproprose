@@ -1,7 +1,6 @@
 import type { MetaBlob } from "@/lib/migration/schema";
-import type { ProjectMeta } from "@/lib/types";
 
-export function migrateV4(meta: MetaBlob): ProjectMeta {
+export function migrateV4(meta: MetaBlob): MetaBlob {
   return {
     ...meta,
     version: 4,

@@ -22,6 +22,7 @@ vi.mock("@/stores/agent-persistence", async (importOriginal) => {
 });
 
 import { ChapterSubview } from "@/components/app/outline/chapter-subview";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
@@ -54,6 +55,7 @@ beforeEach(() => {
     meta: {
       characters: [], lore: [], statuses: {}, outline: { premise: "", overview: "" },
       chapters: { ch1: { act: "setup", plotPoint: "inciting", premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] } },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildOutlinePlannerGrounding } from "@/lib/outline/planner-grounding";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type { ChapterRef, ProjectMeta } from "@/lib/types";
 
 const chapters: ChapterRef[] = ["a", "b", "c"].map((id, index) => ({
@@ -17,6 +18,7 @@ const meta: ProjectMeta = {
   statuses: {},
   outline: { premise: "Logline", overview: "Overview" },
   chapters: {},
+  knowledge: emptyProjectKnowledge(),
 };
 
 const manuscript = (chapterId: string) => ({

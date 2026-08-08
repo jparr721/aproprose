@@ -17,7 +17,6 @@ import type { MetaBlob } from "@/lib/migration/schema";
 import type {
   Card,
   ChapterOutline,
-  ProjectMeta,
 } from "@/lib/types";
 
 /** True when the blob is already chapter-centric (has `chapters` present,
@@ -30,7 +29,7 @@ export function isNewShapeMeta(m: MetaBlob): boolean {
   return m.chapters !== undefined && !hasActs && !hasChapterBeats;
 }
 
-export function migrateLegacyMeta(m: MetaBlob): ProjectMeta {
+export function migrateLegacyMeta(m: MetaBlob): MetaBlob {
   const chapters: Record<string, ChapterOutline> = {};
   const ensure = (id: string): ChapterOutline =>
     (chapters[id] ??= { ...emptyChapterOutline(), characterIds: [], cards: [] });
@@ -68,10 +67,11 @@ export function migrateLegacyMeta(m: MetaBlob): ProjectMeta {
     statuses: m.statuses,
     outline: { premise: m.outline?.premise ?? "", overview: "" },
     chapters,
+    knowledge: m.knowledge,
   };
 }
 
-export function migrateV1(meta: MetaBlob): ProjectMeta {
+export function migrateV1(meta: MetaBlob): MetaBlob {
   if (isNewShapeMeta(meta)) {
     const chapters = meta.chapters ?? {};
     return {
@@ -83,6 +83,7 @@ export function migrateV1(meta: MetaBlob): ProjectMeta {
       chapters: Object.fromEntries(
         Object.entries(chapters).map(([id, ch]) => [id, { ...ch, characterIds: ch.characterIds ?? [] }]),
       ),
+      knowledge: meta.knowledge,
     };
   }
   return migrateLegacyMeta(meta);

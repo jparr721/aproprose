@@ -21,6 +21,7 @@ import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
 import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { writeProjectMeta } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import type {
@@ -135,6 +136,7 @@ beforeEach(() => {
           cards: [cardFixture()],
         },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
 });

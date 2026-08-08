@@ -27,6 +27,7 @@ import {
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { useViewStore } from "@/stores/view-store";
 import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
 
@@ -89,6 +90,7 @@ const meta: ProjectMeta = {
       cards: [],
     },
   },
+  knowledge: emptyProjectKnowledge(),
 };
 
 const message: AgentUIMessage = {

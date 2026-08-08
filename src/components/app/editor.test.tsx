@@ -121,6 +121,7 @@ import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 
 const project: ProjectInfo = {
   root: "/book",
@@ -188,6 +189,7 @@ const meta: ProjectMeta = {
       cards: [],
     },
   },
+  knowledge: emptyProjectKnowledge(),
 };
 
 function manuscriptProposal(): ManuscriptPendingProposal {

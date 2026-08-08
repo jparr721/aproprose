@@ -5,8 +5,7 @@
 // so v2 is a pure version stamp.
 
 import type { MetaBlob } from "@/lib/migration/schema";
-import type { ProjectMeta } from "@/lib/types";
 
-export function migrateV2(meta: MetaBlob): ProjectMeta {
+export function migrateV2(meta: MetaBlob): MetaBlob {
   return { ...meta, version: 2, chapters: meta.chapters ?? {} };
 }

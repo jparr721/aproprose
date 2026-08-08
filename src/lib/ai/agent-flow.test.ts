@@ -75,6 +75,10 @@ import type {
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
 import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
+import {
   readAppData,
   readTextFile,
   writeAppData,
@@ -169,6 +173,7 @@ function project(root: string): ProjectInfo {
 function projectMeta(): ProjectMeta {
   return {
     ...EMPTY_META,
+    knowledge: emptyProjectKnowledge(),
     chapters: {
       ch1: {
         act: "setup",
@@ -457,7 +462,13 @@ describe("agent console authoring flows", () => {
         ...state.meta,
         outline: { premise: "A ledger pulls Mara toward the harbor.", overview: "" },
         characters: [
-          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+          {
+            id: "mara",
+            name: "Mara",
+            color: "#123456",
+            role: "Detective",
+            profile: emptyCharacterProfile(),
+          },
         ],
         lore: [
           {
@@ -503,7 +514,13 @@ describe("agent console authoring flows", () => {
           throw new Error("Expected complete outline data.");
         }
         expect(outline.value.characters).toEqual([
-          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+          {
+            id: "mara",
+            name: "Mara",
+            color: "#123456",
+            role: "Detective",
+            profile: emptyCharacterProfile(),
+          },
         ]);
         expect(outline.value.chapters[1]).toMatchObject({
           chapterId: "ch2",

@@ -71,6 +71,7 @@ import type {
   OutlinePendingProposal,
 } from "@/lib/ai/agent-types";
 import { writeProjectMeta } from "@/lib/tauri";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type {
   Block,
   BlockChange,
@@ -280,6 +281,7 @@ beforeEach(() => {
           cards,
         },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
   useAgentConsoleStore.setState({

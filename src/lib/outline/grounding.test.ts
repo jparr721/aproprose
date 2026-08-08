@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { renderStoryStructure } from "@/lib/outline/grounding";
 import { emptyChapterOutline } from "@/lib/outline/model";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 import type { Character } from "@/lib/types";
 
 const roster: Character[] = [
-  { id: "c1", name: "Mara", color: "oklch(0.5 0 0)", role: "lead" },
-  { id: "c2", name: "Joren", color: "oklch(0.5 0 0)", role: "foil" },
+  {
+    id: "c1",
+    name: "Mara",
+    color: "oklch(0.5 0 0)",
+    role: "lead",
+    profile: emptyCharacterProfile(),
+  },
+  {
+    id: "c2",
+    name: "Joren",
+    color: "oklch(0.5 0 0)",
+    role: "foil",
+    profile: emptyCharacterProfile(),
+  },
 ];
 
 describe("renderStoryStructure", () => {

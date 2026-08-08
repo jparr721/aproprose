@@ -70,6 +70,7 @@ import type {
 } from "@/lib/ai/agent-types";
 import { parseChapter } from "@/lib/latex";
 import { EMPTY_META } from "@/lib/migration";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type {
   Block,
   ChapterOutline,
@@ -179,6 +180,7 @@ const outlineChapter: ChapterOutline = {
 function projectMeta(): ProjectMeta {
   return {
     ...EMPTY_META,
+    knowledge: emptyProjectKnowledge(),
     outline: { premise: "A detective is trapped.", overview: "" },
     chapters: { ch1: outlineChapter },
     lore: [

@@ -57,6 +57,7 @@ import type {
 } from "@/lib/ai/agent-types";
 import { parseChapter } from "@/lib/latex";
 import { readTextFile } from "@/lib/tauri";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type { Block, Card, ProjectInfo } from "@/lib/types";
 import {
   EMPTY_AGENT_STATE,
@@ -267,6 +268,7 @@ beforeEach(() => {
           cards: [],
         },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
   useSyncStore.setState({ conflictedFiles: [] });

@@ -10,6 +10,10 @@
 // so isNewShapeMeta can distinguish "absent" from "present but empty".
 
 import { z } from "zod";
+import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
 
 const continuityFlagSchema = z.object({
   sev: z.enum(["ok", "warn", "flag"]).catch("ok"),
@@ -38,11 +42,84 @@ const chapterOutlineSchema = z.object({
   cards: z.array(cardSchema).catch([]),
 });
 
+const characterProfileSchema = z.object({
+  appearance: z.string().catch(""),
+  mannerisms: z.string().catch(""),
+  motivations: z.string().catch(""),
+  relationships: z.string().catch(""),
+  history: z.string().catch(""),
+  voice: z.string().catch(""),
+});
+
+const evidenceLocatorSchema = z.object({
+  chapterId: z.string().catch(""),
+  sourceId: z.string().catch(""),
+  order: z.number().int().catch(0),
+  fingerprint: z.string().catch(""),
+  previewText: z.string().catch(""),
+});
+
+const characterObservationSchema = z.object({
+  id: z.string().catch(""),
+  characterId: z.string().catch(""),
+  field: z.enum([
+    "appearance",
+    "mannerisms",
+    "motivations",
+    "relationships",
+    "history",
+    "voice",
+  ]).catch("appearance"),
+  detail: z.string().catch(""),
+  evidence: z.array(evidenceLocatorSchema).catch([]),
+});
+
+const unknownCharacterObservationSchema = z.object({
+  id: z.string().catch(""),
+  name: z.string().catch(""),
+  role: z.string().catch(""),
+  details: characterProfileSchema.partial().catch({}),
+  evidence: z.array(evidenceLocatorSchema).catch([]),
+});
+
+const chapterKnowledgeSchema = z.object({
+  sourceFingerprint: z.string().catch(""),
+  summary: z.string().catch(""),
+  premiseSignals: z.array(z.string()).catch([]),
+  conflictSignals: z.array(z.string()).catch([]),
+  stakeSignals: z.array(z.string()).catch([]),
+  arcSignals: z.array(z.string()).catch([]),
+  endingSignals: z.array(z.string()).catch([]),
+  characterObservations: z.array(characterObservationSchema).catch([]),
+  unknownCharacterObservations: z
+    .array(unknownCharacterObservationSchema)
+    .catch([]),
+});
+
+const characterCandidateSchema = z.object({
+  id: z.string().catch(""),
+  evidenceFingerprint: z.string().catch(""),
+  name: z.string().catch(""),
+  role: z.string().catch(""),
+  profile: characterProfileSchema.catch(emptyCharacterProfile()),
+  evidence: z.array(evidenceLocatorSchema).catch([]),
+});
+
+const projectKnowledgeSchema = z.object({
+  chapters: z.record(z.string(), chapterKnowledgeSchema).catch({}),
+  characterCandidates: z.array(characterCandidateSchema).catch([]),
+  dismissedCandidateFingerprints: z.array(z.string()).catch([]),
+  appliedCharacterObservationIds: z
+    .record(z.string(), z.array(z.string()))
+    .catch({}),
+});
+
 const characterSchema = z.object({
   id: z.string().catch(""),
   name: z.string().catch(""),
   color: z.string().catch(""),
   role: z.string().catch(""),
+  profile: characterProfileSchema.catch(emptyCharacterProfile()),
 });
 
 const loreEntrySchema = z.object({
@@ -89,6 +166,7 @@ export const metaBlobSchema = z.object({
   }).passthrough().catch({ premise: "", overview: "" }),
   chapters: z.record(z.string(), chapterOutlineSchema).optional(),
   chapterBeats: z.record(z.string(), legacyChapterBeatSchema).optional(),
+  knowledge: projectKnowledgeSchema.catch(emptyProjectKnowledge()),
 }).passthrough();
 
 export type MetaBlob = z.infer<typeof metaBlobSchema>;

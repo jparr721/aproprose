@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { OutlineBoard } from "@/components/app/outline/outline-board";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 
@@ -30,6 +31,7 @@ beforeEach(() => {
         ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] },
         ch2: { act: "confrontation", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", characterIds: [], cards: [] },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
 });

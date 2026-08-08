@@ -26,6 +26,7 @@ import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
@@ -1457,6 +1458,7 @@ describe("applyAgentManuscriptProposal", () => {
             name: "Mara",
             color: "#aabbcc",
             role: "Detective",
+            profile: emptyCharacterProfile(),
           },
         ],
       },

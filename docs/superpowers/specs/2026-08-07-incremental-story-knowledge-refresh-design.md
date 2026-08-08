@@ -249,14 +249,14 @@ Automatic character output is a patch, not an unconstrained record replacement:
 interface CharacterFieldAddition {
   field: CharacterProfileField;
   text: string;
-  evidenceIds: string[];
+  observationIds: string[];
 }
 
 interface CharacterFieldCorrection {
   field: CharacterProfileField;
   replaceExact: string;
   replacement: string;
-  evidenceIds: string[];
+  observationIds: string[];
 }
 ```
 

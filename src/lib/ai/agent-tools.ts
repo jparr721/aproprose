@@ -16,6 +16,8 @@ import type {
 } from "@/lib/ai/agent-types";
 import type {
   BlockChange,
+  Character,
+  CharacterProfile,
   CritiqueNote,
   ContinuityFlag,
   SculptChange,
@@ -57,6 +59,10 @@ export interface AgentToolEnvironment {
     reason: string;
   }) => Extract<PendingProposal, { kind: "overview" }>;
   replacePendingProposal: (proposal: PendingProposal) => void;
+  updateCharacterProfile: (input: {
+    characterId: string;
+    profile: Partial<CharacterProfile>;
+  }) => Promise<Character>;
 }
 
 function runtimeOutput<T>(
@@ -121,6 +127,17 @@ const overviewStageSchema = z.object({
   summary: z.string(),
   overview: z.string(),
   reason: z.string(),
+});
+const characterProfileUpdateSchema = z.object({
+  characterId: z.string(),
+  profile: z.object({
+    appearance: z.string().nullable(),
+    mannerisms: z.string().nullable(),
+    motivations: z.string().nullable(),
+    relationships: z.string().nullable(),
+    history: z.string().nullable(),
+    voice: z.string().nullable(),
+  }),
 });
 
 export function createAgentToolHandlers(env: AgentToolEnvironment) {
@@ -289,6 +306,42 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
         { proposalId: proposal.id, changeCount: 1 },
       );
     },
+    updateCharacterProfile: async (
+      input: z.infer<typeof characterProfileUpdateSchema>,
+    ) => {
+      if (
+        env.run.task.kind !== "character-describe" ||
+        env.run.task.characterId !== input.characterId
+      ) {
+        throw new Error(
+          `Character update is outside the frozen target: ${input.characterId}`,
+        );
+      }
+      const profile = Object.fromEntries(
+        Object.entries(input.profile).filter((entry) => entry[1] !== null),
+      ) as Partial<CharacterProfile>;
+      const changedFieldCount = Object.keys(profile).length;
+      if (changedFieldCount === 0) {
+        throw new Error("Character profile update requires at least one field.");
+      }
+      const character = await env.updateCharacterProfile({
+        characterId: input.characterId,
+        profile,
+      });
+      return runtimeOutput(
+        {
+          label: "Update character profile",
+          target: character.name,
+          detail: countLabel(changedFieldCount, "field"),
+          itemCount: changedFieldCount,
+        },
+        {
+          characterId: character.id,
+          characterName: character.name,
+          changedFieldCount,
+        },
+      );
+    },
   };
 }
 
@@ -354,6 +407,12 @@ export function createAgentTools(env: AgentToolEnvironment) {
         "Stage an independently reviewable replacement for the concise story overview without changing manuscript or outline cards.",
       inputSchema: overviewStageSchema,
       execute: handlers.stageOverview,
+    }),
+    update_character_profile: tool({
+      description:
+        "Update profile fields for the character frozen into this Describe session after the conversation yields profile-worthy detail.",
+      inputSchema: characterProfileUpdateSchema,
+      execute: handlers.updateCharacterProfile,
     }),
   };
 }

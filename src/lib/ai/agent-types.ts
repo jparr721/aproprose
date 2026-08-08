@@ -4,6 +4,7 @@ import type {
   BeatType,
   Block,
   BlockChange,
+  CharacterProfile,
   Card,
   CritiqueNote,
   ContinuityFlag,
@@ -513,6 +514,17 @@ export interface AgentUiTools {
   stage_overview_proposal: {
     input: { summary: string; overview: string; reason: string };
     output: AgentToolOutput<{ proposalId: string; changeCount: number }>;
+  };
+  update_character_profile: {
+    input: {
+      characterId: string;
+      profile: { [Field in keyof CharacterProfile]: string | null };
+    };
+    output: AgentToolOutput<{
+      characterId: string;
+      characterName: string;
+      changedFieldCount: number;
+    }>;
   };
 }
 

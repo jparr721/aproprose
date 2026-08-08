@@ -14,6 +14,7 @@ import {
   flattenMessageFindings,
   resolveDraftSnapshots,
 } from "@/lib/ai/agent-context";
+import { buildCharacterGrounding } from "@/lib/ai/character-grounding";
 import { settleAgentMessages } from "@/lib/ai/agent-messages";
 import { getModel } from "@/lib/ai/model";
 import { resolveModelContextWindow } from "@/lib/ai/models";
@@ -641,6 +642,32 @@ function targetChapterId(
   return task.chapterId;
 }
 
+function requireCharacterDescribeTask(
+  task: AgentTask,
+  sessionId: AgentSessionId,
+): void {
+  if (sessionId.kind === "character") {
+    if (
+      task.kind !== "character-describe" ||
+      task.characterId !== sessionId.characterId
+    ) {
+      const characterId =
+        task.kind === "character-describe"
+          ? task.characterId
+          : sessionId.characterId;
+      throw new Error(
+        `Character Describe target does not match the session: ${characterId}`,
+      );
+    }
+    return;
+  }
+  if (task.kind === "character-describe") {
+    throw new Error(
+      `Character Describe requires its character session: ${task.characterId}`,
+    );
+  }
+}
+
 function requireBridgeAnchor(task: AgentTask, chapter: LoadedChapter): void {
   if (task.kind !== "bridge") return;
   if (chapter.chapterId !== task.chapterId) {
@@ -668,6 +695,7 @@ function captureTaskAndTarget(args: {
   resolve: SubmissionCapture["resolveTaskAndTarget"];
 } {
   const task = structuredClone(args.task);
+  requireCharacterDescribeTask(task, args.sessionId);
   const chapterId = targetChapterId(task, args.pendingProposal, args.sessionId);
   if (chapterId === null) {
     return {
@@ -749,6 +777,47 @@ async function resolveOutlinePlannerGroundingInput(
   };
 }
 
+function characterDescribeGrounding(
+  capture: SubmissionCapture,
+  task: AgentTask,
+): string | null {
+  if (capture.sessionId.kind !== "character") return null;
+  requireCharacterDescribeTask(task, capture.sessionId);
+  const characterId = capture.sessionId.characterId;
+  const frozenCharacter = capture.meta.characters.find(
+    (character) => character.id === characterId,
+  );
+  if (frozenCharacter === undefined) {
+    throw new Error(`Character not found in frozen project: ${characterId}`);
+  }
+  const live = useProjectStore.getState();
+  if (live.project === null || live.project.root !== capture.projectRoot) {
+    throw new Error("The active project changed before the character run.");
+  }
+  const liveCharacter = live.meta.characters.find(
+    (character) => character.id === characterId,
+  );
+  if (liveCharacter === undefined) {
+    throw new Error(`Character not found in active project: ${characterId}`);
+  }
+  return buildCharacterGrounding({
+    character: frozenCharacter,
+    outline: capture.meta.outline,
+    chapters: capture.project.chapters.flatMap((chapter) => {
+      const knowledge = capture.meta.knowledge.chapters[chapter.id];
+      return knowledge === undefined
+        ? []
+        : [
+            {
+              chapterId: chapter.id,
+              title: chapter.title,
+              knowledge,
+            },
+          ];
+    }),
+  });
+}
+
 async function loadExactTaskAndTarget(args: {
   project: ProjectInfo;
   activeChapter: LoadedChapter | null;
@@ -757,6 +826,7 @@ async function loadExactTaskAndTarget(args: {
   sessionId: AgentSessionId;
 }): Promise<{ task: AgentTask; chapter: LoadedChapter | null }> {
   const task = structuredClone(args.task);
+  requireCharacterDescribeTask(task, args.sessionId);
   const chapterId = targetChapterId(task, args.pendingProposal, args.sessionId);
   return {
     task,
@@ -1388,6 +1458,14 @@ export function createAgentController(
         }
       },
       buildOverviewProposal: (input) => {
+        if (args.sessionId.kind === "character") {
+          throw taggedError(
+            "tool",
+            new Error(
+              "The frozen character run cannot stage source changes.",
+            ),
+          );
+        }
         try {
           return buildOverviewPendingProposal({
             run: args.run,
@@ -1419,6 +1497,40 @@ export function createAgentController(
         ) {
           viewState.openManuscriptReview(proposal.id);
         }
+      },
+      updateCharacterProfile: async ({ characterId, profile }) => {
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
+        if (
+          args.sessionId.kind !== "character" ||
+          args.run.task.kind !== "character-describe" ||
+          args.sessionId.characterId !== characterId ||
+          args.run.task.characterId !== characterId
+        ) {
+          throw taggedError(
+            "tool",
+            new Error(
+              `Character update is outside the frozen target: ${characterId}`,
+            ),
+          );
+        }
+        const live = useProjectStore.getState();
+        const current = live.meta.characters.find(
+          (character) => character.id === characterId,
+        );
+        if (current === undefined) {
+          throw taggedError(
+            "tool",
+            new Error(`Character not found: ${characterId}`),
+          );
+        }
+        const nextProfile = { ...current.profile, ...profile };
+        const character = await live.applyCharacterProfileFromAgent(
+          args.run.projectRoot,
+          characterId,
+          nextProfile,
+        );
+        checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
+        return character;
       },
     };
   };
@@ -1562,6 +1674,10 @@ export function createAgentController(
         throw targetResult.reason;
       }
       const frozen = targetResult.value;
+      const describeGrounding = characterDescribeGrounding(
+        capture,
+        frozen.task,
+      );
       const plannerGroundingInput = await resolveOutlinePlannerGroundingInput(
         capture,
         frozen.chapter,
@@ -1634,9 +1750,9 @@ export function createAgentController(
         sessionId: capture.sessionId,
       });
       const instructions =
-        plannerGrounding === null
-          ? baseInstructions
-          : `${baseInstructions}\n\n${plannerGrounding}`;
+        [baseInstructions, plannerGrounding, describeGrounding]
+          .filter((part): part is string => part !== null)
+          .join("\n\n");
       const environment = toolEnvironment({
         run,
         model,
@@ -1869,7 +1985,9 @@ export function createAgentController(
     task: AgentTask,
     requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
-    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+    const sessionId = structuredClone(
+      requestedSessionId ?? PROJECT_AGENT_SESSION,
+    );
     const requestedProject = useProjectStore.getState().project;
     if (requestedProject === null) {
       throw new Error("Open a project before running the agent.");
@@ -1957,7 +2075,9 @@ export function createAgentController(
     request: Extract<AgentIntent, { kind: "run" }>,
     requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
-    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+    const sessionId = structuredClone(
+      requestedSessionId ?? PROJECT_AGENT_SESSION,
+    );
     const frozenRequest = structuredClone(request);
     if (
       frozenRequest.text.trim() === "" &&
@@ -2027,7 +2147,9 @@ export function createAgentController(
     userMessageId: string,
     requestedSessionId?: AgentSessionId,
   ): Promise<AgentSubmissionOutcome> => {
-    const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+    const sessionId = structuredClone(
+      requestedSessionId ?? PROJECT_AGENT_SESSION,
+    );
     const project = useProjectStore.getState().project;
     if (project === null) {
       throw new Error("Open a project before running the agent.");

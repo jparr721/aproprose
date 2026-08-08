@@ -96,6 +96,8 @@ function toolTitle(type: string): string {
       return "Stage manuscript proposal";
     case "tool-stage_outline_proposal":
       return "Stage outline proposal";
+    case "tool-update_character_profile":
+      return "Update character profile";
     default:
       throw new Error(`Unknown agent tool part: ${type}`);
   }

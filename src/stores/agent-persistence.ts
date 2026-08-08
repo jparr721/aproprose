@@ -509,6 +509,7 @@ const persistablePartTypes = new Set<string>([
   "tool-stage_manuscript_proposal",
   "tool-stage_outline_proposal",
   "tool-stage_overview_proposal",
+  "tool-update_character_profile",
 ]);
 
 const messageEnvelopeSchema = z

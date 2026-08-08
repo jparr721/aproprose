@@ -8,6 +8,7 @@ import {
 export const WRITING_MODE_MARKER = "APROPROSE WRITING MODE";
 export const EDIT_MODE_MARKER = "APROPROSE EDIT MODE";
 export const OUTLINE_PLANNING_MARKER = "APROPROSE OUTLINE PLANNING";
+export const CHARACTER_DESCRIBE_MARKER = "APROPROSE CHARACTER DESCRIBE";
 
 export const CLEAN_DIRECTIVE =
   "Clean the selected prose conservatively. Preserve meaning, voice, and structure unless a change is required.";
@@ -76,6 +77,14 @@ const OUTLINE_PLANNING_INSTRUCTIONS = `${OUTLINE_PLANNING_MARKER}
 
 Collaborate as a story planner. Ground every suggestion in the frozen target chapter, its current neighbors, and the ordered whole-novel outline. Stage reviewable outline changes only when the author has supplied enough direction.`;
 
+const CHARACTER_DESCRIBE_INSTRUCTIONS = `${CHARACTER_DESCRIBE_MARKER}
+
+Riff collaboratively when the author is exploring possibilities. In conversational text, distinguish authored manuscript facts from newly invented possibilities. Use read tools before making source-specific claims not present in the supplied grounding.
+
+Call update_character_profile whenever an exchange yields profile-worthy detail. Preserve every nonempty profile field unless the author explicitly revises it.
+
+Never update another character, create a character, or stage manuscript or outline changes in this session.`;
+
 function taskInstructions(task: AgentTask): string {
   if (task.kind === "bridge") {
     const rightBoundary =
@@ -97,7 +106,7 @@ function taskInstructions(task: AgentTask): string {
     return `FROZEN TASK: replace pending proposal ${task.proposalId} completely.`;
   }
   if (task.kind === "character-describe") {
-    return "FROZEN TASK: conversation with no write target.";
+    return `FROZEN TASK: describe character ${task.characterId} and update only that character's profile.`;
   }
   return task.targetChapterId === null
     ? "FROZEN TASK: conversation with no write target."
@@ -112,6 +121,16 @@ export function buildAgentInstructions(args: {
   sessionId: AgentSessionId;
 }): string {
   const profile = agentSessionProfile(args.sessionId, args.mode);
+  if (profile.kind === "character") {
+    return [
+      CHARACTER_DESCRIBE_INSTRUCTIONS,
+      taskInstructions(args.task),
+      renderVoicePreference(args.styleGuide),
+      renderEditingPreference(args.editingRules),
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+  }
   const modeInstructions =
     profile.kind === "outline"
       ? OUTLINE_PLANNING_INSTRUCTIONS

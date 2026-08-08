@@ -862,6 +862,62 @@ describe("agent persistence", () => {
     });
   });
 
+  it("round-trips settled character profile update rows", async () => {
+    const updateMessage: AgentUIMessage = {
+      id: "assistant-character-update",
+      role: "assistant",
+      metadata: {
+        ...metadata,
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      parts: [
+        {
+          type: "tool-update_character_profile",
+          toolCallId: "call-character-update",
+          state: "output-available",
+          input: {
+            characterId: "c1",
+            profile: {
+              appearance: null,
+              mannerisms: "Counts every door.",
+              motivations: null,
+              relationships: null,
+              history: null,
+              voice: null,
+            },
+          },
+          output: {
+            kind: "summary",
+            summary: {
+              label: "Update character profile",
+              target: "Mara",
+              detail: "1 field",
+              itemCount: 1,
+            },
+          },
+        },
+      ],
+    };
+    useAgentConsoleStore.setState({ messages: [updateMessage] });
+
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/books/reopened", snapshot);
+
+    expect(restored.messages[0].parts[0]).toMatchObject({
+      type: "tool-update_character_profile",
+      state: "output-available",
+      output: {
+        kind: "summary",
+        summary: {
+          label: "Update character profile",
+          target: "Mara",
+          detail: "1 field",
+          itemCount: 1,
+        },
+      },
+    });
+  });
+
   it("round-trips safe failed and denied tool lifecycle rows", async () => {
     const untrustedMarkers = [
       "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",

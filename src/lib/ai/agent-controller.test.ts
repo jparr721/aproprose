@@ -182,6 +182,50 @@ function projectMeta(): ProjectMeta {
     knowledge: emptyProjectKnowledge(),
     outline: { premise: "A detective is trapped.", overview: "" },
     chapters: { ch1: outlineChapter },
+    characters: [
+      {
+        id: "character-1",
+        name: "Detective",
+        color: "#123456",
+        role: "Detective",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+      {
+        id: "c1",
+        name: "Mara",
+        color: "#654321",
+        role: "Courier",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+      {
+        id: "c2",
+        name: "Ivo",
+        color: "#abcdef",
+        role: "Watcher",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+    ],
     lore: [
       {
         id: "lore-1",
@@ -511,6 +555,65 @@ beforeEach(() => {
   });
   useViewStore.setState(useViewStore.getInitialState(), true);
   useViewStore.setState({ aiOpen: false });
+});
+
+describe("character Describe sessions", () => {
+  it("rejects a task whose character differs from the session", async () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate("/book", emptyPersistedAgentState());
+    store.getState().setDraftText("Describe Ivo.");
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentDraft(
+        { kind: "character-describe", characterId: "c2" },
+        sessionId,
+      ),
+    ).rejects.toThrow("Character Describe target does not match the session: c2");
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
+  it("freezes the character session identity during asynchronous preflight", async () => {
+    const sessionId: {
+      kind: "character";
+      characterId: string;
+    } = { kind: "character", characterId: "c1" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      emptyPersistedAgentState(),
+    );
+    const model = deferred<MockLanguageModelV3>();
+    let modelRequested = false;
+    const dependencies = makeDependencies(null);
+    dependencies.getModel = async () => {
+      modelRequested = true;
+      return model.promise;
+    };
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Describe Mara.",
+        refs: [],
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      sessionId,
+    );
+    await vi.waitFor(() => expect(modelRequested).toBe(true));
+
+    sessionId.characterId = "c2";
+    model.resolve(new MockLanguageModelV3());
+
+    await expect(submission).resolves.toEqual({ status: "success" });
+    expect(dependencies.stream).toHaveBeenCalledOnce();
+    expect(dependencies.stream.mock.calls[0][0].run.task).toEqual({
+      kind: "character-describe",
+      characterId: "c1",
+    });
+  });
 });
 
 describe("outline planner sessions", () => {

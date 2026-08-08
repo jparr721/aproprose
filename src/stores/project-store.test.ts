@@ -23,10 +23,19 @@ vi.mock("sonner", () => ({
 }));
 
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
+import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
-import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
-import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
+import {
+  characterProfileFingerprint,
+  storyFieldsFingerprint,
+  storyOverviewFingerprint,
+} from "@/lib/ai/agent-context";
+import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
+import type { StoryRefreshResult } from "@/lib/story-knowledge/refresh";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import {
   compileProject,
@@ -36,9 +45,16 @@ import {
   readPdf,
   readTextFile,
   writeAppData,
+  writeProjectMeta,
   writeTextFile,
 } from "@/lib/tauri";
-import type { Block, BlockChange, ProjectInfo } from "@/lib/types";
+import type {
+  Block,
+  BlockChange,
+  CharacterCandidate,
+  ProjectInfo,
+  ProjectMeta,
+} from "@/lib/types";
 
 const mkBlock = (p: Partial<Block> = {}): Block => ({
   id: Math.random().toString(36).slice(2),
@@ -71,6 +87,72 @@ const projectFixture = (root: string): ProjectInfo => ({
       wordCount: 2,
     },
   ],
+});
+
+const candidateFixture = (): CharacterCandidate => ({
+  id: "candidate-inez",
+  evidenceFingerprint: "candidate-fp",
+  name: "Inez",
+  role: "Guide",
+  profile: {
+    ...emptyCharacterProfile(),
+    appearance: "Silver hair.",
+  },
+  evidence: [],
+});
+
+const storyMetaFixture = (): ProjectMeta => ({
+  version: 5,
+  characters: [
+    {
+      id: "c1",
+      name: "Mara",
+      color: "#aabbcc",
+      role: "Detective",
+      profile: emptyCharacterProfile(),
+    },
+  ],
+  lore: [],
+  statuses: {},
+  outline: { premise: "", overview: "" },
+  chapters: {},
+  knowledge: emptyProjectKnowledge(),
+});
+
+const refreshResultFixture = (
+  input: Partial<StoryRefreshResult>,
+): StoryRefreshResult => ({
+  projectRoot: "/book",
+  analyzedChapterFingerprints: { ch1: "fp-1" },
+  knowledge: {
+    ...emptyProjectKnowledge(),
+    chapters: {
+      ch1: {
+        sourceFingerprint: "fp-1",
+        summary: "Mara arrives.",
+        premiseSignals: [],
+        conflictSignals: [],
+        stakeSignals: [],
+        arcSignals: [],
+        endingSignals: [],
+        characterObservations: [
+          {
+            id: "obs-1",
+            characterId: "c1",
+            field: "voice",
+            detail: "Mara speaks precisely.",
+            evidence: [],
+          },
+        ],
+        unknownCharacterObservations: [],
+      },
+    },
+  },
+  storyInputFingerprint: storyFieldsFingerprint({ premise: "", overview: "" }),
+  story: { premise: "New premise", overview: "New overview" },
+  characterUpdates: [],
+  characterFailures: [],
+  ...input,
 });
 
 const rewriteFixture = (blockId: string, newText: string): BlockChange => ({
@@ -136,6 +218,7 @@ const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
   });
 
 beforeEach(() => {
+  useStoryRefreshStore.getState().cancel();
   vi.mocked(writeTextFile).mockClear();
   useProjectStore.setState({
     blocks: [],
@@ -1048,6 +1131,57 @@ describe("saveChapter refreshes the backup indicator", () => {
   });
 });
 
+describe("saveChapter story refresh integration", () => {
+  const saveReadyState = () => ({
+    project: projectFixture("/book"),
+    activeChapterId: "ch1",
+    blocks: [mkBlock({ id: "save-block", text: "Alpha", dirty: true })],
+    chapterDirty: true,
+  });
+
+  it("enqueues the adopted chapter only after a successful disk save", async () => {
+    const enqueue = vi
+      .spyOn(useStoryRefreshStore.getState(), "enqueueSavedChapter")
+      .mockImplementation(() => undefined);
+    vi.mocked(writeTextFile).mockResolvedValueOnce(undefined);
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(enqueue).toHaveBeenCalledWith(
+      "/book",
+      "ch1",
+      expect.any(String),
+    );
+    enqueue.mockRestore();
+  });
+
+  it("does not enqueue when the chapter write fails", async () => {
+    const enqueue = vi
+      .spyOn(useStoryRefreshStore.getState(), "enqueueSavedChapter")
+      .mockImplementation(() => undefined);
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    useProjectStore.setState(saveReadyState());
+
+    await useProjectStore.getState().saveChapter();
+
+    expect(enqueue).not.toHaveBeenCalled();
+    enqueue.mockRestore();
+  });
+});
+
+describe("project lifecycle story refresh integration", () => {
+  it("cancels an active refresh before loading another project", async () => {
+    const cancel = vi.spyOn(useStoryRefreshStore.getState(), "cancel");
+    vi.mocked(openProject).mockRejectedValueOnce(new Error("not found"));
+
+    await useProjectStore.getState().loadProjectAt("/next-book");
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    cancel.mockRestore();
+  });
+});
+
 describe("saveChapter save errors", () => {
   const saveReadyState = () => ({
     project: projectFixture("/book"),
@@ -1684,5 +1818,212 @@ describe("applyAgentManuscriptProposal", () => {
     });
     expect(useProjectStore.getState().blocks).toEqual(blocks);
     expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+});
+
+describe("story refresh commits", () => {
+  beforeEach(() => {
+    vi.mocked(writeProjectMeta).mockClear();
+    vi.mocked(writeProjectMeta).mockResolvedValue(undefined);
+    useProjectStore.setState({
+      project: projectFixture("/book"),
+      meta: storyMetaFixture(),
+    } as never);
+  });
+
+  it("skips stale profile output and requests a follow-up reduction", async () => {
+    const result = refreshResultFixture({
+      characterUpdates: [
+        {
+          characterId: "c1",
+          inputFingerprint: characterProfileFingerprint(emptyCharacterProfile()),
+          patch: { additions: [], corrections: [] },
+        },
+      ],
+    });
+    useProjectStore.getState().updateCharacter("c1", {
+      profile: {
+        ...emptyCharacterProfile(),
+        voice: "Author-edited voice.",
+      },
+    });
+
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    expect(committed.followUpRequired).toBe(true);
+    expect(
+      useProjectStore.getState().meta.characters[0].profile.voice,
+    ).toBe("Author-edited voice.");
+  });
+
+  it("keeps new chapter knowledge pending when story fields are stale", async () => {
+    const priorKnowledge = {
+      ...emptyProjectKnowledge(),
+      chapters: {
+        ch1: {
+          ...refreshResultFixture({}).knowledge.chapters.ch1,
+          sourceFingerprint: "old-fp",
+          summary: "Old summary.",
+        },
+      },
+    };
+    useProjectStore.setState((state) => ({
+      meta: { ...state.meta, knowledge: priorKnowledge },
+    }));
+    const result = refreshResultFixture({});
+    useProjectStore.getState().setPremise("Author-edited premise.");
+
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    expect(committed.followUpRequired).toBe(true);
+    expect(useProjectStore.getState().meta.outline.premise).toBe(
+      "Author-edited premise.",
+    );
+    expect(
+      useProjectStore.getState().meta.knowledge.chapters.ch1.sourceFingerprint,
+    ).toBe("old-fp");
+    expect(useProjectStore.getState().meta.knowledge.characterCandidates).toEqual(
+      [],
+    );
+  });
+
+  it("skips analyzed chapters superseded by a newer saved fingerprint", async () => {
+    const result = refreshResultFixture({});
+
+    await useProjectStore.getState().commitStoryRefresh(result, {
+      ch1: "fp-newer",
+    });
+
+    expect(useProjectStore.getState().meta.knowledge.chapters.ch1).toBeUndefined();
+  });
+
+  it("applies valid character operations and records their observation IDs", async () => {
+    const result = refreshResultFixture({
+      characterUpdates: [
+        {
+          characterId: "c1",
+          inputFingerprint: characterProfileFingerprint(emptyCharacterProfile()),
+          patch: {
+            additions: [
+              {
+                field: "voice",
+                text: "Measured and precise.",
+                observationIds: ["obs-1"],
+              },
+              {
+                field: "history",
+                text: " ",
+                observationIds: ["obs-blank"],
+              },
+            ],
+            corrections: [],
+          },
+        },
+      ],
+    });
+
+    await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    const state = useProjectStore.getState();
+    expect(state.meta.characters[0].profile.voice).toBe("Measured and precise.");
+    expect(state.meta.characters[0].profile.history).toBe("");
+    expect(state.meta.knowledge.appliedCharacterObservationIds.c1).toEqual([
+      "obs-1",
+    ]);
+  });
+
+  it("accepts a candidate as a normal character with a fresh ID", async () => {
+    const candidate = candidateFixture();
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+
+    const id = await useProjectStore
+      .getState()
+      .acceptCharacterCandidate(candidate.id);
+
+    const state = useProjectStore.getState();
+    const accepted = state.meta.characters.find((character) => character.id === id);
+    expect(id).not.toBe(candidate.id);
+    expect(accepted).toMatchObject({
+      name: "Inez",
+      role: "Guide",
+      profile: candidate.profile,
+    });
+    expect(state.meta.knowledge.characterCandidates).toEqual([]);
+  });
+
+  it("dismisses a candidate and records its evidence fingerprint once", async () => {
+    const candidate = candidateFixture();
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+          dismissedCandidateFingerprints: [candidate.evidenceFingerprint],
+        },
+      },
+    }));
+
+    await useProjectStore.getState().dismissCharacterCandidate(candidate.id);
+
+    const knowledge = useProjectStore.getState().meta.knowledge;
+    expect(knowledge.characterCandidates).toEqual([]);
+    expect(knowledge.dismissedCandidateFingerprints).toEqual(["candidate-fp"]);
+  });
+
+  it("rejects direct agent profiles for the wrong project or character", async () => {
+    const profile = {
+      ...emptyCharacterProfile(),
+      motivations: "Find the missing courier.",
+    };
+
+    await expect(
+      useProjectStore
+        .getState()
+        .applyCharacterProfileFromAgent("/other", "c1", profile),
+    ).rejects.toThrow("project");
+    await expect(
+      useProjectStore
+        .getState()
+        .applyCharacterProfileFromAgent("/book", "missing", profile),
+    ).rejects.toThrow("character");
+    expect(useProjectStore.getState().meta.characters[0].profile).toEqual(
+      emptyCharacterProfile(),
+    );
+  });
+
+  it("replaces all six profile fields for a valid direct agent update", async () => {
+    const profile = {
+      appearance: "Tall.",
+      mannerisms: "Checks the exits.",
+      motivations: "Find the courier.",
+      relationships: "Trusts Inez.",
+      history: "Former guard.",
+      voice: "Precise.",
+    };
+
+    const updated = await useProjectStore
+      .getState()
+      .applyCharacterProfileFromAgent("/book", "c1", profile);
+
+    expect(updated.profile).toEqual(profile);
+    expect(useProjectStore.getState().meta.characters[0].profile).toEqual(profile);
   });
 });

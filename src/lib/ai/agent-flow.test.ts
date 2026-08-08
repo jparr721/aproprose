@@ -1263,7 +1263,9 @@ describe("agent console authoring flows", () => {
       useProjectStore.getState().undoAgentOutlineProposal(applied.undoToken),
     ).toBe(true);
     expect(useProjectStore.getState().meta).toEqual(before);
-    expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => {
+      expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    });
     expect(writeProjectMeta).toHaveBeenLastCalledWith(
       "/book",
       JSON.stringify(before),

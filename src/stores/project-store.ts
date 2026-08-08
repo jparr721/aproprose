@@ -19,6 +19,7 @@ import type {
   ChapterRef,
   ChapterStatus,
   Character,
+  CharacterProfile,
   CompileError,
   ContinuityFlag,
   LoreEntry,
@@ -63,7 +64,9 @@ import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
 import {
+  characterProfileFingerprint,
   projectMetaFingerprint,
+  storyFieldsFingerprint,
   storyOverviewFingerprint,
 } from "@/lib/ai/agent-context";
 import {
@@ -104,6 +107,11 @@ import {
 } from "@/lib/outline/model";
 import { runMigrations, EMPTY_META } from "@/lib/migration";
 import { updateLore, removeLore } from "@/lib/lore/model";
+import { DEFAULT_CHARACTER_COLOR } from "@/lib/characters/colors";
+import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
+import { storyChapterFingerprint } from "@/lib/story-knowledge/chunking";
+import type { StoryRefreshResult } from "@/lib/story-knowledge/refresh";
+import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -164,6 +172,27 @@ function metaKey(root: string): string {
 /** Stable, filesystem-safe key for a project's last-open chapter (local UI cursor). */
 function lastChapterKey(root: string): string {
   return `last-chapter-${pathHash(root)}`;
+}
+
+const metaWriteQueues = new Map<string, Promise<void>>();
+
+function queueProjectMetaWrite(
+  root: string,
+  meta: ProjectMeta,
+): Promise<void> {
+  const previous = metaWriteQueues.get(root);
+  const write = previous
+    ? previous
+        .catch(() => undefined)
+        .then(() => writeProjectMeta(root, JSON.stringify(meta)))
+    : writeProjectMeta(root, JSON.stringify(meta));
+  const tracked = write.finally(() => {
+    if (metaWriteQueues.get(root) === tracked) {
+      metaWriteQueues.delete(root);
+    }
+  });
+  metaWriteQueues.set(root, tracked);
+  return tracked;
 }
 
 interface ProjectState {
@@ -290,6 +319,17 @@ interface ProjectState {
   /** Adds a character and returns its newly-minted id. */
   addCharacter: (c: Omit<Character, "id">) => string;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
+  commitStoryRefresh: (
+    result: StoryRefreshResult,
+    latestSavedFingerprints: Record<string, string>,
+  ) => Promise<{ followUpRequired: boolean }>;
+  applyCharacterProfileFromAgent: (
+    projectRoot: string,
+    characterId: string,
+    profile: CharacterProfile,
+  ) => Promise<Character>;
+  acceptCharacterCandidate: (candidateId: string) => Promise<string>;
+  dismissCharacterCandidate: (candidateId: string) => Promise<void>;
   removeCharacter: (id: string) => void;
   addLore: (title: string) => string;
   updateLore: (id: string, patch: Partial<Pick<LoreEntry, "title" | "description" | "characterIds" | "tags">>) => void;
@@ -511,9 +551,23 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
     if (project)
-      void writeProjectMeta(project.root, JSON.stringify(meta)).catch((e) => {
+      void queueProjectMetaWrite(project.root, meta).catch((e) => {
         toast.error("Couldn't save project metadata", { description: String(e) });
       });
+  };
+
+  const persistMetaAndWait = async (
+    root: string,
+    meta: ProjectMeta,
+  ): Promise<void> => {
+    try {
+      await queueProjectMetaWrite(root, meta);
+    } catch (error) {
+      toast.error("Couldn't save project metadata", {
+        description: String(error),
+      });
+      throw error;
+    }
   };
 
   const persistRecents = (recents: RecentProject[]) => {
@@ -628,6 +682,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     loadProjectAt: async (root) => {
       // Wipe everything — this is the multi-project reset.
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
         const outcome = await openProjectCmd(root);
@@ -653,6 +708,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
+      useStoryRefreshStore.getState().cancel();
       void writeAppData(LAST_PROJECT_KEY, "");
       useSyncStore.getState().teardown();
       set({
@@ -710,6 +766,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     createProject: async (parent, name, author) => {
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
         const metadata: NovelMetadata = {
@@ -836,6 +893,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     migrateProject: async () => {
       const nm = get().needsMigration;
       if (!nm) return;
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
         const project = await migrateToManaged(nm.root);
@@ -1464,6 +1522,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // The working tree changed on disk; refresh the backup indicator now
         // instead of waiting for the next status poll tick.
         void useSyncStore.getState().refreshStatus();
+        useStoryRefreshStore.getState().enqueueSavedChapter(
+          project.root,
+          activeChapterId,
+          storyChapterFingerprint(get().blocks),
+        );
       } catch (e) {
         const message = String(e);
         set({ saving: false, error: message, saveError: message });
@@ -1525,6 +1588,227 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         persistMeta(meta);
         return { meta };
       }),
+
+    commitStoryRefresh: async (result, latestSavedFingerprints) => {
+      const state = get();
+      if (state.project === null || state.project.root !== result.projectRoot) {
+        throw new Error(
+          `Story refresh project does not match the open project: ${result.projectRoot}`,
+        );
+      }
+
+      const staleChapterIds = new Set(
+        Object.entries(result.analyzedChapterFingerprints).flatMap(
+          ([chapterId, analyzedFingerprint]) => {
+            const latestFingerprint = latestSavedFingerprints[chapterId];
+            return latestFingerprint !== undefined &&
+              latestFingerprint !== analyzedFingerprint
+              ? [chapterId]
+              : [];
+          },
+        ),
+      );
+      const storyIsStale =
+        storyFieldsFingerprint(state.meta.outline) !==
+        result.storyInputFingerprint;
+      const knowledge = structuredClone(state.meta.knowledge);
+      const liveChapterIds = new Set(
+        state.project.chapters.map((chapter) => chapter.id),
+      );
+
+      if (!storyIsStale) {
+        for (const chapterId of Object.keys(knowledge.chapters)) {
+          if (!liveChapterIds.has(chapterId)) {
+            delete knowledge.chapters[chapterId];
+          }
+        }
+        for (const chapterId of Object.keys(
+          result.analyzedChapterFingerprints,
+        )) {
+          if (staleChapterIds.has(chapterId)) continue;
+          const chapterKnowledge = result.knowledge.chapters[chapterId];
+          if (chapterKnowledge !== undefined) {
+            knowledge.chapters[chapterId] = structuredClone(chapterKnowledge);
+          }
+        }
+      }
+
+      if (!storyIsStale && staleChapterIds.size === 0) {
+        knowledge.characterCandidates = structuredClone(
+          result.knowledge.characterCandidates,
+        );
+      }
+      knowledge.dismissedCandidateFingerprints = [
+        ...new Set([
+          ...knowledge.dismissedCandidateFingerprints,
+          ...result.knowledge.dismissedCandidateFingerprints,
+        ]),
+      ];
+
+      let followUpRequired = storyIsStale || staleChapterIds.size > 0;
+      let characters = state.meta.characters;
+      if (!storyIsStale) {
+        for (const update of result.characterUpdates) {
+          const index = characters.findIndex(
+            (character) => character.id === update.characterId,
+          );
+          if (index < 0) continue;
+          const character = characters[index];
+          if (
+            characterProfileFingerprint(character.profile) !==
+            update.inputFingerprint
+          ) {
+            followUpRequired = true;
+            continue;
+          }
+
+          const knownObservationIds = new Set(
+            Object.values(knowledge.chapters).flatMap((chapter) =>
+              chapter.characterObservations
+                .filter(
+                  (observation) =>
+                    observation.characterId === update.characterId,
+                )
+                .map((observation) => observation.id),
+            ),
+          );
+          const patch = {
+            additions: update.patch.additions.map((addition) => ({
+              ...addition,
+              observationIds: addition.observationIds.filter((id) =>
+                knownObservationIds.has(id),
+              ),
+            })),
+            corrections: update.patch.corrections.map((correction) => ({
+              ...correction,
+              observationIds: correction.observationIds.filter((id) =>
+                knownObservationIds.has(id),
+              ),
+            })),
+          };
+          const applied = applyCharacterKnowledgePatch(
+            character.profile,
+            patch,
+            knowledge.appliedCharacterObservationIds[character.id] ?? [],
+          );
+          characters = characters.map((item, characterIndex) =>
+            characterIndex === index
+              ? { ...item, profile: applied.profile }
+              : item,
+          );
+          knowledge.appliedCharacterObservationIds[character.id] =
+            applied.appliedObservationIds;
+        }
+      }
+
+      const meta: ProjectMeta = {
+        ...state.meta,
+        outline:
+          storyIsStale || staleChapterIds.size > 0
+            ? state.meta.outline
+            : { ...result.story },
+        characters,
+        knowledge,
+      };
+      set({ meta });
+      await persistMetaAndWait(state.project.root, meta);
+      return { followUpRequired };
+    },
+
+    applyCharacterProfileFromAgent: async (
+      projectRoot,
+      characterId,
+      profile,
+    ) => {
+      const state = get();
+      if (state.project === null || state.project.root !== projectRoot) {
+        throw new Error(
+          `Agent profile project does not match the open project: ${projectRoot}`,
+        );
+      }
+      const character = state.meta.characters.find(
+        (item) => item.id === characterId,
+      );
+      if (character === undefined) {
+        throw new Error(`Agent profile character was not found: ${characterId}`);
+      }
+      const updated = { ...character, profile: { ...profile } };
+      const meta = {
+        ...state.meta,
+        characters: state.meta.characters.map((item) =>
+          item.id === characterId ? updated : item,
+        ),
+      };
+      set({ meta });
+      await persistMetaAndWait(projectRoot, meta);
+      return updated;
+    },
+
+    acceptCharacterCandidate: async (candidateId) => {
+      const state = get();
+      if (state.project === null) {
+        throw new Error("Cannot accept a character candidate without an open project");
+      }
+      const candidate = state.meta.knowledge.characterCandidates.find(
+        (item) => item.id === candidateId,
+      );
+      if (candidate === undefined) {
+        throw new Error(`Character candidate was not found: ${candidateId}`);
+      }
+      const id = uid("c");
+      const character: Character = {
+        id,
+        name: candidate.name,
+        role: candidate.role,
+        color: DEFAULT_CHARACTER_COLOR,
+        profile: { ...candidate.profile },
+      };
+      const meta = {
+        ...state.meta,
+        characters: [...state.meta.characters, character],
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates:
+            state.meta.knowledge.characterCandidates.filter(
+              (item) => item.id !== candidateId,
+            ),
+        },
+      };
+      set({ meta });
+      await persistMetaAndWait(state.project.root, meta);
+      return id;
+    },
+
+    dismissCharacterCandidate: async (candidateId) => {
+      const state = get();
+      if (state.project === null) {
+        throw new Error("Cannot dismiss a character candidate without an open project");
+      }
+      const candidate = state.meta.knowledge.characterCandidates.find(
+        (item) => item.id === candidateId,
+      );
+      if (candidate === undefined) {
+        throw new Error(`Character candidate was not found: ${candidateId}`);
+      }
+      const meta = {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates:
+            state.meta.knowledge.characterCandidates.filter(
+              (item) => item.id !== candidateId,
+            ),
+          dismissedCandidateFingerprints: [
+            ...new Set([
+              ...state.meta.knowledge.dismissedCandidateFingerprints,
+              candidate.evidenceFingerprint,
+            ]),
+          ],
+        },
+      };
+      set({ meta });
+      await persistMetaAndWait(state.project.root, meta);
+    },
 
     removeCharacter: (id) =>
       set((s) => {

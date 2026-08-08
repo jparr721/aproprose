@@ -26,10 +26,31 @@ import { writeProjectMeta } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import type {
   Card,
+  ProjectMeta,
   ProjectInfo,
   SculptChange,
   SculptProposal,
 } from "@/lib/types";
+
+function deferred<Value>(): {
+  promise: Promise<Value>;
+  resolve: (value: Value) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve!: (value: Value) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) {
+    await Promise.resolve();
+  }
+}
 
 const cardFixture = (): Card => ({
   id: "card-1",
@@ -164,6 +185,26 @@ describe("runMigrations", () => {
 });
 
 describe("card + chapter actions", () => {
+  it("serializes metadata snapshots so the newest state writes last", async () => {
+    const first = deferred<void>();
+    vi.mocked(writeProjectMeta)
+      .mockImplementationOnce(async () => first.promise)
+      .mockResolvedValueOnce(undefined);
+
+    useProjectStore.getState().setPremise("First");
+    useProjectStore.getState().setPremise("Second");
+
+    expect(writeProjectMeta).toHaveBeenCalledTimes(1);
+    first.resolve();
+    await flushPromises();
+
+    expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    const last = JSON.parse(
+      vi.mocked(writeProjectMeta).mock.calls[1][1] as string,
+    ) as ProjectMeta;
+    expect(last.outline.premise).toBe("Second");
+  });
+
   it("persists story overview edits", () => {
     useProjectStore.getState().setOverview("A courier exposes the crown.");
 

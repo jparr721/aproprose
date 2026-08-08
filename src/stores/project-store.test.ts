@@ -30,6 +30,7 @@ import {
   characterProfileFingerprint,
   storyFieldsFingerprint,
   storyOverviewFingerprint,
+  textFingerprint,
 } from "@/lib/ai/agent-context";
 import {
   emptyCharacterProfile,
@@ -101,6 +102,23 @@ const candidateFixture = (): CharacterCandidate => ({
   evidence: [],
 });
 
+const candidateInputFingerprintFixture = (
+  candidates: CharacterCandidate[],
+  dismissedFingerprints: string[],
+): string =>
+  textFingerprint(
+    JSON.stringify([
+      candidates
+        .map((candidate) => [candidate.id, candidate.evidenceFingerprint])
+        .sort(([leftId, leftFingerprint], [rightId, rightFingerprint]) =>
+          leftId === rightId
+            ? leftFingerprint.localeCompare(rightFingerprint)
+            : leftId.localeCompare(rightId),
+        ),
+      [...dismissedFingerprints].sort(),
+    ]),
+  );
+
 const storyMetaFixture = (): ProjectMeta => ({
   version: 5,
   characters: [
@@ -149,6 +167,7 @@ const refreshResultFixture = (
     },
   },
   storyInputFingerprint: storyFieldsFingerprint({ premise: "", overview: "" }),
+  candidateInputFingerprint: candidateInputFingerprintFixture([], []),
   story: { premise: "New premise", overview: "New overview" },
   characterUpdates: [],
   characterFailures: [],
@@ -1968,6 +1987,46 @@ describe("story refresh commits", () => {
     expect(state.meta.knowledge.characterCandidates).toEqual([]);
   });
 
+  it("preserves a candidate accepted while refresh output is in flight", async () => {
+    const candidate = candidateFixture();
+    const candidateInputFingerprint = candidateInputFingerprintFixture(
+      [candidate],
+      [],
+    );
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+    const result = {
+      ...refreshResultFixture({}),
+      candidateInputFingerprint,
+      knowledge: {
+        ...refreshResultFixture({}).knowledge,
+        characterCandidates: [candidate],
+      },
+    };
+
+    const acceptedId = await useProjectStore
+      .getState()
+      .acceptCharacterCandidate(candidate.id);
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    const state = useProjectStore.getState();
+    expect(committed.followUpRequired).toBe(true);
+    expect(state.meta.knowledge.characterCandidates).toEqual([]);
+    expect(
+      state.meta.characters.some((character) => character.id === acceptedId),
+    ).toBe(true);
+  });
+
   it("dismisses a candidate and records its evidence fingerprint once", async () => {
     const candidate = candidateFixture();
     useProjectStore.setState((state) => ({
@@ -1984,6 +2043,42 @@ describe("story refresh commits", () => {
     await useProjectStore.getState().dismissCharacterCandidate(candidate.id);
 
     const knowledge = useProjectStore.getState().meta.knowledge;
+    expect(knowledge.characterCandidates).toEqual([]);
+    expect(knowledge.dismissedCandidateFingerprints).toEqual(["candidate-fp"]);
+  });
+
+  it("preserves a candidate dismissed while refresh output is in flight", async () => {
+    const candidate = candidateFixture();
+    const candidateInputFingerprint = candidateInputFingerprintFixture(
+      [candidate],
+      [],
+    );
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+    const result = {
+      ...refreshResultFixture({}),
+      candidateInputFingerprint,
+      knowledge: {
+        ...refreshResultFixture({}).knowledge,
+        characterCandidates: [candidate],
+      },
+    };
+
+    await useProjectStore.getState().dismissCharacterCandidate(candidate.id);
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    const knowledge = useProjectStore.getState().meta.knowledge;
+    expect(committed.followUpRequired).toBe(true);
     expect(knowledge.characterCandidates).toEqual([]);
     expect(knowledge.dismissedCandidateFingerprints).toEqual(["candidate-fp"]);
   });

@@ -64,6 +64,7 @@ import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
 import {
+  candidateInputFingerprint,
   characterProfileFingerprint,
   projectMetaFingerprint,
   storyFieldsFingerprint,
@@ -1611,6 +1612,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const storyIsStale =
         storyFieldsFingerprint(state.meta.outline) !==
         result.storyInputFingerprint;
+      const candidateInputIsStale =
+        candidateInputFingerprint(state.meta.knowledge) !==
+        result.candidateInputFingerprint;
       const knowledge = structuredClone(state.meta.knowledge);
       const liveChapterIds = new Set(
         state.project.chapters.map((chapter) => chapter.id),
@@ -1633,19 +1637,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         }
       }
 
-      if (!storyIsStale && staleChapterIds.size === 0) {
+      if (
+        !storyIsStale &&
+        staleChapterIds.size === 0 &&
+        !candidateInputIsStale
+      ) {
         knowledge.characterCandidates = structuredClone(
           result.knowledge.characterCandidates,
         );
-      }
-      knowledge.dismissedCandidateFingerprints = [
-        ...new Set([
-          ...knowledge.dismissedCandidateFingerprints,
+        knowledge.dismissedCandidateFingerprints = [
           ...result.knowledge.dismissedCandidateFingerprints,
-        ]),
-      ];
+        ];
+      }
 
-      let followUpRequired = storyIsStale || staleChapterIds.size > 0;
+      let followUpRequired =
+        storyIsStale || staleChapterIds.size > 0 || candidateInputIsStale;
       let characters = state.meta.characters;
       if (!storyIsStale) {
         for (const update of result.characterUpdates) {

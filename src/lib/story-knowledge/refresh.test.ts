@@ -1,6 +1,7 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { textFingerprint } from "@/lib/ai/agent-context";
 import { parseChapter } from "@/lib/latex";
 import { CURRENT_VERSION } from "@/lib/migration";
 import { storyChapterFingerprint } from "@/lib/story-knowledge/chunking";
@@ -428,6 +429,51 @@ describe("story refresh orchestration", () => {
       expect.any(Object),
     );
     expect(result.knowledge.characterCandidates).toEqual([]);
+  });
+
+  it("captures candidate input state in deterministic order", async () => {
+    const fixture = indexedRefreshFixture();
+    fixture.capture.meta.knowledge.characterCandidates = [
+      {
+        id: "candidate-b",
+        evidenceFingerprint: "evidence-b",
+        name: "B",
+        role: "Guide",
+        profile: emptyCharacterProfile(),
+        evidence: [],
+      },
+      {
+        id: "candidate-a",
+        evidenceFingerprint: "evidence-a",
+        name: "A",
+        role: "Scout",
+        profile: emptyCharacterProfile(),
+        evidence: [],
+      },
+    ];
+    fixture.capture.meta.knowledge.dismissedCandidateFingerprints = [
+      "dismissed-b",
+      "dismissed-a",
+    ];
+
+    const result = await buildStoryRefresh(
+      fixture.capture,
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({
+      candidateInputFingerprint: textFingerprint(
+        JSON.stringify([
+          [
+            ["candidate-a", "evidence-a"],
+            ["candidate-b", "evidence-b"],
+          ],
+          ["dismissed-a", "dismissed-b"],
+        ]),
+      ),
+    });
   });
 
   it("keeps the captured chapter record untouched when a later chunk fails", async () => {

@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import {
+  candidateInputFingerprint,
   characterProfileFingerprint,
   storyFieldsFingerprint,
 } from "@/lib/ai/agent-context";
@@ -58,6 +59,7 @@ export interface StoryRefreshResult {
   analyzedChapterFingerprints: Record<string, string>;
   knowledge: ProjectKnowledge;
   storyInputFingerprint: string;
+  candidateInputFingerprint: string;
   story: Outline;
   characterUpdates: StoryRefreshCharacterUpdate[];
   characterFailures: Array<{
@@ -223,6 +225,9 @@ export async function buildStoryRefresh(
   onProgress: StoryRefreshProgressHandler,
 ): Promise<StoryRefreshResult> {
   signal.throwIfAborted();
+  const capturedCandidateInputFingerprint = candidateInputFingerprint(
+    capture.meta.knowledge,
+  );
   const parsedChapters: ParsedStoryChapter[] = [];
   for (const chapter of capture.project.chapters) {
     signal.throwIfAborted();
@@ -428,6 +433,7 @@ export async function buildStoryRefresh(
     analyzedChapterFingerprints,
     knowledge,
     storyInputFingerprint,
+    candidateInputFingerprint: capturedCandidateInputFingerprint,
     story,
     characterUpdates,
     characterFailures,

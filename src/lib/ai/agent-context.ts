@@ -17,6 +17,7 @@ import type {
   ContinuityFlag,
   Outline,
   ProjectMeta,
+  ProjectKnowledge,
 } from "@/lib/types";
 
 export interface FlattenedMessageFinding {
@@ -84,6 +85,25 @@ export function characterProfileFingerprint(profile: CharacterProfile): string {
 
 export function storyFieldsFingerprint(outline: Outline): string {
   return textFingerprint(JSON.stringify([outline.premise, outline.overview]));
+}
+
+export function candidateInputFingerprint(
+  knowledge: Pick<
+    ProjectKnowledge,
+    "characterCandidates" | "dismissedCandidateFingerprints"
+  >,
+): string {
+  const candidates = knowledge.characterCandidates
+    .map((candidate) => [candidate.id, candidate.evidenceFingerprint])
+    .sort(([leftId, leftFingerprint], [rightId, rightFingerprint]) => {
+      if (leftId !== rightId) return leftId < rightId ? -1 : 1;
+      if (leftFingerprint === rightFingerprint) return 0;
+      return leftFingerprint < rightFingerprint ? -1 : 1;
+    });
+  const dismissed = [...knowledge.dismissedCandidateFingerprints].sort(
+    (left, right) => (left === right ? 0 : left < right ? -1 : 1),
+  );
+  return textFingerprint(JSON.stringify([candidates, dismissed]));
 }
 
 export function findingFingerprint(

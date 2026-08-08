@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildOutlinePlannerGrounding } from "@/lib/outline/planner-grounding";
-import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
+import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
 import type { ChapterRef, ProjectMeta } from "@/lib/types";
 
 const chapters: ChapterRef[] = ["a", "b", "c"].map((id, index) => ({
@@ -152,5 +155,215 @@ describe("buildOutlinePlannerGrounding", () => {
     ).toBeLessThanOrEqual(18);
     expect(manuscriptChapters.every((chapter) => chapter.truncated)).toBe(true);
     expect(grounding).not.toContain("TAIL");
+  });
+
+  it("expands profiles only for cast relevant to the target neighborhood", () => {
+    const profile = (marker: string) => ({
+      ...emptyCharacterProfile(),
+      mannerisms: marker,
+    });
+    const plannerMeta: ProjectMeta = {
+      ...meta,
+      characters: [
+        {
+          id: "previous",
+          name: "Previous",
+          color: "#111111",
+          role: "Guide",
+          profile: profile("previous-profile"),
+        },
+        {
+          id: "target",
+          name: "Target",
+          color: "#222222",
+          role: "Lead",
+          profile: profile("target-profile"),
+        },
+        {
+          id: "card",
+          name: "Card",
+          color: "#333333",
+          role: "Witness",
+          profile: profile("card-profile"),
+        },
+        {
+          id: "next",
+          name: "Next",
+          color: "#444444",
+          role: "Rival",
+          profile: profile("next-profile"),
+        },
+        {
+          id: "observed",
+          name: "Observed",
+          color: "#555555",
+          role: "Clerk",
+          profile: profile("observed-profile"),
+        },
+        {
+          id: "previous-observed",
+          name: "Previous observed",
+          color: "#565656",
+          role: "Porter",
+          profile: profile("previous-observed-profile"),
+        },
+        {
+          id: "next-observed",
+          name: "Next observed",
+          color: "#575757",
+          role: "Sailor",
+          profile: profile("next-observed-profile"),
+        },
+        {
+          id: "unrelated",
+          name: "Unrelated",
+          color: "#666666",
+          role: "Pilot",
+          profile: profile("unrelated-profile"),
+        },
+      ],
+      chapters: {
+        a: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: ["previous"],
+          cards: [],
+        },
+        b: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: ["target"],
+          cards: [
+            {
+              id: "card",
+              title: "Beat",
+              intention: "",
+              characterIds: ["card"],
+              loreIds: [],
+              continuityFlags: [],
+            },
+          ],
+        },
+        c: {
+          act: null,
+          plotPoint: null,
+          premise: "",
+          goal: "",
+          conflict: "",
+          turn: "",
+          characterIds: ["next"],
+          cards: [],
+        },
+      },
+      knowledge: {
+        ...emptyProjectKnowledge(),
+        chapters: {
+          a: {
+            sourceFingerprint: "previous-source",
+            summary: "",
+            premiseSignals: [],
+            conflictSignals: [],
+            stakeSignals: [],
+            arcSignals: [],
+            endingSignals: [],
+            characterObservations: [
+              {
+                id: "previous-observation",
+                characterId: "previous-observed",
+                field: "history",
+                detail: "Noted",
+                evidence: [],
+              },
+            ],
+            unknownCharacterObservations: [],
+          },
+          b: {
+            sourceFingerprint: "source",
+            summary: "",
+            premiseSignals: [],
+            conflictSignals: [],
+            stakeSignals: [],
+            arcSignals: [],
+            endingSignals: [],
+            characterObservations: [
+              {
+                id: "observation",
+                characterId: "observed",
+                field: "history",
+                detail: "Noted",
+                evidence: [],
+              },
+            ],
+            unknownCharacterObservations: [],
+          },
+          c: {
+            sourceFingerprint: "next-source",
+            summary: "",
+            premiseSignals: [],
+            conflictSignals: [],
+            stakeSignals: [],
+            arcSignals: [],
+            endingSignals: [],
+            characterObservations: [
+              {
+                id: "next-observation",
+                characterId: "next-observed",
+                field: "history",
+                detail: "Noted",
+                evidence: [],
+              },
+            ],
+            unknownCharacterObservations: [],
+          },
+        },
+      },
+    };
+
+    const grounding = buildOutlinePlannerGrounding(
+      {
+        chapters,
+        meta: plannerMeta,
+        targetChapterId: "b",
+        previous: manuscript("a"),
+        target: manuscript("b"),
+        next: manuscript("c"),
+      },
+      1_000,
+    );
+    const value = JSON.parse(grounding.split("\n").slice(1).join("\n")) as {
+      characters: Array<{
+        id: string;
+        profile?: ReturnType<typeof emptyCharacterProfile>;
+      }>;
+    };
+
+    expect(
+      value.characters
+        .filter((character) => character.profile !== undefined)
+        .map((character) => character.id),
+    ).toEqual([
+      "previous",
+      "target",
+      "card",
+      "next",
+      "observed",
+      "previous-observed",
+      "next-observed",
+    ]);
+    expect(
+      value.characters.find((character) => character.id === "unrelated"),
+    ).toEqual({
+      id: "unrelated",
+      name: "Unrelated",
+      role: "Pilot",
+    });
   });
 });

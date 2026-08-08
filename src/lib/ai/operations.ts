@@ -14,6 +14,7 @@ import {
 import { renderGrounding } from "@/lib/ai/grounding-render";
 import type {
   BlockType,
+  CharacterProfile,
   ContinuityFlag,
   CritiqueNote,
   ManuscriptProposal,
@@ -29,7 +30,11 @@ export interface AiOpOptions {
 export interface AnchoredContext {
   chapterTitle?: string;
   cursorSummary?: string;
-  characters?: { name: string; role?: string }[];
+  characters?: Array<{
+    name: string;
+    role: string;
+    profile: CharacterProfile;
+  }>;
   instruction?: string;
   structure?: string;
   blocks: { id: string; type: BlockType; text: string }[];

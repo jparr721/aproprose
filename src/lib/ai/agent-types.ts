@@ -418,6 +418,7 @@ export interface OutlineToolValue {
     name: string;
     color: string;
     role: string;
+    profile: CharacterProfile;
   }>;
   chapters: Array<{
     chapterId: string;

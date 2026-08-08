@@ -66,6 +66,7 @@ import { renderStoryStructure } from "@/lib/outline/grounding";
 import { getChapterOutline } from "@/lib/outline/model";
 import { buildOutlinePlannerGrounding } from "@/lib/outline/planner-grounding";
 import type { OutlinePlannerGroundingInput } from "@/lib/outline/planner-grounding";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 import {
   appendAgentFailureLog,
   readTextFile,
@@ -856,7 +857,10 @@ function outlineValue(
   return {
     premise: meta.outline.premise,
     overview: meta.outline.overview,
-    characters: meta.characters.map((character) => ({ ...character })),
+    characters: meta.characters.map((character) => ({
+      ...character,
+      profile: { ...character.profile },
+    })),
     chapters: selected.map((chapter) => {
       const outline = getChapterOutline(meta.chapters, chapter.id);
       return {
@@ -958,12 +962,28 @@ function anchoredContext(
     characters: meta.characters,
     activeChapterId: chapter.chapterId,
   });
+  const outline = getChapterOutline(meta.chapters, chapter.chapterId);
+  const relevantCharacterIds = new Set([
+    ...prose.flatMap((block) =>
+      block.type === "dialogue" && block.speaker !== undefined
+        ? [block.speaker]
+        : [],
+    ),
+    ...outline.characterIds,
+    ...outline.cards.flatMap((card) => card.characterIds),
+    ...(meta.knowledge.chapters[chapter.chapterId]?.characterObservations.map(
+      (observation) => observation.characterId,
+    ) ?? []),
+  ]);
   return {
     chapterTitle: chapter.title,
     cursorSummary: "Reviewing the frozen chapter.",
     characters: meta.characters.map((character) => ({
       name: character.name,
       role: character.role,
+      profile: relevantCharacterIds.has(character.id)
+        ? { ...character.profile }
+        : emptyCharacterProfile(),
     })),
     instruction: focus ?? undefined,
     structure: structure ?? undefined,

@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { renderGrounding } from "@/lib/ai/grounding-render";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 
 describe("renderGrounding", () => {
   it("renders every section in the canonical order, joined by blank lines", () => {
     const text = renderGrounding({
       chapterTitle: "The Gate",
-      characters: [{ name: "Mara", role: "PI" }, { name: "Finch" }],
+      characters: [
+        { name: "Mara", role: "PI", profile: emptyCharacterProfile() },
+        { name: "Finch", role: "", profile: emptyCharacterProfile() },
+      ],
       cursorSummary: "Cursor sits at the end.",
       structure: "Act I",
       prose: "First.\n\nSecond.",
@@ -21,6 +25,26 @@ describe("renderGrounding", () => {
         "AUTHOR'S REQUEST (follow this):\ntighten it",
       ].join("\n\n"),
     );
+  });
+
+  it("renders nonempty profile sections for relevant cast", () => {
+    const text = renderGrounding({
+      characters: [
+        {
+          name: "Mara",
+          role: "Lead",
+          profile: {
+            ...emptyCharacterProfile(),
+            mannerisms: "Checks every lock twice.",
+            motivations: "Protect her sister.",
+          },
+        },
+      ],
+    });
+
+    expect(text).toContain("Mannerisms: Checks every lock twice.");
+    expect(text).toContain("Motivations: Protect her sister.");
+    expect(text).not.toContain("Appearance:");
   });
 
   it("renders id-labeled blocks under the caller's label", () => {

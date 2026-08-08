@@ -80,6 +80,30 @@ export function buildOutlinePlannerGrounding(
       chapter.cards.flatMap((card) => card.loreIds),
     ),
   );
+  const targetOutline = getChapterOutline(
+    input.meta.chapters,
+    input.targetChapterId,
+  );
+  const neighborhoodChapterIds = [
+    input.previous?.chapterId,
+    input.target.chapterId,
+    input.next?.chapterId,
+  ].filter((chapterId): chapterId is string => chapterId !== undefined);
+  const relevantCharacterIds = new Set([
+    ...targetOutline.characterIds,
+    ...targetOutline.cards.flatMap((card) => card.characterIds),
+    ...[input.previous, input.next].flatMap((chapter) =>
+      chapter === null
+        ? []
+        : getChapterOutline(input.meta.chapters, chapter.chapterId).characterIds,
+    ),
+    ...neighborhoodChapterIds.flatMap(
+      (chapterId) =>
+        input.meta.knowledge.chapters[chapterId]?.characterObservations.map(
+          (observation) => observation.characterId,
+        ) ?? [],
+    ),
+  ]);
   const manuscriptSources = [input.previous, input.target, input.next];
   const presentManuscriptCount = manuscriptSources.filter(
     (chapter) => chapter !== null,
@@ -111,7 +135,20 @@ export function buildOutlinePlannerGrounding(
       title: chapter.title,
       ...getChapterOutline(input.meta.chapters, chapter.id),
     })),
-    characters: input.meta.characters,
+    characters: input.meta.characters.map((character) =>
+      relevantCharacterIds.has(character.id)
+        ? {
+            id: character.id,
+            name: character.name,
+            role: character.role,
+            profile: { ...character.profile },
+          }
+        : {
+            id: character.id,
+            name: character.name,
+            role: character.role,
+          },
+    ),
     linkedLore: input.meta.lore.filter((entry) => linkedLoreIds.has(entry.id)),
     manuscript: {
       previous: manuscriptChapter(input.previous, manuscriptBudgets[0]),

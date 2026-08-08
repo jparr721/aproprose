@@ -756,6 +756,14 @@ describe("agent console authoring flows", () => {
             profile: emptyCharacterProfile(),
           },
         ]);
+        outline.value.characters[0].profile.voice = "Mutated tool result.";
+        const outlineAgain = await handlers.readOutline({ chapterId: null });
+        if (outlineAgain.kind !== "runtime") {
+          throw new Error("Expected complete outline data.");
+        }
+        expect(outlineAgain.value.characters[0].profile).toEqual(
+          emptyCharacterProfile(),
+        );
         expect(outline.value.chapters[1]).toMatchObject({
           chapterId: "ch2",
           plotPoint: "midpoint",
@@ -1152,6 +1160,101 @@ describe("agent console authoring flows", () => {
   });
 
   it("emits critique and continuity findings while keeping analysis tasks read-only", async () => {
+    const profile = (
+      field: keyof ReturnType<typeof emptyCharacterProfile>,
+      value: string,
+    ) => ({
+      ...emptyCharacterProfile(),
+      [field]: value,
+    });
+    useProjectStore.setState((state) => ({
+      blocks: state.blocks.map((current) =>
+        current.id === "successor"
+          ? { ...current, type: "dialogue", speaker: "speaker" }
+          : current,
+      ),
+      meta: {
+        ...state.meta,
+        characters: [
+          {
+            id: "assigned",
+            name: "Assigned",
+            color: "#111111",
+            role: "Lead",
+            profile: profile("mannerisms", "Assigned profile."),
+          },
+          {
+            id: "card",
+            name: "Card",
+            color: "#222222",
+            role: "Witness",
+            profile: profile("motivations", "Card profile."),
+          },
+          {
+            id: "observed",
+            name: "Observed",
+            color: "#333333",
+            role: "Clerk",
+            profile: profile("history", "Observed profile."),
+          },
+          {
+            id: "speaker",
+            name: "Speaker",
+            color: "#444444",
+            role: "Guard",
+            profile: profile("voice", "Speaker profile."),
+          },
+          {
+            id: "unrelated",
+            name: "Unrelated",
+            color: "#555555",
+            role: "Pilot",
+            profile: profile("appearance", "Unrelated profile."),
+          },
+        ],
+        chapters: {
+          ...state.meta.chapters,
+          ch1: {
+            ...state.meta.chapters.ch1,
+            characterIds: ["assigned"],
+            cards: [
+              {
+                id: "cast-card",
+                title: "Witness arrives",
+                intention: "",
+                characterIds: ["card"],
+                loreIds: [],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+        knowledge: {
+          ...state.meta.knowledge,
+          chapters: {
+            ch1: {
+              sourceFingerprint: "source",
+              summary: "",
+              premiseSignals: [],
+              conflictSignals: [],
+              stakeSignals: [],
+              arcSignals: [],
+              endingSignals: [],
+              characterObservations: [
+                {
+                  id: "observation",
+                  characterId: "observed",
+                  field: "history",
+                  detail: "Observed",
+                  evidence: [],
+                },
+              ],
+              unknownCharacterObservations: [],
+            },
+          },
+        },
+      },
+    }));
     mocks.generateText
       .mockResolvedValueOnce({
         output: {
@@ -1270,6 +1373,18 @@ describe("agent console authoring flows", () => {
         analysis: "continuity",
       },
     });
+
+    const prompts = mocks.generateText.mock.calls.map((call) =>
+      String(call[0].prompt),
+    );
+    for (const prompt of prompts) {
+      expect(prompt).toContain("Mannerisms: Assigned profile.");
+      expect(prompt).toContain("Motivations: Card profile.");
+      expect(prompt).toContain("History: Observed profile.");
+      expect(prompt).toContain("Voice: Speaker profile.");
+      expect(prompt).toContain("- Unrelated (Pilot)");
+      expect(prompt).not.toContain("Appearance: Unrelated profile.");
+    }
 
     const findings = useAgentConsoleStore
       .getState()

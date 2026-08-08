@@ -6,11 +6,15 @@
 // varies, so op groundings cannot drift apart. (Named grounding-render to avoid
 // clashing with src/lib/outline/grounding.ts.)
 
-import type { BlockType } from "@/lib/types";
+import type { BlockType, CharacterProfile } from "@/lib/types";
 
 export interface GroundingSections {
   chapterTitle?: string;
-  characters?: { name: string; role?: string }[];
+  characters?: Array<{
+    name: string;
+    role: string;
+    profile: CharacterProfile;
+  }>;
   cursorSummary?: string;
   structure?: string;
   /** Rendered scene prose (SCENE PROSE section). */
@@ -31,7 +35,22 @@ export function renderGrounding(sections: GroundingSections): string {
   if (sections.chapterTitle) parts.push(`CHAPTER: ${sections.chapterTitle}`);
   if (sections.characters && sections.characters.length > 0) {
     const roster = sections.characters
-      .map((c) => (c.role ? `- ${c.name} (${c.role})` : `- ${c.name}`))
+      .map((character) => {
+        const heading = character.role
+          ? `- ${character.name} (${character.role})`
+          : `- ${character.name}`;
+        const profile = [
+          ["Appearance", character.profile.appearance],
+          ["Mannerisms", character.profile.mannerisms],
+          ["Motivations", character.profile.motivations],
+          ["Relationships", character.profile.relationships],
+          ["History", character.profile.history],
+          ["Voice", character.profile.voice],
+        ]
+          .filter((entry) => entry[1].trim().length > 0)
+          .map(([label, value]) => `  ${label}: ${value}`);
+        return [heading, ...profile].join("\n");
+      })
       .join("\n");
     parts.push(`KNOWN CAST:\n${roster}`);
   }

@@ -22,7 +22,11 @@ import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
-import { writeProjectMeta } from "@/lib/tauri";
+import {
+  openProject,
+  readProjectMeta,
+  writeProjectMeta,
+} from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import type {
   Card,
@@ -203,6 +207,53 @@ describe("card + chapter actions", () => {
       vi.mocked(writeProjectMeta).mock.calls[1][1] as string,
     ) as ProjectMeta;
     expect(last.outline.premise).toBe("Second");
+  });
+
+  it("drains three pending writes before a same-root reopen reads metadata", async () => {
+    const gates = [deferred<void>(), deferred<void>(), deferred<void>()];
+    let persisted = JSON.stringify(useProjectStore.getState().meta);
+    let writeIndex = 0;
+    vi.mocked(writeProjectMeta).mockImplementation(async (_root, serialized) => {
+      const gate = gates[writeIndex];
+      writeIndex += 1;
+      if (gate !== undefined) await gate.promise;
+      persisted = serialized;
+    });
+    const reopenedProject = {
+      ...projectFixture("/book"),
+      chapters: [],
+    };
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project: reopenedProject,
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readProjectMeta).mockImplementationOnce(async () => persisted);
+
+    useProjectStore.getState().setPremise("First");
+    useProjectStore.getState().setPremise("Second");
+    useProjectStore.getState().setPremise("Third");
+    useProjectStore.getState().closeProject();
+    const reopened = useProjectStore.getState().loadProjectAt("/book");
+    await flushPromises();
+
+    expect(readProjectMeta).not.toHaveBeenCalled();
+    gates[0].resolve();
+    await flushPromises();
+    gates[1].resolve();
+    await flushPromises();
+    gates[2].resolve();
+    await reopened;
+
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Third");
+    useProjectStore.getState().setOverview("After reopen");
+    await flushPromises();
+    const finalSnapshot = JSON.parse(persisted) as ProjectMeta;
+    expect(finalSnapshot.outline).toEqual({
+      premise: "Third",
+      overview: "After reopen",
+    });
   });
 
   it("persists story overview edits", () => {

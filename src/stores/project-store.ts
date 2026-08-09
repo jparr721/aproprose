@@ -200,6 +200,10 @@ function queueProjectMetaWrite(
   return tracked;
 }
 
+export function drainProjectMetaWrites(root: string): Promise<void> {
+  return metaWriteQueues.get(root) ?? Promise.resolve();
+}
+
 interface ProjectState {
   status: ProjectStatus;
   project: ProjectInfo | null;
@@ -588,6 +592,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     // In-repo metadata wins; a corrupt meta.json must not brick the open — fall
     // back to the legacy app-config record (or empty), migrating that record into
     // the repo once when no in-repo file exists yet.
+    await drainProjectMetaWrites(root);
     let meta: ProjectMeta;
     const inRepo = await readProjectMeta(root);
     let parsed: unknown = null;
@@ -687,9 +692,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     loadProjectAt: async (root) => {
       // Wipe everything — this is the multi-project reset.
+      const previousRoot = get().project?.root ?? null;
       useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
+        if (previousRoot !== null) {
+          await drainProjectMetaWrites(previousRoot);
+        }
         const outcome = await openProjectCmd(root);
         if (outcome.status === "needsMigration") {
           set({
@@ -713,9 +722,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
+      const root = get().project?.root ?? null;
       useStoryRefreshStore.getState().cancel();
       void writeAppData(LAST_PROJECT_KEY, "");
       useSyncStore.getState().teardown();
+      if (root !== null) {
+        void drainProjectMetaWrites(root).catch((error) => {
+          toast.error("Couldn't save project metadata", {
+            description: String(error),
+          });
+        });
+      }
       set({
         status: "empty",
         project: null,

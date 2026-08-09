@@ -212,9 +212,15 @@ function queueProjectMetaWrite(
   provenance: ProjectMetaProvenance,
 ): Promise<void> {
   const previous = metaWriteQueues.get(root);
-  const persist = async (): Promise<void> => {
-    await writeProjectMeta(root, JSON.stringify(meta));
-    provenance.lastDurableMeta = meta;
+  const persist = (): Promise<void> => {
+    const write = writeProjectMeta(root, JSON.stringify(meta));
+    void write.then(
+      () => {
+        provenance.lastDurableMeta = meta;
+      },
+      () => undefined,
+    );
+    return write;
   };
   const write = previous
     ? previous

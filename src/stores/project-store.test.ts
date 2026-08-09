@@ -2428,6 +2428,55 @@ describe("story refresh commits", () => {
     expect(useProjectStore.getState().meta).toBe(previousMeta);
   });
 
+  it("restores the last durable metadata after overlapping optimistic writes fail", async () => {
+    await useProjectStore.getState().applyCharacterProfileFromAgent(
+      "/book",
+      "c1",
+      {
+        ...emptyCharacterProfile(),
+        voice: "Durable voice.",
+      },
+    );
+    const durableMeta = useProjectStore.getState().meta;
+    const firstWrite = deferred<void>();
+    const secondWrite = deferred<void>();
+    vi.mocked(writeProjectMeta)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockImplementationOnce(() => secondWrite.promise);
+
+    const firstUpdate = useProjectStore.getState().applyCharacterProfileFromAgent(
+      "/book",
+      "c1",
+      {
+        ...emptyCharacterProfile(),
+        voice: "Failed first voice.",
+      },
+    );
+    const failedFirstMeta = useProjectStore.getState().meta;
+    const secondUpdate = useProjectStore.getState().applyCharacterProfileFromAgent(
+      "/book",
+      "c1",
+      {
+        ...emptyCharacterProfile(),
+        motivations: "Failed second motivation.",
+      },
+    );
+
+    firstWrite.reject(new Error("first metadata write failed"));
+    await expect(firstUpdate).rejects.toThrow("first metadata write failed");
+    await vi.waitFor(() => {
+      expect(writeProjectMeta).toHaveBeenCalledTimes(3);
+    });
+    secondWrite.reject(new Error("second metadata write failed"));
+    await expect(secondUpdate).rejects.toThrow("second metadata write failed");
+
+    expect(useProjectStore.getState().meta).toBe(durableMeta);
+    expect(useProjectStore.getState().meta).not.toBe(failedFirstMeta);
+    expect(useProjectStore.getState().meta.characters[0].profile.voice).toBe(
+      "Durable voice.",
+    );
+  });
+
   it("does not roll back newer metadata after an earlier write fails", async () => {
     const firstWrite = deferred<void>();
     vi.mocked(writeProjectMeta)

@@ -181,16 +181,46 @@ function lastChapterKey(root: string): string {
 
 const metaWriteQueues = new Map<string, Promise<void>>();
 
+interface ProjectMetaProvenance {
+  root: string;
+  lastDurableMeta: ProjectMeta;
+}
+
+const projectMetaProvenance = new WeakMap<
+  ProjectMeta,
+  ProjectMetaProvenance
+>();
+
+function inheritProjectMetaProvenance(
+  root: string,
+  previousMeta: ProjectMeta,
+  nextMeta: ProjectMeta,
+): ProjectMetaProvenance {
+  const previousProvenance = projectMetaProvenance.get(previousMeta);
+  const provenance =
+    previousProvenance?.root === root
+      ? previousProvenance
+      : { root, lastDurableMeta: previousMeta };
+  projectMetaProvenance.set(previousMeta, provenance);
+  projectMetaProvenance.set(nextMeta, provenance);
+  return provenance;
+}
+
 function queueProjectMetaWrite(
   root: string,
   meta: ProjectMeta,
+  provenance: ProjectMetaProvenance,
 ): Promise<void> {
   const previous = metaWriteQueues.get(root);
+  const persist = async (): Promise<void> => {
+    await writeProjectMeta(root, JSON.stringify(meta));
+    provenance.lastDurableMeta = meta;
+  };
   const write = previous
     ? previous
         .catch(() => undefined)
-        .then(() => writeProjectMeta(root, JSON.stringify(meta)))
-    : writeProjectMeta(root, JSON.stringify(meta));
+        .then(persist)
+    : persist();
   const tracked = write.finally(() => {
     if (metaWriteQueues.get(root) === tracked) {
       metaWriteQueues.delete(root);
@@ -559,18 +589,25 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
-    if (project)
-      void queueProjectMetaWrite(project.root, meta).catch((e) => {
+    if (project) {
+      const provenance = inheritProjectMetaProvenance(
+        project.root,
+        get().meta,
+        meta,
+      );
+      void queueProjectMetaWrite(project.root, meta, provenance).catch((e) => {
         toast.error("Couldn't save project metadata", { description: String(e) });
       });
+    }
   };
 
   const persistMetaAndWait = async (
     root: string,
     meta: ProjectMeta,
+    provenance: ProjectMetaProvenance,
   ): Promise<void> => {
     try {
-      await queueProjectMetaWrite(root, meta);
+      await queueProjectMetaWrite(root, meta, provenance);
     } catch (error) {
       toast.error("Couldn't save project metadata", {
         description: String(error),
@@ -584,13 +621,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     previousMeta: ProjectMeta,
     optimisticMeta: ProjectMeta,
   ): Promise<void> => {
+    const provenance = inheritProjectMetaProvenance(
+      root,
+      previousMeta,
+      optimisticMeta,
+    );
     set({ meta: optimisticMeta });
     try {
-      await persistMetaAndWait(root, optimisticMeta);
+      await persistMetaAndWait(root, optimisticMeta, provenance);
     } catch (error) {
       const current = get();
       if (current.project?.root === root && current.meta === optimisticMeta) {
-        set({ meta: previousMeta });
+        set({ meta: provenance.lastDurableMeta });
       }
       throw error;
     }

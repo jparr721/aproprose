@@ -13,6 +13,7 @@ import type {
   Block,
   Card,
   CharacterProfile,
+  ChapterRef,
   CritiqueNote,
   ContinuityFlag,
   Outline,
@@ -85,6 +86,12 @@ export function characterProfileFingerprint(profile: CharacterProfile): string {
 
 export function storyFieldsFingerprint(outline: Outline): string {
   return textFingerprint(JSON.stringify([outline.premise, outline.overview]));
+}
+
+export function chapterTopologyFingerprint(chapters: ChapterRef[]): string {
+  return textFingerprint(
+    JSON.stringify(chapters.map((chapter) => [chapter.id, chapter.title])),
+  );
 }
 
 export function candidateInputFingerprint(

@@ -26,6 +26,7 @@ describe("migrateV5", () => {
       voice: "",
     });
     expect(migrated.knowledge).toEqual({
+      chapterTopologyFingerprint: "",
       chapters: {},
       characterCandidates: [],
       acceptedCandidateFingerprints: [],

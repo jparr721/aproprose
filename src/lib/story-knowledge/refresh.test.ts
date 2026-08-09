@@ -236,11 +236,22 @@ function indexedRefreshFixture(): {
       storyChapterFingerprint(parseChapter(sources["two.tex"])),
     ),
   };
+  knowledge.chapterTopologyFingerprint = topologyFingerprintFixture(
+    projectFixture,
+  );
   return {
     capture: refreshCaptureFixture({ knowledge }),
     dependencies,
     sources,
   };
+}
+
+function topologyFingerprintFixture(project: ProjectInfo): string {
+  return textFingerprint(
+    JSON.stringify(
+      project.chapters.map((chapter) => [chapter.id, chapter.title]),
+    ),
+  );
 }
 
 describe("story refresh orchestration", () => {
@@ -298,6 +309,63 @@ describe("story refresh orchestration", () => {
     );
 
     expect(Object.keys(result.knowledge.chapters)).toEqual(["ch1"]);
+    expect(fixture.dependencies.analyzeStoryChunk).not.toHaveBeenCalled();
+    expect(fixture.dependencies.reduceStoryFields).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles reordered chapters without reanalyzing their prose", async () => {
+    const fixture = indexedRefreshFixture();
+    Object.assign(fixture.capture.meta.knowledge, {
+      chapterTopologyFingerprint: topologyFingerprintFixture(
+        fixture.capture.project,
+      ),
+    });
+    const reorderedProject = {
+      ...fixture.capture.project,
+      chapters: [...fixture.capture.project.chapters].reverse(),
+    };
+
+    await buildStoryRefresh(
+      { ...fixture.capture, project: reorderedProject },
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(fixture.dependencies.analyzeStoryChunk).not.toHaveBeenCalled();
+    expect(fixture.dependencies.reduceChapterKnowledge).not.toHaveBeenCalled();
+    expect(fixture.dependencies.reduceStoryFields).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chapters: [
+          expect.objectContaining({ chapterId: "ch2" }),
+          expect.objectContaining({ chapterId: "ch1" }),
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("reconciles chapter title changes without reanalyzing prose", async () => {
+    const fixture = indexedRefreshFixture();
+    Object.assign(fixture.capture.meta.knowledge, {
+      chapterTopologyFingerprint: topologyFingerprintFixture(
+        fixture.capture.project,
+      ),
+    });
+    const renamedProject = {
+      ...fixture.capture.project,
+      chapters: fixture.capture.project.chapters.map((chapter) =>
+        chapter.id === "ch2" ? { ...chapter, title: "Renamed Two" } : chapter,
+      ),
+    };
+
+    await buildStoryRefresh(
+      { ...fixture.capture, project: renamedProject },
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
     expect(fixture.dependencies.analyzeStoryChunk).not.toHaveBeenCalled();
     expect(fixture.dependencies.reduceStoryFields).toHaveBeenCalledTimes(1);
   });

@@ -19,12 +19,14 @@ export interface StoryRefreshState {
   progress: StoryRefreshProgress;
   error: string | null;
   pendingFingerprints: Record<string, string>;
+  pendingTopologyRevision: number | null;
   latestSavedFingerprints: Record<string, string>;
   enqueueSavedChapter: (
     projectRoot: string,
     chapterId: string,
     fingerprint: string,
   ) => void;
+  enqueueChapterTopology: (projectRoot: string) => void;
   retry: () => void;
   cancel: () => void;
 }
@@ -121,6 +123,7 @@ export function createStoryRefreshState(
     let controller: AbortController | null = null;
     let projectRoot: string | null = null;
     let generation = 0;
+    let nextTopologyRevision = 0;
 
     const execute = async (root: string): Promise<void> => {
       const currentGeneration = generation + 1;
@@ -128,6 +131,7 @@ export function createStoryRefreshState(
       const currentController = new AbortController();
       controller = currentController;
       const processingFingerprints = { ...get().pendingFingerprints };
+      const processingTopologyRevision = get().pendingTopologyRevision;
       set({ status: "refreshing", progress: EMPTY_PROGRESS, error: null });
 
       try {
@@ -183,21 +187,27 @@ export function createStoryRefreshState(
           get().pendingFingerprints,
           processingFingerprints,
         );
+        const pendingTopologyRevision =
+          get().pendingTopologyRevision === processingTopologyRevision
+            ? null
+            : get().pendingTopologyRevision;
         controller = null;
         if (result.characterFailures.length > 0) {
           set({
             status: "failed",
             error: characterFailureMessage(result.characterFailures),
             pendingFingerprints,
+            pendingTopologyRevision,
           });
           return;
         }
 
         if (
           committed.followUpRequired ||
-          Object.keys(pendingFingerprints).length > 0
+          Object.keys(pendingFingerprints).length > 0 ||
+          pendingTopologyRevision !== null
         ) {
-          set({ pendingFingerprints });
+          set({ pendingFingerprints, pendingTopologyRevision });
           void execute(root);
           return;
         }
@@ -207,6 +217,7 @@ export function createStoryRefreshState(
           progress: EMPTY_PROGRESS,
           error: null,
           pendingFingerprints,
+          pendingTopologyRevision,
         });
       } catch (error) {
         if (generation !== currentGeneration) return;
@@ -229,6 +240,7 @@ export function createStoryRefreshState(
         progress: EMPTY_PROGRESS,
         error: null,
         pendingFingerprints: {},
+        pendingTopologyRevision: null,
         latestSavedFingerprints: {},
       });
     };
@@ -238,6 +250,7 @@ export function createStoryRefreshState(
       progress: EMPTY_PROGRESS,
       error: null,
       pendingFingerprints: {},
+      pendingTopologyRevision: null,
       latestSavedFingerprints: {},
       enqueueSavedChapter: (root, chapterId, fingerprint) => {
         if (projectRoot !== null && projectRoot !== root) {
@@ -254,6 +267,17 @@ export function createStoryRefreshState(
             [chapterId]: fingerprint,
           },
         }));
+        if (controller === null) {
+          void execute(root);
+        }
+      },
+      enqueueChapterTopology: (root) => {
+        if (projectRoot !== null && projectRoot !== root) {
+          cancel();
+        }
+        projectRoot = root;
+        nextTopologyRevision += 1;
+        set({ pendingTopologyRevision: nextTopologyRevision });
         if (controller === null) {
           void execute(root);
         }

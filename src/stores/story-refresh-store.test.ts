@@ -24,6 +24,7 @@ vi.mock("sonner", () => ({
 
 import {
   candidateInputFingerprint,
+  chapterTopologyFingerprint,
   characterProfileFingerprint,
   storyFieldsFingerprint,
 } from "@/lib/ai/agent-context";
@@ -112,6 +113,9 @@ function refreshResultFixture(input: {
 }): StoryRefreshResult {
   return {
     projectRoot: "/book",
+    chapterTopologyFingerprint: chapterTopologyFingerprint(
+      projectFixture("/book").chapters,
+    ),
     analyzedChapterFingerprints: { ch1: "fp-1" },
     knowledge: emptyProjectKnowledge(),
     storyInputFingerprint: storyFieldsFingerprint({ premise: "", overview: "" }),

@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 
 import {
   candidateInputFingerprint,
+  chapterTopologyFingerprint,
   characterProfileFingerprint,
   storyFieldsFingerprint,
 } from "@/lib/ai/agent-context";
@@ -56,6 +57,7 @@ export interface StoryRefreshCharacterUpdate {
 
 export interface StoryRefreshResult {
   projectRoot: string;
+  chapterTopologyFingerprint: string;
   analyzedChapterFingerprints: Record<string, string>;
   knowledge: ProjectKnowledge;
   storyInputFingerprint: string;
@@ -115,6 +117,7 @@ function cloneCandidate(candidate: CharacterCandidate): CharacterCandidate {
 
 function cloneProjectKnowledge(knowledge: ProjectKnowledge): ProjectKnowledge {
   return {
+    chapterTopologyFingerprint: knowledge.chapterTopologyFingerprint,
     chapters: Object.fromEntries(
       Object.entries(knowledge.chapters).map(([chapterId, chapter]) => [
         chapterId,
@@ -231,6 +234,9 @@ export async function buildStoryRefresh(
   const capturedCandidateInputFingerprint = candidateInputFingerprint(
     capture.meta.knowledge,
   );
+  const capturedChapterTopologyFingerprint = chapterTopologyFingerprint(
+    capture.project.chapters,
+  );
   const parsedChapters: ParsedStoryChapter[] = [];
   for (const chapter of capture.project.chapters) {
     signal.throwIfAborted();
@@ -256,6 +262,9 @@ export async function buildStoryRefresh(
     Object.keys(capture.meta.knowledge.chapters).length -
     Object.keys(retainedChapters).length;
   knowledge.chapters = retainedChapters;
+  const topologyChanged =
+    knowledge.chapterTopologyFingerprint !== capturedChapterTopologyFingerprint;
+  knowledge.chapterTopologyFingerprint = capturedChapterTopologyFingerprint;
   const selectedChapters = parsedChapters.filter(
     ({ chapter, sourceFingerprint }) =>
       knowledge.chapters[chapter.id]?.sourceFingerprint !== sourceFingerprint,
@@ -333,7 +342,7 @@ export async function buildStoryRefresh(
   }
 
   const chapterKnowledgeChanged =
-    selectedChapters.length > 0 || deletedChapterCount > 0;
+    selectedChapters.length > 0 || deletedChapterCount > 0 || topologyChanged;
   const storyInputFingerprint = storyFieldsFingerprint(capture.meta.outline);
   let story = { ...capture.meta.outline };
   if (chapterKnowledgeChanged) {
@@ -436,6 +445,7 @@ export async function buildStoryRefresh(
 
   return {
     projectRoot: capture.project.root,
+    chapterTopologyFingerprint: capturedChapterTopologyFingerprint,
     analyzedChapterFingerprints,
     knowledge,
     storyInputFingerprint,

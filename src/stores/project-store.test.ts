@@ -90,6 +90,13 @@ const projectFixture = (root: string): ProjectInfo => ({
   ],
 });
 
+const topologyFingerprintFixture = (project: ProjectInfo): string =>
+  textFingerprint(
+    JSON.stringify(
+      project.chapters.map((chapter) => [chapter.id, chapter.title]),
+    ),
+  );
+
 const candidateFixture = (): CharacterCandidate => ({
   id: "candidate-inez",
   evidenceFingerprint: "candidate-fp",
@@ -143,6 +150,9 @@ const refreshResultFixture = (
   input: Partial<StoryRefreshResult>,
 ): StoryRefreshResult => ({
   projectRoot: "/book",
+  chapterTopologyFingerprint: topologyFingerprintFixture(
+    projectFixture("/book"),
+  ),
   analyzedChapterFingerprints: { ch1: "fp-1" },
   knowledge: {
     ...emptyProjectKnowledge(),
@@ -1201,6 +1211,31 @@ describe("project lifecycle story refresh integration", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     cancel.mockRestore();
   });
+
+  it("enqueues reconciliation after an idle chapter deletion", async () => {
+    const project = projectFixture("/book");
+    const enqueueChapterTopology = vi.fn();
+    const originalEnqueueChapterTopology = (
+      useStoryRefreshStore.getState() as unknown as {
+        enqueueChapterTopology?: (root: string) => void;
+      }
+    ).enqueueChapterTopology;
+    useStoryRefreshStore.setState({ enqueueChapterTopology } as never);
+    vi.mocked(deleteChapterCmd).mockResolvedValueOnce({
+      ...project,
+      chapters: [],
+    });
+    useProjectStore.setState({ project, meta: storyMetaFixture() } as never);
+
+    await useProjectStore.getState().deleteChapter("ch1");
+
+    expect(enqueueChapterTopology).toHaveBeenCalledWith("/book");
+    if (originalEnqueueChapterTopology !== undefined) {
+      useStoryRefreshStore.setState({
+        enqueueChapterTopology: originalEnqueueChapterTopology,
+      } as never);
+    }
+  });
 });
 
 describe("saveChapter save errors", () => {
@@ -1922,6 +1957,80 @@ describe("story refresh commits", () => {
     });
 
     expect(useProjectStore.getState().meta.knowledge.chapters.ch1).toBeUndefined();
+  });
+
+  it("never resurrects knowledge for a chapter deleted during refresh", async () => {
+    const capturedProject = projectFixture("/book");
+    const result = Object.assign(refreshResultFixture({}), {
+      chapterTopologyFingerprint: topologyFingerprintFixture(capturedProject),
+    });
+    useProjectStore.setState((state) => ({
+      project: { ...capturedProject, chapters: [] },
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          chapters: {
+            ch1: {
+              ...result.knowledge.chapters.ch1,
+              sourceFingerprint: "old-fp",
+            },
+          },
+        },
+      },
+    }));
+
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      result.analyzedChapterFingerprints,
+    );
+
+    expect(committed.followUpRequired).toBe(true);
+    expect(useProjectStore.getState().meta.knowledge.chapters.ch1).toBeUndefined();
+    expect(useProjectStore.getState().meta.outline).toEqual({
+      premise: "",
+      overview: "",
+    });
+  });
+
+  it("skips topology-dependent output after chapters reorder during refresh", async () => {
+    const first = projectFixture("/book").chapters[0];
+    const second = {
+      ...first,
+      id: "ch2",
+      label: "II",
+      title: "Chapter Two",
+      file: "chapter-two.tex",
+    };
+    const capturedProject = {
+      ...projectFixture("/book"),
+      chapters: [first, second],
+    };
+    const result = Object.assign(
+      refreshResultFixture({ analyzedChapterFingerprints: {} }),
+      {
+        chapterTopologyFingerprint:
+          topologyFingerprintFixture(capturedProject),
+      },
+    );
+    useProjectStore.setState({
+      project: {
+        ...capturedProject,
+        chapters: [second, first],
+      },
+      meta: storyMetaFixture(),
+    } as never);
+
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      {},
+    );
+
+    expect(committed.followUpRequired).toBe(true);
+    expect(useProjectStore.getState().meta.outline).toEqual({
+      premise: "",
+      overview: "",
+    });
   });
 
   it("applies valid character operations and records their observation IDs", async () => {

@@ -192,6 +192,7 @@ export interface CharacterKnowledgePatch {
 }
 
 export interface ProjectKnowledge {
+  chapterTopologyFingerprint: string;
   chapters: Record<string, ChapterKnowledge>;
   characterCandidates: CharacterCandidate[];
   acceptedCandidateFingerprints: string[];

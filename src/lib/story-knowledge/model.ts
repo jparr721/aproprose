@@ -13,6 +13,7 @@ export function emptyCharacterProfile(): CharacterProfile {
 
 export function emptyProjectKnowledge(): ProjectKnowledge {
   return {
+    chapterTopologyFingerprint: "",
     chapters: {},
     characterCandidates: [],
     acceptedCandidateFingerprints: [],

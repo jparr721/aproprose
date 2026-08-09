@@ -107,6 +107,7 @@ const characterCandidateSchema = z.object({
 });
 
 const projectKnowledgeSchema = z.object({
+  chapterTopologyFingerprint: z.string().catch(""),
   chapters: z.record(z.string(), chapterKnowledgeSchema).catch({}),
   characterCandidates: z.array(characterCandidateSchema).catch([]),
   acceptedCandidateFingerprints: z.array(z.string()).catch([]),

@@ -65,6 +65,7 @@ import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
 import {
   candidateInputFingerprint,
+  chapterTopologyFingerprint,
   characterProfileFingerprint,
   projectMetaFingerprint,
   storyFieldsFingerprint,
@@ -793,6 +794,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
         const created = updated.chapters[updated.chapters.length - 1];
         if (created) await get().selectChapter(created.id);
       } catch (e) {
@@ -811,6 +815,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
       } catch (e) {
         toast.error("Couldn't rename the chapter", { description: String(e) });
         set({ error: String(e) });
@@ -829,6 +836,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
       } catch (e) {
         toast.error("Couldn't reorder chapters", { description: String(e) });
         set({ error: String(e) });
@@ -856,6 +866,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           persistMeta(meta);
           return { meta };
         });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
         deleteOutlineAgentSession(id);
         if (activeChapterId === id) {
           const first = updated.chapters[0];
@@ -1612,6 +1625,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const storyIsStale =
         storyFieldsFingerprint(state.meta.outline) !==
         result.storyInputFingerprint;
+      const topologyIsStale =
+        chapterTopologyFingerprint(state.project.chapters) !==
+        result.chapterTopologyFingerprint;
       const candidateInputIsStale =
         candidateInputFingerprint(state.meta.knowledge) !==
         result.candidateInputFingerprint;
@@ -1620,25 +1636,30 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         state.project.chapters.map((chapter) => chapter.id),
       );
 
-      if (!storyIsStale) {
-        for (const chapterId of Object.keys(knowledge.chapters)) {
-          if (!liveChapterIds.has(chapterId)) {
-            delete knowledge.chapters[chapterId];
-          }
+      for (const chapterId of Object.keys(knowledge.chapters)) {
+        if (!liveChapterIds.has(chapterId)) {
+          delete knowledge.chapters[chapterId];
         }
+      }
+      if (!storyIsStale && !topologyIsStale) {
         for (const chapterId of Object.keys(
           result.analyzedChapterFingerprints,
         )) {
-          if (staleChapterIds.has(chapterId)) continue;
+          if (staleChapterIds.has(chapterId) || !liveChapterIds.has(chapterId)) {
+            continue;
+          }
           const chapterKnowledge = result.knowledge.chapters[chapterId];
           if (chapterKnowledge !== undefined) {
             knowledge.chapters[chapterId] = structuredClone(chapterKnowledge);
           }
         }
+        knowledge.chapterTopologyFingerprint =
+          result.knowledge.chapterTopologyFingerprint;
       }
 
       if (
         !storyIsStale &&
+        !topologyIsStale &&
         staleChapterIds.size === 0 &&
         !candidateInputIsStale
       ) {
@@ -1654,9 +1675,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
 
       let followUpRequired =
-        storyIsStale || staleChapterIds.size > 0 || candidateInputIsStale;
+        storyIsStale ||
+        topologyIsStale ||
+        staleChapterIds.size > 0 ||
+        candidateInputIsStale;
       let characters = state.meta.characters;
-      if (!storyIsStale) {
+      if (!storyIsStale && !topologyIsStale) {
         for (const update of result.characterUpdates) {
           const index = characters.findIndex(
             (character) => character.id === update.characterId,
@@ -1713,7 +1737,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const meta: ProjectMeta = {
         ...state.meta,
         outline:
-          storyIsStale || staleChapterIds.size > 0
+          storyIsStale || topologyIsStale || staleChapterIds.size > 0
             ? state.meta.outline
             : { ...result.story },
         characters,

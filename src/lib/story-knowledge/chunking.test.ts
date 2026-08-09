@@ -4,9 +4,10 @@ import {
   chunkStoryChapter,
   storyChapterFingerprint,
 } from "@/lib/story-knowledge/chunking";
+import type { Block } from "@/lib/types";
 
 describe("story knowledge chunking", () => {
-  it("ignores reminted ids and excluded note blocks in semantic fingerprints", () => {
+  it("ignores reminted ids in semantic fingerprints", () => {
     const blocks = parseChapter("First paragraph.\n\nSecond paragraph.\n");
     const reminted = blocks.map((block, index) => ({
       ...block,
@@ -14,6 +15,51 @@ describe("story knowledge chunking", () => {
     }));
     expect(storyChapterFingerprint(reminted)).toBe(
       storyChapterFingerprint(blocks),
+    );
+  });
+
+  it("excludes notes, raw latex, and chapter breaks from model input", () => {
+    const eligible = parseChapter("First paragraph.\n\nSecond paragraph.\n");
+    const excluded: Block[] = [
+      {
+        id: "lore-1",
+        type: "lore",
+        text: "Lore note",
+        raw: "% lore\n",
+        dirty: false,
+      },
+      {
+        id: "scratch-1",
+        type: "scratchpad",
+        text: "Scratch note",
+        raw: "% scratch\n",
+        dirty: false,
+      },
+      {
+        id: "latex-1",
+        type: "latex",
+        text: "\\newpage",
+        raw: "\\newpage\n",
+        dirty: false,
+      },
+      {
+        id: "break-1",
+        type: "chapter",
+        level: "break",
+        text: "Scene break",
+        raw: "\\begin{center}Scene break\\end{center}\n",
+        dirty: false,
+      },
+    ];
+    const mixed = [eligible[0], ...excluded, eligible[1]];
+
+    expect(
+      chunkStoryChapter("ch1", "One", mixed, 1_000).flatMap((chunk) =>
+        chunk.blocks.map((block) => block.text),
+      ),
+    ).toEqual(["First paragraph.", "Second paragraph."]);
+    expect(storyChapterFingerprint(mixed)).toBe(
+      storyChapterFingerprint(eligible),
     );
   });
 

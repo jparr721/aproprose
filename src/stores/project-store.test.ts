@@ -90,6 +90,26 @@ const projectFixture = (root: string): ProjectInfo => ({
   ],
 });
 
+function deferred<Value>(): {
+  promise: Promise<Value>;
+  resolve: (value: Value) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: Value) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 const topologyFingerprintFixture = (project: ProjectInfo): string =>
   textFingerprint(
     JSON.stringify(
@@ -1915,6 +1935,22 @@ describe("story refresh commits", () => {
     ).toBe("Author-edited voice.");
   });
 
+  it("rolls back a story refresh when metadata persistence fails", async () => {
+    const previousMeta = useProjectStore.getState().meta;
+    vi.mocked(writeProjectMeta).mockRejectedValueOnce(
+      new Error("metadata write failed"),
+    );
+
+    await expect(
+      useProjectStore.getState().commitStoryRefresh(
+        refreshResultFixture({}),
+        { ch1: "fp-1" },
+      ),
+    ).rejects.toThrow("metadata write failed");
+
+    expect(useProjectStore.getState().meta).toBe(previousMeta);
+  });
+
   it("keeps new chapter knowledge pending when story fields are stale", async () => {
     const priorKnowledge = {
       ...emptyProjectKnowledge(),
@@ -2179,6 +2215,33 @@ describe("story refresh commits", () => {
     ).toEqual([candidate.evidenceFingerprint]);
   });
 
+  it("restores an accepted candidate when metadata persistence fails", async () => {
+    const candidate = candidateFixture();
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+    const previousMeta = useProjectStore.getState().meta;
+    vi.mocked(writeProjectMeta).mockRejectedValueOnce(
+      new Error("metadata write failed"),
+    );
+
+    await expect(
+      useProjectStore.getState().acceptCharacterCandidate(candidate.id),
+    ).rejects.toThrow("metadata write failed");
+
+    expect(useProjectStore.getState().meta).toBe(previousMeta);
+    expect(useProjectStore.getState().meta.characters).toHaveLength(1);
+    expect(
+      useProjectStore.getState().meta.knowledge.characterCandidates,
+    ).toEqual([candidate]);
+  });
+
   it("preserves a candidate accepted while refresh output is in flight", async () => {
     const candidate = candidateFixture();
     const candidateInputFingerprint = candidateInputFingerprintFixture(
@@ -2238,6 +2301,35 @@ describe("story refresh commits", () => {
     const knowledge = useProjectStore.getState().meta.knowledge;
     expect(knowledge.characterCandidates).toEqual([]);
     expect(knowledge.dismissedCandidateFingerprints).toEqual(["candidate-fp"]);
+  });
+
+  it("restores a dismissed candidate when metadata persistence fails", async () => {
+    const candidate = candidateFixture();
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+    const previousMeta = useProjectStore.getState().meta;
+    vi.mocked(writeProjectMeta).mockRejectedValueOnce(
+      new Error("metadata write failed"),
+    );
+
+    await expect(
+      useProjectStore.getState().dismissCharacterCandidate(candidate.id),
+    ).rejects.toThrow("metadata write failed");
+
+    expect(useProjectStore.getState().meta).toBe(previousMeta);
+    expect(
+      useProjectStore.getState().meta.knowledge.characterCandidates,
+    ).toEqual([candidate]);
+    expect(
+      useProjectStore.getState().meta.knowledge.dismissedCandidateFingerprints,
+    ).toEqual([]);
   });
 
   it("preserves a candidate dismissed while refresh output is in flight", async () => {
@@ -2314,5 +2406,51 @@ describe("story refresh commits", () => {
 
     expect(updated.profile).toEqual(profile);
     expect(useProjectStore.getState().meta.characters[0].profile).toEqual(profile);
+  });
+
+  it("rolls back a direct agent profile when metadata persistence fails", async () => {
+    const previousMeta = useProjectStore.getState().meta;
+    vi.mocked(writeProjectMeta).mockRejectedValueOnce(
+      new Error("metadata write failed"),
+    );
+
+    await expect(
+      useProjectStore.getState().applyCharacterProfileFromAgent(
+        "/book",
+        "c1",
+        {
+          ...emptyCharacterProfile(),
+          motivations: "Find the missing courier.",
+        },
+      ),
+    ).rejects.toThrow("metadata write failed");
+
+    expect(useProjectStore.getState().meta).toBe(previousMeta);
+  });
+
+  it("does not roll back newer metadata after an earlier write fails", async () => {
+    const firstWrite = deferred<void>();
+    vi.mocked(writeProjectMeta)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockResolvedValueOnce(undefined);
+    const update = useProjectStore.getState().applyCharacterProfileFromAgent(
+      "/book",
+      "c1",
+      {
+        ...emptyCharacterProfile(),
+        voice: "Measured.",
+      },
+    );
+
+    useProjectStore.getState().setPremise("Newer premise.");
+    const newerMeta = useProjectStore.getState().meta;
+    firstWrite.reject(new Error("metadata write failed"));
+
+    await expect(update).rejects.toThrow("metadata write failed");
+    await flushPromises();
+    expect(useProjectStore.getState().meta).toBe(newerMeta);
+    expect(useProjectStore.getState().meta.outline.premise).toBe(
+      "Newer premise.",
+    );
   });
 });

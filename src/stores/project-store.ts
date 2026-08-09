@@ -579,6 +579,23 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     }
   };
 
+  const persistOptimisticMeta = async (
+    root: string,
+    previousMeta: ProjectMeta,
+    optimisticMeta: ProjectMeta,
+  ): Promise<void> => {
+    set({ meta: optimisticMeta });
+    try {
+      await persistMetaAndWait(root, optimisticMeta);
+    } catch (error) {
+      const current = get();
+      if (current.project?.root === root && current.meta === optimisticMeta) {
+        set({ meta: previousMeta });
+      }
+      throw error;
+    }
+  };
+
   const persistRecents = (recents: RecentProject[]) => {
     void writeAppData(RECENTS_KEY, recents).catch((e) => {
       toast.error("Couldn't save recent projects", { description: String(e) });
@@ -1795,8 +1812,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         characters,
         knowledge,
       };
-      set({ meta });
-      await persistMetaAndWait(state.project.root, meta);
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
       return { followUpReasons };
     },
 
@@ -1824,8 +1840,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           item.id === characterId ? updated : item,
         ),
       };
-      set({ meta });
-      await persistMetaAndWait(projectRoot, meta);
+      await persistOptimisticMeta(projectRoot, state.meta, meta);
       return updated;
     },
 
@@ -1865,8 +1880,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ],
         },
       };
-      set({ meta });
-      await persistMetaAndWait(state.project.root, meta);
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
       return id;
     },
 
@@ -1897,8 +1911,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ],
         },
       };
-      set({ meta });
-      await persistMetaAndWait(state.project.root, meta);
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
     },
 
     removeCharacter: (id) =>

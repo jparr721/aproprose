@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   Card,
   CardContent,
@@ -15,11 +17,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/spinner";
 import {
   TypographyEyebrow,
   TypographyMuted,
 } from "@/components/ui/typography";
-import type { CharacterProfileField } from "@/lib/types";
+import type { CharacterCandidate, CharacterProfileField } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
 const PROFILE_FIELDS: ReadonlyArray<{
@@ -35,6 +38,13 @@ const PROFILE_FIELDS: ReadonlyArray<{
 ];
 
 export function CharacterCandidatesDialog() {
+  const [pendingActionId, setPendingActionId] = useState<string | null>(
+    null,
+  );
+  const [pendingCandidates, setPendingCandidates] = useState<
+    ReadonlyArray<CharacterCandidate>
+  >([]);
+  const [actionError, setActionError] = useState<string | null>(null);
   const candidates = useProjectStore(
     (state) => state.meta.knowledge.characterCandidates,
   );
@@ -45,15 +55,36 @@ export function CharacterCandidatesDialog() {
     (state) => state.dismissCharacterCandidate,
   );
 
-  if (candidates.length === 0) return null;
+  const runCandidateAction = async (
+    actionId: string,
+    action: () => Promise<unknown>,
+  ): Promise<void> => {
+    setPendingCandidates(candidates);
+    setPendingActionId(actionId);
+    setActionError(null);
+    try {
+      await action();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingActionId(null);
+      setPendingCandidates([]);
+    }
+  };
 
-  const candidateLabel = candidates.length === 1 ? "character" : "characters";
+  const visibleCandidates =
+    pendingActionId === null ? candidates : pendingCandidates;
+
+  if (visibleCandidates.length === 0) return null;
+
+  const candidateLabel =
+    visibleCandidates.length === 1 ? "character" : "characters";
 
   return (
     <Dialog>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          Review {candidates.length} {candidateLabel}
+          Review {visibleCandidates.length} {candidateLabel}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
@@ -63,8 +94,15 @@ export function CharacterCandidatesDialog() {
             Add generated characters to the cast or dismiss suggestions that do not belong.
           </DialogDescription>
         </DialogHeader>
+        {actionError === null ? null : (
+          <TypographyMuted role="alert" className="text-destructive">
+            {actionError}
+          </TypographyMuted>
+        )}
         <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
-          {candidates.map((candidate) => {
+          {visibleCandidates.map((candidate) => {
+            const dismissActionId = `dismiss-${candidate.id}`;
+            const acceptActionId = `accept-${candidate.id}`;
             const populatedFields = PROFILE_FIELDS.filter(
               ({ field }) => candidate.profile[field].trim().length > 0,
             );
@@ -98,13 +136,25 @@ export function CharacterCandidatesDialog() {
                 <CardFooter className="justify-end gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => void dismissCharacterCandidate(candidate.id)}
+                    disabled={pendingActionId !== null}
+                    onClick={() =>
+                      void runCandidateAction(dismissActionId, () =>
+                        dismissCharacterCandidate(candidate.id),
+                      )
+                    }
                   >
+                    {pendingActionId === dismissActionId ? <Spinner /> : null}
                     Dismiss {candidate.name}
                   </Button>
                   <Button
-                    onClick={() => void acceptCharacterCandidate(candidate.id)}
+                    disabled={pendingActionId !== null}
+                    onClick={() =>
+                      void runCandidateAction(acceptActionId, () =>
+                        acceptCharacterCandidate(candidate.id),
+                      )
+                    }
                   >
+                    {pendingActionId === acceptActionId ? <Spinner /> : null}
                     Add {candidate.name}
                   </Button>
                 </CardFooter>

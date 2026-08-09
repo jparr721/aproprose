@@ -12,8 +12,20 @@ vi.mock("@/lib/tauri", () => ({
 
 import { CharacterCandidatesDialog } from "@/components/app/outline/character-candidates-dialog";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
+import { writeProjectMeta } from "@/lib/tauri";
 import type { CharacterCandidate } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
+
+function deferred<Value>(): {
+  promise: Promise<Value>;
+  resolve: (value: Value) => void;
+} {
+  let resolve!: (value: Value) => void;
+  const promise = new Promise<Value>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const candidate: CharacterCandidate = {
   id: "candidate-inez",
@@ -41,6 +53,8 @@ const candidate: CharacterCandidate = {
 };
 
 beforeEach(() => {
+  vi.mocked(writeProjectMeta).mockReset();
+  vi.mocked(writeProjectMeta).mockResolvedValue(undefined);
   useProjectStore.setState({
     project: {
       root: "/book",
@@ -127,6 +141,45 @@ describe("CharacterCandidatesDialog", () => {
       ).toEqual([]);
     });
     expect(useProjectStore.getState().meta.characters).toHaveLength(1);
+  });
+
+  it("keeps candidate actions pending until metadata is persisted", async () => {
+    const write = deferred<void>();
+    vi.mocked(writeProjectMeta).mockReturnValueOnce(write.promise);
+    render(<CharacterCandidatesDialog />);
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Inez" }));
+
+    const addButton = await screen.findByRole("button", { name: /Add Inez/ });
+    const dismissButton = screen.getByRole("button", { name: "Dismiss Inez" });
+    expect((addButton as HTMLButtonElement).disabled).toBe(true);
+    expect((dismissButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+
+    write.resolve(undefined);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Add Inez/ }),
+      ).toBeNull();
+    });
+  });
+
+  it("shows persistence errors and restores a failed candidate action", async () => {
+    vi.mocked(writeProjectMeta).mockRejectedValueOnce(new Error("disk full"));
+    render(<CharacterCandidatesDialog />);
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Inez" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("disk full");
+    expect(
+      useProjectStore.getState().meta.knowledge.characterCandidates,
+    ).toEqual([candidate]);
+    expect(
+      (screen.getByRole("button", { name: "Add Inez" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("pluralizes the candidate count", () => {

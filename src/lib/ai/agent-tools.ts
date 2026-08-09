@@ -18,6 +18,7 @@ import type {
   BlockChange,
   Character,
   CharacterProfile,
+  CharacterProfileField,
   CritiqueNote,
   ContinuityFlag,
   SculptChange,
@@ -128,6 +129,14 @@ const overviewStageSchema = z.object({
   overview: z.string(),
   reason: z.string(),
 });
+const CHARACTER_PROFILE_FIELDS: CharacterProfileField[] = [
+  "appearance",
+  "mannerisms",
+  "motivations",
+  "relationships",
+  "history",
+  "voice",
+];
 const characterProfileUpdateSchema = z.object({
   characterId: z.string(),
   profile: z.object({
@@ -317,9 +326,13 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
           `Character update is outside the frozen target: ${input.characterId}`,
         );
       }
-      const profile = Object.fromEntries(
-        Object.entries(input.profile).filter((entry) => entry[1] !== null),
-      ) as Partial<CharacterProfile>;
+      const profile: Partial<CharacterProfile> = {};
+      for (const field of CHARACTER_PROFILE_FIELDS) {
+        const value = input.profile[field];
+        if (value === null) continue;
+        const trimmed = value.trim();
+        if (trimmed.length > 0) profile[field] = trimmed;
+      }
       const changedFieldCount = Object.keys(profile).length;
       if (changedFieldCount === 0) {
         throw new Error("Character profile update requires at least one field.");

@@ -223,6 +223,70 @@ describe("character profile tool", () => {
     expect(env.updateCharacterProfile).not.toHaveBeenCalled();
   });
 
+  it("rejects a profile patch whose strings are all blank", async () => {
+    const env = characterEnvironment();
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.updateCharacterProfile({
+        characterId: "c1",
+        profile: {
+          appearance: " ",
+          mannerisms: "\t",
+          motivations: "\n",
+          relationships: "  ",
+          history: "\t ",
+          voice: " ",
+        },
+      }),
+    ).rejects.toThrow("Character profile update requires at least one field");
+    expect(env.updateCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it("drops blank fields from a mixed patch and preserves existing prose", async () => {
+    const env = characterEnvironment();
+    let liveProfile = {
+      ...emptyCharacterProfile(),
+      appearance: "Silver braid.",
+      voice: "Precise and spare.",
+    };
+    vi.mocked(env.updateCharacterProfile).mockImplementation(
+      async ({ characterId, profile }) => {
+        liveProfile = { ...liveProfile, ...profile };
+        return {
+          id: characterId,
+          name: "Mara",
+          color: "#123456",
+          role: "Courier",
+          profile: liveProfile,
+        };
+      },
+    );
+    const handlers = createAgentToolHandlers(env);
+
+    await handlers.updateCharacterProfile({
+      characterId: "c1",
+      profile: {
+        appearance: "   ",
+        mannerisms: "  Counts every door.  ",
+        motivations: null,
+        relationships: null,
+        history: null,
+        voice: "",
+      },
+    });
+
+    expect(env.updateCharacterProfile).toHaveBeenCalledWith({
+      characterId: "c1",
+      profile: { mannerisms: "Counts every door." },
+    });
+    expect(liveProfile).toMatchObject({
+      appearance: "Silver braid.",
+      mannerisms: "Counts every door.",
+      voice: "Precise and spare.",
+    });
+  });
+
   it("propagates profile persistence failures", async () => {
     const env = characterEnvironment();
     vi.mocked(env.updateCharacterProfile).mockRejectedValue(

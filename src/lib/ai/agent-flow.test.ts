@@ -350,6 +350,7 @@ describe("agent console authoring flows", () => {
                       sourceId: "anchor",
                       order: 0,
                       fingerprint: "anchor-fingerprint",
+                      occurrence: 0,
                       previewText: "Mara counted every door.",
                     },
                   ],

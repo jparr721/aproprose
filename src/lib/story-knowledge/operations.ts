@@ -5,6 +5,7 @@ import { textFingerprint } from "@/lib/ai/agent-context";
 import { withAiRetry } from "@/lib/ai/errors";
 import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import type { StoryKnowledgeChunk } from "@/lib/story-knowledge/chunking";
+import { durableEvidenceIdentity } from "@/lib/story-knowledge/chunking";
 import type { UnknownCharacterGroup } from "@/lib/story-knowledge/merge";
 import type {
   Character,
@@ -223,7 +224,12 @@ function observationId(
   evidence: EvidenceLocator[],
 ): string {
   return textFingerprint(
-    JSON.stringify([characterId, field, detail, evidence]),
+    JSON.stringify([
+      characterId,
+      field,
+      detail,
+      evidence.map(durableEvidenceIdentity).sort(),
+    ]),
   );
 }
 
@@ -233,7 +239,14 @@ function unknownObservationId(
   details: Partial<CharacterProfile>,
   evidence: EvidenceLocator[],
 ): string {
-  return textFingerprint(JSON.stringify([name, role, details, evidence]));
+  return textFingerprint(
+    JSON.stringify([
+      name,
+      role,
+      details,
+      evidence.map(durableEvidenceIdentity).sort(),
+    ]),
+  );
 }
 
 function compactPartialProfile(

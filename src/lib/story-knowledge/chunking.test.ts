@@ -29,6 +29,30 @@ describe("story knowledge chunking", () => {
     expect(new Set(projected.map((block) => block.locator.sourceId)).size).toBe(3);
   });
 
+  it("assigns a stable occurrence to duplicate semantic blocks", () => {
+    const blocks = parseChapter("Repeated text.\n\nRepeated text.\n");
+    const reminted = blocks.map((block, index) => ({
+      ...block,
+      id: `reminted-${index}`,
+    }));
+
+    const originalLocators = chunkStoryChapter("ch1", "One", blocks, 1_000)
+      .flatMap((chunk) => chunk.blocks)
+      .map((block) => block.locator);
+    const remintedLocators = chunkStoryChapter("ch1", "One", reminted, 1_000)
+      .flatMap((chunk) => chunk.blocks)
+      .map((block) => block.locator);
+
+    expect(originalLocators).toMatchObject([
+      { occurrence: 0 },
+      { occurrence: 1 },
+    ]);
+    expect(remintedLocators).toMatchObject([
+      { occurrence: 0 },
+      { occurrence: 1 },
+    ]);
+  });
+
   it("allows one authored block to exceed the chunk budget without splitting", () => {
     const blocks = parseChapter("A single long authored paragraph.\n");
     const chunks = chunkStoryChapter("ch1", "One", blocks, 5);

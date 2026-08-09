@@ -35,6 +35,8 @@ function projectStoryBlock(
   chapterId: string,
   block: EligibleStoryBlock,
   order: number,
+  fingerprint: string,
+  occurrence: number,
 ): StoryKnowledgeBlock {
   const text = block.type === "dialogue" ? blockSnapshotText(block) : block.text;
   return {
@@ -42,13 +44,22 @@ function projectStoryBlock(
       chapterId,
       sourceId: block.id,
       order,
-      fingerprint: blockFingerprint(block),
+      fingerprint,
+      occurrence,
       previewText: text.slice(0, EVIDENCE_PREVIEW_MAX_CHARACTERS),
     },
     type: block.type,
     text,
     speakerId: block.type === "dialogue" ? (block.speaker ?? null) : null,
   };
+}
+
+export function durableEvidenceIdentity(locator: EvidenceLocator): string {
+  return JSON.stringify([
+    locator.chapterId,
+    locator.fingerprint,
+    locator.occurrence,
+  ]);
 }
 
 export function storyChapterFingerprint(blocks: Block[]): string {
@@ -64,11 +75,22 @@ export function chunkStoryChapter(
   blocks: Block[],
   maxCharacters: number,
 ): StoryKnowledgeChunk[] {
-  const projected = blocks.flatMap((block, order) =>
-    isEligibleStoryBlock(block)
-      ? [projectStoryBlock(chapterId, block, order)]
-      : [],
-  );
+  const occurrences = new Map<string, number>();
+  const projected = blocks.flatMap((block, order) => {
+    if (!isEligibleStoryBlock(block)) return [];
+    const fingerprint = blockFingerprint(block);
+    const occurrence = occurrences.get(fingerprint) ?? 0;
+    occurrences.set(fingerprint, occurrence + 1);
+    return [
+      projectStoryBlock(
+        chapterId,
+        block,
+        order,
+        fingerprint,
+        occurrence,
+      ),
+    ];
+  });
   const chunks: StoryKnowledgeChunk[] = [];
   let currentBlocks: StoryKnowledgeBlock[] = [];
   let currentCharacters = 0;

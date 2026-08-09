@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
+import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
 import {
   analyzeStoryChunk,
   characterCandidateReductionResultSchema,
@@ -58,6 +59,7 @@ function mapInputFixture(): AnalyzeStoryChunkInput {
             sourceId: "b1",
             order: 0,
             fingerprint: "fp-b1",
+            occurrence: 0,
             previewText: "Mara checks every lock twice.",
           },
           type: "narration",
@@ -110,6 +112,7 @@ function evidence(sourceId: string): EvidenceLocator {
     sourceId,
     order: 0,
     fingerprint: `fp-${sourceId}`,
+    occurrence: 0,
     previewText: "Evidence.",
   };
 }
@@ -236,6 +239,7 @@ describe("story chunk analysis", () => {
               sourceId: "b2",
               order: 1,
               fingerprint: "fp-b2",
+              occurrence: 0,
               previewText: "She checks the back door next.",
             },
             type: "narration" as const,
@@ -276,6 +280,76 @@ describe("story chunk analysis", () => {
       "b1",
       "b2",
     ]);
+  });
+
+  it("does not reapply an observation after parse source IDs are reminted", async () => {
+    const originalInput = mapInputFixture();
+    const remintedInput = {
+      ...originalInput,
+      chunk: {
+        ...originalInput.chunk,
+        blocks: originalInput.chunk.blocks.map((block) => ({
+          ...block,
+          locator: { ...block.locator, sourceId: "reminted-b1" },
+        })),
+      },
+    };
+    const outputFor = (sourceId: string) => ({
+      ...emptyMapOutput(),
+      characterObservations: [
+        {
+          characterId: "c1",
+          field: "mannerisms",
+          detail: "Mara checks every lock twice.",
+          sourceIds: [sourceId],
+        },
+      ],
+    });
+    vi.mocked(generateText)
+      .mockResolvedValueOnce({ output: outputFor("b1") } as never)
+      .mockResolvedValueOnce({ output: outputFor("reminted-b1") } as never);
+
+    const original = await analyzeStoryChunk(
+      originalInput,
+      aiOptions(new AbortController().signal),
+    );
+    const reminted = await analyzeStoryChunk(
+      remintedInput,
+      aiOptions(new AbortController().signal),
+    );
+    const first = applyCharacterKnowledgePatch(
+      emptyCharacterProfile(),
+      {
+        additions: [
+          {
+            field: "mannerisms",
+            text: original.characterObservations[0].detail,
+            observationIds: [original.characterObservations[0].id],
+          },
+        ],
+        corrections: [],
+      },
+      [],
+    );
+    const second = applyCharacterKnowledgePatch(
+      first.profile,
+      {
+        additions: [
+          {
+            field: "mannerisms",
+            text: reminted.characterObservations[0].detail,
+            observationIds: [reminted.characterObservations[0].id],
+          },
+        ],
+        corrections: [],
+      },
+      first.appliedObservationIds,
+    );
+
+    expect(reminted.characterObservations[0].id).toBe(
+      original.characterObservations[0].id,
+    );
+    expect(second.profile.mannerisms).toBe("Mara checks every lock twice.");
   });
 
   it("forwards abort and retries one failed generation", async () => {

@@ -23,6 +23,7 @@ function evidence(
     sourceId,
     order: 0,
     fingerprint,
+    occurrence: 0,
     previewText: "A short evidence preview.",
   };
 }
@@ -252,16 +253,57 @@ describe("candidate evidence fingerprints", () => {
     );
   });
 
-  it("distinguishes locator identity when content fingerprints match", () => {
-    const original = evidence("ch1", "b1", "same-content");
-    const otherChapter = evidence("ch2", "b1", "same-content");
-    const otherSource = evidence("ch1", "b2", "same-content");
+  it("uses durable locator identity when parse source IDs are reminted", () => {
+    const original = Object.assign(
+      evidence("ch1", "b1", "same-content"),
+      { occurrence: 0 },
+    );
+    const reminted = Object.assign(
+      evidence("ch1", "reminted-b1", "same-content"),
+      { occurrence: 0 },
+    );
+    const otherChapter = Object.assign(
+      evidence("ch2", "b1", "same-content"),
+      { occurrence: 0 },
+    );
+    const duplicateOccurrence = Object.assign(
+      evidence("ch1", "b1", "same-content"),
+      { occurrence: 1 },
+    );
 
+    expect(candidateEvidenceFingerprint("Inez", [original])).toBe(
+      candidateEvidenceFingerprint("Inez", [reminted]),
+    );
     expect(candidateEvidenceFingerprint("Inez", [original])).not.toBe(
       candidateEvidenceFingerprint("Inez", [otherChapter]),
     );
     expect(candidateEvidenceFingerprint("Inez", [original])).not.toBe(
-      candidateEvidenceFingerprint("Inez", [otherSource]),
+      candidateEvidenceFingerprint("Inez", [duplicateOccurrence]),
     );
+  });
+
+  it("keeps a dismissed candidate resolved after parse source IDs are reminted", () => {
+    const original = unknownObservation(
+      "u1",
+      "Inez",
+      { appearance: "Silver hair", mannerisms: "Counts doors" },
+      "b1",
+    );
+    const reminted = {
+      ...original,
+      id: "u-reminted",
+      evidence: original.evidence.map((locator) => ({
+        ...locator,
+        sourceId: "reminted-b1",
+      })),
+    };
+    const [group] = eligibleUnknownCharacterGroups([original], []);
+
+    expect(
+      eligibleUnknownCharacterGroups(
+        [reminted],
+        [group.evidenceFingerprint],
+      ),
+    ).toEqual([]);
   });
 });

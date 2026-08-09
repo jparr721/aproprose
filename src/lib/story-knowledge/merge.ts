@@ -1,4 +1,5 @@
 import { textFingerprint } from "@/lib/ai/agent-context";
+import { durableEvidenceIdentity } from "@/lib/story-knowledge/chunking";
 import type {
   CharacterKnowledgePatch,
   CharacterObservation,
@@ -49,7 +50,7 @@ function cloneEvidence(locator: EvidenceLocator): EvidenceLocator {
 }
 
 function sortedEvidenceFingerprints(evidence: EvidenceLocator[]): string[] {
-  return evidence.map((locator) => locator.fingerprint).sort();
+  return evidence.map(durableEvidenceIdentity).sort();
 }
 
 function observationSemanticKey(observation: CharacterObservation): string {
@@ -76,11 +77,7 @@ function withObservationIds(
 }
 
 function evidenceLocatorKey(locator: EvidenceLocator): string {
-  return JSON.stringify([
-    locator.chapterId,
-    locator.sourceId,
-    locator.fingerprint,
-  ]);
+  return durableEvidenceIdentity(locator);
 }
 
 function mergeUnknownObservation(

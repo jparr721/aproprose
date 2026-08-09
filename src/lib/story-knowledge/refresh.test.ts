@@ -89,6 +89,7 @@ function evidenceFixture(chapterId: string, sourceId: string): EvidenceLocator {
     sourceId,
     order: 0,
     fingerprint: `fp-${sourceId}`,
+    occurrence: 0,
     previewText: "Evidence",
   };
 }

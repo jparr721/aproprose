@@ -56,6 +56,7 @@ const evidenceLocatorSchema = z.object({
   sourceId: z.string().catch(""),
   order: z.number().int().catch(0),
   fingerprint: z.string().catch(""),
+  occurrence: z.number().int().nonnegative().catch(0),
   previewText: z.string().catch(""),
 });
 

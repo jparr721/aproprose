@@ -132,6 +132,7 @@ export interface EvidenceLocator {
   sourceId: string;
   order: number;
   fingerprint: string;
+  occurrence: number;
   previewText: string;
 }
 

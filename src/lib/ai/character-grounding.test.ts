@@ -29,6 +29,7 @@ function observationFixture(characterId: string): CharacterObservation {
         sourceId: "block-1",
         order: 0,
         fingerprint: "fingerprint-1",
+        occurrence: 0,
         previewText: "Mara counted the doors twice.",
       },
     ],

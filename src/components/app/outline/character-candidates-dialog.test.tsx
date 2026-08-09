@@ -34,6 +34,7 @@ const candidate: CharacterCandidate = {
       sourceId: "block-1",
       order: 0,
       fingerprint: "evidence-fp",
+      occurrence: 0,
       previewText: "She counts every door twice.",
     },
   ],

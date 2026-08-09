@@ -179,6 +179,40 @@ describe("character knowledge patches", () => {
     });
     expect(result.profile).not.toBe(profile);
   });
+
+  it("rejects additions and corrections without evidence IDs", () => {
+    const profile = {
+      ...emptyCharacterProfile(),
+      appearance: "Mara has blue eyes.",
+    };
+
+    const result = applyCharacterKnowledgePatch(
+      profile,
+      {
+        additions: [
+          {
+            field: "history",
+            text: "Former harbor guard.",
+            observationIds: [],
+          },
+        ],
+        corrections: [
+          {
+            field: "appearance",
+            replaceExact: "blue eyes",
+            replacement: "gray eyes",
+            observationIds: [],
+          },
+        ],
+      },
+      [],
+    );
+
+    expect(result).toEqual({
+      profile,
+      appliedObservationIds: [],
+    });
+  });
 });
 
 describe("unknown character grouping", () => {

@@ -1644,7 +1644,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           delete knowledge.chapters[chapterId];
         }
       }
-      if (!storyIsStale && !topologyIsStale) {
+      if (
+        !storyIsStale &&
+        !topologyIsStale &&
+        staleChapterIds.size === 0
+      ) {
         for (const chapterId of Object.keys(
           result.analyzedChapterFingerprints,
         )) {
@@ -1689,7 +1693,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         followUpReasons.push("candidate-input-stale");
       }
       let characters = state.meta.characters;
-      if (!storyIsStale && !topologyIsStale) {
+      if (
+        !storyIsStale &&
+        !topologyIsStale &&
+        staleChapterIds.size === 0
+      ) {
         for (const update of result.characterUpdates) {
           const index = characters.findIndex(
             (character) => character.id === update.characterId,
@@ -1717,19 +1725,35 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             ),
           );
           const patch = {
-            additions: update.patch.additions.map((addition) => ({
-              ...addition,
-              observationIds: addition.observationIds.filter((id) =>
-                knownObservationIds.has(id),
-              ),
-            })),
-            corrections: update.patch.corrections.map((correction) => ({
-              ...correction,
-              observationIds: correction.observationIds.filter((id) =>
-                knownObservationIds.has(id),
-              ),
-            })),
+            additions: update.patch.additions.filter(
+              (addition) =>
+                addition.observationIds.length > 0 &&
+                addition.observationIds.every((id) =>
+                  knownObservationIds.has(id),
+                ),
+            ),
+            corrections: update.patch.corrections.filter(
+              (correction) =>
+                correction.observationIds.length > 0 &&
+                correction.observationIds.every((id) =>
+                  knownObservationIds.has(id),
+                ),
+            ),
           };
+          if (
+            patch.additions.length !== update.patch.additions.length ||
+            patch.corrections.length !== update.patch.corrections.length
+          ) {
+            if (!followUpReasons.includes("chapter-content-stale")) {
+              followUpReasons.push("chapter-content-stale");
+            }
+          }
+          if (
+            patch.additions.length === 0 &&
+            patch.corrections.length === 0
+          ) {
+            continue;
+          }
           const applied = applyCharacterKnowledgePatch(
             character.profile,
             patch,

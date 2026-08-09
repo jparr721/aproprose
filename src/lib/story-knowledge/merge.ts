@@ -160,6 +160,7 @@ export function applyCharacterKnowledgePatch(
     const text = addition.text.trim();
     if (
       text.length === 0 ||
+      addition.observationIds.length === 0 ||
       operationWasApplied(addition.observationIds, appliedIds)
     ) {
       continue;
@@ -177,6 +178,7 @@ export function applyCharacterKnowledgePatch(
     if (
       replaceExact.length === 0 ||
       replacement.length === 0 ||
+      correction.observationIds.length === 0 ||
       operationWasApplied(correction.observationIds, appliedIds)
     ) {
       continue;

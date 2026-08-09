@@ -1959,6 +1959,80 @@ describe("story refresh commits", () => {
     expect(useProjectStore.getState().meta.knowledge.chapters.ch1).toBeUndefined();
   });
 
+  it("rejects character prose inferred from a superseded chapter", async () => {
+    const result = refreshResultFixture({
+      characterUpdates: [
+        {
+          characterId: "c1",
+          inputFingerprint: characterProfileFingerprint(emptyCharacterProfile()),
+          patch: {
+            additions: [
+              {
+                field: "voice",
+                text: "Measured and precise.",
+                observationIds: ["obs-1"],
+              },
+            ],
+            corrections: [],
+          },
+        },
+      ],
+    });
+
+    const committed = await useProjectStore.getState().commitStoryRefresh(
+      result,
+      { ch1: "fp-newer" },
+    );
+
+    expect(committed.followUpReasons).toContain("chapter-content-stale");
+    expect(useProjectStore.getState().meta.characters[0].profile.voice).toBe("");
+    expect(
+      useProjectStore.getState().meta.knowledge.appliedCharacterObservationIds,
+    ).toEqual({});
+  });
+
+  it("rejects a whole character operation when any evidence ID is stale", async () => {
+    const baseResult = refreshResultFixture({});
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          chapters: baseResult.knowledge.chapters,
+        },
+      },
+    }));
+    const result = refreshResultFixture({
+      analyzedChapterFingerprints: {},
+      characterUpdates: [
+        {
+          characterId: "c1",
+          inputFingerprint: characterProfileFingerprint(emptyCharacterProfile()),
+          patch: {
+            additions: [
+              {
+                field: "voice",
+                text: "Measured and precise.",
+                observationIds: ["obs-1", "obs-stale"],
+              },
+            ],
+            corrections: [],
+          },
+        },
+      ],
+    });
+
+    const committed = await useProjectStore
+      .getState()
+      .commitStoryRefresh(result, {});
+
+    expect(committed.followUpReasons).toContain("chapter-content-stale");
+    expect(useProjectStore.getState().meta.characters[0].profile.voice).toBe("");
+    expect(
+      useProjectStore.getState().meta.knowledge.appliedCharacterObservationIds,
+    ).toEqual({});
+  });
+
   it("never resurrects knowledge for a chapter deleted during refresh", async () => {
     const capturedProject = projectFixture("/book");
     const result = Object.assign(refreshResultFixture({}), {

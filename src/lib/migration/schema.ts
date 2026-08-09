@@ -109,6 +109,7 @@ const characterCandidateSchema = z.object({
 const projectKnowledgeSchema = z.object({
   chapters: z.record(z.string(), chapterKnowledgeSchema).catch({}),
   characterCandidates: z.array(characterCandidateSchema).catch([]),
+  acceptedCandidateFingerprints: z.array(z.string()).catch([]),
   dismissedCandidateFingerprints: z.array(z.string()).catch([]),
   appliedCharacterObservationIds: z
     .record(z.string(), z.array(z.string()))

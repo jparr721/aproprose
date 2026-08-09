@@ -1645,6 +1645,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         knowledge.characterCandidates = structuredClone(
           result.knowledge.characterCandidates,
         );
+        knowledge.acceptedCandidateFingerprints = [
+          ...result.knowledge.acceptedCandidateFingerprints,
+        ];
         knowledge.dismissedCandidateFingerprints = [
           ...result.knowledge.dismissedCandidateFingerprints,
         ];
@@ -1778,6 +1781,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             state.meta.knowledge.characterCandidates.filter(
               (item) => item.id !== candidateId,
             ),
+          acceptedCandidateFingerprints: [
+            ...new Set([
+              ...state.meta.knowledge.acceptedCandidateFingerprints,
+              candidate.evidenceFingerprint,
+            ]),
+          ],
         },
       };
       set({ meta });

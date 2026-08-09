@@ -15,6 +15,7 @@ export function emptyProjectKnowledge(): ProjectKnowledge {
   return {
     chapters: {},
     characterCandidates: [],
+    acceptedCandidateFingerprints: [],
     dismissedCandidateFingerprints: [],
     appliedCharacterObservationIds: {},
   };

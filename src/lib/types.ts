@@ -194,6 +194,7 @@ export interface CharacterKnowledgePatch {
 export interface ProjectKnowledge {
   chapters: Record<string, ChapterKnowledge>;
   characterCandidates: CharacterCandidate[];
+  acceptedCandidateFingerprints: string[];
   dismissedCandidateFingerprints: string[];
   appliedCharacterObservationIds: Record<string, string[]>;
 }

@@ -90,7 +90,9 @@ export function storyFieldsFingerprint(outline: Outline): string {
 export function candidateInputFingerprint(
   knowledge: Pick<
     ProjectKnowledge,
-    "characterCandidates" | "dismissedCandidateFingerprints"
+    | "characterCandidates"
+    | "acceptedCandidateFingerprints"
+    | "dismissedCandidateFingerprints"
   >,
 ): string {
   const candidates = knowledge.characterCandidates
@@ -103,7 +105,10 @@ export function candidateInputFingerprint(
   const dismissed = [...knowledge.dismissedCandidateFingerprints].sort(
     (left, right) => (left === right ? 0 : left < right ? -1 : 1),
   );
-  return textFingerprint(JSON.stringify([candidates, dismissed]));
+  const accepted = [...knowledge.acceptedCandidateFingerprints].sort(
+    (left, right) => (left === right ? 0 : left < right ? -1 : 1),
+  );
+  return textFingerprint(JSON.stringify([candidates, accepted, dismissed]));
 }
 
 export function findingFingerprint(

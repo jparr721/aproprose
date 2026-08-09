@@ -105,6 +105,7 @@ const candidateFixture = (): CharacterCandidate => ({
 const candidateInputFingerprintFixture = (
   candidates: CharacterCandidate[],
   dismissedFingerprints: string[],
+  acceptedFingerprints: string[],
 ): string =>
   textFingerprint(
     JSON.stringify([
@@ -115,6 +116,7 @@ const candidateInputFingerprintFixture = (
             ? leftFingerprint.localeCompare(rightFingerprint)
             : leftId.localeCompare(rightId),
         ),
+      [...acceptedFingerprints].sort(),
       [...dismissedFingerprints].sort(),
     ]),
   );
@@ -167,7 +169,7 @@ const refreshResultFixture = (
     },
   },
   storyInputFingerprint: storyFieldsFingerprint({ premise: "", overview: "" }),
-  candidateInputFingerprint: candidateInputFingerprintFixture([], []),
+  candidateInputFingerprint: candidateInputFingerprintFixture([], [], []),
   story: { premise: "New premise", overview: "New overview" },
   characterUpdates: [],
   characterFailures: [],
@@ -1985,12 +1987,20 @@ describe("story refresh commits", () => {
       profile: candidate.profile,
     });
     expect(state.meta.knowledge.characterCandidates).toEqual([]);
+    expect(
+      (
+        state.meta.knowledge as typeof state.meta.knowledge & {
+          acceptedCandidateFingerprints: string[];
+        }
+      ).acceptedCandidateFingerprints,
+    ).toEqual([candidate.evidenceFingerprint]);
   });
 
   it("preserves a candidate accepted while refresh output is in flight", async () => {
     const candidate = candidateFixture();
     const candidateInputFingerprint = candidateInputFingerprintFixture(
       [candidate],
+      [],
       [],
     );
     useProjectStore.setState((state) => ({
@@ -2051,6 +2061,7 @@ describe("story refresh commits", () => {
     const candidate = candidateFixture();
     const candidateInputFingerprint = candidateInputFingerprintFixture(
       [candidate],
+      [],
       [],
     );
     useProjectStore.setState((state) => ({

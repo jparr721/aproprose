@@ -432,6 +432,33 @@ describe("story refresh orchestration", () => {
     expect(result.knowledge.characterCandidates).toEqual([]);
   });
 
+  it("does not regenerate an accepted candidate after an unrelated chapter edit", async () => {
+    const fixture = indexedRefreshFixture();
+    const unknown = unknownObservationFixture();
+    fixture.capture.meta.knowledge.chapters.ch1.unknownCharacterObservations = [
+      unknown,
+    ];
+    Object.assign(fixture.capture.meta.knowledge, {
+      acceptedCandidateFingerprints: [
+        candidateEvidenceFingerprint(unknown.name, unknown.evidence),
+      ],
+    });
+    fixture.sources["two.tex"] = "Two unrelated changed prose block.\n";
+
+    const result = await buildStoryRefresh(
+      fixture.capture,
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(fixture.dependencies.reduceCharacterCandidates).toHaveBeenCalledWith(
+      { groups: [] },
+      expect.any(Object),
+    );
+    expect(result.knowledge.characterCandidates).toEqual([]);
+  });
+
   it("captures candidate input state in deterministic order", async () => {
     const fixture = indexedRefreshFixture();
     fixture.capture.meta.knowledge.characterCandidates = [
@@ -471,6 +498,7 @@ describe("story refresh orchestration", () => {
             ["candidate-a", "evidence-a"],
             ["candidate-b", "evidence-b"],
           ],
+          [],
           ["dismissed-a", "dismissed-b"],
         ]),
       ),

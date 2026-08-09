@@ -28,6 +28,7 @@ describe("migrateV5", () => {
     expect(migrated.knowledge).toEqual({
       chapters: {},
       characterCandidates: [],
+      acceptedCandidateFingerprints: [],
       dismissedCandidateFingerprints: [],
       appliedCharacterObservationIds: {},
     });

@@ -122,6 +122,9 @@ function cloneProjectKnowledge(knowledge: ProjectKnowledge): ProjectKnowledge {
       ]),
     ),
     characterCandidates: knowledge.characterCandidates.map(cloneCandidate),
+    acceptedCandidateFingerprints: [
+      ...knowledge.acceptedCandidateFingerprints,
+    ],
     dismissedCandidateFingerprints: [
       ...knowledge.dismissedCandidateFingerprints,
     ],
@@ -400,7 +403,10 @@ export async function buildStoryRefresh(
         (chapter) =>
           knowledge.chapters[chapter.id]?.unknownCharacterObservations ?? [],
       ),
-      knowledge.dismissedCandidateFingerprints,
+      [
+        ...knowledge.acceptedCandidateFingerprints,
+        ...knowledge.dismissedCandidateFingerprints,
+      ],
     );
     const reductions = await dependencies.reduceCharacterCandidates(
       { groups },

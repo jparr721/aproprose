@@ -195,6 +195,14 @@ describe("CharacterDetailSheet", () => {
     });
   });
 
+  it("leaves the sheet title font family to the shared primitive", () => {
+    render(<CharacterDetailSheet />);
+    act(() => useCharacterSheetStore.getState().open("c1"));
+
+    const title = screen.getByRole("heading", { name: "Edit Mara" });
+    expect(title.className.split(/\s+/)).not.toContain("font-sans");
+  });
+
   it("hydrates the selected character session and renders its agent surface", async () => {
     renderDescribeView("c1");
 

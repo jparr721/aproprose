@@ -74,7 +74,7 @@ export function CharacterDetailSheet() {
         className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
       >
         <SheetHeader className="gap-1 border-b border-border px-4 py-3.5">
-          <SheetTitle className="flex items-center gap-2 font-sans text-sm">
+          <SheetTitle className="flex items-center gap-2 text-sm">
             <IconUser className="size-4 text-muted-foreground" />
             Edit {entry.name}
           </SheetTitle>

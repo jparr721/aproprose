@@ -472,4 +472,101 @@ describe("story refresh runtime queue", () => {
       "Author premise refined.",
     );
   });
+
+  it("requests candidate-only reconciliation after a decision races new evidence", async () => {
+    const candidate = {
+      id: "candidate-inez",
+      evidenceFingerprint: "candidate-inez-fingerprint",
+      name: "Inez",
+      role: "Guide",
+      profile: emptyCharacterProfile(),
+      evidence: [],
+    };
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates: [candidate],
+        },
+      },
+    }));
+    const first = deferred<StoryRefreshResult>();
+    const firstResult: StoryRefreshResult = {
+      ...refreshResultFixture({ characterId: null, inputFingerprint: null }),
+      candidateInputFingerprint: candidateInputFingerprint(
+        useProjectStore.getState().meta.knowledge,
+      ),
+      knowledge: {
+        ...emptyProjectKnowledge(),
+        chapterTopologyFingerprint: chapterTopologyFingerprint(
+          projectFixture("/book").chapters,
+        ),
+        chapters: {
+          ch1: {
+            sourceFingerprint: "fp-1",
+            summary: "Inez arrives.",
+            premiseSignals: [],
+            conflictSignals: [],
+            stakeSignals: [],
+            arcSignals: [],
+            endingSignals: [],
+            characterObservations: [],
+            unknownCharacterObservations: [
+              {
+                id: "unknown-new",
+                name: "Niko",
+                role: "Traveler",
+                details: {
+                  appearance: "Niko wears a red coat.",
+                  mannerisms: "Niko counts every doorway.",
+                },
+                evidence: [
+                  {
+                    chapterId: "ch1",
+                    sourceId: "niko-source",
+                    order: 0,
+                    fingerprint: "niko-source-fingerprint",
+                    occurrence: 0,
+                    previewText: "Niko counts every doorway.",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+    const build = vi
+      .fn<typeof buildStoryRefresh>()
+      .mockReturnValueOnce(first.promise)
+      .mockImplementationOnce(async (capture: StoryRefreshCapture) => ({
+        ...refreshResultFixture({ characterId: null, inputFingerprint: null }),
+        analyzedChapterFingerprints: {},
+        knowledge: structuredClone(capture.meta.knowledge),
+        storyInputFingerprint: storyFieldsFingerprint(capture.meta.outline),
+        candidateInputFingerprint: candidateInputFingerprint(
+          capture.meta.knowledge,
+        ),
+        story: { ...capture.meta.outline },
+      }));
+    const store = createStore(
+      createStoryRefreshState(refreshStoreDependencies(build, "gpt-test")),
+    );
+
+    store.getState().enqueueSavedChapter("/book", "ch1", "fp-1");
+    await useProjectStore
+      .getState()
+      .acceptCharacterCandidate(candidate.id);
+    first.resolve(firstResult);
+    await vi.waitFor(() => expect(build).toHaveBeenCalledTimes(2));
+
+    expect(
+      (
+        build.mock.calls[1][0] as StoryRefreshCapture & {
+          reconcileCandidates?: boolean;
+        }
+      ).reconcileCandidates,
+    ).toBe(true);
+  });
 });

@@ -112,7 +112,10 @@ import { updateLore, removeLore } from "@/lib/lore/model";
 import { DEFAULT_CHARACTER_COLOR } from "@/lib/characters/colors";
 import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
 import { storyChapterFingerprint } from "@/lib/story-knowledge/chunking";
-import type { StoryRefreshResult } from "@/lib/story-knowledge/refresh";
+import type {
+  StoryRefreshFollowUpReason,
+  StoryRefreshResult,
+} from "@/lib/story-knowledge/refresh";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 type ProjectStatus = "empty" | "loading" | "ready";
@@ -324,7 +327,7 @@ interface ProjectState {
   commitStoryRefresh: (
     result: StoryRefreshResult,
     latestSavedFingerprints: Record<string, string>,
-  ) => Promise<{ followUpRequired: boolean }>;
+  ) => Promise<{ followUpReasons: StoryRefreshFollowUpReason[] }>;
   applyCharacterProfileFromAgent: (
     projectRoot: string,
     characterId: string,
@@ -1674,11 +1677,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         ];
       }
 
-      let followUpRequired =
-        storyIsStale ||
-        topologyIsStale ||
-        staleChapterIds.size > 0 ||
-        candidateInputIsStale;
+      const followUpReasons: StoryRefreshFollowUpReason[] = [];
+      if (storyIsStale) followUpReasons.push("story-fields-stale");
+      if (topologyIsStale) {
+        followUpReasons.push("chapter-topology-stale");
+      }
+      if (staleChapterIds.size > 0) {
+        followUpReasons.push("chapter-content-stale");
+      }
+      if (candidateInputIsStale) {
+        followUpReasons.push("candidate-input-stale");
+      }
       let characters = state.meta.characters;
       if (!storyIsStale && !topologyIsStale) {
         for (const update of result.characterUpdates) {
@@ -1691,7 +1700,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             characterProfileFingerprint(character.profile) !==
             update.inputFingerprint
           ) {
-            followUpRequired = true;
+            if (!followUpReasons.includes("character-profile-stale")) {
+              followUpReasons.push("character-profile-stale");
+            }
             continue;
           }
 
@@ -1745,7 +1756,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       };
       set({ meta });
       await persistMetaAndWait(state.project.root, meta);
-      return { followUpRequired };
+      return { followUpReasons };
     },
 
     applyCharacterProfileFromAgent: async (

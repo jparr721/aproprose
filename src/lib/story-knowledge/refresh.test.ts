@@ -168,6 +168,7 @@ function refreshCaptureFixture(input: {
     meta: input.meta ?? refreshMetaFixture(input.knowledge),
     provider: "openai",
     modelId: "test-model",
+    reconcileCandidates: false,
   };
 }
 
@@ -525,6 +526,37 @@ describe("story refresh orchestration", () => {
       expect.any(Object),
     );
     expect(result.knowledge.characterCandidates).toEqual([]);
+  });
+
+  it("reconciles candidates from persisted knowledge without chapter analysis", async () => {
+    const fixture = indexedRefreshFixture();
+    const unknown = unknownObservationFixture();
+    fixture.capture.meta.knowledge.chapters.ch1.unknownCharacterObservations = [
+      unknown,
+    ];
+    vi.mocked(fixture.dependencies.reduceCharacterCandidates).mockImplementation(
+      async ({ groups }) =>
+        groups.map((group) => ({
+          groupFingerprint: group.evidenceFingerprint,
+          name: group.name,
+          role: group.role,
+          profile: emptyCharacterProfile(),
+        })),
+    );
+
+    const result = await buildStoryRefresh(
+      Object.assign(fixture.capture, { reconcileCandidates: true }),
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(fixture.dependencies.analyzeStoryChunk).not.toHaveBeenCalled();
+    expect(fixture.dependencies.reduceChapterKnowledge).not.toHaveBeenCalled();
+    expect(fixture.dependencies.reduceCharacterCandidates).toHaveBeenCalledTimes(1);
+    expect(result.knowledge.characterCandidates).toEqual([
+      expect.objectContaining({ name: "Niko" }),
+    ]);
   });
 
   it("captures candidate input state in deterministic order", async () => {

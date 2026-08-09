@@ -6,6 +6,7 @@ import type {
   buildStoryRefresh,
   StoryRefreshCapture,
   StoryRefreshDependencies,
+  StoryRefreshFollowUpReason,
   StoryRefreshProgress,
   StoryRefreshResult,
 } from "@/lib/story-knowledge/refresh";
@@ -20,6 +21,7 @@ export interface StoryRefreshState {
   error: string | null;
   pendingFingerprints: Record<string, string>;
   pendingTopologyRevision: number | null;
+  pendingFollowUpReasons: StoryRefreshFollowUpReason[];
   latestSavedFingerprints: Record<string, string>;
   enqueueSavedChapter: (
     projectRoot: string,
@@ -32,7 +34,10 @@ export interface StoryRefreshState {
 }
 
 export interface StoryRefreshStoreDependencies {
-  capture: () => Omit<StoryRefreshCapture, "modelId"> & {
+  capture: () => Omit<
+    StoryRefreshCapture,
+    "modelId" | "reconcileCandidates"
+  > & {
     modelId: string | null;
   };
   buildStoryRefresh: typeof buildStoryRefresh;
@@ -40,7 +45,7 @@ export interface StoryRefreshStoreDependencies {
   commitStoryRefresh: (
     result: StoryRefreshResult,
     latestSavedFingerprints: Record<string, string>,
-  ) => Promise<{ followUpRequired: boolean }>;
+  ) => Promise<{ followUpReasons: StoryRefreshFollowUpReason[] }>;
   describeError: (error: unknown) => string;
 }
 
@@ -116,6 +121,13 @@ function characterFailureMessage(
     .join("\n");
 }
 
+function mergeFollowUpReasons(
+  current: StoryRefreshFollowUpReason[],
+  additions: StoryRefreshFollowUpReason[],
+): StoryRefreshFollowUpReason[] {
+  return [...new Set([...current, ...additions])];
+}
+
 export function createStoryRefreshState(
   dependencies: StoryRefreshStoreDependencies,
 ): StateCreator<StoryRefreshState> {
@@ -132,6 +144,7 @@ export function createStoryRefreshState(
       controller = currentController;
       const processingFingerprints = { ...get().pendingFingerprints };
       const processingTopologyRevision = get().pendingTopologyRevision;
+      const processingFollowUpReasons = [...get().pendingFollowUpReasons];
       set({ status: "refreshing", progress: EMPTY_PROGRESS, error: null });
 
       try {
@@ -151,6 +164,9 @@ export function createStoryRefreshState(
           meta: structuredClone(captured.meta),
           provider: captured.provider,
           modelId: captured.modelId,
+          reconcileCandidates: processingFollowUpReasons.includes(
+            "candidate-input-stale",
+          ),
         };
         const result = await dependencies.buildStoryRefresh(
           capture,
@@ -191,6 +207,13 @@ export function createStoryRefreshState(
           get().pendingTopologyRevision === processingTopologyRevision
             ? null
             : get().pendingTopologyRevision;
+        const remainingFollowUpReasons = get().pendingFollowUpReasons.filter(
+          (reason) => !processingFollowUpReasons.includes(reason),
+        );
+        const pendingFollowUpReasons = mergeFollowUpReasons(
+          remainingFollowUpReasons,
+          committed.followUpReasons,
+        );
         controller = null;
         if (result.characterFailures.length > 0) {
           set({
@@ -198,16 +221,21 @@ export function createStoryRefreshState(
             error: characterFailureMessage(result.characterFailures),
             pendingFingerprints,
             pendingTopologyRevision,
+            pendingFollowUpReasons,
           });
           return;
         }
 
         if (
-          committed.followUpRequired ||
+          pendingFollowUpReasons.length > 0 ||
           Object.keys(pendingFingerprints).length > 0 ||
           pendingTopologyRevision !== null
         ) {
-          set({ pendingFingerprints, pendingTopologyRevision });
+          set({
+            pendingFingerprints,
+            pendingTopologyRevision,
+            pendingFollowUpReasons,
+          });
           void execute(root);
           return;
         }
@@ -218,6 +246,7 @@ export function createStoryRefreshState(
           error: null,
           pendingFingerprints,
           pendingTopologyRevision,
+          pendingFollowUpReasons,
         });
       } catch (error) {
         if (generation !== currentGeneration) return;
@@ -241,6 +270,7 @@ export function createStoryRefreshState(
         error: null,
         pendingFingerprints: {},
         pendingTopologyRevision: null,
+        pendingFollowUpReasons: [],
         latestSavedFingerprints: {},
       });
     };
@@ -251,6 +281,7 @@ export function createStoryRefreshState(
       error: null,
       pendingFingerprints: {},
       pendingTopologyRevision: null,
+      pendingFollowUpReasons: [],
       latestSavedFingerprints: {},
       enqueueSavedChapter: (root, chapterId, fingerprint) => {
         if (projectRoot !== null && projectRoot !== root) {

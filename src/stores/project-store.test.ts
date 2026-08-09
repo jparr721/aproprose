@@ -1909,7 +1909,7 @@ describe("story refresh commits", () => {
       result.analyzedChapterFingerprints,
     );
 
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("character-profile-stale");
     expect(
       useProjectStore.getState().meta.characters[0].profile.voice,
     ).toBe("Author-edited voice.");
@@ -1937,7 +1937,7 @@ describe("story refresh commits", () => {
       result.analyzedChapterFingerprints,
     );
 
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("story-fields-stale");
     expect(useProjectStore.getState().meta.outline.premise).toBe(
       "Author-edited premise.",
     );
@@ -1985,7 +1985,7 @@ describe("story refresh commits", () => {
       result.analyzedChapterFingerprints,
     );
 
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("chapter-topology-stale");
     expect(useProjectStore.getState().meta.knowledge.chapters.ch1).toBeUndefined();
     expect(useProjectStore.getState().meta.outline).toEqual({
       premise: "",
@@ -2026,7 +2026,7 @@ describe("story refresh commits", () => {
       {},
     );
 
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("chapter-topology-stale");
     expect(useProjectStore.getState().meta.outline).toEqual({
       premise: "",
       overview: "",
@@ -2139,7 +2139,7 @@ describe("story refresh commits", () => {
     );
 
     const state = useProjectStore.getState();
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("candidate-input-stale");
     expect(state.meta.knowledge.characterCandidates).toEqual([]);
     expect(
       state.meta.characters.some((character) => character.id === acceptedId),
@@ -2198,7 +2198,7 @@ describe("story refresh commits", () => {
     );
 
     const knowledge = useProjectStore.getState().meta.knowledge;
-    expect(committed.followUpRequired).toBe(true);
+    expect(committed.followUpReasons).toContain("candidate-input-stale");
     expect(knowledge.characterCandidates).toEqual([]);
     expect(knowledge.dismissedCandidateFingerprints).toEqual(["candidate-fp"]);
   });

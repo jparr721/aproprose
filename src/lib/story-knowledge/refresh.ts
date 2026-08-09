@@ -47,7 +47,15 @@ export interface StoryRefreshCapture {
   meta: ProjectMeta;
   provider: AiProvider;
   modelId: string;
+  reconcileCandidates: boolean;
 }
+
+export type StoryRefreshFollowUpReason =
+  | "candidate-input-stale"
+  | "chapter-content-stale"
+  | "chapter-topology-stale"
+  | "character-profile-stale"
+  | "story-fields-stale";
 
 export interface StoryRefreshCharacterUpdate {
   characterId: string;
@@ -406,7 +414,7 @@ export async function buildStoryRefresh(
     }
   }
 
-  if (chapterKnowledgeChanged) {
+  if (chapterKnowledgeChanged || capture.reconcileCandidates) {
     const groups = eligibleUnknownCharacterGroups(
       capture.project.chapters.flatMap(
         (chapter) =>

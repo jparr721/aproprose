@@ -706,6 +706,56 @@ describe("story refresh orchestration", () => {
     ]);
   });
 
+  it("bounds character reductions and preserves deterministic result order", async () => {
+    const fixture = indexedRefreshFixture();
+    fixture.sources["one.tex"] = "One changed prose block.\n";
+    fixture.capture.meta.characters = Array.from({ length: 7 }, (_, index) =>
+      characterFixture(`c${index + 1}`, `Character ${index + 1}`),
+    );
+    vi.mocked(fixture.dependencies.reduceChapterKnowledge).mockResolvedValueOnce({
+      ...chapterKnowledgeFixture("changed-fingerprint"),
+      characterObservations: fixture.capture.meta.characters.map(
+        (character, index) =>
+          observationFixture(`obs-${index + 1}`, character.id, "ch1"),
+      ),
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(fixture.dependencies.reduceCharacterPatch).mockImplementation(
+      async ({ character }) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Promise.resolve();
+        await Promise.resolve();
+        inFlight -= 1;
+        if (character.id === "c3") {
+          throw new Error("Character 3 failed");
+        }
+        return { additions: [], corrections: [] };
+      },
+    );
+
+    const result = await buildStoryRefresh(
+      fixture.capture,
+      fixture.dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+    expect(result.characterUpdates.map((update) => update.characterId)).toEqual([
+      "c1",
+      "c2",
+      "c4",
+      "c5",
+      "c6",
+      "c7",
+    ]);
+    expect(result.characterFailures).toEqual([
+      { characterId: "c3", message: "Character 3 failed" },
+    ]);
+  });
+
   it("reports completed chapters over the total selected chapters", async () => {
     const dependencies = refreshDependenciesFixture({
       sources: {

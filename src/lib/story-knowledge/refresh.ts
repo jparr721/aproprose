@@ -98,6 +98,8 @@ export interface StoryRefreshDependencies {
   reduceCharacterCandidates: typeof reduceCharacterCandidates;
 }
 
+export const STORY_REFRESH_CHARACTER_CONCURRENCY = 3;
+
 interface ParsedStoryChapter {
   chapter: ChapterRef;
   blocks: Block[];
@@ -387,7 +389,9 @@ export async function buildStoryRefresh(
     knowledge,
     selectedChapterIds,
   );
-  const characterJobs = characters.map(async (character) => {
+  const reduceCharacter = async (
+    character: Character,
+  ): Promise<StoryRefreshCharacterUpdate> => {
     const inputFingerprint = characterProfileFingerprint(character.profile);
     const observations = dedupeCharacterObservations(
       capture.project.chapters.flatMap(
@@ -411,8 +415,41 @@ export async function buildStoryRefresh(
       inputFingerprint,
       patch,
     };
-  });
-  const settledCharacterJobs = await Promise.allSettled(characterJobs);
+  };
+  const settledCharacterJobs: Array<
+    PromiseSettledResult<StoryRefreshCharacterUpdate>
+  > = new Array(characters.length);
+  let nextCharacterIndex = 0;
+  const workers = Array.from(
+    {
+      length: Math.min(
+        STORY_REFRESH_CHARACTER_CONCURRENCY,
+        characters.length,
+      ),
+    },
+    async () => {
+      while (nextCharacterIndex < characters.length) {
+        signal.throwIfAborted();
+        const characterIndex = nextCharacterIndex;
+        nextCharacterIndex += 1;
+        try {
+          const value = await reduceCharacter(characters[characterIndex]);
+          signal.throwIfAborted();
+          settledCharacterJobs[characterIndex] = {
+            status: "fulfilled",
+            value,
+          };
+        } catch (reason) {
+          signal.throwIfAborted();
+          settledCharacterJobs[characterIndex] = {
+            status: "rejected",
+            reason,
+          };
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
   signal.throwIfAborted();
   const characterUpdates: StoryRefreshCharacterUpdate[] = [];
   const characterFailures: StoryRefreshResult["characterFailures"] = [];

@@ -16,6 +16,7 @@ import {
   type StoryRefreshDependencies,
 } from "@/lib/story-knowledge/refresh";
 import type {
+  Block,
   Character,
   CharacterObservation,
   ChapterKnowledge,
@@ -275,6 +276,40 @@ describe("story refresh orchestration", () => {
     expect(Object.keys(result.knowledge.chapters)).toEqual(["ch1", "ch2"]);
   });
 
+  it("constructs empty chapter knowledge without reducing excluded blocks", async () => {
+    const dependencies = refreshDependenciesFixture({
+      sources: { "one.tex": "Ignored", "two.tex": "Ignored" },
+    });
+    const excludedBlock: Block = {
+      id: "note-1",
+      type: "lore",
+      text: "Private note",
+      raw: "% Private note",
+      dirty: false,
+    };
+    dependencies.parseChapter = vi.fn(() => [excludedBlock]);
+    const project = {
+      ...projectFixture,
+      chapters: [projectFixture.chapters[0]],
+    };
+
+    const result = await buildStoryRefresh(
+      refreshCaptureFixture({
+        knowledge: emptyProjectKnowledge(),
+        project,
+      }),
+      dependencies,
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    expect(dependencies.analyzeStoryChunk).not.toHaveBeenCalled();
+    expect(dependencies.reduceChapterKnowledge).not.toHaveBeenCalled();
+    expect(result.knowledge.chapters.ch1).toEqual(
+      chapterKnowledgeFixture(storyChapterFingerprint([excludedBlock])),
+    );
+  });
+
   it("analyzes only chapters whose semantic fingerprint changed", async () => {
     const fixture = indexedRefreshFixture();
     fixture.sources["two.tex"] = "Two changed prose block.\n";
@@ -494,10 +529,7 @@ describe("story refresh orchestration", () => {
       vi.fn(),
     );
 
-    expect(fixture.dependencies.reduceCharacterCandidates).toHaveBeenCalledWith(
-      { groups: [] },
-      expect.any(Object),
-    );
+    expect(fixture.dependencies.reduceCharacterCandidates).not.toHaveBeenCalled();
     expect(result.knowledge.characterCandidates).toEqual([]);
   });
 
@@ -521,10 +553,7 @@ describe("story refresh orchestration", () => {
       vi.fn(),
     );
 
-    expect(fixture.dependencies.reduceCharacterCandidates).toHaveBeenCalledWith(
-      { groups: [] },
-      expect.any(Object),
-    );
+    expect(fixture.dependencies.reduceCharacterCandidates).not.toHaveBeenCalled();
     expect(result.knowledge.characterCandidates).toEqual([]);
   });
 

@@ -332,13 +332,26 @@ export async function buildStoryRefresh(
       );
       signal.throwIfAborted();
     }
-    const chapterKnowledge = await dependencies.reduceChapterKnowledge(
-      {
-        sourceFingerprint: parsed.sourceFingerprint,
-        analyses,
-      },
-      { model: await resolveModel(), signal },
-    );
+    const chapterKnowledge: ChapterKnowledge =
+      chunks.length === 0
+        ? {
+            sourceFingerprint: parsed.sourceFingerprint,
+            summary: "",
+            premiseSignals: [],
+            conflictSignals: [],
+            stakeSignals: [],
+            arcSignals: [],
+            endingSignals: [],
+            characterObservations: [],
+            unknownCharacterObservations: [],
+          }
+        : await dependencies.reduceChapterKnowledge(
+            {
+              sourceFingerprint: parsed.sourceFingerprint,
+              analyses,
+            },
+            { model: await resolveModel(), signal },
+          );
     signal.throwIfAborted();
     knowledge.chapters[parsed.chapter.id] = cloneChapterKnowledge(chapterKnowledge);
     analyzedChapterFingerprints[parsed.chapter.id] = parsed.sourceFingerprint;
@@ -425,10 +438,13 @@ export async function buildStoryRefresh(
         ...knowledge.dismissedCandidateFingerprints,
       ],
     );
-    const reductions = await dependencies.reduceCharacterCandidates(
-      { groups },
-      { model: await resolveModel(), signal },
-    );
+    const reductions =
+      groups.length === 0
+        ? []
+        : await dependencies.reduceCharacterCandidates(
+            { groups },
+            { model: await resolveModel(), signal },
+          );
     signal.throwIfAborted();
     const groupByFingerprint = new Map(
       groups.map((group) => [group.evidenceFingerprint, group]),

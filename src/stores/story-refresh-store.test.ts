@@ -1,3 +1,4 @@
+import { MockLanguageModelV3 } from "ai/test";
 import { createStore } from "zustand/vanilla";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,13 +33,20 @@ import {
   emptyCharacterProfile,
   emptyProjectKnowledge,
 } from "@/lib/story-knowledge/model";
+import { storyChapterFingerprint } from "@/lib/story-knowledge/chunking";
 import {
   buildStoryRefresh,
   storyRefreshDependencies,
   type StoryRefreshCapture,
+  type StoryRefreshDependencies,
   type StoryRefreshResult,
 } from "@/lib/story-knowledge/refresh";
-import type { Character, ProjectInfo, ProjectMeta } from "@/lib/types";
+import type {
+  ChapterKnowledge,
+  Character,
+  ProjectInfo,
+  ProjectMeta,
+} from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import {
   createStoryRefreshState,
@@ -405,6 +413,64 @@ describe("story refresh runtime queue", () => {
 
     expect(returned).toBeUndefined();
     expect(store.getState().status).toBe("refreshing");
+  });
+
+  it("reports the selected total while the first chapter reducer is pending", async () => {
+    const firstChapter = deferred<ChapterKnowledge>();
+    const refreshDependencies: StoryRefreshDependencies = {
+      readTextFile: vi.fn(async () => "One prose block.\n"),
+      parseChapter: storyRefreshDependencies.parseChapter,
+      getModel: vi.fn(async () => new MockLanguageModelV3()),
+      analyzeStoryChunk: vi.fn(async () => ({
+        summaryFragment: "",
+        premiseSignals: [],
+        conflictSignals: [],
+        stakeSignals: [],
+        arcSignals: [],
+        endingSignals: [],
+        characterObservations: [],
+        unknownCharacterObservations: [],
+      })),
+      reduceChapterKnowledge: vi.fn(async () => firstChapter.promise),
+      reduceStoryFields: vi.fn(async ({ current }) => ({ ...current })),
+      reduceCharacterPatch: vi.fn(async () => ({
+        additions: [],
+        corrections: [],
+      })),
+      reduceCharacterCandidates: vi.fn(async () => []),
+    };
+    const dependencies = {
+      ...refreshStoreDependencies(buildStoryRefresh, "gpt-test"),
+      refreshDependencies,
+    };
+    const store = createStore(createStoryRefreshState(dependencies));
+
+    const savedFingerprint = storyChapterFingerprint(
+      storyRefreshDependencies.parseChapter("One prose block.\n"),
+    );
+    store
+      .getState()
+      .enqueueSavedChapter("/book", "ch1", savedFingerprint);
+    await vi.waitFor(() => {
+      expect(refreshDependencies.reduceChapterKnowledge).toHaveBeenCalledTimes(1);
+    });
+
+    expect(store.getState().progress).toEqual({
+      completedChapters: 0,
+      totalChapters: 1,
+    });
+    firstChapter.resolve({
+      sourceFingerprint: savedFingerprint,
+      summary: "",
+      premiseSignals: [],
+      conflictSignals: [],
+      stakeSignals: [],
+      arcSignals: [],
+      endingSignals: [],
+      characterObservations: [],
+      unknownCharacterObservations: [],
+    });
+    await vi.waitFor(() => expect(store.getState().status).toBe("idle"));
   });
 
   it("reselects changed chapters after a stale story commit", async () => {

@@ -773,6 +773,7 @@ describe("story refresh orchestration", () => {
     );
 
     expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      { completedChapters: 0, totalChapters: 2 },
       { completedChapters: 1, totalChapters: 2 },
       { completedChapters: 2, totalChapters: 2 },
     ]);

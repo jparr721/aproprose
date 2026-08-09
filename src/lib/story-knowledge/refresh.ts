@@ -282,6 +282,10 @@ export async function buildStoryRefresh(
   const selectedChapterIds = new Set(
     selectedChapters.map(({ chapter }) => chapter.id),
   );
+  onProgress({
+    completedChapters: 0,
+    totalChapters: selectedChapters.length,
+  });
   const analyzedChapterFingerprints: Record<string, string> = {};
   let modelPromise: Promise<LanguageModel> | null = null;
   const resolveModel = async (): Promise<LanguageModel> => {

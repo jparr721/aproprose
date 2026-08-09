@@ -127,7 +127,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("CharacterDetailSheet", () => {
-  function renderDescribeView(characterId: string): void {
+  function renderDescribeView(characterId: string): { unmount: () => void } {
     const sessionId = { kind: "character" as const, characterId };
     agentSessionStore(sessionId).setState({
       ...EMPTY_AGENT_STATE,
@@ -135,16 +135,19 @@ describe("CharacterDetailSheet", () => {
       hydratedProjectRoot: project.root,
       requestedProjectRoot: project.root,
     });
-    render(<CharacterDetailSheet />);
+    const rendered = render(<CharacterDetailSheet />);
     act(() => useCharacterSheetStore.getState().open(characterId));
     fireEvent.click(screen.getByRole("button", { name: "Describe with AI" }));
+    return rendered;
   }
 
   it("opens from a sidebar character and edits every structured field", () => {
+    useCharacterSheetStore.setState({ characterId: null, view: "describe" });
     render(<AppSidebar />, { wrapper: SidebarProvider });
     fireEvent.click(screen.getByRole("button", { name: /Mara/ }));
 
     expect(screen.getByRole("dialog", { name: "Edit Mara" })).toBeTruthy();
+    expect(useCharacterSheetStore.getState().view).toBe("manual");
 
     const updates = {
       Appearance: "Tall, with a silver braid.",
@@ -170,6 +173,7 @@ describe("CharacterDetailSheet", () => {
       voice: updates.Voice,
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Describe with AI" }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(useCharacterSheetStore.getState()).toMatchObject({
       characterId: null,
@@ -245,6 +249,54 @@ describe("CharacterDetailSheet", () => {
       kind: "character",
       characterId: "c1",
     });
+  });
+
+  it("stops the character run exactly once when the sheet unmounts", () => {
+    const { unmount } = renderDescribeView("c1");
+
+    unmount();
+
+    expect(agent.stopAgentRun).toHaveBeenCalledTimes(1);
+    expect(agent.stopAgentRun).toHaveBeenCalledWith({
+      kind: "character",
+      characterId: "c1",
+    });
+  });
+
+  it("stops the former session exactly once when the character changes", async () => {
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        characters: [
+          ...state.meta.characters,
+          {
+            id: "c2",
+            name: "Ivo",
+            role: "Archivist",
+            color: CHARACTER_COLORS[1],
+            profile,
+          },
+        ],
+      },
+    }));
+    renderDescribeView("c1");
+
+    act(() => {
+      useCharacterSheetStore.setState({
+        characterId: "c2",
+        view: "describe",
+      });
+    });
+
+    await waitFor(() => {
+      expect(agent.hydrateAgentCharacterSession).toHaveBeenCalledWith(
+        "/book",
+        "c2",
+      );
+    });
+    expect(agent.stopAgentRun.mock.calls).toEqual([
+      [{ kind: "character", characterId: "c1" }],
+    ]);
   });
 
   it("shows live character tool updates when returning to Manual", () => {

@@ -90,6 +90,20 @@ describe("StoryRefreshStatus", () => {
     expect(screen.getByRole("status")).toBeTruthy();
   });
 
+  it("shows an accurate loading label during zero-chapter reconciliation", () => {
+    useStoryRefreshStore.setState({
+      status: "refreshing",
+      progress: { completedChapters: 0, totalChapters: 0 },
+      error: null,
+    });
+
+    render(<StoryRefreshStatus />);
+
+    expect(screen.getByText("Refreshing story knowledge")).toBeTruthy();
+    expect(screen.queryByText("Refreshing 0 of 0 chapters")).toBeNull();
+    expect(screen.getByRole("status")).toBeTruthy();
+  });
+
   it("shows an actionable retry after failure", () => {
     const retry = vi.fn();
     useStoryRefreshStore.setState({

@@ -44,7 +44,9 @@ export function StoryRefreshStatus() {
         <>
           <Spinner />
           <TypographyMuted>
-            Refreshing {progress.completedChapters} of {progress.totalChapters} chapters
+            {progress.totalChapters > 0
+              ? `Refreshing ${progress.completedChapters} of ${progress.totalChapters} chapters`
+              : "Refreshing story knowledge"}
           </TypographyMuted>
         </>
       ) : null}

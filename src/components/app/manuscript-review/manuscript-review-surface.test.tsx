@@ -57,6 +57,10 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import type { Block, Character, ProjectInfo, ProjectMeta } from "@/lib/types";
+import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -65,7 +69,13 @@ const ROOT = "/book";
 const CHAPTER_ID = "chapter-1";
 
 const characters: Character[] = [
-  { id: "character-mara", name: "Mara", color: "#336699", role: "Lead" },
+  {
+    id: "character-mara",
+    name: "Mara",
+    color: "#336699",
+    role: "Lead",
+    profile: emptyCharacterProfile(),
+  },
 ];
 
 function narration(id: string, text: string): Block {
@@ -286,8 +296,9 @@ function metaFixture(): ProjectMeta {
     characters,
     lore: [],
     statuses: {},
-    outline: { premise: "" },
+    outline: { premise: "", overview: "" },
     chapters: {},
+    knowledge: emptyProjectKnowledge(),
   };
 }
 

@@ -19,6 +19,7 @@ import type {
   ChapterRef,
   ChapterStatus,
   Character,
+  CharacterProfile,
   CompileError,
   ContinuityFlag,
   LoreEntry,
@@ -56,12 +57,20 @@ import { pathHash } from "@/lib/path-hash";
 import { useSyncStore } from "@/stores/sync-store";
 import { useStatsStore } from "@/stores/stats-store";
 import { useViewStore } from "@/stores/view-store";
+import { deleteOutlineAgentSession } from "@/stores/agent-console-store";
 import { isNoOp, planCarve, planSplit } from "@/lib/blocks/carve";
 import { carriesTailContent } from "@/lib/blocks/dialogue";
 import { canMerge } from "@/lib/blocks/keys";
 import { applyProposal } from "@/lib/blocks/proposal";
 import { structurePassage } from "@/lib/blocks/structure";
-import { projectMetaFingerprint } from "@/lib/ai/agent-context";
+import {
+  candidateInputFingerprint,
+  chapterTopologyFingerprint,
+  characterProfileFingerprint,
+  projectMetaFingerprint,
+  storyFieldsFingerprint,
+  storyOverviewFingerprint,
+} from "@/lib/ai/agent-context";
 import {
   conflictingTargetChangeIds,
   invalidProposalCorrelationIds,
@@ -85,6 +94,7 @@ import {
   applySculpt as applySculptModel,
   editCard as editCardModel,
   editChapterField,
+  editOverview,
   editPremise,
   getChapterOutline,
   moveCardToChapter as moveCardToChapterModel,
@@ -99,6 +109,14 @@ import {
 } from "@/lib/outline/model";
 import { runMigrations, EMPTY_META } from "@/lib/migration";
 import { updateLore, removeLore } from "@/lib/lore/model";
+import { DEFAULT_CHARACTER_COLOR } from "@/lib/characters/colors";
+import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
+import { storyChapterFingerprint } from "@/lib/story-knowledge/chunking";
+import type {
+  StoryRefreshFollowUpReason,
+  StoryRefreshResult,
+} from "@/lib/story-knowledge/refresh";
+import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -114,7 +132,7 @@ interface CompileState {
 }
 
 export function defaultOutline(): Outline {
-  return { premise: "" };
+  return { premise: "", overview: "" };
 }
 
 
@@ -159,6 +177,67 @@ function metaKey(root: string): string {
 /** Stable, filesystem-safe key for a project's last-open chapter (local UI cursor). */
 function lastChapterKey(root: string): string {
   return `last-chapter-${pathHash(root)}`;
+}
+
+const metaWriteQueues = new Map<string, Promise<void>>();
+
+interface ProjectMetaProvenance {
+  root: string;
+  lastDurableMeta: ProjectMeta;
+}
+
+const projectMetaProvenance = new WeakMap<
+  ProjectMeta,
+  ProjectMetaProvenance
+>();
+
+function inheritProjectMetaProvenance(
+  root: string,
+  previousMeta: ProjectMeta,
+  nextMeta: ProjectMeta,
+): ProjectMetaProvenance {
+  const previousProvenance = projectMetaProvenance.get(previousMeta);
+  const provenance =
+    previousProvenance?.root === root
+      ? previousProvenance
+      : { root, lastDurableMeta: previousMeta };
+  projectMetaProvenance.set(previousMeta, provenance);
+  projectMetaProvenance.set(nextMeta, provenance);
+  return provenance;
+}
+
+function queueProjectMetaWrite(
+  root: string,
+  meta: ProjectMeta,
+  provenance: ProjectMetaProvenance,
+): Promise<void> {
+  const previous = metaWriteQueues.get(root);
+  const persist = (): Promise<void> => {
+    const write = writeProjectMeta(root, JSON.stringify(meta));
+    void write.then(
+      () => {
+        provenance.lastDurableMeta = meta;
+      },
+      () => undefined,
+    );
+    return write;
+  };
+  const write = previous
+    ? previous
+        .catch(() => undefined)
+        .then(persist)
+    : persist();
+  const tracked = write.finally(() => {
+    if (metaWriteQueues.get(root) === tracked) {
+      metaWriteQueues.delete(root);
+    }
+  });
+  metaWriteQueues.set(root, tracked);
+  return tracked;
+}
+
+export function drainProjectMetaWrites(root: string): Promise<void> {
+  return metaWriteQueues.get(root) ?? Promise.resolve();
 }
 
 interface ProjectState {
@@ -285,6 +364,17 @@ interface ProjectState {
   /** Adds a character and returns its newly-minted id. */
   addCharacter: (c: Omit<Character, "id">) => string;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
+  commitStoryRefresh: (
+    result: StoryRefreshResult,
+    latestSavedFingerprints: Record<string, string>,
+  ) => Promise<{ followUpReasons: StoryRefreshFollowUpReason[] }>;
+  applyCharacterProfileFromAgent: (
+    projectRoot: string,
+    characterId: string,
+    profile: CharacterProfile,
+  ) => Promise<Character>;
+  acceptCharacterCandidate: (candidateId: string) => Promise<string>;
+  dismissCharacterCandidate: (candidateId: string) => Promise<void>;
   removeCharacter: (id: string) => void;
   addLore: (title: string) => string;
   updateLore: (id: string, patch: Partial<Pick<LoreEntry, "title" | "description" | "characterIds" | "tags">>) => void;
@@ -293,6 +383,7 @@ interface ProjectState {
 
   // outline (global)
   setPremise: (premise: string) => void;
+  setOverview: (overview: string) => void;
   // cards
   addCard: (chapterId: string) => string;
   removeCard: (chapterId: string, cardId: string) => void;
@@ -504,10 +595,53 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
-    if (project)
-      void writeProjectMeta(project.root, JSON.stringify(meta)).catch((e) => {
+    if (project) {
+      const provenance = inheritProjectMetaProvenance(
+        project.root,
+        get().meta,
+        meta,
+      );
+      void queueProjectMetaWrite(project.root, meta, provenance).catch((e) => {
         toast.error("Couldn't save project metadata", { description: String(e) });
       });
+    }
+  };
+
+  const persistMetaAndWait = async (
+    root: string,
+    meta: ProjectMeta,
+    provenance: ProjectMetaProvenance,
+  ): Promise<void> => {
+    try {
+      await queueProjectMetaWrite(root, meta, provenance);
+    } catch (error) {
+      toast.error("Couldn't save project metadata", {
+        description: String(error),
+      });
+      throw error;
+    }
+  };
+
+  const persistOptimisticMeta = async (
+    root: string,
+    previousMeta: ProjectMeta,
+    optimisticMeta: ProjectMeta,
+  ): Promise<void> => {
+    const provenance = inheritProjectMetaProvenance(
+      root,
+      previousMeta,
+      optimisticMeta,
+    );
+    set({ meta: optimisticMeta });
+    try {
+      await persistMetaAndWait(root, optimisticMeta, provenance);
+    } catch (error) {
+      const current = get();
+      if (current.project?.root === root && current.meta === optimisticMeta) {
+        set({ meta: provenance.lastDurableMeta });
+      }
+      throw error;
+    }
   };
 
   const persistRecents = (recents: RecentProject[]) => {
@@ -523,6 +657,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     // In-repo metadata wins; a corrupt meta.json must not brick the open — fall
     // back to the legacy app-config record (or empty), migrating that record into
     // the repo once when no in-repo file exists yet.
+    await drainProjectMetaWrites(root);
     let meta: ProjectMeta;
     const inRepo = await readProjectMeta(root);
     let parsed: unknown = null;
@@ -622,8 +757,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     loadProjectAt: async (root) => {
       // Wipe everything — this is the multi-project reset.
+      const previousRoot = get().project?.root ?? null;
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
+        if (previousRoot !== null) {
+          await drainProjectMetaWrites(previousRoot);
+        }
         const outcome = await openProjectCmd(root);
         if (outcome.status === "needsMigration") {
           set({
@@ -647,8 +787,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
+      const root = get().project?.root ?? null;
+      useStoryRefreshStore.getState().cancel();
       void writeAppData(LAST_PROJECT_KEY, "");
       useSyncStore.getState().teardown();
+      if (root !== null) {
+        void drainProjectMetaWrites(root).catch((error) => {
+          toast.error("Couldn't save project metadata", {
+            description: String(error),
+          });
+        });
+      }
       set({
         status: "empty",
         project: null,
@@ -704,6 +853,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     createProject: async (parent, name, author) => {
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
         const metadata: NovelMetadata = {
@@ -729,6 +879,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
         const created = updated.chapters[updated.chapters.length - 1];
         if (created) await get().selectChapter(created.id);
       } catch (e) {
@@ -747,6 +900,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
       } catch (e) {
         toast.error("Couldn't rename the chapter", { description: String(e) });
         set({ error: String(e) });
@@ -765,6 +921,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
       } catch (e) {
         toast.error("Couldn't reorder chapters", { description: String(e) });
         set({ error: String(e) });
@@ -792,6 +951,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           persistMeta(meta);
           return { meta };
         });
+        useStoryRefreshStore
+          .getState()
+          .enqueueChapterTopology(project.root);
+        deleteOutlineAgentSession(id);
         if (activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
@@ -829,6 +992,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     migrateProject: async () => {
       const nm = get().needsMigration;
       if (!nm) return;
+      useStoryRefreshStore.getState().cancel();
       set(LOADING_RESET);
       try {
         const project = await migrateToManaged(nm.root);
@@ -962,18 +1126,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const state = get();
+      const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
-        state.project.root !== proposal.projectRoot ||
-        state.activeChapterId !== proposal.chapterId ||
-        !state.project.chapters.some(
-          (chapter) => chapter.id === proposal.chapterId,
-        )
+        state.project.root !== proposal.projectRoot
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
+      const selectableChanges = [
+        ...proposal.changes,
+        ...(overviewChange ? [{ id: overviewChange.id }] : []),
+      ];
       const invalidChangeIds = invalidSelectedChangeIds(
-        proposal.changes,
+        selectableChanges,
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
@@ -984,10 +1149,34 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const selected = new Set(changeIds);
+      const appliesOverview =
+        overviewChange !== null && selected.has(overviewChange.id);
+      if (
+        appliesOverview &&
+        storyOverviewFingerprint(state.meta.outline.overview) !==
+          overviewChange!.sourceFingerprint
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: [overviewChange!.id],
+        };
+      }
       const selectedProposal = {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
       };
+      if (
+        selectedProposal.changes.length > 0 &&
+        (state.activeChapterId !== proposal.chapterId ||
+          !state.project.chapters.some(
+            (chapter) => chapter.id === proposal.chapterId,
+          ))
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
       const stale = validateManuscriptChanges(selectedProposal, state.blocks);
       if (stale.length > 0) {
         return {
@@ -1026,7 +1215,27 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       if (changes.length > 0) {
-        set(manuscriptProposalMutation(state, outcome.blocks));
+        const meta = appliesOverview
+          ? {
+              ...state.meta,
+              outline: editOverview(
+                state.meta.outline,
+                overviewChange!.after,
+              ),
+            }
+          : state.meta;
+        if (appliesOverview) persistMeta(meta);
+        set({ ...manuscriptProposalMutation(state, outcome.blocks), meta });
+      } else if (appliesOverview) {
+        const meta = {
+          ...state.meta,
+          outline: editOverview(
+            state.meta.outline,
+            overviewChange!.after,
+          ),
+        };
+        persistMeta(meta);
+        set({ meta });
       }
       return { status: "applied", appliedChangeIds: changeIds };
     },
@@ -1412,6 +1621,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // The working tree changed on disk; refresh the backup indicator now
         // instead of waiting for the next status poll tick.
         void useSyncStore.getState().refreshStatus();
+        useStoryRefreshStore.getState().enqueueSavedChapter(
+          project.root,
+          activeChapterId,
+          storyChapterFingerprint(get().blocks),
+        );
       } catch (e) {
         const message = String(e);
         set({ saving: false, error: message, saveError: message });
@@ -1474,6 +1688,280 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { meta };
       }),
 
+    commitStoryRefresh: async (result, latestSavedFingerprints) => {
+      const state = get();
+      if (state.project === null || state.project.root !== result.projectRoot) {
+        throw new Error(
+          `Story refresh project does not match the open project: ${result.projectRoot}`,
+        );
+      }
+
+      const staleChapterIds = new Set(
+        Object.entries(result.analyzedChapterFingerprints).flatMap(
+          ([chapterId, analyzedFingerprint]) => {
+            const latestFingerprint = latestSavedFingerprints[chapterId];
+            return latestFingerprint !== undefined &&
+              latestFingerprint !== analyzedFingerprint
+              ? [chapterId]
+              : [];
+          },
+        ),
+      );
+      const storyIsStale =
+        storyFieldsFingerprint(state.meta.outline) !==
+        result.storyInputFingerprint;
+      const topologyIsStale =
+        chapterTopologyFingerprint(state.project.chapters) !==
+        result.chapterTopologyFingerprint;
+      const candidateInputIsStale =
+        candidateInputFingerprint(state.meta.knowledge) !==
+        result.candidateInputFingerprint;
+      const knowledge = structuredClone(state.meta.knowledge);
+      const liveChapterIds = new Set(
+        state.project.chapters.map((chapter) => chapter.id),
+      );
+
+      for (const chapterId of Object.keys(knowledge.chapters)) {
+        if (!liveChapterIds.has(chapterId)) {
+          delete knowledge.chapters[chapterId];
+        }
+      }
+      if (
+        !storyIsStale &&
+        !topologyIsStale &&
+        staleChapterIds.size === 0
+      ) {
+        for (const chapterId of Object.keys(
+          result.analyzedChapterFingerprints,
+        )) {
+          if (staleChapterIds.has(chapterId) || !liveChapterIds.has(chapterId)) {
+            continue;
+          }
+          const chapterKnowledge = result.knowledge.chapters[chapterId];
+          if (chapterKnowledge !== undefined) {
+            knowledge.chapters[chapterId] = structuredClone(chapterKnowledge);
+          }
+        }
+        knowledge.chapterTopologyFingerprint =
+          result.knowledge.chapterTopologyFingerprint;
+      }
+
+      if (
+        !storyIsStale &&
+        !topologyIsStale &&
+        staleChapterIds.size === 0 &&
+        !candidateInputIsStale
+      ) {
+        knowledge.characterCandidates = structuredClone(
+          result.knowledge.characterCandidates,
+        );
+        knowledge.acceptedCandidateFingerprints = [
+          ...result.knowledge.acceptedCandidateFingerprints,
+        ];
+        knowledge.dismissedCandidateFingerprints = [
+          ...result.knowledge.dismissedCandidateFingerprints,
+        ];
+      }
+
+      const followUpReasons: StoryRefreshFollowUpReason[] = [];
+      if (storyIsStale) followUpReasons.push("story-fields-stale");
+      if (topologyIsStale) {
+        followUpReasons.push("chapter-topology-stale");
+      }
+      if (staleChapterIds.size > 0) {
+        followUpReasons.push("chapter-content-stale");
+      }
+      if (candidateInputIsStale) {
+        followUpReasons.push("candidate-input-stale");
+      }
+      let characters = state.meta.characters;
+      if (
+        !storyIsStale &&
+        !topologyIsStale &&
+        staleChapterIds.size === 0
+      ) {
+        for (const update of result.characterUpdates) {
+          const index = characters.findIndex(
+            (character) => character.id === update.characterId,
+          );
+          if (index < 0) continue;
+          const character = characters[index];
+          if (
+            characterProfileFingerprint(character.profile) !==
+            update.inputFingerprint
+          ) {
+            if (!followUpReasons.includes("character-profile-stale")) {
+              followUpReasons.push("character-profile-stale");
+            }
+            continue;
+          }
+
+          const knownObservationIds = new Set(
+            Object.values(knowledge.chapters).flatMap((chapter) =>
+              chapter.characterObservations
+                .filter(
+                  (observation) =>
+                    observation.characterId === update.characterId,
+                )
+                .map((observation) => observation.id),
+            ),
+          );
+          const patch = {
+            additions: update.patch.additions.filter(
+              (addition) =>
+                addition.observationIds.length > 0 &&
+                addition.observationIds.every((id) =>
+                  knownObservationIds.has(id),
+                ),
+            ),
+            corrections: update.patch.corrections.filter(
+              (correction) =>
+                correction.observationIds.length > 0 &&
+                correction.observationIds.every((id) =>
+                  knownObservationIds.has(id),
+                ),
+            ),
+          };
+          if (
+            patch.additions.length !== update.patch.additions.length ||
+            patch.corrections.length !== update.patch.corrections.length
+          ) {
+            if (!followUpReasons.includes("chapter-content-stale")) {
+              followUpReasons.push("chapter-content-stale");
+            }
+          }
+          if (
+            patch.additions.length === 0 &&
+            patch.corrections.length === 0
+          ) {
+            continue;
+          }
+          const applied = applyCharacterKnowledgePatch(
+            character.profile,
+            patch,
+            knowledge.appliedCharacterObservationIds[character.id] ?? [],
+          );
+          characters = characters.map((item, characterIndex) =>
+            characterIndex === index
+              ? { ...item, profile: applied.profile }
+              : item,
+          );
+          knowledge.appliedCharacterObservationIds[character.id] =
+            applied.appliedObservationIds;
+        }
+      }
+
+      const meta: ProjectMeta = {
+        ...state.meta,
+        outline:
+          storyIsStale || topologyIsStale || staleChapterIds.size > 0
+            ? state.meta.outline
+            : { ...result.story },
+        characters,
+        knowledge,
+      };
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
+      return { followUpReasons };
+    },
+
+    applyCharacterProfileFromAgent: async (
+      projectRoot,
+      characterId,
+      profile,
+    ) => {
+      const state = get();
+      if (state.project === null || state.project.root !== projectRoot) {
+        throw new Error(
+          `Agent profile project does not match the open project: ${projectRoot}`,
+        );
+      }
+      const character = state.meta.characters.find(
+        (item) => item.id === characterId,
+      );
+      if (character === undefined) {
+        throw new Error(`Agent profile character was not found: ${characterId}`);
+      }
+      const updated = { ...character, profile: { ...profile } };
+      const meta = {
+        ...state.meta,
+        characters: state.meta.characters.map((item) =>
+          item.id === characterId ? updated : item,
+        ),
+      };
+      await persistOptimisticMeta(projectRoot, state.meta, meta);
+      return updated;
+    },
+
+    acceptCharacterCandidate: async (candidateId) => {
+      const state = get();
+      if (state.project === null) {
+        throw new Error("Cannot accept a character candidate without an open project");
+      }
+      const candidate = state.meta.knowledge.characterCandidates.find(
+        (item) => item.id === candidateId,
+      );
+      if (candidate === undefined) {
+        throw new Error(`Character candidate was not found: ${candidateId}`);
+      }
+      const id = uid("c");
+      const character: Character = {
+        id,
+        name: candidate.name,
+        role: candidate.role,
+        color: DEFAULT_CHARACTER_COLOR,
+        profile: { ...candidate.profile },
+      };
+      const meta = {
+        ...state.meta,
+        characters: [...state.meta.characters, character],
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates:
+            state.meta.knowledge.characterCandidates.filter(
+              (item) => item.id !== candidateId,
+            ),
+          acceptedCandidateFingerprints: [
+            ...new Set([
+              ...state.meta.knowledge.acceptedCandidateFingerprints,
+              candidate.evidenceFingerprint,
+            ]),
+          ],
+        },
+      };
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
+      return id;
+    },
+
+    dismissCharacterCandidate: async (candidateId) => {
+      const state = get();
+      if (state.project === null) {
+        throw new Error("Cannot dismiss a character candidate without an open project");
+      }
+      const candidate = state.meta.knowledge.characterCandidates.find(
+        (item) => item.id === candidateId,
+      );
+      if (candidate === undefined) {
+        throw new Error(`Character candidate was not found: ${candidateId}`);
+      }
+      const meta = {
+        ...state.meta,
+        knowledge: {
+          ...state.meta.knowledge,
+          characterCandidates:
+            state.meta.knowledge.characterCandidates.filter(
+              (item) => item.id !== candidateId,
+            ),
+          dismissedCandidateFingerprints: [
+            ...new Set([
+              ...state.meta.knowledge.dismissedCandidateFingerprints,
+              candidate.evidenceFingerprint,
+            ]),
+          ],
+        },
+      };
+      await persistOptimisticMeta(state.project.root, state.meta, meta);
+    },
+
     removeCharacter: (id) =>
       set((s) => {
         const meta = {
@@ -1522,6 +2010,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     setPremise: (premise) =>
       set((s) => {
         const meta = { ...s.meta, outline: editPremise(s.meta.outline, premise) };
+        persistMeta(meta);
+        return { meta };
+      }),
+
+    setOverview: (overview) =>
+      set((s) => {
+        const meta = { ...s.meta, outline: editOverview(s.meta.outline, overview) };
         persistMeta(meta);
         return { meta };
       }),
@@ -1647,17 +2142,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const state = get();
+      const overviewChange = proposal.overviewChange ?? null;
       if (
         state.project === null ||
-        state.project.root !== proposal.projectRoot ||
-        !state.project.chapters.some(
-          (chapter) => chapter.id === proposal.chapterId,
-        )
+        state.project.root !== proposal.projectRoot
       ) {
         return { status: "stale", staleChangeIds: changeIds };
       }
+      const selectableChanges = [
+        ...proposal.changes,
+        ...(overviewChange ? [{ id: overviewChange.id }] : []),
+      ];
       const invalidChangeIds = invalidSelectedChangeIds(
-        proposal.changes,
+        selectableChanges,
         changeIds,
       );
       if (invalidChangeIds.length > 0) {
@@ -1667,16 +2164,38 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "unknown-selection",
         };
       }
-      const chapter = getChapterOutline(
-        state.meta.chapters,
-        proposal.chapterId,
-      );
       const selected = new Set(changeIds);
+      const appliesOverview =
+        overviewChange !== null && selected.has(overviewChange.id);
+      if (
+        appliesOverview &&
+        storyOverviewFingerprint(state.meta.outline.overview) !==
+          overviewChange!.sourceFingerprint
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: [overviewChange!.id],
+        };
+      }
       const selectedProposal = {
         ...proposal,
         changes: proposal.changes.filter((item) => selected.has(item.id)),
       };
-      const stale = validateOutlineChanges(selectedProposal, chapter.cards);
+      if (
+        selectedProposal.changes.length > 0 &&
+        !state.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        return {
+          status: "stale",
+          staleChangeIds: selectedProposal.changes.map((item) => item.id),
+        };
+      }
+      const cards = selectedProposal.changes.length === 0
+        ? []
+        : getChapterOutline(state.meta.chapters, proposal.chapterId).cards;
+      const stale = validateOutlineChanges(selectedProposal, cards);
       if (stale.length > 0) {
         return {
           status: "stale",
@@ -1697,12 +2216,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       }
       const before = state.meta;
-      const chapters = applyOutlineChangesStrict(
-        before.chapters,
-        proposal.chapterId,
-        proposal.summary,
-        selectedProposal.changes,
-      );
+      const chapters = selectedProposal.changes.length === 0
+        ? before.chapters
+        : applyOutlineChangesStrict(
+            before.chapters,
+            proposal.chapterId,
+            proposal.summary,
+            selectedProposal.changes,
+          );
       if (chapters === null) {
         return {
           status: "invalid",
@@ -1710,7 +2231,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "apply-failed",
         };
       }
-      const meta = { ...before, chapters };
+      const meta = {
+        ...before,
+        chapters,
+        ...(appliesOverview
+          ? {
+              outline: editOverview(
+                before.outline,
+                overviewChange!.after,
+              ),
+            }
+          : {}),
+      };
       const undoToken: OutlineUndoToken = {
         id: uid(),
         projectRoot: state.project.root,

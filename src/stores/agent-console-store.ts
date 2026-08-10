@@ -1,7 +1,10 @@
-import { create } from "zustand";
+import { create, useStore } from "zustand";
+import { createStore, type StoreApi } from "zustand/vanilla";
+import type { StateCreator } from "zustand";
 import { draftContextRefKey } from "@/lib/ai/agent-context";
 import type {
   AgentMode,
+  AgentSessionId,
   AgentMessageMetadata,
   AgentPersistenceIssue,
   AgentFailure,
@@ -69,7 +72,7 @@ export class PendingProposalEditError extends Error {
   }
 }
 
-interface AgentConsoleData {
+export interface AgentConsoleData {
   mode: AgentMode;
   messages: AgentUIMessage[];
   summary: ConversationSummary | null;
@@ -352,7 +355,17 @@ export function requireAgentConsoleProject(projectRoot: string): void {
   }
 }
 
-export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
+export function requireAgentSessionProject(
+  sessionId: AgentSessionId,
+  projectRoot: string,
+): void {
+  const state = agentSessionStore(sessionId).getState();
+  if (agentConsoleOwnershipStatus(state, projectRoot) !== "ready") {
+    throw new AgentConsoleOwnershipError();
+  }
+}
+
+const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => ({
   ...EMPTY_AGENT_STATE,
   hydrate: (projectRoot, state) =>
     set((current) => {
@@ -840,6 +853,7 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
         changes: proposal.changes.map((item) =>
           editPendingManuscriptChange(item, edit),
         ),
+        overviewChange: proposal.overviewChange,
       };
       return { pendingProposal: updatedProposal };
     }),
@@ -850,25 +864,44 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
         return { pendingProposal: null };
       }
       const removedIds = new Set(changeIds);
+      if (state.pendingProposal.kind === "overview") {
+        return {
+          pendingProposal: removedIds.has(state.pendingProposal.overviewChange.id)
+            ? null
+            : state.pendingProposal,
+        };
+      }
       if (state.pendingProposal.kind === "manuscript") {
         const changes = state.pendingProposal.changes.filter(
           (change) => !removedIds.has(change.id),
         );
+        const overviewChange =
+          state.pendingProposal.overviewChange !== null &&
+          state.pendingProposal.overviewChange !== undefined &&
+          removedIds.has(state.pendingProposal.overviewChange.id)
+            ? null
+            : state.pendingProposal.overviewChange;
         return {
           pendingProposal:
-            changes.length === 0
+            changes.length === 0 && !overviewChange
               ? null
-              : { ...state.pendingProposal, changes },
+              : { ...state.pendingProposal, changes, overviewChange },
         };
       }
       const changes = state.pendingProposal.changes.filter(
         (change) => !removedIds.has(change.id),
       );
+      const overviewChange =
+        state.pendingProposal.overviewChange !== null &&
+        state.pendingProposal.overviewChange !== undefined &&
+        removedIds.has(state.pendingProposal.overviewChange.id)
+          ? null
+          : state.pendingProposal.overviewChange;
       return {
         pendingProposal:
-          changes.length === 0
+          changes.length === 0 && !overviewChange
             ? null
-            : { ...state.pendingProposal, changes },
+            : { ...state.pendingProposal, changes, overviewChange },
       };
     }),
   clearPendingProposal: () =>
@@ -883,4 +916,87 @@ export const useAgentConsoleStore = create<AgentConsoleState>()((set, get) => ({
     }),
   setSummary: (summary) => set(() => ({ summary })),
   setPersistenceIssue: (persistenceIssue) => set(() => ({ persistenceIssue })),
-}));
+});
+
+export const useAgentConsoleStore = create<AgentConsoleState>()(
+  createAgentConsoleState,
+);
+
+export type AgentConsoleStore = StoreApi<AgentConsoleState>;
+
+const outlineAgentStores = new Map<string, AgentConsoleStore>();
+const characterAgentStores = new Map<string, AgentConsoleStore>();
+const agentSessionRegistryListeners = new Set<() => void>();
+
+export function agentSessionStore(sessionId: AgentSessionId): AgentConsoleStore {
+  switch (sessionId.kind) {
+    case "project":
+      return useAgentConsoleStore;
+    case "outline": {
+      const current = outlineAgentStores.get(sessionId.chapterId);
+      if (current !== undefined) return current;
+      const created = createStore<AgentConsoleState>()(createAgentConsoleState);
+      outlineAgentStores.set(sessionId.chapterId, created);
+      agentSessionRegistryListeners.forEach((listener) => listener());
+      return created;
+    }
+    case "character": {
+      const current = characterAgentStores.get(sessionId.characterId);
+      if (current !== undefined) return current;
+      const created = createStore<AgentConsoleState>()(createAgentConsoleState);
+      characterAgentStores.set(sessionId.characterId, created);
+      agentSessionRegistryListeners.forEach((listener) => listener());
+      return created;
+    }
+  }
+}
+
+export function outlineAgentSessionEntries(): Array<[
+  string,
+  AgentConsoleStore,
+]> {
+  return [...outlineAgentStores.entries()];
+}
+
+export function deleteOutlineAgentSession(chapterId: string): void {
+  if (outlineAgentStores.delete(chapterId)) {
+    agentSessionRegistryListeners.forEach((listener) => listener());
+  }
+}
+
+export function clearOutlineAgentSessions(): void {
+  if (outlineAgentStores.size === 0) return;
+  outlineAgentStores.clear();
+  agentSessionRegistryListeners.forEach((listener) => listener());
+}
+
+export function characterAgentSessionEntries(): Array<[
+  string,
+  AgentConsoleStore,
+]> {
+  return [...characterAgentStores.entries()];
+}
+
+export function deleteCharacterAgentSession(characterId: string): void {
+  if (characterAgentStores.delete(characterId)) {
+    agentSessionRegistryListeners.forEach((listener) => listener());
+  }
+}
+
+export function clearCharacterAgentSessions(): void {
+  if (characterAgentStores.size === 0) return;
+  characterAgentStores.clear();
+  agentSessionRegistryListeners.forEach((listener) => listener());
+}
+
+export function subscribeAgentSessionRegistry(listener: () => void): () => void {
+  agentSessionRegistryListeners.add(listener);
+  return () => agentSessionRegistryListeners.delete(listener);
+}
+
+export function useAgentSessionStore<T>(
+  sessionId: AgentSessionId,
+  selector: (state: AgentConsoleState) => T,
+): T {
+  return useStore(agentSessionStore(sessionId), selector);
+}

@@ -37,6 +37,8 @@ export const ACT_TITLES: Record<ActKind, string> = {
 
 export const ACT_ORDER: ActKind[] = ["setup", "confrontation", "resolution"];
 
+export const STORY_OVERVIEW_MAX_CHARS = 2000;
+
 type Chapters = Record<string, ChapterOutline>;
 
 const _EMPTY_OUTLINE: ChapterOutline = {
@@ -209,6 +211,15 @@ export function editChapterField(
 
 export function editPremise(outline: Outline, premise: string): Outline {
   return { ...outline, premise };
+}
+
+export function editOverview(outline: Outline, overview: string): Outline {
+  if (overview.length > STORY_OVERVIEW_MAX_CHARS) {
+    throw new RangeError(
+      `Story overview must be ${STORY_OVERVIEW_MAX_CHARS} characters or fewer.`,
+    );
+  }
+  return { ...outline, overview };
 }
 
 export interface ActPacing {

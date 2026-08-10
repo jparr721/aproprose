@@ -75,6 +75,10 @@ import type {
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
 import {
+  emptyCharacterProfile,
+  emptyProjectKnowledge,
+} from "@/lib/story-knowledge/model";
+import {
   readAppData,
   readTextFile,
   writeAppData,
@@ -87,6 +91,8 @@ import {
   transitionAgentProject,
 } from "@/stores/agent-persistence";
 import {
+  agentSessionStore,
+  clearCharacterAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -169,6 +175,7 @@ function project(root: string): ProjectInfo {
 function projectMeta(): ProjectMeta {
   return {
     ...EMPTY_META,
+    knowledge: emptyProjectKnowledge(),
     chapters: {
       ch1: {
         act: "setup",
@@ -252,6 +259,7 @@ const originalBlocks: Block[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearCharacterAgentSessions();
   const uidCounts = new Map<string, number>();
   mocks.generateText.mockReset();
   mocks.getModel.mockReset().mockResolvedValue({});
@@ -265,6 +273,7 @@ beforeEach(() => {
   vi.mocked(readAppData).mockReset().mockResolvedValue(null);
   vi.mocked(readTextFile).mockReset();
   vi.mocked(writeAppData).mockReset().mockResolvedValue(undefined);
+  vi.mocked(writeProjectMeta).mockReset().mockResolvedValue(undefined);
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
     requestedProjectRoot: "/book",
@@ -295,6 +304,237 @@ beforeEach(() => {
 });
 
 describe("agent console authoring flows", () => {
+  it("updates only the character frozen into a Describe session", async () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const characterStore = agentSessionStore(sessionId);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#123456",
+            role: "Courier",
+            profile: emptyCharacterProfile(),
+          },
+          {
+            id: "c2",
+            name: "Ivo",
+            color: "#654321",
+            role: "Watcher",
+            profile: emptyCharacterProfile(),
+          },
+        ],
+        knowledge: {
+          ...state.meta.knowledge,
+          chapters: {
+            ch1: {
+              sourceFingerprint: "chapter-fingerprint",
+              summary: "Mara checks the doors.",
+              premiseSignals: [],
+              conflictSignals: [],
+              stakeSignals: [],
+              arcSignals: [],
+              endingSignals: [],
+              characterObservations: [
+                {
+                  id: "observation-c1",
+                  characterId: "c1",
+                  field: "mannerisms",
+                  detail: "Counts every door.",
+                  evidence: [
+                    {
+                      chapterId: "ch1",
+                      sourceId: "anchor",
+                      order: 0,
+                      fingerprint: "anchor-fingerprint",
+                      occurrence: 0,
+                      previewText: "Mara counted every door.",
+                    },
+                  ],
+                },
+              ],
+              unknownCharacterObservations: [],
+            },
+          },
+        },
+      },
+    }));
+    let instructions = "";
+    const controller = createAgentController(
+      dependencies(async (input) => {
+        instructions = input.instructions;
+        const handlers = createAgentToolHandlers(input.environment);
+        await handlers.updateCharacterProfile({
+          characterId: "c1",
+          profile: {
+            appearance: null,
+            mannerisms: "Counts every door.",
+            motivations: null,
+            relationships: null,
+            history: null,
+            voice: null,
+          },
+        });
+        return { message: completeAssistant(input), usage };
+      }),
+    );
+
+    const outcome = await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "She counts doors when nervous.",
+        refs: [],
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      sessionId,
+    );
+
+    expect(outcome).toEqual({ status: "success" });
+    expect(instructions).toContain("APROPROSE CHARACTER DESCRIBE");
+    expect(instructions).toContain("CHARACTER DESCRIBE GROUNDING");
+    expect(instructions).toContain("Mara counted every door.");
+    expect(
+      useProjectStore.getState().meta.characters.find(({ id }) => id === "c1")
+        ?.profile.mannerisms,
+    ).toBe("Counts every door.");
+    expect(
+      useProjectStore.getState().meta.characters.find(({ id }) => id === "c2")
+        ?.profile,
+    ).toEqual(emptyCharacterProfile());
+  });
+
+  it("does not update a character after the project switches", async () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const characterStore = agentSessionStore(sessionId);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#123456",
+            role: "Courier",
+            profile: emptyCharacterProfile(),
+          },
+        ],
+      },
+    }));
+    const persistenceGate = deferred<void>();
+    vi.mocked(writeProjectMeta).mockImplementation(async (root) => {
+      if (root === "/book") await persistenceGate.promise;
+    });
+    const controller = createAgentController(
+      dependencies(async (input) => {
+        const handlers = createAgentToolHandlers(input.environment);
+        await handlers.updateCharacterProfile({
+          characterId: "c1",
+          profile: {
+            appearance: null,
+            mannerisms: "Counts every door.",
+            motivations: null,
+            relationships: null,
+            history: null,
+            voice: null,
+          },
+        });
+        return { message: completeAssistant(input), usage };
+      }),
+    );
+    const submission = controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "She counts doors when nervous.",
+        refs: [],
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      sessionId,
+    );
+    await vi.waitFor(() => expect(writeProjectMeta).toHaveBeenCalledOnce());
+
+    controller.abortAgentRunForProjectSwitch("/book", "project-switch");
+    useProjectStore.setState({
+      project: project("/other"),
+      meta: {
+        ...projectMeta(),
+        characters: [
+          {
+            id: "c1",
+            name: "Other Mara",
+            color: "#abcdef",
+            role: "Other",
+            profile: emptyCharacterProfile(),
+          },
+        ],
+      },
+    });
+    persistenceGate.resolve(undefined);
+
+    await expect(submission).resolves.toEqual({ status: "stopped" });
+    expect(useProjectStore.getState().meta.characters[0].profile).toEqual(
+      emptyCharacterProfile(),
+    );
+  });
+
+  it("does not stage source changes from a character Describe session", async () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const characterStore = agentSessionStore(sessionId);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#123456",
+            role: "Courier",
+            profile: emptyCharacterProfile(),
+          },
+        ],
+      },
+    }));
+    let stageError: unknown = null;
+    const controller = createAgentController(
+      dependencies(async (input) => {
+        const handlers = createAgentToolHandlers(input.environment);
+        try {
+          await handlers.stageOverview({
+            summary: "Rewrite the overview",
+            overview: "A changed overview.",
+            reason: "The profile changed",
+          });
+        } catch (error) {
+          stageError = error;
+        }
+        return { message: completeAssistant(input), usage };
+      }),
+    );
+
+    await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Change the story overview too.",
+        refs: [],
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      sessionId,
+    );
+
+    expect(stageError).toBeInstanceOf(Error);
+    expect((stageError as Error).message).toContain(
+      "The frozen character run cannot stage source changes.",
+    );
+    expect(characterStore.getState().pendingProposal).toBeNull();
+  });
+
   it("bridges a middle chapter anchor without replacing later prose", async () => {
     const before = structuredClone(useProjectStore.getState().blocks);
     const controller = createAgentController(
@@ -455,9 +695,15 @@ describe("agent console authoring flows", () => {
       },
       meta: {
         ...state.meta,
-        outline: { premise: "A ledger pulls Mara toward the harbor." },
+        outline: { premise: "A ledger pulls Mara toward the harbor.", overview: "" },
         characters: [
-          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+          {
+            id: "mara",
+            name: "Mara",
+            color: "#123456",
+            role: "Detective",
+            profile: emptyCharacterProfile(),
+          },
         ],
         lore: [
           {
@@ -503,8 +749,22 @@ describe("agent console authoring flows", () => {
           throw new Error("Expected complete outline data.");
         }
         expect(outline.value.characters).toEqual([
-          { id: "mara", name: "Mara", color: "#123456", role: "Detective" },
+          {
+            id: "mara",
+            name: "Mara",
+            color: "#123456",
+            role: "Detective",
+            profile: emptyCharacterProfile(),
+          },
         ]);
+        outline.value.characters[0].profile.voice = "Mutated tool result.";
+        const outlineAgain = await handlers.readOutline({ chapterId: null });
+        if (outlineAgain.kind !== "runtime") {
+          throw new Error("Expected complete outline data.");
+        }
+        expect(outlineAgain.value.characters[0].profile).toEqual(
+          emptyCharacterProfile(),
+        );
         expect(outline.value.chapters[1]).toMatchObject({
           chapterId: "ch2",
           plotPoint: "midpoint",
@@ -901,6 +1161,101 @@ describe("agent console authoring flows", () => {
   });
 
   it("emits critique and continuity findings while keeping analysis tasks read-only", async () => {
+    const profile = (
+      field: keyof ReturnType<typeof emptyCharacterProfile>,
+      value: string,
+    ) => ({
+      ...emptyCharacterProfile(),
+      [field]: value,
+    });
+    useProjectStore.setState((state) => ({
+      blocks: state.blocks.map((current) =>
+        current.id === "successor"
+          ? { ...current, type: "dialogue", speaker: "speaker" }
+          : current,
+      ),
+      meta: {
+        ...state.meta,
+        characters: [
+          {
+            id: "assigned",
+            name: "Assigned",
+            color: "#111111",
+            role: "Lead",
+            profile: profile("mannerisms", "Assigned profile."),
+          },
+          {
+            id: "card",
+            name: "Card",
+            color: "#222222",
+            role: "Witness",
+            profile: profile("motivations", "Card profile."),
+          },
+          {
+            id: "observed",
+            name: "Observed",
+            color: "#333333",
+            role: "Clerk",
+            profile: profile("history", "Observed profile."),
+          },
+          {
+            id: "speaker",
+            name: "Speaker",
+            color: "#444444",
+            role: "Guard",
+            profile: profile("voice", "Speaker profile."),
+          },
+          {
+            id: "unrelated",
+            name: "Unrelated",
+            color: "#555555",
+            role: "Pilot",
+            profile: profile("appearance", "Unrelated profile."),
+          },
+        ],
+        chapters: {
+          ...state.meta.chapters,
+          ch1: {
+            ...state.meta.chapters.ch1,
+            characterIds: ["assigned"],
+            cards: [
+              {
+                id: "cast-card",
+                title: "Witness arrives",
+                intention: "",
+                characterIds: ["card"],
+                loreIds: [],
+                continuityFlags: [],
+              },
+            ],
+          },
+        },
+        knowledge: {
+          ...state.meta.knowledge,
+          chapters: {
+            ch1: {
+              sourceFingerprint: "source",
+              summary: "",
+              premiseSignals: [],
+              conflictSignals: [],
+              stakeSignals: [],
+              arcSignals: [],
+              endingSignals: [],
+              characterObservations: [
+                {
+                  id: "observation",
+                  characterId: "observed",
+                  field: "history",
+                  detail: "Observed",
+                  evidence: [],
+                },
+              ],
+              unknownCharacterObservations: [],
+            },
+          },
+        },
+      },
+    }));
     mocks.generateText
       .mockResolvedValueOnce({
         output: {
@@ -1020,6 +1375,18 @@ describe("agent console authoring flows", () => {
       },
     });
 
+    const prompts = mocks.generateText.mock.calls.map((call) =>
+      String(call[0].prompt),
+    );
+    for (const prompt of prompts) {
+      expect(prompt).toContain("Mannerisms: Assigned profile.");
+      expect(prompt).toContain("Motivations: Card profile.");
+      expect(prompt).toContain("History: Observed profile.");
+      expect(prompt).toContain("Voice: Speaker profile.");
+      expect(prompt).toContain("- Unrelated (Pilot)");
+      expect(prompt).not.toContain("Appearance: Unrelated profile.");
+    }
+
     const findings = useAgentConsoleStore
       .getState()
       .messages.flatMap((message) =>
@@ -1093,6 +1460,7 @@ describe("agent console authoring flows", () => {
           },
           value: {
             premise: "",
+            overview: "",
             characters: [],
             chapters: [
               {
@@ -1245,7 +1613,9 @@ describe("agent console authoring flows", () => {
       useProjectStore.getState().undoAgentOutlineProposal(applied.undoToken),
     ).toBe(true);
     expect(useProjectStore.getState().meta).toEqual(before);
-    expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => {
+      expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    });
     expect(writeProjectMeta).toHaveBeenLastCalledWith(
       "/book",
       JSON.stringify(before),

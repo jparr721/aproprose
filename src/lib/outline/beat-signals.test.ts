@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { worstSev, SEV_DOT, beatCharacters } from "@/lib/outline/beat-signals";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 import type { Character, ContinuityFlag } from "@/lib/types";
 
 const f = (sev: ContinuityFlag["sev"]): ContinuityFlag => ({ sev, tag: "t", text: "x", blockIds: [] });
@@ -30,7 +31,13 @@ describe("SEV_DOT", () => {
   });
 });
 
-const c = (id: string): Character => ({ id, name: id, color: "oklch(0.7 0.1 30)", role: "" });
+const c = (id: string): Character => ({
+  id,
+  name: id,
+  color: "oklch(0.7 0.1 30)",
+  role: "",
+  profile: emptyCharacterProfile(),
+});
 
 describe("beatCharacters", () => {
   it("resolves ids to roster characters in id order", () => {

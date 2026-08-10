@@ -13,6 +13,7 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import type { Card } from "@/lib/types";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { useProjectStore } from "@/stores/project-store";
 
 const card = (id: string, title: string, intention: string): Card => ({
@@ -148,7 +149,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,
@@ -161,6 +162,7 @@ beforeEach(() => {
           cards: frozenCards.map((item) => ({ ...item })),
         },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
 });

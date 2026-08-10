@@ -18,16 +18,43 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentRun } from "@/lib/ai/agent-types";
 import { runMigrations } from "@/lib/migration";
-import { writeProjectMeta } from "@/lib/tauri";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
+import {
+  openProject,
+  readProjectMeta,
+  writeProjectMeta,
+} from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
 import type {
   Card,
+  ProjectMeta,
   ProjectInfo,
   SculptChange,
   SculptProposal,
 } from "@/lib/types";
+
+function deferred<Value>(): {
+  promise: Promise<Value>;
+  resolve: (value: Value) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve!: (value: Value) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) {
+    await Promise.resolve();
+  }
+}
 
 const cardFixture = (): Card => ({
   id: "card-1",
@@ -92,6 +119,7 @@ const buildPendingOutlineFixture = (
         return index === 0 ? "proposal-1" : `change-${index - 1}`;
       };
     })(),
+    currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
 };
@@ -120,7 +148,7 @@ beforeEach(() => {
       characters: [],
       lore: [],
       statuses: {},
-      outline: { premise: "" },
+      outline: { premise: "", overview: "" },
       chapters: {
         ch1: {
           act: null,
@@ -133,6 +161,7 @@ beforeEach(() => {
           cards: [cardFixture()],
         },
       },
+      knowledge: emptyProjectKnowledge(),
     },
   } as never);
 });
@@ -150,16 +179,99 @@ describe("runMigrations", () => {
     expect(m.chapters.ch1.goal).toBe("g");
   });
   it("passes a new-shape blob through", () => {
-    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X", overview: "" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.act).toBe("setup");
   });
   it("backfills characterIds on chapters that predate the field", () => {
-    const m = runMigrations({ outline: { premise: "X" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
+    const m = runMigrations({ outline: { premise: "X", overview: "" }, chapters: { ch1: { act: "setup", plotPoint: null, premise: "", goal: "", conflict: "", turn: "", cards: [] } } } as never);
     expect(m.chapters.ch1.characterIds).toEqual([]);
   });
 });
 
 describe("card + chapter actions", () => {
+  it("serializes metadata snapshots so the newest state writes last", async () => {
+    const first = deferred<void>();
+    vi.mocked(writeProjectMeta)
+      .mockImplementationOnce(async () => first.promise)
+      .mockResolvedValueOnce(undefined);
+
+    useProjectStore.getState().setPremise("First");
+    useProjectStore.getState().setPremise("Second");
+
+    expect(writeProjectMeta).toHaveBeenCalledTimes(1);
+    first.resolve();
+    await flushPromises();
+
+    expect(writeProjectMeta).toHaveBeenCalledTimes(2);
+    const last = JSON.parse(
+      vi.mocked(writeProjectMeta).mock.calls[1][1] as string,
+    ) as ProjectMeta;
+    expect(last.outline.premise).toBe("Second");
+  });
+
+  it("drains three pending writes before a same-root reopen reads metadata", async () => {
+    const gates = [deferred<void>(), deferred<void>(), deferred<void>()];
+    let persisted = JSON.stringify(useProjectStore.getState().meta);
+    let writeIndex = 0;
+    vi.mocked(writeProjectMeta).mockImplementation(async (_root, serialized) => {
+      const gate = gates[writeIndex];
+      writeIndex += 1;
+      if (gate !== undefined) await gate.promise;
+      persisted = serialized;
+    });
+    const reopenedProject = {
+      ...projectFixture("/book"),
+      chapters: [],
+    };
+    vi.mocked(openProject).mockResolvedValueOnce({
+      status: "managed",
+      project: reopenedProject,
+      mainFile: "main.tex",
+      detectedChapters: null,
+    });
+    vi.mocked(readProjectMeta).mockImplementationOnce(async () => persisted);
+
+    useProjectStore.getState().setPremise("First");
+    useProjectStore.getState().setPremise("Second");
+    useProjectStore.getState().setPremise("Third");
+    useProjectStore.getState().closeProject();
+    const reopened = useProjectStore.getState().loadProjectAt("/book");
+    await flushPromises();
+
+    expect(readProjectMeta).not.toHaveBeenCalled();
+    gates[0].resolve();
+    await flushPromises();
+    gates[1].resolve();
+    await flushPromises();
+    gates[2].resolve();
+    await reopened;
+
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Third");
+    useProjectStore.getState().setOverview("After reopen");
+    await flushPromises();
+    const finalSnapshot = JSON.parse(persisted) as ProjectMeta;
+    expect(finalSnapshot.outline).toEqual({
+      premise: "Third",
+      overview: "After reopen",
+    });
+  });
+
+  it("persists story overview edits", () => {
+    useProjectStore.getState().setOverview("A courier exposes the crown.");
+
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "A courier exposes the crown.",
+    );
+    const persisted = JSON.parse(
+      vi.mocked(writeProjectMeta).mock.calls[0][1] as string,
+    ) as { outline: { premise: string; overview: string } };
+    expect(writeProjectMeta).toHaveBeenCalledWith("/book", expect.any(String));
+    expect(persisted.outline).toEqual({
+      premise: "",
+      overview: "A courier exposes the crown.",
+    });
+  });
+
   it("adds and edits a card", () => {
     const id = useProjectStore.getState().addCard("ch1");
     useProjectStore.getState().editCard("ch1", id, { title: "Hello" });
@@ -190,6 +302,45 @@ describe("card + chapter actions", () => {
 });
 
 describe("agent outline proposals", () => {
+  it("applies a selected overview change after the proposal chapter is deleted", () => {
+    const proposal = {
+      ...pendingOutlineFixture(),
+      overviewChange: {
+        id: "overview-change",
+        before: "",
+        after: "The courier exposes the crown.",
+        reason: "Clarify the story direction",
+        sourceFingerprint: storyOverviewFingerprint(""),
+      },
+    };
+    useProjectStore.setState((state) => ({
+      project: {
+        ...projectFixture("/book"),
+        chapters: [],
+      },
+      meta: {
+        ...state.meta,
+        chapters: {},
+      },
+    }));
+    const before = useProjectStore.getState().meta;
+
+    const result = useProjectStore
+      .getState()
+      .applyAgentOutlineProposal(proposal, [proposal.overviewChange.id]);
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") throw new Error("expected an applied result");
+    expect(useProjectStore.getState().meta.outline.overview).toBe(
+      "The courier exposes the crown.",
+    );
+    expect(useProjectStore.getState().meta.chapters).toEqual({});
+    expect(
+      useProjectStore.getState().undoAgentOutlineProposal(result.undoToken),
+    ).toBe(true);
+    expect(useProjectStore.getState().meta).toEqual(before);
+  });
+
   it("applies selected changes in one metadata write and returns one undo token", () => {
     const proposal = pendingOutlineFixture();
     const before = useProjectStore.getState().meta;

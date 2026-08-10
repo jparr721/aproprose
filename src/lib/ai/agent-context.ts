@@ -12,9 +12,13 @@ import { dialogueSegments } from "@/lib/blocks/dialogue";
 import type {
   Block,
   Card,
+  CharacterProfile,
+  ChapterRef,
   CritiqueNote,
   ContinuityFlag,
+  Outline,
   ProjectMeta,
+  ProjectKnowledge,
 } from "@/lib/types";
 
 export interface FlattenedMessageFinding {
@@ -24,7 +28,7 @@ export interface FlattenedMessageFinding {
   finding: CritiqueNote | ContinuityFlag;
 }
 
-function fnv1a(value: string): string {
+export function textFingerprint(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
@@ -34,7 +38,7 @@ function fnv1a(value: string): string {
 }
 
 export function blockFingerprint(block: Block): string {
-  return fnv1a(
+  return textFingerprint(
     JSON.stringify([
       block.type,
       block.text,
@@ -47,11 +51,11 @@ export function blockFingerprint(block: Block): string {
 }
 
 export function blockOrderFingerprint(blocks: Block[]): string {
-  return fnv1a(JSON.stringify(blocks.map(blockFingerprint)));
+  return textFingerprint(JSON.stringify(blocks.map(blockFingerprint)));
 }
 
 export function cardFingerprint(card: Card): string {
-  return fnv1a(
+  return textFingerprint(
     JSON.stringify([
       card.id,
       card.title,
@@ -63,19 +67,61 @@ export function cardFingerprint(card: Card): string {
 }
 
 export function outlineOrderFingerprint(cards: Card[]): string {
-  return fnv1a(
+  return textFingerprint(
     JSON.stringify(cards.map((card) => [card.id, cardFingerprint(card)])),
   );
 }
 
 export function projectMetaFingerprint(meta: ProjectMeta): string {
-  return fnv1a(JSON.stringify(meta));
+  return textFingerprint(JSON.stringify(meta));
+}
+
+export function storyOverviewFingerprint(overview: string): string {
+  return textFingerprint(JSON.stringify(overview));
+}
+
+export function characterProfileFingerprint(profile: CharacterProfile): string {
+  return textFingerprint(JSON.stringify(profile));
+}
+
+export function storyFieldsFingerprint(outline: Outline): string {
+  return textFingerprint(JSON.stringify([outline.premise, outline.overview]));
+}
+
+export function chapterTopologyFingerprint(chapters: ChapterRef[]): string {
+  return textFingerprint(
+    JSON.stringify(chapters.map((chapter) => [chapter.id, chapter.title])),
+  );
+}
+
+export function candidateInputFingerprint(
+  knowledge: Pick<
+    ProjectKnowledge,
+    | "characterCandidates"
+    | "acceptedCandidateFingerprints"
+    | "dismissedCandidateFingerprints"
+  >,
+): string {
+  const candidates = knowledge.characterCandidates
+    .map((candidate) => [candidate.id, candidate.evidenceFingerprint])
+    .sort(([leftId, leftFingerprint], [rightId, rightFingerprint]) => {
+      if (leftId !== rightId) return leftId < rightId ? -1 : 1;
+      if (leftFingerprint === rightFingerprint) return 0;
+      return leftFingerprint < rightFingerprint ? -1 : 1;
+    });
+  const dismissed = [...knowledge.dismissedCandidateFingerprints].sort(
+    (left, right) => (left === right ? 0 : left < right ? -1 : 1),
+  );
+  const accepted = [...knowledge.acceptedCandidateFingerprints].sort(
+    (left, right) => (left === right ? 0 : left < right ? -1 : 1),
+  );
+  return textFingerprint(JSON.stringify([candidates, accepted, dismissed]));
 }
 
 export function findingFingerprint(
   finding: CritiqueNote | ContinuityFlag,
 ): string {
-  return fnv1a(JSON.stringify(finding));
+  return textFingerprint(JSON.stringify(finding));
 }
 
 export function flattenMessageFindings(

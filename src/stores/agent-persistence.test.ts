@@ -19,15 +19,26 @@ import { convertAgentMessagesToModel } from "@/lib/ai/agent-messages";
 import { resetAiProvider } from "@/lib/ai/model";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
-import { useAgentConsoleStore } from "@/stores/agent-console-store";
+import {
+  agentSessionStore,
+  characterAgentSessionEntries,
+  clearCharacterAgentSessions,
+  deleteCharacterAgentSession,
+  useAgentConsoleStore,
+} from "@/stores/agent-console-store";
 import {
   AgentPersistenceError,
+  agentSessionCollectionKey,
   agentStateKey,
   emptyPersistedAgentState,
   fromAgentSnapshot,
+  hydrateAgentCharacterSession,
+  hydrateAgentOutlineSession,
   loadAgentState,
+  loadAgentSessionCollection,
   resetAgentConversation,
   retryAgentPersistence,
+  saveAgentSessionCollection,
   saveAgentState,
   toAgentSnapshot,
   transitionAgentProject,
@@ -43,6 +54,12 @@ const tauri = vi.hoisted(() => ({
   writeAppData: vi.fn(),
 }));
 
+const controller = vi.hoisted(() => ({
+  abortAgentRunForProjectSwitch: vi.fn<
+    (root: string, reason: "project-switch" | "app-exit") => void
+  >(),
+}));
+
 vi.mock("@/lib/tauri", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tauri")>();
   return {
@@ -50,6 +67,17 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
     getAiConfig: tauri.getAiConfig,
     readAppData: tauri.readAppData,
     writeAppData: tauri.writeAppData,
+  };
+});
+
+vi.mock("@/lib/ai/agent-controller", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ai/agent-controller")>();
+  controller.abortAgentRunForProjectSwitch.mockImplementation(
+    actual.abortAgentRunForProjectSwitch,
+  );
+  return {
+    ...actual,
+    abortAgentRunForProjectSwitch: controller.abortAgentRunForProjectSwitch,
   };
 });
 
@@ -253,6 +281,7 @@ async function resetPersistence(): Promise<void> {
   useSettingsStore.setState({ aiModel: null });
   resetAiProvider();
   tauri.getAiConfig.mockReset();
+  controller.abortAgentRunForProjectSwitch.mockClear();
   tauri.readAppData.mockClear();
   tauri.writeAppData.mockClear();
 }
@@ -271,6 +300,27 @@ afterEach(() => {
 });
 
 describe("agent persistence", () => {
+  it("rejects a persisted character describe task whose ID is blank", async () => {
+    const raw = persistedState("", [
+      {
+        ...textMessage(
+          "character-user",
+          "user",
+          "Describe Mara.",
+          "complete",
+        ),
+        metadata: {
+          ...metadata,
+          task: { kind: "character-describe", characterId: "" },
+        },
+      },
+    ]);
+
+    await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: "/books/one" },
+    });
+  });
+
   it("recovers a completed outputless assistant run as a retryable error", async () => {
     const zeroUsage: PersistedUsage = {
       modelId: "gpt-5.6-luna",
@@ -806,6 +856,62 @@ describe("agent persistence", () => {
           label: "Read chapter",
           target: "Chapter 1",
           detail: "1 block",
+          itemCount: 1,
+        },
+      },
+    });
+  });
+
+  it("round-trips settled character profile update rows", async () => {
+    const updateMessage: AgentUIMessage = {
+      id: "assistant-character-update",
+      role: "assistant",
+      metadata: {
+        ...metadata,
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      parts: [
+        {
+          type: "tool-update_character_profile",
+          toolCallId: "call-character-update",
+          state: "output-available",
+          input: {
+            characterId: "c1",
+            profile: {
+              appearance: null,
+              mannerisms: "Counts every door.",
+              motivations: null,
+              relationships: null,
+              history: null,
+              voice: null,
+            },
+          },
+          output: {
+            kind: "summary",
+            summary: {
+              label: "Update character profile",
+              target: "Mara",
+              detail: "1 field",
+              itemCount: 1,
+            },
+          },
+        },
+      ],
+    };
+    useAgentConsoleStore.setState({ messages: [updateMessage] });
+
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/books/reopened", snapshot);
+
+    expect(restored.messages[0].parts[0]).toMatchObject({
+      type: "tool-update_character_profile",
+      state: "output-available",
+      output: {
+        kind: "summary",
+        summary: {
+          label: "Update character profile",
+          target: "Mara",
+          detail: "1 field",
           itemCount: 1,
         },
       },
@@ -1568,6 +1674,35 @@ describe("agent persistence", () => {
     });
   });
 
+  it("aborts an active planner when the project console is unavailable during a switch", async () => {
+    const root = "/books/planner-with-unavailable-console";
+    useProjectStore.setState({ project: project(root) });
+    useAgentConsoleStore.setState({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: null,
+      persistenceIssue: {
+        kind: "load",
+        projectRoot: root,
+        message: "Project conversation unavailable",
+      },
+    });
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "switch-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    controller.abortAgentRunForProjectSwitch.mockClear();
+
+    await transitionAgentProject("/books/next");
+
+    expect(controller.abortAgentRunForProjectSwitch).toHaveBeenCalledWith(
+      root,
+      "project-switch",
+    );
+  });
+
   it("retries the immutable old-root snapshot after a switch save fails", async () => {
     await transitionAgentProject("/books/old");
     useAgentConsoleStore.getState().setDraftText("Captured old draft");
@@ -2287,6 +2422,38 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
+  it("aborts an active planner on page hide when the project console is unavailable", async () => {
+    const root = "/books/pagehide-planner-with-unavailable-console";
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root),
+    );
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      persistenceIssue: {
+        kind: "corrupt",
+        projectRoot: root,
+        message: "Project conversation is corrupt",
+      },
+    });
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "pagehide-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    controller.abortAgentRunForProjectSwitch.mockClear();
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(controller.abortAgentRunForProjectSwitch).toHaveBeenCalledWith(
+      root,
+      "app-exit",
+    );
+    persistence.unmount();
+  });
+
   it("rejects a wrong-root reset before touching state, disk, or the save timer", async () => {
     const root = "/books/current-reset-owner";
     const wrongRoot = "/books/stale-reset-dialog";
@@ -2847,5 +3014,428 @@ describe("agent persistence", () => {
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
     expect(tauri.writeAppData).not.toHaveBeenCalled();
     persistence.unmount();
+  });
+
+  it("migrates a v3 conversation into only the project session", async () => {
+    const legacy = {
+      ...emptyPersistedAgentState(),
+      draftText: "Existing project chat",
+    };
+    tauri.readAppData.mockResolvedValueOnce(null);
+
+    const collection = await loadAgentSessionCollection("/books/legacy", legacy);
+
+    expect(collection.project.draftText).toBe("Existing project chat");
+    expect(collection.outlines).toEqual({});
+  });
+
+  it("isolates one corrupt planner session from the remaining collection", async () => {
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:good": {
+          ...emptyPersistedAgentState(),
+          draftText: "Good planner",
+        },
+        "outline:bad": { v: 3, draftText: 42 },
+      },
+    });
+
+    const collection = await loadAgentSessionCollection(
+      "/books/planners",
+      emptyPersistedAgentState(),
+    );
+
+    expect(collection.outlines.good.draftText).toBe("Good planner");
+    expect(collection.outlines.bad).toEqual(emptyPersistedAgentState());
+    expect(collection.corruptOutlineChapterIds).toEqual(["bad"]);
+  });
+
+  it("keeps overlapping planner hydration from resetting an active run", async () => {
+    const root = "/books/overlapping-planner-hydration";
+    const chapterId = "overlap-chapter";
+    const read = deferred<unknown>();
+    tauri.readAppData.mockReturnValue(read.promise);
+    useProjectStore.setState({ project: project(root) });
+    const planner = agentSessionStore({ kind: "outline", chapterId });
+    planner.getState().resetProject();
+
+    const firstHydration = hydrateAgentOutlineSession(root, chapterId);
+    const secondHydration = hydrateAgentOutlineSession(root, chapterId);
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().beginPreflight();
+    read.resolve({
+      v: 1,
+      sessions: {
+        [`outline:${chapterId}`]: {
+          ...emptyPersistedAgentState(),
+          draftText: "Stale hydration draft",
+        },
+      },
+    });
+    await Promise.all([firstHydration, secondHydration]);
+
+    expect(tauri.readAppData).toHaveBeenCalledTimes(1);
+    expect(planner.getState()).toMatchObject({
+      runStatus: "submitted",
+      draftText: "",
+    });
+  });
+
+  it("round trips character conversations in the scoped session collection", async () => {
+    const root = "/book";
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const disk = new Map<string, unknown>();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key, value) => {
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({
+      project: project(root),
+      meta: {
+        ...EMPTY_META,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+            profile: {
+              appearance: "",
+              mannerisms: "",
+              motivations: "",
+              relationships: "",
+              history: "",
+              voice: "",
+            },
+          },
+        ],
+      },
+    });
+    useAgentConsoleStore.getState().hydrate(root, emptyPersistedAgentState());
+    const character = agentSessionStore(sessionId);
+    character.getState().hydrate(root, emptyPersistedAgentState());
+    character.setState({
+      messages: [
+        {
+          ...textMessage(
+            "character-user",
+            "user",
+            "Describe Mara.",
+            "complete",
+          ),
+          metadata: {
+            ...metadata,
+            task: { kind: "character-describe", characterId: "c1" },
+          },
+        },
+        {
+          ...textMessage(
+            "character-assistant",
+            "assistant",
+            "Mara is precise.",
+            "complete",
+          ),
+          metadata: {
+            ...metadata,
+            task: { kind: "character-describe", characterId: "c1" },
+          },
+        },
+      ],
+    });
+
+    await saveAgentSessionCollection(root);
+    clearCharacterAgentSessions();
+    await hydrateAgentCharacterSession(root, "c1");
+
+    expect(agentSessionStore(sessionId).getState().messages).toHaveLength(2);
+  });
+
+  it("does not recreate a deleted character session when an in-flight save settles", async () => {
+    const root = "/books/deleted-character-save";
+    useProjectStore.setState({
+      project: project(root),
+      meta: {
+        ...EMPTY_META,
+        characters: [
+          {
+            id: "c1",
+            name: "Mara",
+            color: "#aabbcc",
+            role: "Detective",
+            profile: {
+              appearance: "",
+              mannerisms: "",
+              motivations: "",
+              relationships: "",
+              history: "",
+              voice: "",
+            },
+          },
+        ],
+      },
+    });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root),
+    );
+    tauri.writeAppData.mockClear();
+    const pendingWrite = deferred<void>();
+    tauri.writeAppData.mockImplementation((key: string) =>
+      key === agentSessionCollectionKey(root)
+        ? pendingWrite.promise
+        : Promise.resolve(),
+    );
+    vi.useFakeTimers();
+    const session = agentSessionStore({
+      kind: "character",
+      characterId: "c1",
+    });
+    session.getState().hydrate(root, emptyPersistedAgentState());
+    session.getState().setDraftText("Character draft");
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.waitFor(() =>
+      expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentSessionCollectionKey(root),
+        expect.anything(),
+      ),
+    );
+
+    deleteCharacterAgentSession("c1");
+    pendingWrite.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(characterAgentSessionEntries()).toEqual([]);
+    vi.useRealTimers();
+    persistence.unmount();
+  });
+
+  it("flushes planner sessions before switching projects", async () => {
+    const firstRoot = "/books/first";
+    await transitionAgentProject(firstRoot);
+    const sessionId = { kind: "outline" as const, chapterId: "chapter-1" };
+    const planner = agentSessionStore(sessionId);
+    planner.getState().hydrate(firstRoot, emptyPersistedAgentState());
+    planner.getState().setDraftText("Planner draft");
+    tauri.writeAppData.mockClear();
+
+    await transitionAgentProject("/books/second");
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(firstRoot),
+    );
+    expect(collectionWrite?.[1]).toMatchObject({
+      v: 1,
+      sessions: {
+        "outline:chapter-1": { draftText: "Planner draft" },
+      },
+    });
+  });
+
+  it("preserves planner sessions that have not been opened since restart", async () => {
+    const root = "/books/planners";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+          {
+            id: "chapter-2",
+            label: "2",
+            title: "Two",
+            file: "chapters/two.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    const openPlanner = agentSessionStore({
+      kind: "outline",
+      chapterId: "chapter-1",
+    });
+    openPlanner.getState().hydrate(root, {
+      ...emptyPersistedAgentState(),
+      draftText: "Open planner draft",
+    });
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:chapter-2": {
+          ...emptyPersistedAgentState(),
+          draftText: "Unopened planner draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    expect(tauri.writeAppData).toHaveBeenCalledWith(
+      agentSessionCollectionKey(root),
+      expect.objectContaining({
+        sessions: expect.objectContaining({
+          "outline:chapter-1": expect.objectContaining({
+            draftText: "Open planner draft",
+          }),
+          "outline:chapter-2": expect.objectContaining({
+            draftText: "Unopened planner draft",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("serializes planner writes so an older completion cannot overwrite a newer snapshot", async () => {
+    const root = "/books/serialized-planner-saves";
+    useProjectStore.setState({ project: project(root) });
+    useAgentConsoleStore.getState().hydrate(root, emptyPersistedAgentState());
+    const planner = agentSessionStore({
+      kind: "outline",
+      chapterId: "serialized-planner",
+    });
+    planner.getState().hydrate(root, emptyPersistedAgentState());
+    planner.getState().setDraftText("Older planner draft");
+    const disk = new Map<string, unknown>();
+    const firstWrite = deferred<void>();
+    const secondWrite = deferred<void>();
+    let writeIndex = 0;
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key, value) => {
+      const completion = writeIndex === 0 ? firstWrite : secondWrite;
+      writeIndex += 1;
+      await completion.promise;
+      disk.set(key, structuredClone(value));
+    });
+
+    const olderSave = saveAgentSessionCollection(root);
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
+    planner.getState().setDraftText("Newer planner draft");
+    const newerSave = saveAgentSessionCollection(root);
+
+    expect(tauri.readAppData).toHaveBeenCalledOnce();
+    expect(tauri.writeAppData).toHaveBeenCalledOnce();
+    firstWrite.resolve(undefined);
+    await vi.waitFor(() => expect(tauri.readAppData).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledTimes(2));
+    secondWrite.resolve(undefined);
+    await Promise.all([olderSave, newerSave]);
+
+    expect(disk.get(agentSessionCollectionKey(root))).toMatchObject({
+      sessions: {
+        "outline:serialized-planner": {
+          draftText: "Newer planner draft",
+        },
+      },
+    });
+  });
+
+  it("removes persisted planner sessions for deleted chapters", async () => {
+    const root = "/books/planners";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:deleted-chapter": {
+          ...emptyPersistedAgentState(),
+          draftText: "Deleted planner draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(root),
+    );
+    expect(collectionWrite?.[1]).not.toHaveProperty(
+      "sessions.outline:deleted-chapter",
+    );
+  });
+
+  it("prunes deleted character sessions while preserving outline sessions", async () => {
+    const root = "/books/character-pruning";
+    useProjectStore.setState({
+      project: {
+        ...project(root),
+        chapters: [
+          {
+            id: "chapter-1",
+            label: "1",
+            title: "One",
+            file: "chapters/one.tex",
+            wordCount: 10,
+          },
+        ],
+      },
+      meta: EMPTY_META,
+    });
+    await transitionAgentProject(root);
+    const deletedCharacter = agentSessionStore({
+      kind: "character",
+      characterId: "deleted-character",
+    });
+    deletedCharacter.getState().hydrate(root, {
+      ...emptyPersistedAgentState(),
+      draftText: "Live deleted character draft",
+    });
+    tauri.readAppData.mockResolvedValueOnce({
+      v: 1,
+      sessions: {
+        project: emptyPersistedAgentState(),
+        "outline:chapter-1": {
+          ...emptyPersistedAgentState(),
+          draftText: "Retained outline draft",
+        },
+        "character:deleted-character": {
+          ...emptyPersistedAgentState(),
+          draftText: "Deleted character draft",
+        },
+      },
+    });
+    tauri.writeAppData.mockClear();
+
+    await saveAgentSessionCollection(root);
+
+    const collectionWrite = tauri.writeAppData.mock.calls.find(
+      ([key]) => key === agentSessionCollectionKey(root),
+    );
+    expect(collectionWrite?.[1]).toHaveProperty(
+      "sessions.outline:chapter-1.draftText",
+      "Retained outline draft",
+    );
+    expect(collectionWrite?.[1]).not.toHaveProperty(
+      "sessions.character:deleted-character",
+    );
   });
 });

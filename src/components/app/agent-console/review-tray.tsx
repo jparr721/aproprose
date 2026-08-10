@@ -7,6 +7,7 @@ import {
   X as IconX,
 } from "lucide-react";
 import { OutlineReview } from "@/components/app/agent-console/outline-review";
+import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,11 +39,15 @@ import {
 } from "@/lib/ai/proposal-decisions";
 import type {
   ManuscriptPendingProposal,
+  AgentSessionId,
   OutlinePendingProposal,
+  OverviewPendingChange,
+  PendingProposal,
 } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
-  useAgentConsoleStore,
+  useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
@@ -51,14 +56,53 @@ interface ManuscriptReviewTrayProps {
   proposal: ManuscriptPendingProposal;
   staleChangeIds: Set<string>;
   authorMutationsDisabled: boolean;
+  sessionId: AgentSessionId;
+}
+
+function OverviewChangeReview(props: {
+  change: OverviewPendingChange;
+  proposal: PendingProposal;
+  stale: boolean;
+  disabled: boolean;
+  sessionId: AgentSessionId;
+}) {
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-3">
+      <TypographyEyebrow>Story Overview</TypographyEyebrow>
+      <AgentDiffPreview before={props.change.before} after={props.change.after} />
+      <TypographyMuted>{props.change.reason}</TypographyMuted>
+      <div className="flex gap-2">
+        <Button
+          disabled={props.disabled || props.stale}
+          onClick={() =>
+            acceptProposalChange(props.proposal, props.change.id, props.sessionId)
+          }
+          size="sm"
+        >
+          <IconCheck /> Accept overview
+        </Button>
+        <Button
+          disabled={props.disabled}
+          onClick={() =>
+            rejectProposalChange(props.proposal, props.change.id, props.sessionId)
+          }
+          size="sm"
+          variant="outline"
+        >
+          <IconX /> Reject overview
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function ManuscriptReviewTray({
   proposal,
   staleChangeIds,
   authorMutationsDisabled,
+  sessionId,
 }: ManuscriptReviewTrayProps) {
-  const remaining = proposal.changes.length;
+  const remaining = proposal.changes.length + (proposal.overviewChange ? 1 : 0);
   const remainingLabel = `${remaining} ${remaining === 1 ? "change" : "changes"}`;
 
   const openReview = (): void => {
@@ -89,7 +133,7 @@ function ManuscriptReviewTray({
         </Button>
         <Button
           disabled={authorMutationsDisabled || staleChangeIds.size > 0}
-          onClick={() => acceptAllProposalChanges(proposal)}
+          onClick={() => acceptAllProposalChanges(proposal, sessionId)}
           size="sm"
         >
           <IconCheck data-icon="inline-start" />
@@ -97,7 +141,7 @@ function ManuscriptReviewTray({
         </Button>
         <Button
           disabled={authorMutationsDisabled}
-          onClick={() => rejectAllProposalChanges(proposal)}
+          onClick={() => rejectAllProposalChanges(proposal, sessionId)}
           size="sm"
           variant="outline"
         >
@@ -105,6 +149,17 @@ function ManuscriptReviewTray({
           Reject All
         </Button>
       </CardContent>
+      {proposal.overviewChange ? (
+        <CardContent>
+          <OverviewChangeReview
+            change={proposal.overviewChange}
+            disabled={authorMutationsDisabled}
+            proposal={proposal}
+            sessionId={sessionId}
+            stale={staleChangeIds.has(proposal.overviewChange.id)}
+          />
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
@@ -113,15 +168,17 @@ interface OutlineReviewTrayProps {
   proposal: OutlinePendingProposal;
   staleChangeIds: Set<string>;
   authorMutationsDisabled: boolean;
+  sessionId: AgentSessionId;
 }
 
 function OutlineReviewTray({
   proposal,
   staleChangeIds,
   authorMutationsDisabled,
+  sessionId,
 }: OutlineReviewTrayProps) {
   const [expanded, setExpanded] = useState(false);
-  const remaining = proposal.changes.length;
+  const remaining = proposal.changes.length + (proposal.overviewChange ? 1 : 0);
   const remainingLabel = `${remaining} ${remaining === 1 ? "change" : "changes"}`;
 
   const navigate = (changeId: string): void => {
@@ -167,7 +224,7 @@ function OutlineReviewTray({
           {remaining === 0 ? (
             <Button
               disabled={authorMutationsDisabled}
-              onClick={() => rejectAllProposalChanges(proposal)}
+              onClick={() => rejectAllProposalChanges(proposal, sessionId)}
               size="sm"
               variant="outline"
             >
@@ -179,7 +236,7 @@ function OutlineReviewTray({
                 disabled={
                   authorMutationsDisabled || staleChangeIds.size > 0
                 }
-                onClick={() => acceptAllProposalChanges(proposal)}
+                onClick={() => acceptAllProposalChanges(proposal, sessionId)}
                 size="sm"
               >
                 <IconCheck data-icon="inline-start" />
@@ -187,7 +244,7 @@ function OutlineReviewTray({
               </Button>
               <Button
                 disabled={authorMutationsDisabled}
-                onClick={() => rejectAllProposalChanges(proposal)}
+                onClick={() => rejectAllProposalChanges(proposal, sessionId)}
                 size="sm"
                 variant="outline"
               >
@@ -201,29 +258,41 @@ function OutlineReviewTray({
               <OutlineReview
                 disabled={authorMutationsDisabled}
                 onAccept={(changeId) =>
-                  acceptProposalChange(proposal, changeId)
+                  acceptProposalChange(proposal, changeId, sessionId)
                 }
                 onNavigate={navigate}
                 onReject={(changeId) =>
-                  rejectProposalChange(proposal, changeId)
+                  rejectProposalChange(proposal, changeId, sessionId)
                 }
                 proposal={proposal}
                 staleChangeIds={staleChangeIds}
               />
             </ScrollArea>
           </CollapsibleContent>
+          {proposal.overviewChange ? (
+            <OverviewChangeReview
+              change={proposal.overviewChange}
+              disabled={authorMutationsDisabled}
+              proposal={proposal}
+              sessionId={sessionId}
+              stale={staleChangeIds.has(proposal.overviewChange.id)}
+            />
+          ) : null}
         </CardContent>
       </Collapsible>
     </Card>
   );
 }
 
-export function ReviewTray() {
-  const proposal = useAgentConsoleStore((state) => state.pendingProposal);
+export function ReviewTray({
+  sessionId: requestedSessionId,
+}: { sessionId?: AgentSessionId }) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  const proposal = useAgentSessionStore(sessionId, (state) => state.pendingProposal);
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
-  const authorMutationsDisabled = useAgentConsoleStore(
+  const authorMutationsDisabled = useAgentSessionStore(sessionId,
     (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
   useProjectStore((state) => state.activeChapterId);
@@ -233,16 +302,36 @@ export function ReviewTray() {
   if (proposal === null) return null;
 
   const staleChangeIds = proposalStaleChangeIds(proposal);
+  if (proposal.kind === "overview") {
+    return (
+      <Card data-agent-review-tray size="sm">
+        <CardHeader>
+          <CardTitle>{proposal.summary}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <OverviewChangeReview
+            change={proposal.overviewChange}
+            disabled={authorMutationsDisabled}
+            proposal={proposal}
+            sessionId={sessionId}
+            stale={staleChangeIds.has(proposal.overviewChange.id)}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
   return proposal.kind === "manuscript" ? (
     <ManuscriptReviewTray
       authorMutationsDisabled={authorMutationsDisabled}
       proposal={proposal}
+      sessionId={sessionId}
       staleChangeIds={staleChangeIds}
     />
   ) : (
     <OutlineReviewTray
       authorMutationsDisabled={authorMutationsDisabled}
       proposal={proposal}
+      sessionId={sessionId}
       staleChangeIds={staleChangeIds}
     />
   );

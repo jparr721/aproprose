@@ -28,11 +28,13 @@ import {
 } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import { agentFailureActionLabel } from "@/lib/ai/agent-failure";
-import type { AgentTask } from "@/lib/ai/agent-types";
+import type { AgentSessionId, AgentTask } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
 import {
   agentConsoleOwnershipStatus,
-  useAgentConsoleStore,
+  agentSessionStore,
+  useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
@@ -42,29 +44,35 @@ import {
 export interface AgentComposerProps {
   task: AgentTask | null;
   placeholder: string;
+  sessionId?: AgentSessionId;
 }
 
-export function AgentComposer({ task, placeholder }: AgentComposerProps) {
-  const mode = useAgentConsoleStore((state) => state.mode);
-  const setMode = useAgentConsoleStore((state) => state.setMode);
-  const draftText = useAgentConsoleStore((state) => state.draftText);
-  const setDraftText = useAgentConsoleStore((state) => state.setDraftText);
-  const draftContextRefs = useAgentConsoleStore(
+export function AgentComposer({
+  task,
+  placeholder,
+  sessionId: requestedSessionId,
+}: AgentComposerProps) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  const mode = useAgentSessionStore(sessionId, (state) => state.mode);
+  const setMode = useAgentSessionStore(sessionId, (state) => state.setMode);
+  const draftText = useAgentSessionStore(sessionId, (state) => state.draftText);
+  const setDraftText = useAgentSessionStore(sessionId, (state) => state.setDraftText);
+  const draftContextRefs = useAgentSessionStore(sessionId,
     (state) => state.draftContextRefs,
   );
-  const draftContextSources = useAgentConsoleStore(
+  const draftContextSources = useAgentSessionStore(sessionId,
     (state) => state.draftContextSources,
   );
-  const removeDraftContextRef = useAgentConsoleStore(
+  const removeDraftContextRef = useAgentSessionStore(sessionId,
     (state) => state.removeDraftContextRef,
   );
-  const runStatus = useAgentConsoleStore((state) => state.runStatus);
-  const runError = useAgentConsoleStore((state) => state.runError);
-  const lastUsage = useAgentConsoleStore((state) => state.lastUsage);
+  const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
+  const runError = useAgentSessionStore(sessionId, (state) => state.runError);
+  const lastUsage = useAgentSessionStore(sessionId, (state) => state.lastUsage);
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
-  const ownershipStatus = useAgentConsoleStore((state) =>
+  const ownershipStatus = useAgentSessionStore(sessionId, (state) =>
     agentConsoleOwnershipStatus(state, projectRoot),
   );
 
@@ -102,7 +110,7 @@ export function AgentComposer({ task, placeholder }: AgentComposerProps) {
     ) {
       return "failed";
     }
-    const consoleState = useAgentConsoleStore.getState();
+    const consoleState = agentSessionStore(sessionId).getState();
     if (
       consoleState.activeRun !== null ||
       consoleState.runStatus !== "idle"
@@ -126,7 +134,10 @@ export function AgentComposer({ task, placeholder }: AgentComposerProps) {
             kind: "proposal-follow-up",
             proposalId: consoleState.pendingProposal.id,
           };
-    const outcome = await submitAgentDraft(submittedTask);
+    const outcome =
+      sessionId.kind === "project"
+        ? await submitAgentDraft(submittedTask)
+        : await submitAgentDraft(submittedTask, sessionId);
     return outcome.status === "failure" ? "failed" : "submitted";
   };
 
@@ -136,7 +147,7 @@ export function AgentComposer({ task, placeholder }: AgentComposerProps) {
       className="flex shrink-0 flex-col gap-2 border-t border-border bg-background p-3"
       role="region"
     >
-      <ButtonGroup aria-label="Agent mode">
+      {sessionId.kind === "project" ? <ButtonGroup aria-label="Agent mode">
         <Button
           aria-pressed={mode === "writing"}
           disabled={blocksTargetEditing}
@@ -155,7 +166,7 @@ export function AgentComposer({ task, placeholder }: AgentComposerProps) {
         >
           Edit
         </Button>
-      </ButtonGroup>
+      </ButtonGroup> : null}
       {blocksTargetEditing ? (
         <TypographyMuted>AI conversation is loading.</TypographyMuted>
       ) : null}
@@ -235,7 +246,7 @@ export function AgentComposer({ task, placeholder }: AgentComposerProps) {
               runStatus === "idle" &&
               (!hasMeaningfulDraft || blocksTargetEditing)
             }
-            onStop={stopAgentRun}
+            onStop={() => stopAgentRun(sessionId)}
             status={status}
           />
         </PromptInputFooter>

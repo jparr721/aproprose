@@ -42,6 +42,7 @@ import {
   stopAgentRun as stopProductionAgentRun,
   submitAgentRequest as submitProductionAgentRequest,
   type AgentControllerDependencies,
+  type AgentSubmissionOutcome,
 } from "@/lib/ai/agent-controller";
 import {
   blockFingerprint,
@@ -68,6 +69,7 @@ import type {
 } from "@/lib/ai/agent-types";
 import { parseChapter } from "@/lib/latex";
 import { EMPTY_META } from "@/lib/migration";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type {
   Block,
   ChapterOutline,
@@ -75,9 +77,13 @@ import type {
   ProjectMeta,
 } from "@/lib/types";
 import {
+  agentSessionStore,
+  clearCharacterAgentSessions,
+  clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
+import { emptyPersistedAgentState } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -173,8 +179,53 @@ const outlineChapter: ChapterOutline = {
 function projectMeta(): ProjectMeta {
   return {
     ...EMPTY_META,
-    outline: { premise: "A detective is trapped." },
+    knowledge: emptyProjectKnowledge(),
+    outline: { premise: "A detective is trapped.", overview: "" },
     chapters: { ch1: outlineChapter },
+    characters: [
+      {
+        id: "character-1",
+        name: "Detective",
+        color: "#123456",
+        role: "Detective",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+      {
+        id: "c1",
+        name: "Mara",
+        color: "#654321",
+        role: "Courier",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+      {
+        id: "c2",
+        name: "Ivo",
+        color: "#abcdef",
+        role: "Watcher",
+        profile: {
+          appearance: "",
+          mannerisms: "",
+          motivations: "",
+          relationships: "",
+          history: "",
+          voice: "",
+        },
+      },
+    ],
     lore: [
       {
         id: "lore-1",
@@ -467,6 +518,8 @@ function compactionMessages(payloadLength: number): AgentUIMessage[] {
 }
 
 beforeEach(() => {
+  clearCharacterAgentSessions();
+  clearOutlineAgentSessions();
   mocks.generateText.mockReset().mockResolvedValue({ text: "Compacted history" });
   mocks.readTextFile.mockReset().mockImplementation(async (_root, path) => {
     if (path === "chapters/two.tex") {
@@ -504,7 +557,568 @@ beforeEach(() => {
   useViewStore.setState({ aiOpen: false });
 });
 
+describe("character Describe sessions", () => {
+  it("rejects a task whose character differs from the session", async () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate("/book", emptyPersistedAgentState());
+    store.getState().setDraftText("Describe Ivo.");
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentDraft(
+        { kind: "character-describe", characterId: "c2" },
+        sessionId,
+      ),
+    ).rejects.toThrow("Character Describe target does not match the session: c2");
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+
+  it("freezes the character session identity during asynchronous preflight", async () => {
+    const sessionId: {
+      kind: "character";
+      characterId: string;
+    } = { kind: "character", characterId: "c1" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      emptyPersistedAgentState(),
+    );
+    const model = deferred<MockLanguageModelV3>();
+    let modelRequested = false;
+    const dependencies = makeDependencies(null);
+    dependencies.getModel = async () => {
+      modelRequested = true;
+      return model.promise;
+    };
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Describe Mara.",
+        refs: [],
+        task: { kind: "character-describe", characterId: "c1" },
+      },
+      sessionId,
+    );
+    await vi.waitFor(() => expect(modelRequested).toBe(true));
+
+    sessionId.characterId = "c2";
+    model.resolve(new MockLanguageModelV3());
+
+    await expect(submission).resolves.toEqual({ status: "success" });
+    expect(dependencies.stream).toHaveBeenCalledOnce();
+    expect(dependencies.stream.mock.calls[0][0].run.task).toEqual({
+      kind: "character-describe",
+      characterId: "c1",
+    });
+  });
+});
+
+describe("outline planner sessions", () => {
+  it("rejects outline and character runs while the project run is active", async () => {
+    const release = deferred<void>();
+    const inputs: StreamAgentRunInput[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      inputs.push(input);
+      await release.promise;
+      return successfulResult(input, "Finished");
+    });
+    const controller = createAgentController(dependencies);
+    const outlineSession = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(outlineSession);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const characterSession = {
+      kind: "character" as const,
+      characterId: "character-1",
+    };
+    const characterStore = agentSessionStore(characterSession);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    useAgentConsoleStore.getState().setDraftText("Revise the current chapter.");
+    outlineStore.getState().setDraftText("Plan the next chapter.");
+    characterStore.getState().setDraftText("Describe the detective.");
+
+    const projectSubmission = controller.submitAgentDraft(conversationTask("ch1"));
+    await vi.waitFor(() => expect(inputs).toHaveLength(1));
+    const outlineSubmission = controller.submitAgentDraft(
+      { kind: "outline-sculpt", chapterId: "ch2" },
+      outlineSession,
+    );
+    const characterSubmission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "character-1" },
+      characterSession,
+    );
+    let contenders: AgentSubmissionOutcome[] | null = null;
+    const contenderSettlements = Promise.all([
+      outlineSubmission,
+      characterSubmission,
+    ]).then((outcomes) => {
+      contenders = outcomes;
+      return outcomes;
+    });
+    await vi.waitFor(() =>
+      expect(inputs.length > 1 || contenders !== null).toBe(true),
+    );
+    release.resolve(undefined);
+    const [projectOutcome, contenderOutcomes] = await Promise.all([
+      projectSubmission,
+      contenderSettlements,
+    ]);
+
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+    expect(outlineStore.getState().runStatus).toBe("idle");
+    expect(characterStore.getState().runStatus).toBe("idle");
+    expect(projectOutcome).toEqual({ status: "success" });
+    expect(contenderOutcomes).toEqual([
+      expect.objectContaining({ status: "failure" }),
+      expect.objectContaining({ status: "failure" }),
+    ]);
+    expect(inputs).toHaveLength(1);
+  });
+
+  it("rejects project and character runs while an outline run is active", async () => {
+    const release = deferred<void>();
+    const inputs: StreamAgentRunInput[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      inputs.push(input);
+      await release.promise;
+      return successfulResult(input, "Finished");
+    });
+    const controller = createAgentController(dependencies);
+    const outlineSession = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(outlineSession);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const characterSession = {
+      kind: "character" as const,
+      characterId: "character-1",
+    };
+    const characterStore = agentSessionStore(characterSession);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    outlineStore.getState().setDraftText("Plan the next chapter.");
+    useAgentConsoleStore.getState().setDraftText("Revise the chapter.");
+    characterStore.getState().setDraftText("Describe the detective.");
+
+    const outlineSubmission = controller.submitAgentDraft(
+      { kind: "outline-sculpt", chapterId: "ch2" },
+      outlineSession,
+    );
+    await vi.waitFor(() => expect(inputs).toHaveLength(1));
+    const projectSubmission = controller.submitAgentDraft(
+      conversationTask("ch1"),
+    );
+    const characterSubmission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "character-1" },
+      characterSession,
+    );
+    let contenders: AgentSubmissionOutcome[] | null = null;
+    const contenderSettlements = Promise.all([
+      projectSubmission,
+      characterSubmission,
+    ]).then((outcomes) => {
+      contenders = outcomes;
+      return outcomes;
+    });
+    await vi.waitFor(() =>
+      expect(inputs.length > 1 || contenders !== null).toBe(true),
+    );
+    release.resolve(undefined);
+    const [outlineOutcome, contenderOutcomes] = await Promise.all([
+      outlineSubmission,
+      contenderSettlements,
+    ]);
+
+    expect(outlineStore.getState().runStatus).toBe("idle");
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+    expect(characterStore.getState().runStatus).toBe("idle");
+    expect(outlineOutcome).toEqual({ status: "success" });
+    expect(contenderOutcomes).toEqual([
+      expect.objectContaining({ status: "failure" }),
+      expect.objectContaining({ status: "failure" }),
+    ]);
+    expect(inputs).toHaveLength(1);
+  });
+
+  it("rejects a second character run while another character is active", async () => {
+    const release = deferred<void>();
+    const inputs: StreamAgentRunInput[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      inputs.push(input);
+      await release.promise;
+      return successfulResult(input, "Finished");
+    });
+    const controller = createAgentController(dependencies);
+    const firstSession = { kind: "character" as const, characterId: "c1" };
+    const secondSession = { kind: "character" as const, characterId: "c2" };
+    const firstStore = agentSessionStore(firstSession);
+    const secondStore = agentSessionStore(secondSession);
+    firstStore.getState().hydrate("/book", emptyPersistedAgentState());
+    secondStore.getState().hydrate("/book", emptyPersistedAgentState());
+    firstStore.getState().setDraftText("Describe the detective.");
+    secondStore.getState().setDraftText("Describe the witness.");
+
+    const firstSubmission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "c1" },
+      firstSession,
+    );
+    await vi.waitFor(() => expect(inputs).toHaveLength(1));
+    const secondSubmission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "c2" },
+      secondSession,
+    );
+    let contender: AgentSubmissionOutcome | null = null;
+    const contenderSettlement = secondSubmission.then((outcome) => {
+      contender = outcome;
+      return outcome;
+    });
+    await vi.waitFor(() =>
+      expect(inputs.length > 1 || contender !== null).toBe(true),
+    );
+    release.resolve(undefined);
+    const [firstOutcome, secondOutcome] = await Promise.all([
+      firstSubmission,
+      contenderSettlement,
+    ]);
+
+    expect(firstStore.getState().runStatus).toBe("idle");
+    expect(secondStore.getState().runStatus).toBe("idle");
+    expect(firstOutcome).toEqual({ status: "success" });
+    expect(secondOutcome).toMatchObject({ status: "failure" });
+    expect(inputs).toHaveLength(1);
+  });
+
+  it("rejects project and outline runs while a character run is active", async () => {
+    const release = deferred<void>();
+    const inputs: StreamAgentRunInput[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      inputs.push(input);
+      await release.promise;
+      return successfulResult(input, "Finished");
+    });
+    const controller = createAgentController(dependencies);
+    const characterSession = {
+      kind: "character" as const,
+      characterId: "character-1",
+    };
+    const characterStore = agentSessionStore(characterSession);
+    characterStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const outlineSession = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(outlineSession);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    characterStore.getState().setDraftText("Describe the detective.");
+    useAgentConsoleStore.getState().setDraftText("Revise the chapter.");
+    outlineStore.getState().setDraftText("Plan the next chapter.");
+
+    const characterSubmission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "character-1" },
+      characterSession,
+    );
+    await vi.waitFor(() => expect(inputs).toHaveLength(1));
+    const projectSubmission = controller.submitAgentDraft(
+      conversationTask("ch1"),
+    );
+    const outlineSubmission = controller.submitAgentDraft(
+      { kind: "outline-sculpt", chapterId: "ch2" },
+      outlineSession,
+    );
+    let contenders: AgentSubmissionOutcome[] | null = null;
+    const contenderSettlements = Promise.all([
+      projectSubmission,
+      outlineSubmission,
+    ]).then((outcomes) => {
+      contenders = outcomes;
+      return outcomes;
+    });
+    await vi.waitFor(() =>
+      expect(inputs.length > 1 || contenders !== null).toBe(true),
+    );
+    release.resolve(undefined);
+    const [characterOutcome, contenderOutcomes] = await Promise.all([
+      characterSubmission,
+      contenderSettlements,
+    ]);
+
+    expect(characterStore.getState().runStatus).toBe("idle");
+    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+    expect(outlineStore.getState().runStatus).toBe("idle");
+    expect(characterOutcome).toEqual({ status: "success" });
+    expect(contenderOutcomes).toEqual([
+      expect.objectContaining({ status: "failure" }),
+      expect.objectContaining({ status: "failure" }),
+    ]);
+    expect(inputs).toHaveLength(1);
+  });
+
+  it("injects frozen target and neighbor grounding while retaining arbitrary reads", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    useProjectStore.setState((state) => ({
+      meta: {
+        ...state.meta,
+        outline: {
+          premise: state.meta.outline.premise,
+          overview: "The detective must escape before the house resets.",
+        },
+      },
+    }));
+    let instructions = "";
+    let arbitraryChapterText: string[] = [];
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      const chapter = await input.environment.readChapter("ch1");
+      arbitraryChapterText = chapter.blocks.map((block) => block.text);
+      return successfulResult(input, "Planned");
+    });
+    const controller = createAgentController(dependencies);
+
+    await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(instructions).toContain("APROPROSE OUTLINE PLANNING");
+    expect(instructions).toContain("OUTLINE PLANNER GROUNDING");
+    expect(instructions).toContain(
+      '"storyOverview": "The detective must escape before the house resets."',
+    );
+    expect(instructions).toContain('"chapterId": "ch1"');
+    expect(instructions).toContain('"chapterId": "ch2"');
+    expect(instructions).toContain('"next": null');
+    expect(arbitraryChapterText).toEqual([
+      "Disk first.",
+      "Disk middle.",
+      "Disk final.",
+    ]);
+  });
+
+  it("grounds a follow-up to an overview-only proposal in the planner chapter", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(sessionId);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const proposal: PendingProposal = {
+      id: "overview-proposal",
+      kind: "overview",
+      projectRoot: "/book",
+      chapterId: null,
+      summary: "Clarify the story direction",
+      createdAt: "2026-07-30T12:00:00.000Z",
+      originatingMessageId: "assistant-overview",
+      changes: [],
+      overviewChange: {
+        id: "overview-change",
+        before: "",
+        after: "The detective must escape before the house resets.",
+        reason: "Make the central pressure explicit",
+        sourceFingerprint: "overview-source",
+      },
+    };
+    outlineStore.getState().replacePendingProposal(proposal);
+    outlineStore.getState().setDraftText("Develop the next beat.");
+    let instructions = "";
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      return successfulResult(input, "Planned");
+    });
+    const controller = createAgentController(dependencies);
+
+    await expect(
+      controller.submitAgentDraft(
+        { kind: "proposal-follow-up", proposalId: proposal.id },
+        sessionId,
+      ),
+    ).resolves.toEqual({ status: "success" });
+
+    expect(dependencies.stream).toHaveBeenCalledOnce();
+    expect(instructions).toContain("OUTLINE PLANNER GROUNDING");
+    expect(instructions).toContain('"chapterId": "ch2"');
+  });
+
+  it("bounds planner manuscript grounding against the selected model context", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    mocks.readTextFile.mockResolvedValue(
+      "HEAD TARGET_TAIL_SHOULD_NOT_REACH_THE_MODEL",
+    );
+    let instructions = "";
+    const dependencies = makeDependencies(async (input) => {
+      instructions = input.instructions;
+      return successfulResult(input, "Planned");
+    });
+    dependencies.getContextWindow = async () => 24;
+    const controller = createAgentController(dependencies);
+
+    await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(instructions).toContain('"truncated": true');
+    expect(instructions).not.toContain("TARGET_TAIL_SHOULD_NOT_REACH_THE_MODEL");
+  });
+
+  it("reports the exact planner grounding source when preflight fails", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    agentSessionStore(sessionId).getState().hydrate(
+      "/book",
+      {
+        v: 3,
+        mode: "writing",
+        messages: [],
+        summary: null,
+        draftText: "",
+        draftContextRefs: [],
+        draftSourceLocators: {},
+        pendingProposal: null,
+        lastUsage: null,
+        interruptedRun: null,
+      },
+    );
+    mocks.readTextFile.mockRejectedValueOnce(new Error("chapter file missing"));
+    const dependencies = makeDependencies(null);
+    const controller = createAgentController(dependencies);
+
+    const outcome = await controller.submitAgentRequest(
+      {
+        kind: "run",
+        mode: "writing",
+        text: "Plan the escape.",
+        refs: [],
+        task: { kind: "outline-sculpt", chapterId: "ch2" },
+      },
+      sessionId,
+    );
+
+    expect(outcome).toMatchObject({
+      status: "failure",
+      failure: {
+        message: expect.stringContaining(
+          "Outline planner grounding failed for chapter ch2 at target source ch2: chapter file missing",
+        ),
+      },
+    });
+    expect(dependencies.stream).not.toHaveBeenCalled();
+  });
+});
+
 describe("dispatchAgentIntent", () => {
+  it("adds findings to the requested planner draft without changing the project draft", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const outlineStore = agentSessionStore(sessionId);
+    outlineStore.getState().hydrate("/book", emptyPersistedAgentState());
+    const findingsMessage: AgentUIMessage = {
+      id: "planner-findings",
+      role: "assistant",
+      metadata: metadata(
+        {
+          id: "planner-run",
+          projectRoot: "/book",
+          mode: "writing",
+          task: { kind: "chapter-analysis", chapterId: "ch2", analysis: "critique" },
+          userMessageId: "planner-user",
+          attachments: [],
+          startedAt: "2026-07-30T12:00:00.000Z",
+        },
+        "complete",
+        null,
+      ),
+      parts: [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch2",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The turn arrives before the setup lands.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+    outlineStore.setState({ messages: [findingsMessage] });
+    useAgentConsoleStore.getState().addDraftContextRefs([blockRef("b1", "ch1")]);
+    const controller = createAgentController(makeDependencies(null));
+
+    await controller.dispatchAgentIntent(
+      {
+        kind: "add-context",
+        refs: [
+          {
+            kind: "finding",
+            chapterId: "ch2",
+            findingId: "planner-findings:0",
+          },
+        ],
+      },
+      sessionId,
+    );
+
+    expect(outlineStore.getState().draftContextRefs).toEqual([
+      {
+        kind: "finding",
+        chapterId: "ch2",
+        findingId: "planner-findings:0",
+      },
+    ]);
+    expect(
+      outlineStore.getState().draftContextSources[
+        "finding:ch2:planner-findings:0"
+      ],
+    ).toMatchObject({
+      available: true,
+      label: "Pacing",
+      preview: "The turn arrives before the setup lands.",
+    });
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
+      blockRef("b1", "ch1"),
+    ]);
+    expect(useViewStore.getState().aiOpen).toBe(false);
+  });
+
   it("opens the console and resolves add-context without starting a run", async () => {
     const dependencies = makeDependencies(null);
     const controller = createAgentController(dependencies);
@@ -1476,7 +2090,10 @@ describe("frozen run preflight", () => {
     useProjectStore.setState((state) => ({
       meta: {
         ...state.meta,
-        outline: { premise: "Initial outline premise" },
+        outline: {
+          premise: "Initial outline premise",
+          overview: "Initial story overview",
+        },
         chapters: {
           ...state.meta.chapters,
           ch2: {
@@ -1546,7 +2163,7 @@ describe("frozen run preflight", () => {
       },
       meta: {
         ...current.meta,
-        outline: { premise: "Changed outline premise" },
+        outline: { premise: "Changed outline premise", overview: "" },
         chapters: {
           ...current.meta.chapters,
           ch2: {
@@ -1587,6 +2204,7 @@ describe("frozen run preflight", () => {
     ]);
     expect(frozenOutline).toMatchObject({
       premise: "Initial outline premise",
+      overview: "Initial story overview",
       chapters: [
         {
           chapterId: "ch2",
@@ -1903,6 +2521,60 @@ describe("frozen run preflight", () => {
 });
 
 describe("run settlement and cancellation", () => {
+  it("stops the active outline session", async () => {
+    const pending = deferred<StreamAgentRunResult>();
+    let input: StreamAgentRunInput | null = null;
+    const dependencies = makeDependencies(async (captured) => {
+      input = captured;
+      return pending.promise;
+    });
+    const controller = createAgentController(dependencies);
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate("/book", emptyPersistedAgentState());
+    store.getState().setDraftText("Plan the next chapter.");
+    const submission = controller.submitAgentDraft(
+      { kind: "outline-sculpt", chapterId: "ch2" },
+      sessionId,
+    );
+    await vi.waitFor(() => expect(input).not.toBeNull());
+
+    controller.stopAgentRun(sessionId);
+
+    expect(store.getState().runStatus).toBe("idle");
+    if (input === null) throw new Error("Expected captured outline input");
+    expect(input.signal.aborted).toBe(true);
+    pending.resolve(successfulResult(input, "Ignored outline finish"));
+    await expect(submission).resolves.toEqual({ status: "stopped" });
+  });
+
+  it("aborts the active character session for a project switch", async () => {
+    const pending = deferred<StreamAgentRunResult>();
+    let input: StreamAgentRunInput | null = null;
+    const dependencies = makeDependencies(async (captured) => {
+      input = captured;
+      return pending.promise;
+    });
+    const controller = createAgentController(dependencies);
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate("/book", emptyPersistedAgentState());
+    store.getState().setDraftText("Describe the detective.");
+    const submission = controller.submitAgentDraft(
+      { kind: "character-describe", characterId: "c1" },
+      sessionId,
+    );
+    await vi.waitFor(() => expect(input).not.toBeNull());
+
+    controller.abortAgentRunForProjectSwitch("/book", "project-switch");
+
+    if (input === null) throw new Error("Expected captured character input");
+    expect(input.signal.aborted).toBe(true);
+    expect(store.getState().interruptedRun?.reason).toBe("project-switch");
+    pending.resolve(successfulResult(input, "Ignored character finish"));
+    await expect(submission).resolves.toEqual({ status: "stopped" });
+  });
+
   it("keeps text and attachments added while streaming", async () => {
     const pending = deferred<StreamAgentRunResult>();
     let captured: StreamAgentRunInput | null = null;
@@ -2434,6 +3106,25 @@ describe("proposal staging lifecycle", () => {
     expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
       proposal.id,
     );
+    await run.finish();
+  });
+
+  it("stages an active manuscript proposal without closing an open Outline", async () => {
+    const run = await captureToolRun();
+    const proposal = manuscriptProposalFixture(
+      "background-proposal",
+      "/book",
+      "ch1",
+    );
+    useViewStore.setState({ outlineOpen: true, manuscriptReviewProposalId: null });
+
+    run.input.environment.replacePendingProposal(proposal);
+
+    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState()).toMatchObject({
+      outlineOpen: true,
+      manuscriptReviewProposalId: null,
+    });
     await run.finish();
   });
 

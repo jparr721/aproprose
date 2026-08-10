@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/agent-messages";
 import { invalidProposalCorrelationIds } from "@/lib/ai/agent-proposals";
 import type {
+  AgentSessionId,
   AgentPersistenceIssue,
   PendingProposal,
   PersistedAgentSnapshot,
@@ -16,13 +17,24 @@ import type {
   PersistedPendingProposal,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
+import {
+  agentSessionKey,
+  PROJECT_AGENT_SESSION,
+} from "@/lib/ai/agent-types";
 import { pathHash } from "@/lib/path-hash";
 import { legacyAgentFailure } from "@/lib/ai/agent-failure";
 import { readAppData, writeAppData } from "@/lib/tauri";
 import {
+  type AgentConsoleStore,
   type AgentPersistenceTransitionCapture,
   AgentConsoleOwnershipError,
+  agentSessionStore,
   agentConsoleOwnershipStatus,
+  characterAgentSessionEntries,
+  clearCharacterAgentSessions,
+  clearOutlineAgentSessions,
+  outlineAgentSessionEntries,
+  subscribeAgentSessionRegistry,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -64,6 +76,12 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("outline-sculpt"),
       chapterId: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("character-describe"),
+      characterId: z.string().min(1),
     })
     .strict(),
   z
@@ -211,12 +229,23 @@ const outlinePreconditionSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+const overviewChangeSchema = z
+  .object({
+    id: z.string(),
+    before: z.string(),
+    after: z.string(),
+    reason: z.string(),
+    sourceFingerprint: z.string(),
+  })
+  .strict();
+
 const pendingProposalBase = {
   id: z.string(),
   chapterId: z.string(),
   summary: z.string(),
   createdAt: z.string(),
   originatingMessageId: z.string(),
+  overviewChange: overviewChangeSchema.nullable().optional(),
 };
 
 const pendingProposalSchema = z
@@ -234,6 +263,15 @@ const pendingProposalSchema = z
             })
             .strict(),
         ),
+      })
+      .strict(),
+    z
+      .object({
+        ...pendingProposalBase,
+        kind: z.literal("overview"),
+        chapterId: z.null(),
+        changes: z.tuple([]),
+        overviewChange: overviewChangeSchema,
       })
       .strict(),
     z
@@ -470,6 +508,8 @@ const persistablePartTypes = new Set<string>([
   "tool-read_pending_proposal",
   "tool-stage_manuscript_proposal",
   "tool-stage_outline_proposal",
+  "tool-stage_overview_proposal",
+  "tool-update_character_profile",
 ]);
 
 const messageEnvelopeSchema = z
@@ -511,6 +551,21 @@ const persistedAgentStateSchema = z
   })
   .strict();
 
+const persistedAgentSessionCollectionSchema = z
+  .object({
+    v: z.literal(1),
+    sessions: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+interface LoadedAgentSessionCollection {
+  project: PersistedAgentState;
+  outlines: Record<string, PersistedAgentState>;
+  characters: Record<string, PersistedAgentState>;
+  corruptOutlineChapterIds: string[];
+  corruptCharacterIds: string[];
+}
+
 type AgentSnapshotSource = Pick<
   ReturnType<typeof useAgentConsoleStore.getState>,
   | "mode"
@@ -523,6 +578,8 @@ type AgentSnapshotSource = Pick<
   | "lastUsage"
   | "interruptedRun"
 >;
+
+type ScopedAgentSessionId = Exclude<AgentSessionId, { kind: "project" }>;
 
 interface FailedRecoveryState {
   source: AgentSnapshotSource;
@@ -556,6 +613,10 @@ let recoveryRoot: string | null = null;
 const failedSaves = new Map<string, FailedAgentSave>();
 let transition: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionCollectionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const outlineHydrations = new Map<string, Promise<void>>();
+const characterHydrations = new Map<string, Promise<void>>();
+const sessionCollectionSaveQueues = new Map<string, Promise<void>>();
 let activeRevision = 0;
 let persistedRevision = 0;
 let revisionSequence = 0;
@@ -695,6 +756,42 @@ function clearSaveTimer(): void {
   saveTimer = null;
 }
 
+function clearSessionCollectionSaveTimer(): void {
+  if (sessionCollectionSaveTimer === null) return;
+  clearTimeout(sessionCollectionSaveTimer);
+  sessionCollectionSaveTimer = null;
+}
+
+function scheduleAgentSessionCollectionSave(
+  requestedStore?: AgentConsoleStore,
+): void {
+  clearSessionCollectionSaveTimer();
+  const root = useAgentConsoleStore.getState().activeProjectRoot;
+  if (root === null || writableRoot !== root) return;
+  sessionCollectionSaveTimer = setTimeout(() => {
+    sessionCollectionSaveTimer = null;
+    if (writableRoot !== root) return;
+    void saveAgentSessionCollection(root).then(
+      () => {
+        if (requestedStore === undefined) return;
+        if (requestedStore.getState().persistenceIssue?.kind === "save") {
+          requestedStore.getState().setPersistenceIssue(null);
+        }
+      },
+      (error) => {
+        if (requestedStore !== undefined) {
+          requestedStore.getState().setPersistenceIssue({
+            kind: "save",
+            projectRoot: root,
+            message: errorMessage(error),
+          });
+        }
+        logPersistenceFailure(root, error);
+      },
+    );
+  }, SAVE_DEBOUNCE_MS);
+}
+
 function saveIssue(root: string, error: unknown): AgentPersistenceError {
   const failure =
     error instanceof AgentPersistenceError && error.issue.kind === "save"
@@ -819,6 +916,10 @@ export function agentStateKey(root: string): string {
   return `ai-${pathHash(root)}`;
 }
 
+export function agentSessionCollectionKey(root: string): string {
+  return `ai-sessions-${pathHash(root)}`;
+}
+
 export function emptyPersistedAgentState(): PersistedAgentSnapshot &
   PersistedAgentState {
   return {
@@ -835,7 +936,26 @@ export function emptyPersistedAgentState(): PersistedAgentSnapshot &
   };
 }
 
-export function resetAgentConversation(root: string): Promise<void> {
+export function resetAgentConversation(
+  root: string,
+  requestedSessionId?: AgentSessionId,
+): Promise<void> {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  if (sessionId.kind !== "project") {
+    const store = agentSessionStore(sessionId);
+    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
+      throw new AgentConsoleOwnershipError();
+    }
+    store.getState().hydrate(root, emptyPersistedAgentState());
+    return saveAgentSessionCollection(root).catch((error) => {
+      store.getState().setPersistenceIssue({
+        kind: "save",
+        projectRoot: root,
+        message: errorMessage(error),
+      });
+      throw error;
+    });
+  }
   const initialState = useAgentConsoleStore.getState();
   const ownsExactRoot =
     initialState.activeProjectRoot === root &&
@@ -889,8 +1009,24 @@ export function resetAgentConversation(root: string): Promise<void> {
   });
 }
 
-function captureAgentSnapshotSource(): AgentSnapshotSource {
-  const state = useAgentConsoleStore.getState();
+export async function retryAgentSessionPersistence(
+  root: string,
+  sessionId: AgentSessionId,
+): Promise<void> {
+  if (sessionId.kind === "project") {
+    await retryAgentPersistence();
+    return;
+  }
+  const store = agentSessionStore(sessionId);
+  await saveAgentSessionCollection(root);
+  store.getState().setPersistenceIssue(null);
+}
+
+function captureAgentSnapshotSource(
+  requestedSessionId?: AgentSessionId,
+): AgentSnapshotSource {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  const state = agentSessionStore(sessionId).getState();
   return structuredClone({
     mode: state.mode,
     messages: state.messages,
@@ -910,15 +1046,36 @@ function toPersistedPendingProposal(
   if (proposal === null) return null;
   const base = {
     id: proposal.id,
-    chapterId: proposal.chapterId,
     summary: proposal.summary,
     createdAt: proposal.createdAt,
     originatingMessageId: proposal.originatingMessageId,
+    ...(proposal.overviewChange
+      ? { overviewChange: proposal.overviewChange }
+      : {}),
   };
   if (proposal.kind === "manuscript") {
-    return { ...base, kind: proposal.kind, changes: proposal.changes };
+    return {
+      ...base,
+      kind: proposal.kind,
+      chapterId: proposal.chapterId,
+      changes: proposal.changes,
+    };
   }
-  return { ...base, kind: proposal.kind, changes: proposal.changes };
+  if (proposal.kind === "outline") {
+    return {
+      ...base,
+      kind: proposal.kind,
+      chapterId: proposal.chapterId,
+      changes: proposal.changes,
+    };
+  }
+  return {
+    ...base,
+    kind: proposal.kind,
+    chapterId: null,
+    changes: proposal.changes,
+    overviewChange: proposal.overviewChange,
+  };
 }
 
 function restorePendingProposal(
@@ -927,6 +1084,9 @@ function restorePendingProposal(
 ): PendingProposal | null {
   if (proposal === null) return null;
   if (proposal.kind === "manuscript") {
+    return { ...proposal, projectRoot: root };
+  }
+  if (proposal.kind === "outline") {
     return { ...proposal, projectRoot: root };
   }
   return { ...proposal, projectRoot: root };
@@ -1036,6 +1196,279 @@ function restoreAgentSnapshot(
       snapshot.pendingProposal,
     ),
   };
+}
+
+async function snapshotForSession(
+  sessionId: AgentSessionId,
+): Promise<PersistedAgentSnapshot> {
+  return parseAgentSnapshot(
+    await snapshotFromSource(captureAgentSnapshotSource(sessionId)),
+  );
+}
+
+export async function loadAgentSessionCollection(
+  root: string,
+  migratedProject: PersistedAgentState,
+): Promise<LoadedAgentSessionCollection> {
+  const raw = await readAppData<unknown>(agentSessionCollectionKey(root));
+  if (raw === null) {
+    return {
+      project: migratedProject,
+      outlines: {},
+      characters: {},
+      corruptOutlineChapterIds: [],
+      corruptCharacterIds: [],
+    };
+  }
+  const parsedCollection = persistedAgentSessionCollectionSchema.safeParse(raw);
+  if (!parsedCollection.success) {
+    return {
+      project: migratedProject,
+      outlines: {},
+      characters: {},
+      corruptOutlineChapterIds: [],
+      corruptCharacterIds: [],
+    };
+  }
+  const collection = parsedCollection.data;
+  let project = migratedProject;
+  const projectRaw = collection.sessions.project;
+  if (projectRaw !== undefined) {
+    project = restoreAgentSnapshot(root, await parseAgentSnapshot(projectRaw));
+  }
+  const outlines: Record<string, PersistedAgentState> = {};
+  const characters: Record<string, PersistedAgentState> = {};
+  const corruptOutlineChapterIds: string[] = [];
+  const corruptCharacterIds: string[] = [];
+  for (const [key, snapshot] of Object.entries(collection.sessions)) {
+    if (key.startsWith("outline:")) {
+      const chapterId = key.slice("outline:".length);
+      if (chapterId.length === 0) continue;
+      try {
+        outlines[chapterId] = restoreAgentSnapshot(
+          root,
+          await parseAgentSnapshot(snapshot),
+        );
+      } catch {
+        outlines[chapterId] = emptyPersistedAgentState();
+        corruptOutlineChapterIds.push(chapterId);
+      }
+      continue;
+    }
+    if (key.startsWith("character:")) {
+      const characterId = key.slice("character:".length);
+      if (characterId.length === 0) continue;
+      try {
+        characters[characterId] = restoreAgentSnapshot(
+          root,
+          await parseAgentSnapshot(snapshot),
+        );
+      } catch {
+        characters[characterId] = emptyPersistedAgentState();
+        corruptCharacterIds.push(characterId);
+      }
+    }
+  }
+  return {
+    project,
+    outlines,
+    characters,
+    corruptOutlineChapterIds,
+    corruptCharacterIds,
+  };
+}
+
+async function saveAgentSessionCollectionNow(root: string): Promise<void> {
+  const raw = await readAppData<unknown>(agentSessionCollectionKey(root));
+  const persisted =
+    raw === null ? null : persistedAgentSessionCollectionSchema.parse(raw);
+  const sessions: Record<string, unknown> = {
+    ...(persisted?.sessions ?? {}),
+    project: await snapshotForSession(PROJECT_AGENT_SESSION),
+  };
+  const projectState = useProjectStore.getState();
+  const project = projectState.project;
+  const liveChapterIds =
+    project?.root === root
+      ? new Set(project.chapters.map((chapter) => chapter.id))
+      : null;
+  const liveCharacterIds =
+    project?.root === root
+      ? new Set(projectState.meta.characters.map((character) => character.id))
+      : null;
+  if (project?.root === root) {
+    for (const key of Object.keys(sessions)) {
+      if (
+        key.startsWith("outline:") &&
+        liveChapterIds !== null &&
+        !liveChapterIds.has(key.slice("outline:".length))
+      ) {
+        delete sessions[key];
+      }
+      if (
+        key.startsWith("character:") &&
+        liveCharacterIds !== null &&
+        !liveCharacterIds.has(key.slice("character:".length))
+      ) {
+        delete sessions[key];
+      }
+    }
+  }
+  for (const [chapterId, store] of outlineAgentSessionEntries()) {
+    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
+      continue;
+    }
+    sessions[`outline:${chapterId}`] = await snapshotForSession({
+      kind: "outline",
+      chapterId,
+    });
+  }
+  for (const [characterId, store] of characterAgentSessionEntries()) {
+    if (
+      liveCharacterIds !== null &&
+      !liveCharacterIds.has(characterId)
+    ) {
+      continue;
+    }
+    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
+      continue;
+    }
+    sessions[`character:${characterId}`] = await snapshotForSession({
+      kind: "character",
+      characterId,
+    });
+  }
+  await writeAppData(agentSessionCollectionKey(root), {
+    v: 1,
+    sessions,
+  });
+}
+
+export function saveAgentSessionCollection(root: string): Promise<void> {
+  const previous = sessionCollectionSaveQueues.get(root) ?? Promise.resolve();
+  const save = previous
+    .catch(() => undefined)
+    .then(() => saveAgentSessionCollectionNow(root));
+  const tracked = save.finally(() => {
+    if (sessionCollectionSaveQueues.get(root) === tracked) {
+      sessionCollectionSaveQueues.delete(root);
+    }
+  });
+  sessionCollectionSaveQueues.set(root, tracked);
+  return tracked;
+}
+
+function scopedAgentSessionIsRegistered(
+  sessionId: ScopedAgentSessionId,
+  store: ReturnType<typeof agentSessionStore>,
+): boolean {
+  switch (sessionId.kind) {
+    case "outline":
+      return outlineAgentSessionEntries().some(
+        ([chapterId, candidateStore]) =>
+          chapterId === sessionId.chapterId && candidateStore === store,
+      );
+    case "character":
+      return characterAgentSessionEntries().some(
+        ([characterId, candidateStore]) =>
+          characterId === sessionId.characterId && candidateStore === store,
+      );
+  }
+}
+
+async function hydrateAgentScopedSessionOwned(
+  root: string,
+  sessionId: ScopedAgentSessionId,
+): Promise<void> {
+  const store = agentSessionStore(sessionId);
+  if (agentConsoleOwnershipStatus(store.getState(), root) === "ready") return;
+  const ownsHydration = (): boolean => {
+    const state = store.getState();
+    return (
+      useProjectStore.getState().project?.root === root &&
+      state.runStatus === "idle" &&
+      state.activeRun === null &&
+      scopedAgentSessionIsRegistered(sessionId, store)
+    );
+  };
+  let raw: unknown;
+  try {
+    raw = await readAppData<unknown>(agentSessionCollectionKey(root));
+  } catch (error) {
+    if (!ownsHydration()) return;
+    store.getState().hydrate(root, emptyPersistedAgentState());
+    store.getState().setPersistenceIssue({
+      kind: "load",
+      projectRoot: root,
+      message: errorMessage(error),
+    });
+    return;
+  }
+  if (!ownsHydration()) return;
+  const collection = persistedAgentSessionCollectionSchema.safeParse(raw);
+  const snapshot = collection.success
+    ? collection.data.sessions[agentSessionKey(sessionId)]
+    : undefined;
+  if (snapshot === undefined) {
+    store.getState().hydrate(root, emptyPersistedAgentState());
+    return;
+  }
+  try {
+    const restored = restoreAgentSnapshot(
+      root,
+      await parseAgentSnapshot(snapshot),
+    );
+    if (!ownsHydration()) return;
+    store.getState().hydrate(root, restored);
+  } catch (error) {
+    if (!ownsHydration()) return;
+    store.getState().hydrate(root, emptyPersistedAgentState());
+    store.getState().setPersistenceIssue({
+      kind: "corrupt",
+      projectRoot: root,
+      message: errorMessage(error),
+    });
+  }
+}
+
+export function hydrateAgentOutlineSession(
+  root: string,
+  chapterId: string,
+): Promise<void> {
+  const key = JSON.stringify([root, chapterId]);
+  const current = outlineHydrations.get(key);
+  if (current !== undefined) return current;
+  const hydration = hydrateAgentScopedSessionOwned(
+    root,
+    { kind: "outline", chapterId },
+  ).finally(
+    () => {
+      if (outlineHydrations.get(key) === hydration) {
+        outlineHydrations.delete(key);
+      }
+    },
+  );
+  outlineHydrations.set(key, hydration);
+  return hydration;
+}
+
+export function hydrateAgentCharacterSession(
+  root: string,
+  characterId: string,
+): Promise<void> {
+  const key = JSON.stringify([root, characterId]);
+  const current = characterHydrations.get(key);
+  if (current !== undefined) return current;
+  const hydration = hydrateAgentScopedSessionOwned(
+    root,
+    { kind: "character", characterId },
+  ).finally(() => {
+    if (characterHydrations.get(key) === hydration) {
+      characterHydrations.delete(key);
+    }
+  });
+  characterHydrations.set(key, hydration);
+  return hydration;
 }
 
 export async function fromAgentSnapshot(
@@ -1361,6 +1794,7 @@ function scheduleAgentSave(): void {
 export function transitionAgentProject(nextRoot: string | null): Promise<void> {
   useViewStore.getState().closeManuscriptReview();
   clearSaveTimer();
+  clearSessionCollectionSaveTimer();
   const consoleBeforeSwitch = useAgentConsoleStore.getState();
   const oldRoot = consoleBeforeSwitch.activeProjectRoot;
   const ownsOldConsole =
@@ -1374,9 +1808,29 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     consoleBeforeSwitch.persistenceTransition.projectRoot === oldRoot;
   const oldRootWasRecovering =
     ownsOldConsole && recoveryRoot === oldRoot && !resetOwnsOldRoot;
+  const oldRootHasScopedSessions =
+    oldRoot !== null &&
+    [...outlineAgentSessionEntries(), ...characterAgentSessionEntries()].some(
+      ([, store]) =>
+        agentConsoleOwnershipStatus(store.getState(), oldRoot) === "ready",
+    );
   writableRoot = null;
-  if (ownsOldConsole && oldRoot !== null) {
-    abortAgentRunForProjectSwitch(oldRoot, "project-switch");
+  const rootsWithActiveSessions = new Set<string>();
+  if (oldRoot !== null) rootsWithActiveSessions.add(oldRoot);
+  for (const [, store] of outlineAgentSessionEntries()) {
+    const activeProjectRoot = store.getState().activeProjectRoot;
+    if (activeProjectRoot !== null) {
+      rootsWithActiveSessions.add(activeProjectRoot);
+    }
+  }
+  for (const [, store] of characterAgentSessionEntries()) {
+    const activeProjectRoot = store.getState().activeProjectRoot;
+    if (activeProjectRoot !== null) {
+      rootsWithActiveSessions.add(activeProjectRoot);
+    }
+  }
+  for (const root of rootsWithActiveSessions) {
+    abortAgentRunForProjectSwitch(root, "project-switch");
   }
   const oldSource =
     oldRootWasWritable || oldRootWasRecovering
@@ -1420,11 +1874,21 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       recordRecoveryState(oldRoot, oldSource, oldRevision);
     }
 
+    if (oldRoot !== null && oldRootHasScopedSessions) {
+      try {
+        await saveAgentSessionCollection(oldRoot);
+      } catch (error) {
+        logPersistenceFailure(oldRoot, error);
+      }
+    }
+
     if (!ownsPersistenceCapture(persistenceCapture)) {
       return;
     }
     if (!ownsTargetConsole) {
       useAgentConsoleStore.getState().resetProject();
+      clearOutlineAgentSessions();
+      clearCharacterAgentSessions();
     }
     if (
       !useAgentConsoleStore
@@ -1587,33 +2051,99 @@ export function useAgentPersistence(): void {
           activeRevision = nextRevision();
         }
         scheduleAgentSave();
+        if (
+          outlineAgentSessionEntries().length > 0 ||
+          characterAgentSessionEntries().length > 0
+        ) {
+          scheduleAgentSessionCollectionSave();
+        }
       },
     );
+    const outlineUnsubscribes = new Map<string, () => void>();
+    const characterUnsubscribes = new Map<string, () => void>();
+    const subscribeOutlineSessions = (): void => {
+      const liveChapterIds = new Set(
+        outlineAgentSessionEntries().map(([chapterId]) => chapterId),
+      );
+      for (const [chapterId, unsubscribe] of outlineUnsubscribes) {
+        if (liveChapterIds.has(chapterId)) continue;
+        unsubscribe();
+        outlineUnsubscribes.delete(chapterId);
+      }
+      for (const [chapterId, store] of outlineAgentSessionEntries()) {
+        if (outlineUnsubscribes.has(chapterId)) continue;
+        outlineUnsubscribes.set(
+          chapterId,
+          store.subscribe((state, previous) => {
+            if (!persistedFieldsChanged(state, previous)) return;
+            scheduleAgentSessionCollectionSave(store);
+          }),
+        );
+      }
+    };
+    const subscribeCharacterSessions = (): void => {
+      const liveCharacterIds = new Set(
+        characterAgentSessionEntries().map(([characterId]) => characterId),
+      );
+      for (const [characterId, unsubscribe] of characterUnsubscribes) {
+        if (liveCharacterIds.has(characterId)) continue;
+        unsubscribe();
+        characterUnsubscribes.delete(characterId);
+      }
+      for (const [characterId, store] of characterAgentSessionEntries()) {
+        if (characterUnsubscribes.has(characterId)) continue;
+        characterUnsubscribes.set(
+          characterId,
+          store.subscribe((state, previous) => {
+            if (!persistedFieldsChanged(state, previous)) return;
+            scheduleAgentSessionCollectionSave(store);
+          }),
+        );
+      }
+    };
+    subscribeOutlineSessions();
+    subscribeCharacterSessions();
+    const unsubscribeRegistry = subscribeAgentSessionRegistry(() => {
+      subscribeOutlineSessions();
+      subscribeCharacterSessions();
+      scheduleAgentSessionCollectionSave();
+    });
     const onVisibilityChange = (): void => {
       if (document.visibilityState === "hidden") flushActiveSnapshot();
     };
     const onPageHide = (): void => {
       clearSaveTimer();
       const state = useAgentConsoleStore.getState();
-      const root = state.activeProjectRoot;
-      if (
-        root === null ||
-        agentConsoleOwnershipStatus(state, root) !== "ready"
-      ) {
+      const root =
+        useProjectStore.getState().project?.root ?? state.activeProjectRoot;
+      if (root === null) return;
+      abortAgentRunForProjectSwitch(root, "app-exit");
+      if (agentConsoleOwnershipStatus(state, root) !== "ready") {
         return;
       }
-      abortAgentRunForProjectSwitch(root, "app-exit");
       clearSaveTimer();
       if (writableRoot !== root) return;
       void captureActiveSnapshot(root);
+      if (
+        outlineAgentSessionEntries().length > 0 ||
+        characterAgentSessionEntries().length > 0
+      ) {
+        void saveAgentSessionCollection(root).catch((error) => {
+          logPersistenceFailure(root, error);
+        });
+      }
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", onPageHide);
     return () => {
       clearSaveTimer();
+      clearSessionCollectionSaveTimer();
       unsubscribeProject();
       unsubscribeConsole();
+      unsubscribeRegistry();
+      outlineUnsubscribes.forEach((unsubscribe) => unsubscribe());
+      characterUnsubscribes.forEach((unsubscribe) => unsubscribe());
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onPageHide);
     };

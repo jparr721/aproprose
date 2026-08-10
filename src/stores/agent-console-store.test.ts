@@ -15,9 +15,14 @@ import type {
   PersistedAgentState,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
+import { agentSessionProfile } from "@/lib/ai/agent-types";
 import {
+  agentSessionStore,
   agentConsoleOwnershipStatus,
   AgentConsoleOwnershipError,
+  characterAgentSessionEntries,
+  clearCharacterAgentSessions,
+  deleteCharacterAgentSession,
   EMPTY_AGENT_STATE,
   PendingProposalEditError,
   useAgentConsoleStore,
@@ -369,6 +374,22 @@ describe("agent console store", () => {
   beforeEach(() => {
     useAgentConsoleStore.setState(EMPTY_AGENT_STATE);
     useAgentConsoleStore.getState().hydrate("/book", emptyPersistedState());
+  });
+
+  it("registers character sessions with a describing profile", () => {
+    const sessionId = { kind: "character" as const, characterId: "c1" };
+
+    clearCharacterAgentSessions();
+    agentSessionStore(sessionId);
+
+    expect(agentSessionProfile(sessionId, "writing")).toEqual({
+      kind: "character",
+      mode: "describing",
+      characterId: "c1",
+    });
+    expect(characterAgentSessionEntries()).toHaveLength(1);
+    deleteCharacterAgentSession("c1");
+    expect(characterAgentSessionEntries()).toEqual([]);
   });
 
   it("freezes the active run while later mode changes prepare the next turn", () => {

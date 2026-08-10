@@ -68,11 +68,6 @@ describe("view-store AI console", () => {
 
   it("openAiConsole opens the dock and leaves the left sidebar outside this store", () => {
     useViewStore.setState({
-      agentSection: {
-        kind: "outline",
-        projectRoot: "/novel",
-        chapterId: "chapter-1",
-      },
       aiOpen: false,
       focus: true,
     });
@@ -81,30 +76,12 @@ describe("view-store AI console", () => {
 
     const state = useViewStore.getState();
     expect(state).toMatchObject({
-      agentSection: { kind: "project" },
       aiOpen: true,
       focus: false,
     });
     expect(state).not.toHaveProperty("sidebarOpen");
   });
 
-  it("opens a reusable outline-planning section in the AI dock", () => {
-    useViewStore.setState({ aiOpen: false, focus: true });
-
-    useViewStore
-      .getState()
-      .openOutlineAgent("/novel", "chapter-1");
-
-    expect(useViewStore.getState()).toMatchObject({
-      agentSection: {
-        kind: "outline",
-        projectRoot: "/novel",
-        chapterId: "chapter-1",
-      },
-      aiOpen: true,
-      focus: false,
-    });
-  });
 });
 
 describe("view-store applyLayoutPreset", () => {

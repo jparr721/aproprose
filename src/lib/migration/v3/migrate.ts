@@ -5,8 +5,7 @@
 // (v2 precedent).
 
 import type { MetaBlob } from "@/lib/migration/schema";
-import type { ProjectMeta } from "@/lib/types";
 
-export function migrateV3(meta: MetaBlob): ProjectMeta {
+export function migrateV3(meta: MetaBlob): MetaBlob {
   return { ...meta, version: 3, chapters: meta.chapters ?? {} };
 }

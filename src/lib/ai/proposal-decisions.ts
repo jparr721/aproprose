@@ -12,8 +12,11 @@ import type {
   ProposalEventData,
 } from "@/lib/ai/agent-types";
 import { getChapterOutline } from "@/lib/outline/model";
+import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
+import { PROJECT_AGENT_SESSION, type AgentSessionId } from "@/lib/ai/agent-types";
 import {
-  requireAgentConsoleProject,
+  agentSessionStore,
+  requireAgentSessionProject,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -42,8 +45,9 @@ export class ProposalDecisionCorrelationError extends Error {
 
 function currentProposalForDecision(
   proposal: PendingProposal,
+  sessionId: AgentSessionId,
 ): PendingProposal {
-  const current = useAgentConsoleStore.getState().pendingProposal;
+  const current = agentSessionStore(sessionId).getState().pendingProposal;
   if (
     current === null ||
     current.id !== proposal.id ||
@@ -63,7 +67,12 @@ function eventText(
   action: ProposalDecisionAction,
   count: number,
 ): string {
-  const subject = kind === "manuscript" ? "manuscript" : "outline";
+  const subject =
+    kind === "manuscript"
+      ? "manuscript"
+      : kind === "outline"
+        ? "outline"
+        : "story overview";
   if (action === "accepted-all") {
     return `Accepted all ${count} ${subject} changes.`;
   }
@@ -86,6 +95,17 @@ function proposalEvent(
     changeCount: count,
     text: eventText(proposal.kind, action, count),
   };
+}
+
+function recordSessionProposalEvent(
+  event: ProposalEventData,
+  sessionId: AgentSessionId,
+): void {
+  if (sessionId.kind === "project") {
+    recordProposalEvent(event);
+    return;
+  }
+  recordProposalEvent(event, sessionId);
 }
 
 function showOutlineUndo(token: OutlineUndoToken): void {
@@ -154,6 +174,8 @@ function applyProposalChanges(
       showOutlineUndo(result.undoToken);
       return true;
     }
+    case "overview":
+      return true;
     default:
       return assertProposalKindExhausted(proposal);
   }
@@ -163,35 +185,56 @@ export function proposalStaleChangeIds(
   proposal: PendingProposal,
 ): Set<string> {
   const projectState = useProjectStore.getState();
+  const stale = new Set<string>();
+  if (
+    proposal.overviewChange &&
+    storyOverviewFingerprint(projectState.meta.outline.overview) !==
+      proposal.overviewChange.sourceFingerprint
+  ) {
+    stale.add(proposal.overviewChange.id);
+  }
   if (
     projectState.project === null ||
-    projectState.project.root !== proposal.projectRoot ||
-    !projectState.project.chapters.some(
-      (chapter) => chapter.id === proposal.chapterId,
-    )
+    projectState.project.root !== proposal.projectRoot
   ) {
-    return new Set(proposal.changes.map((change) => change.id));
+    proposal.changes.forEach((change) => stale.add(change.id));
+    if (proposal.overviewChange) stale.add(proposal.overviewChange.id);
+    return stale;
   }
   switch (proposal.kind) {
+    case "overview":
+      return stale;
     case "manuscript":
-      if (projectState.activeChapterId !== proposal.chapterId) {
-        return new Set(proposal.changes.map((change) => change.id));
+      if (
+        projectState.activeChapterId !== proposal.chapterId ||
+        !projectState.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        proposal.changes.forEach((change) => stale.add(change.id));
+        return stale;
       }
-      return new Set(
-        validateManuscriptChanges(proposal, projectState.blocks).map(
-          (stale) => stale.changeId,
-        ),
+      validateManuscriptChanges(proposal, projectState.blocks).forEach(
+        (change) => stale.add(change.changeId),
       );
+      return stale;
     case "outline": {
+      if (
+        !projectState.project.chapters.some(
+          (chapter) => chapter.id === proposal.chapterId,
+        )
+      ) {
+        proposal.changes.forEach((change) => stale.add(change.id));
+        return stale;
+      }
       const chapter = getChapterOutline(
         projectState.meta.chapters,
         proposal.chapterId,
       );
-      return new Set(
-        validateOutlineChanges(proposal, chapter.cards).map(
-          (stale) => stale.changeId,
-        ),
+      validateOutlineChanges(proposal, chapter.cards).forEach(
+        (change) => stale.add(change.changeId),
       );
+      return stale;
     }
     default:
       return assertProposalKindExhausted(proposal);
@@ -201,52 +244,91 @@ export function proposalStaleChangeIds(
 export function acceptProposalChange(
   proposal: PendingProposal,
   changeId: string,
+  requestedSessionId?: AgentSessionId,
 ): void {
-  requireAgentConsoleProject(proposal.projectRoot);
-  const current = currentProposalForDecision(proposal);
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  requireAgentSessionProject(sessionId, proposal.projectRoot);
+  const current = currentProposalForDecision(proposal, sessionId);
+  if (current.overviewChange?.id === changeId) {
+    if (proposalStaleChangeIds(current).has(changeId)) return;
+    if (current.kind === "overview") {
+      useProjectStore.getState().setOverview(current.overviewChange.after);
+    } else if (!applyProposalChanges(current, [changeId])) {
+      return;
+    }
+    agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
+    recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
+    return;
+  }
   const change = current.changes.find((item) => item.id === changeId);
   if (change === undefined) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
   if (!applyProposalChanges(current, [changeId])) return;
-  useAgentConsoleStore.getState().removePendingChanges([changeId]);
+  agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
   closeExhaustedManuscriptReview(current);
-  recordProposalEvent(proposalEvent(current, "accepted", 1));
+  recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
 }
 
-export function acceptAllProposalChanges(proposal: PendingProposal): void {
-  requireAgentConsoleProject(proposal.projectRoot);
-  const current = currentProposalForDecision(proposal);
-  const changeIds = current.changes.map((change) => change.id);
-  if (!applyProposalChanges(current, changeIds)) return;
-  useAgentConsoleStore.getState().clearPendingProposal();
+export function acceptAllProposalChanges(
+  proposal: PendingProposal,
+  requestedSessionId?: AgentSessionId,
+): void {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  requireAgentSessionProject(sessionId, proposal.projectRoot);
+  const current = currentProposalForDecision(proposal, sessionId);
+  const changeIds = [
+    ...current.changes.map((change) => change.id),
+    ...(current.overviewChange ? [current.overviewChange.id] : []),
+  ];
+  if (proposalStaleChangeIds(current).size > 0) return;
+  if (current.kind !== "overview" && !applyProposalChanges(current, changeIds)) return;
+  if (current.kind === "overview") {
+    useProjectStore.getState().setOverview(current.overviewChange.after);
+  }
+  agentSessionStore(sessionId).getState().clearPendingProposal();
   closeExhaustedManuscriptReview(current);
-  recordProposalEvent(
-    proposalEvent(current, "accepted-all", changeIds.length),
+  recordSessionProposalEvent(
+    proposalEvent(
+      current,
+      "accepted-all",
+      changeIds.length,
+    ),
+    sessionId,
   );
 }
 
 export function rejectProposalChange(
   proposal: PendingProposal,
   changeId: string,
+  requestedSessionId?: AgentSessionId,
 ): void {
-  requireAgentConsoleProject(proposal.projectRoot);
-  const current = currentProposalForDecision(proposal);
-  if (!current.changes.some((change) => change.id === changeId)) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  requireAgentSessionProject(sessionId, proposal.projectRoot);
+  const current = currentProposalForDecision(proposal, sessionId);
+  if (
+    !current.changes.some((change) => change.id === changeId) &&
+    current.overviewChange?.id !== changeId
+  ) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
-  useAgentConsoleStore.getState().removePendingChanges([changeId]);
+  agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
   closeExhaustedManuscriptReview(current);
-  recordProposalEvent(proposalEvent(current, "rejected", 1));
+  recordSessionProposalEvent(proposalEvent(current, "rejected", 1), sessionId);
 }
 
-export function rejectAllProposalChanges(proposal: PendingProposal): void {
-  requireAgentConsoleProject(proposal.projectRoot);
-  const current = currentProposalForDecision(proposal);
-  const changeCount = current.changes.length;
-  useAgentConsoleStore.getState().clearPendingProposal();
+export function rejectAllProposalChanges(
+  proposal: PendingProposal,
+  requestedSessionId?: AgentSessionId,
+): void {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  requireAgentSessionProject(sessionId, proposal.projectRoot);
+  const current = currentProposalForDecision(proposal, sessionId);
+  const changeCount = current.changes.length + (current.overviewChange ? 1 : 0);
+  agentSessionStore(sessionId).getState().clearPendingProposal();
   closeExhaustedManuscriptReview(current);
-  recordProposalEvent(
+  recordSessionProposalEvent(
     proposalEvent(current, "rejected-all", changeCount),
+    sessionId,
   );
 }

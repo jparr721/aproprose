@@ -21,6 +21,7 @@ import {
   CHARACTER_COLORS,
   CharacterColorPicker,
 } from "@/components/app/character-color-picker";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 import { useProjectStore } from "@/stores/project-store";
 
 export function AddCharacterDialog({
@@ -52,7 +53,12 @@ export function AddCharacterDialog({
 
   const submit = () => {
     if (!name.trim()) return;
-    const id = addCharacter({ name: name.trim(), role: role.trim(), color });
+    const id = addCharacter({
+      name: name.trim(),
+      role: role.trim(),
+      color,
+      profile: emptyCharacterProfile(),
+    });
     setName("");
     setRole("");
     setColor(CHARACTER_COLORS[0]);

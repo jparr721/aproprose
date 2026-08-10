@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { IconMessages, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +22,10 @@ import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
-import { useViewStore } from "@/stores/view-store";
+import { AgentSection } from "@/components/app/agent-console/agent-console";
+import { ButtonGroup } from "@/components/ui/button-group";
+import { stopAgentRun } from "@/lib/ai/agent-controller";
+import { hydrateAgentOutlineSession } from "@/stores/agent-persistence";
 import type { ActKind, BeatType } from "@/lib/types";
 
 const NONE = "__none__";
@@ -36,6 +40,9 @@ const SPINE: { key: "premise" | "goal" | "conflict" | "turn"; label: string; pla
 export function ChapterSubview() {
   const chapterId = useOutlineBoardStore((s) => s.openChapterId);
   const closeChapter = useOutlineBoardStore((s) => s.closeChapter);
+  const chapterView = useOutlineBoardStore((s) => s.chapterView);
+  const openPlanner = useOutlineBoardStore((s) => s.openPlanner);
+  const showManual = useOutlineBoardStore((s) => s.showManual);
   const project = useProjectStore((s) => s.project);
   const chapterRef = useProjectStore((s) => s.project?.chapters.find((c) => c.id === chapterId));
   const ch = useProjectStore((s) => (chapterId ? getChapterOutline(s.meta.chapters, chapterId) : null));
@@ -52,8 +59,22 @@ export function ChapterSubview() {
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
-  const openOutlineAgent = useViewStore((s) => s.openOutlineAgent);
+  useEffect(() => {
+    if (
+      chapterId === null ||
+      project === null ||
+      chapterView !== "planner"
+    ) return;
+    void hydrateAgentOutlineSession(project.root, chapterId);
+  }, [chapterId, chapterView, project]);
+  useEffect(() => {
+    if (chapterId === null || chapterView !== "planner") return;
+    const sessionId = { kind: "outline" as const, chapterId };
+    return () => stopAgentRun(sessionId);
+  }, [chapterId, chapterView]);
   if (!chapterId || !ch || !chapterRef || !project) return null;
+
+  const sessionId = { kind: "outline" as const, chapterId };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -73,16 +94,40 @@ export function ChapterSubview() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <Button
-          onClick={() => openOutlineAgent(project.root, chapterId)}
-          size="sm"
-          variant="outline"
-        >
-          <IconMessages /> Plan with AI
-        </Button>
+        <ButtonGroup aria-label="Chapter planning view">
+          <Button
+            onClick={showManual}
+            size="sm"
+            variant={chapterView === "manual" ? "default" : "outline"}
+          >
+            Manual
+          </Button>
+          <Button
+            onClick={() => openPlanner(chapterId)}
+            size="sm"
+            variant={chapterView === "planner" ? "default" : "outline"}
+          >
+            <IconMessages /> Plan with AI
+          </Button>
+        </ButtonGroup>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {chapterView === "planner" ? (
+        <div className="min-h-0 flex-1">
+          <AgentSection
+            ariaLabel="Outline Planner"
+            closeLabel="Close Outline Planner"
+            contextLabel={`${project.name} / ${chapterRef.label}. ${chapterRef.title}`}
+            emptyDescription="Describe the story you want for this chapter. The planner can use the surrounding manuscript and stage plot changes for review."
+            emptyTitle="Plan this chapter"
+            onClose={showManual}
+            placeholder="Describe this chapter or request more plot points"
+            sessionId={sessionId}
+            task={{ kind: "outline-sculpt", chapterId }}
+            title="Outline Planner"
+          />
+        </div>
+      ) : <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex flex-col gap-4 p-4">
           <TypographyEyebrow>Chapter Title</TypographyEyebrow>
           <Input
@@ -200,7 +245,7 @@ export function ChapterSubview() {
             </Button>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

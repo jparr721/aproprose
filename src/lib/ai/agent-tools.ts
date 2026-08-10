@@ -16,6 +16,9 @@ import type {
 } from "@/lib/ai/agent-types";
 import type {
   BlockChange,
+  Character,
+  CharacterProfile,
+  CharacterProfileField,
   CritiqueNote,
   ContinuityFlag,
   SculptChange,
@@ -44,12 +47,23 @@ export interface AgentToolEnvironment {
   buildManuscriptProposal: (input: {
     summary: string;
     changes: BlockChange[];
+    overview?: string | null;
   }) => Extract<PendingProposal, { kind: "manuscript" }>;
   buildOutlineProposal: (input: {
     summary: string;
     changes: SculptChange[];
+    overview?: string | null;
   }) => Extract<PendingProposal, { kind: "outline" }>;
+  buildOverviewProposal: (input: {
+    summary: string;
+    overview: string;
+    reason: string;
+  }) => Extract<PendingProposal, { kind: "overview" }>;
   replacePendingProposal: (proposal: PendingProposal) => void;
+  updateCharacterProfile: (input: {
+    characterId: string;
+    profile: Partial<CharacterProfile>;
+  }) => Promise<Character>;
 }
 
 function runtimeOutput<T>(
@@ -103,10 +117,36 @@ const pendingInputSchema = z.object({ proposalId: z.string() });
 const manuscriptStageSchema = z.object({
   summary: z.string(),
   changes: z.array(manuscriptChangeSchema),
+  overview: z.string().nullable().optional(),
 });
 const outlineStageSchema = z.object({
   summary: z.string(),
   changes: z.array(outlineChangeSchema),
+  overview: z.string().nullable().optional(),
+});
+const overviewStageSchema = z.object({
+  summary: z.string(),
+  overview: z.string(),
+  reason: z.string(),
+});
+const CHARACTER_PROFILE_FIELDS: CharacterProfileField[] = [
+  "appearance",
+  "mannerisms",
+  "motivations",
+  "relationships",
+  "history",
+  "voice",
+];
+const characterProfileUpdateSchema = z.object({
+  characterId: z.string(),
+  profile: z.object({
+    appearance: z.string().nullable(),
+    mannerisms: z.string().nullable(),
+    motivations: z.string().nullable(),
+    relationships: z.string().nullable(),
+    history: z.string().nullable(),
+    voice: z.string().nullable(),
+  }),
 });
 
 export function createAgentToolHandlers(env: AgentToolEnvironment) {
@@ -210,9 +250,12 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
       return runtimeOutput(
         {
           label: "Read pending proposal",
-          target: pending.chapterId,
-          detail: countLabel(pending.changes.length, "change"),
-          itemCount: pending.changes.length,
+          target: pending.chapterId ?? "Story overview",
+          detail: countLabel(
+            pending.changes.length + (pending.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: pending.changes.length + (pending.overviewChange ? 1 : 0),
         },
         value,
       );
@@ -227,10 +270,16 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
         {
           label: "Stage manuscript proposal",
           target: proposal.chapterId,
-          detail: countLabel(proposal.changes.length, "change"),
-          itemCount: proposal.changes.length,
+          detail: countLabel(
+            proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
         },
-        { proposalId: proposal.id, changeCount: proposal.changes.length },
+        {
+          proposalId: proposal.id,
+          changeCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+        },
       );
     },
     stageOutline: async (input: z.infer<typeof outlineStageSchema>) => {
@@ -241,10 +290,69 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
         {
           label: "Stage outline proposal",
           target: proposal.chapterId,
-          detail: countLabel(proposal.changes.length, "change"),
-          itemCount: proposal.changes.length,
+          detail: countLabel(
+            proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+            "change",
+          ),
+          itemCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
         },
-        { proposalId: proposal.id, changeCount: proposal.changes.length },
+        {
+          proposalId: proposal.id,
+          changeCount: proposal.changes.length + (proposal.overviewChange ? 1 : 0),
+        },
+      );
+    },
+    stageOverview: async (input: z.infer<typeof overviewStageSchema>) => {
+      const proposal = env.buildOverviewProposal(input);
+      env.replacePendingProposal(proposal);
+      return runtimeOutput(
+        {
+          label: "Stage story overview proposal",
+          target: "Story overview",
+          detail: "1 change",
+          itemCount: 1,
+        },
+        { proposalId: proposal.id, changeCount: 1 },
+      );
+    },
+    updateCharacterProfile: async (
+      input: z.infer<typeof characterProfileUpdateSchema>,
+    ) => {
+      if (
+        env.run.task.kind !== "character-describe" ||
+        env.run.task.characterId !== input.characterId
+      ) {
+        throw new Error(
+          `Character update is outside the frozen target: ${input.characterId}`,
+        );
+      }
+      const profile: Partial<CharacterProfile> = {};
+      for (const field of CHARACTER_PROFILE_FIELDS) {
+        const value = input.profile[field];
+        if (value === null) continue;
+        const trimmed = value.trim();
+        if (trimmed.length > 0) profile[field] = trimmed;
+      }
+      const changedFieldCount = Object.keys(profile).length;
+      if (changedFieldCount === 0) {
+        throw new Error("Character profile update requires at least one field.");
+      }
+      const character = await env.updateCharacterProfile({
+        characterId: input.characterId,
+        profile,
+      });
+      return runtimeOutput(
+        {
+          label: "Update character profile",
+          target: character.name,
+          detail: countLabel(changedFieldCount, "field"),
+          itemCount: changedFieldCount,
+        },
+        {
+          characterId: character.id,
+          characterName: character.name,
+          changedFieldCount,
+        },
       );
     },
   };
@@ -306,6 +414,18 @@ export function createAgentTools(env: AgentToolEnvironment) {
         "Validate and replace the complete pending outline proposal. This never writes the outline.",
       inputSchema: outlineStageSchema,
       execute: handlers.stageOutline,
+    }),
+    stage_overview_proposal: tool({
+      description:
+        "Stage an independently reviewable replacement for the concise story overview without changing manuscript or outline cards.",
+      inputSchema: overviewStageSchema,
+      execute: handlers.stageOverview,
+    }),
+    update_character_profile: tool({
+      description:
+        "Update profile fields for the character frozen into this Describe session after the conversation yields profile-worthy detail.",
+      inputSchema: characterProfileUpdateSchema,
+      execute: handlers.updateCharacterProfile,
     }),
   };
 }

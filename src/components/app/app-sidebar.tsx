@@ -63,6 +63,8 @@ import { KEYBINDING_IDS } from "@/lib/keybindings";
 import { useLoreSheetStore } from "@/stores/lore-sheet-store";
 import { IS_MAC } from "@/lib/platform";
 import { LoreDetailSheet } from "@/components/app/lore/lore-detail-sheet";
+import { CharacterDetailSheet } from "@/components/app/character/character-detail-sheet";
+import { useCharacterSheetStore } from "@/stores/character-sheet-store";
 import { cn } from "@/lib/utils";
 
 function AddLoreDialog() {
@@ -119,11 +121,11 @@ export function AppSidebar() {
   const toggleOutline = useViewStore((s) => s.toggleOutline);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openLoreSheet = useLoreSheetStore((s) => s.open);
+  const openCharacterSheet = useCharacterSheetStore((s) => s.open);
 
-  // The Outline toggle is guarded (a dirty chapter stages the unsaved-edits
-  // dialog first). Bind the chord co-located with the action, mirroring the
-  // top bar's TOGGLE_PDF. The button below calls the same guarded toggle.
-  useKeybinding(KEYBINDING_IDS.TOGGLE_OUTLINE, () => guard(toggleOutline));
+  // Outline only changes the visible authoring surface. The editor stays mounted,
+  // so dirty chapter state does not need the destructive-navigation guard.
+  useKeybinding(KEYBINDING_IDS.TOGGLE_OUTLINE, toggleOutline);
 
   if (!project) return null;
 
@@ -210,7 +212,10 @@ export function AppSidebar() {
                   <SidebarMenu>
                     {meta.characters.map((c) => (
                       <SidebarMenuItem key={c.id}>
-                        <SidebarMenuButton className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal">
+                        <SidebarMenuButton
+                          className="h-auto min-h-8 items-start gap-2 py-1.5 text-muted-foreground whitespace-normal [&>span:last-child]:!whitespace-normal"
+                          onClick={() => openCharacterSheet(c.id)}
+                        >
                           <span className="flex h-4 shrink-0 items-center">
                             <ColorDot color={c.color} />
                           </span>
@@ -263,7 +268,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => guard(toggleOutline)}>
+            <SidebarMenuButton onClick={toggleOutline}>
               <IconLayoutList />
               <span>Outline</span>
             </SidebarMenuButton>
@@ -282,6 +287,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarFooter>
       <ProjectSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <CharacterDetailSheet />
       <LoreDetailSheet />
     </Sidebar>
   );

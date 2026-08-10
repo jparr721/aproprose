@@ -19,6 +19,7 @@ import {
   type AiOpOptions,
   type AnchoredContext,
 } from "@/lib/ai/operations";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
 
 const ctx: AnchoredContext = {
   blocks: [
@@ -157,6 +158,30 @@ describe("critique anchoring", () => {
     expect(call.prompt).toContain("SCENE BLOCKS (cite these ids in blockIds):");
     expect(call.prompt).toContain("[b1] (narration): One.");
     expect(call.abortSignal).toBe(ac.signal);
+  });
+
+  it("grounds chapter analysis on supplied character profiles", async () => {
+    vi.mocked(generateText).mockResolvedValue({ output: { notes: [] } } as never);
+    await critique(
+      {
+        ...ctx,
+        characters: [
+          {
+            name: "Mara",
+            role: "Lead",
+            profile: {
+              ...emptyCharacterProfile(),
+              voice: "Clipped questions and exact nouns.",
+            },
+          },
+        ],
+      },
+      analysisOptions(undefined),
+    );
+
+    expect(capturedGeneration<typeof critiqueResultSchema>().prompt).toContain(
+      "Voice: Clipped questions and exact nouns.",
+    );
   });
 
   it("passes the complete retained critique system contract to generateText", async () => {

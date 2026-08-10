@@ -22,6 +22,8 @@ import type {
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
 import {
+  agentSessionStore,
+  clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -107,6 +109,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  clearOutlineAgentSessions();
   mocks.copyText.mockReset();
   mocks.copyText.mockResolvedValue(true);
   mocks.toastError.mockReset();
@@ -244,6 +247,46 @@ describe("AgentMessage content", () => {
     ).toBeTruthy();
   });
 
+  it("labels character profile update activity", () => {
+    const [message] = sanitizeAgentMessages([
+      assistantMessage(
+        "assistant-character-update",
+        [
+          {
+            type: "tool-update_character_profile",
+            toolCallId: "call-character-update",
+            state: "output-available",
+            input: {
+              characterId: "c1",
+              profile: {
+                appearance: null,
+                mannerisms: "Counts every door.",
+                motivations: null,
+                relationships: null,
+                history: null,
+                voice: null,
+              },
+            },
+            output: {
+              kind: "summary",
+              summary: {
+                label: "Update character profile",
+                target: "Mara",
+                detail: "1 field",
+                itemCount: 1,
+              },
+            },
+          },
+        ],
+        metadata({ task: { kind: "character-describe", characterId: "c1" } }),
+      ),
+    ]);
+    renderAgentMessage(message);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tool activity" }));
+    expect(screen.getByText("Update character profile")).toBeTruthy();
+  });
+
   it("renders finding cards whose actions add stable finding context without submitting", async () => {
     const message = assistantMessage(
       "assistant-findings",
@@ -309,6 +352,61 @@ describe("AgentMessage content", () => {
     );
     expect(useAgentConsoleStore.getState().messages).toEqual([message]);
     expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+  });
+
+  it("adds a finding to the planner session that rendered the message", async () => {
+    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
+    const message = assistantMessage(
+      "planner-findings",
+      [
+        {
+          type: "data-findings",
+          data: {
+            kind: "critique",
+            chapterId: "ch2",
+            items: [
+              {
+                kind: "watch",
+                tag: "Pacing",
+                text: "The turn arrives before the setup lands.",
+                blockIds: [],
+              },
+            ],
+          },
+        },
+      ],
+      metadata({}),
+    );
+    const outlineStore = agentSessionStore(sessionId);
+    outlineStore.setState({
+      ...EMPTY_AGENT_STATE,
+      messages: [message],
+      requestedProjectRoot: "/book",
+      activeProjectRoot: "/book",
+      hydratedProjectRoot: "/book",
+    });
+    render(
+      <AgentMessage
+        message={message}
+        onNavigateSnapshot={vi.fn().mockResolvedValue(true)}
+        onRetry={vi.fn().mockResolvedValue({ status: "success" })}
+        onOpenSettings={vi.fn()}
+        sessionId={sessionId}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to Chat" }));
+
+    await waitFor(() =>
+      expect(outlineStore.getState().draftContextRefs).toEqual([
+        {
+          kind: "finding",
+          chapterId: "ch2",
+          findingId: "planner-findings:0",
+        },
+      ]),
+    );
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([]);
   });
 
   it("disables Add to Chat while same-project persistence is transitioning", () => {

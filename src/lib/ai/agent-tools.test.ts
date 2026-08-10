@@ -11,6 +11,8 @@ import type {
   ManuscriptPendingProposal,
   OutlinePendingProposal,
 } from "@/lib/ai/agent-types";
+import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
+import type { Character } from "@/lib/types";
 
 const run: AgentRun = {
   id: "run-1",
@@ -113,7 +115,15 @@ function environment(): AgentToolEnvironment {
     getPendingProposal: vi.fn().mockReturnValue(null),
     buildManuscriptProposal: vi.fn().mockReturnValue(pending),
     buildOutlineProposal: vi.fn().mockReturnValue(pendingOutline),
+    buildOverviewProposal: vi.fn(),
     replacePendingProposal: vi.fn(),
+    updateCharacterProfile: vi.fn().mockResolvedValue({
+      id: "c1",
+      name: "Mara",
+      color: "#123456",
+      role: "Courier",
+      profile: emptyCharacterProfile(),
+    } satisfies Character),
   };
 }
 
@@ -129,7 +139,174 @@ describe("createAgentTools", () => {
       "run_critique",
       "stage_manuscript_proposal",
       "stage_outline_proposal",
+      "stage_overview_proposal",
+      "update_character_profile",
     ]);
+  });
+});
+
+describe("character profile tool", () => {
+  const characterRun: AgentRun = {
+    ...run,
+    task: { kind: "character-describe", characterId: "c1" },
+  };
+
+  function characterEnvironment(): AgentToolEnvironment {
+    return { ...environment(), run: characterRun };
+  }
+
+  it("updates only the character frozen into the environment", async () => {
+    const env = characterEnvironment();
+    const handlers = createAgentToolHandlers(env);
+
+    const output = await handlers.updateCharacterProfile({
+      characterId: "c1",
+      profile: {
+        appearance: null,
+        mannerisms: "Counts every door.",
+        motivations: null,
+        relationships: null,
+        history: null,
+        voice: null,
+      },
+    });
+
+    expect(env.updateCharacterProfile).toHaveBeenCalledWith({
+      characterId: "c1",
+      profile: { mannerisms: "Counts every door." },
+    });
+    expect(agentToolOutputSummary(output)).toEqual({
+      label: "Update character profile",
+      target: "Mara",
+      detail: "1 field",
+      itemCount: 1,
+    });
+  });
+
+  it("rejects a character outside the frozen task", async () => {
+    const env = characterEnvironment();
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.updateCharacterProfile({
+        characterId: "c2",
+        profile: {
+          appearance: "Silver coat.",
+          mannerisms: null,
+          motivations: null,
+          relationships: null,
+          history: null,
+          voice: null,
+        },
+      }),
+    ).rejects.toThrow("Character update is outside the frozen target: c2");
+    expect(env.updateCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a profile patch with no changed fields", async () => {
+    const env = characterEnvironment();
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.updateCharacterProfile({
+        characterId: "c1",
+        profile: {
+          appearance: null,
+          mannerisms: null,
+          motivations: null,
+          relationships: null,
+          history: null,
+          voice: null,
+        },
+      }),
+    ).rejects.toThrow("Character profile update requires at least one field");
+    expect(env.updateCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a profile patch whose strings are all blank", async () => {
+    const env = characterEnvironment();
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.updateCharacterProfile({
+        characterId: "c1",
+        profile: {
+          appearance: " ",
+          mannerisms: "\t",
+          motivations: "\n",
+          relationships: "  ",
+          history: "\t ",
+          voice: " ",
+        },
+      }),
+    ).rejects.toThrow("Character profile update requires at least one field");
+    expect(env.updateCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it("drops blank fields from a mixed patch and preserves existing prose", async () => {
+    const env = characterEnvironment();
+    let liveProfile = {
+      ...emptyCharacterProfile(),
+      appearance: "Silver braid.",
+      voice: "Precise and spare.",
+    };
+    vi.mocked(env.updateCharacterProfile).mockImplementation(
+      async ({ characterId, profile }) => {
+        liveProfile = { ...liveProfile, ...profile };
+        return {
+          id: characterId,
+          name: "Mara",
+          color: "#123456",
+          role: "Courier",
+          profile: liveProfile,
+        };
+      },
+    );
+    const handlers = createAgentToolHandlers(env);
+
+    await handlers.updateCharacterProfile({
+      characterId: "c1",
+      profile: {
+        appearance: "   ",
+        mannerisms: "  Counts every door.  ",
+        motivations: null,
+        relationships: null,
+        history: null,
+        voice: "",
+      },
+    });
+
+    expect(env.updateCharacterProfile).toHaveBeenCalledWith({
+      characterId: "c1",
+      profile: { mannerisms: "Counts every door." },
+    });
+    expect(liveProfile).toMatchObject({
+      appearance: "Silver braid.",
+      mannerisms: "Counts every door.",
+      voice: "Precise and spare.",
+    });
+  });
+
+  it("propagates profile persistence failures", async () => {
+    const env = characterEnvironment();
+    vi.mocked(env.updateCharacterProfile).mockRejectedValue(
+      new Error("profile persistence failed"),
+    );
+    const handlers = createAgentToolHandlers(env);
+
+    await expect(
+      handlers.updateCharacterProfile({
+        characterId: "c1",
+        profile: {
+          appearance: null,
+          mannerisms: "Counts every door.",
+          motivations: null,
+          relationships: null,
+          history: null,
+          voice: null,
+        },
+      }),
+    ).rejects.toThrow("profile persistence failed");
   });
 });
 

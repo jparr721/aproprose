@@ -47,14 +47,17 @@ import {
 import { copyText } from "@/lib/clipboard";
 import type {
   AgentFailure,
+  AgentSessionId,
   AgentSettingsTarget,
   AgentMessageMetadata,
   AgentUIMessage,
   ContextSnapshot,
 } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
   agentConsoleOwnershipStatus,
-  useAgentConsoleStore,
+  agentSessionStore,
+  useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
@@ -67,6 +70,7 @@ export interface AgentMessageProps {
     failure?: AgentFailure;
   }>;
   onOpenSettings: (target: AgentSettingsTarget) => void;
+  sessionId?: AgentSessionId;
 }
 
 type AgentMessagePart = AgentUIMessage["parts"][number];
@@ -92,6 +96,8 @@ function toolTitle(type: string): string {
       return "Stage manuscript proposal";
     case "tool-stage_outline_proposal":
       return "Stage outline proposal";
+    case "tool-update_character_profile":
+      return "Update character profile";
     default:
       throw new Error(`Unknown agent tool part: ${type}`);
   }
@@ -199,9 +205,11 @@ function ToolActivity({
 function Findings({
   entries,
   disabled,
+  sessionId,
 }: {
   entries: FlattenedMessageFinding[];
   disabled: boolean;
+  sessionId: AgentSessionId;
 }) {
   return entries.map((entry) => {
     const finding = entry.finding;
@@ -218,16 +226,19 @@ function Findings({
             <Button
               disabled={disabled}
               onClick={() => {
-                void dispatchAgentIntent({
-                  kind: "add-context",
-                  refs: [
-                    {
-                      kind: "finding",
-                      chapterId: entry.chapterId,
-                      findingId: entry.id,
-                    },
-                  ],
-                });
+                void dispatchAgentIntent(
+                  {
+                    kind: "add-context",
+                    refs: [
+                      {
+                        kind: "finding",
+                        chapterId: entry.chapterId,
+                        findingId: entry.id,
+                      },
+                    ],
+                  },
+                  sessionId,
+                );
               }}
               size="sm"
               type="button"
@@ -252,6 +263,7 @@ function renderPart(
   messageMetadata: AgentMessageMetadata,
   findings: FlattenedMessageFinding[],
   authorMutationsDisabled: boolean,
+  sessionId: AgentSessionId,
   onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>,
 ): ReactNode {
   const key = `${message.id}:part:${index}`;
@@ -282,6 +294,7 @@ function renderPart(
           disabled={authorMutationsDisabled}
           entries={findings.filter((entry) => entry.partIndex === index)}
           key={key}
+          sessionId={sessionId}
         />
       );
     case "data-proposal-event":
@@ -299,14 +312,13 @@ function renderPart(
   }
 }
 
-function retryUserMessageId(message: AgentUIMessage): string {
+function retryUserMessageId(message: AgentUIMessage, sessionId: AgentSessionId): string {
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     throw new Error(`Agent message metadata is missing: ${message.id}`);
   }
   if (messageMetadata.retryOf !== null) return messageMetadata.retryOf;
-  const original = useAgentConsoleStore
-    .getState()
+  const original = agentSessionStore(sessionId).getState()
     .messages.find((candidate) => {
       if (candidate.role !== "user" || candidate.metadata === undefined) {
         return false;
@@ -324,11 +336,13 @@ export function AgentMessage({
   onNavigateSnapshot,
   onRetry,
   onOpenSettings,
+  sessionId: requestedSessionId,
 }: AgentMessageProps) {
+  const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
-  const authorMutationsDisabled = useAgentConsoleStore(
+  const authorMutationsDisabled = useAgentSessionStore(sessionId,
     (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
   const [retryFailure, setRetryFailure] = useState<AgentFailure | null>(null);
@@ -363,7 +377,7 @@ export function AgentMessage({
     .join("\n\n");
   const retry = (): void => {
     setRetryFailure(null);
-    void onRetry(retryUserMessageId(message))
+    void onRetry(retryUserMessageId(message, sessionId))
       .then((outcome) => {
         if (outcome.status === "failure") setRetryFailure(outcome.failure ?? null);
       })
@@ -403,6 +417,7 @@ export function AgentMessage({
               messageMetadata,
               findings,
               authorMutationsDisabled,
+              sessionId,
               onNavigateSnapshot,
             )
           ),

@@ -6,20 +6,25 @@
 // up to CURRENT_VERSION. Input is unknown — the schema is the type gate.
 
 import { metaBlobSchema, type MetaBlob } from "@/lib/migration/schema";
+import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type { ProjectMeta } from "@/lib/types";
 import { migrateV1 } from "@/lib/migration/v1/migrate";
 import { migrateV2 } from "@/lib/migration/v2/migrate";
 import { migrateV3 } from "@/lib/migration/v3/migrate";
+import { migrateV4 } from "@/lib/migration/v4/migrate";
+import { migrateV5 } from "@/lib/migration/v5/migrate";
 
 /** Bump whenever a migration is added. */
-export const CURRENT_VERSION = 3;
+export const CURRENT_VERSION = 5;
 
-type Migration = (meta: MetaBlob) => ProjectMeta;
+type Migration = (meta: MetaBlob) => MetaBlob | ProjectMeta;
 
 const migrations: Record<number, Migration> = {
   1: migrateV1,
   2: migrateV2,
   3: migrateV3,
+  4: migrateV4,
+  5: migrateV5,
 };
 
 export const EMPTY_META: ProjectMeta = {
@@ -27,20 +32,21 @@ export const EMPTY_META: ProjectMeta = {
   characters: [],
   lore: [],
   statuses: {},
-  outline: { premise: "" },
+  outline: { premise: "", overview: "" },
   chapters: {},
+  knowledge: emptyProjectKnowledge(),
 };
 
 export function runMigrations(raw: unknown): ProjectMeta {
   if (raw == null) return EMPTY_META;
   const result = metaBlobSchema.safeParse(raw);
   if (!result.success) return EMPTY_META;
-  let meta: ProjectMeta = result.data as unknown as ProjectMeta;
+  let meta: MetaBlob | ProjectMeta = result.data;
   const version = meta.version;
   for (let v = version + 1; v <= CURRENT_VERSION; v++) {
     const fn = migrations[v];
     if (!fn) continue;
-    meta = fn(meta as unknown as MetaBlob);
+    meta = fn(meta as MetaBlob);
   }
-  return meta;
+  return meta as ProjectMeta;
 }

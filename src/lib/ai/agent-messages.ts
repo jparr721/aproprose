@@ -42,6 +42,10 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
     analysis: z.enum(["critique", "continuity"]),
   }),
   z.object({ kind: z.literal("outline-sculpt"), chapterId: z.string() }),
+  z.object({
+    kind: z.literal("character-describe"),
+    characterId: z.string().min(1),
+  }),
   z.object({ kind: z.literal("proposal-follow-up"), proposalId: z.string() }),
 ]);
 
@@ -183,6 +187,16 @@ const agentToolDescriptors: Record<AgentToolName, AgentToolDescriptor> = {
     targetFallback: "Outline proposal",
     itemName: "change",
   },
+  stage_overview_proposal: {
+    title: "Stage story overview proposal",
+    targetFallback: "Story overview",
+    itemName: "change",
+  },
+  update_character_profile: {
+    title: "Update character profile",
+    targetFallback: "Character",
+    itemName: "field",
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -268,6 +282,21 @@ function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "update_character_profile":
+      return {
+        characterId: safeTarget(
+          inputValue(input, "characterId"),
+          descriptor.targetFallback,
+        ),
+        profile: {
+          appearance: null,
+          mannerisms: null,
+          motivations: null,
+          relationships: null,
+          history: null,
+          voice: null,
+        },
+      };
   }
 }
 
@@ -292,6 +321,18 @@ function genericFailedToolInput(name: AgentToolName): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "update_character_profile":
+      return {
+        characterId: descriptor.targetFallback,
+        profile: {
+          appearance: null,
+          mannerisms: null,
+          motivations: null,
+          relationships: null,
+          history: null,
+          voice: null,
+        },
+      };
   }
 }
 
@@ -503,7 +544,8 @@ export function settleAgentMessages(
           part.type !== "tool-read_conversation_context" &&
           part.type !== "tool-read_pending_proposal" &&
           part.type !== "tool-stage_manuscript_proposal" &&
-          part.type !== "tool-stage_outline_proposal"
+          part.type !== "tool-stage_outline_proposal" &&
+          part.type !== "tool-update_character_profile"
         ) {
           throw new Error("Unknown agent message part cannot be persisted.");
         }

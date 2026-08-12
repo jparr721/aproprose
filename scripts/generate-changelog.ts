@@ -55,7 +55,7 @@ export function parseEntry(stdout: string): DraftEntry {
     throw new Error(`Pi did not return valid JSON. Got:\n${stdout}`);
   }
   if (typeof parsed !== "object" || parsed === null) {
-    throw new Error(`Expected a JSON object from Codex, got: ${text}`);
+    throw new Error(`Expected a JSON object from Pi, got: ${text}`);
   }
   const obj = parsed as Record<string, unknown>;
   const summary = obj.summary;

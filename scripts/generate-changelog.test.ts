@@ -47,8 +47,8 @@ describe("generate-changelog", () => {
     expect(() => parseEntry('{"summary":"X","highlights":["",""]}')).toThrow(/highlights/);
   });
 
-  it("parseEntry throws when the JSON is not an object", () => {
-    expect(() => parseEntry('"just a string"')).toThrow(/JSON object/);
+  it("parseEntry identifies Pi when the JSON is not an object", () => {
+    expect(() => parseEntry('"just a string"')).toThrow(/JSON object from Pi/);
     expect(() => parseEntry("null")).toThrow(/JSON object/);
   });
 

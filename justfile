@@ -78,9 +78,9 @@ _release VERSION MODE:
     # cheap, deterministic check fails before the expensive AI changelog step writes anything.
     echo "==> version"
     bun run scripts/set-version.ts "$ver"
-    # Generate the user-facing changelog entry with Codex. Interactive mode reviews
-    # it in $EDITOR; auto mode (--yes) accepts the AI draft verbatim. Aborts if Codex is
-    # missing/errors or the entry is invalid.
+    # Generate the user-facing changelog entry with Pi. Interactive mode reviews it in
+    # $EDITOR; auto mode (--yes) accepts the AI draft verbatim. Aborts if Pi is missing,
+    # fails, or the entry is invalid.
     echo "==> changelog"
     if [ "$mode" = "auto" ]; then
         bun run scripts/generate-changelog.ts "$ver" "$(date +%F)" --yes

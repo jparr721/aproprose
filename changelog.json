@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.15.0",
+    "date": "2026-08-12",
+    "summary": "Aproprose adds a more capable AI workspace, story intelligence, and full-document PDF search.",
+    "highlights": [
+      "Use the right-side AI console to chat with your manuscript and review or edit proposed changes directly in the editor before accepting them.",
+      "Plan individual chapters with the guided AI Outline Planner and review its staged plot changes.",
+      "Create richer character profiles manually or through the new AI Describe assistant, which also improves AI character context.",
+      "BUF FIX: Story knowledge now refreshes after saves with visible progress and candidate details.",
+      "Search compiled PDFs with Cmd/Ctrl+F, match case and whole-word options, and highlighted results across the full document.",
+      "Choose OpenRouter as an AI provider alongside OpenAI.",
+      "BUG FIX: Dragging blocks preserves their size, and the delete shortcut removes the selected block."
+    ]
+  },
+  {
     "version": "0.14.0",
     "date": "2026-07-17",
     "summary": "Muse can now focus revisions on selected blocks or the whole chapter.",

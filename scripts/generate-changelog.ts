@@ -23,11 +23,12 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export function buildPrompt(commitSubjects: string[], diff: string): string {
+export function buildPrompt(commitSubjects: string[], diffPath: string): string {
   const commits = commitSubjects.map((s) => `- ${s}`).join("\n");
   return [
     "You are writing a changelog entry for aproprose, a desktop writing app, for its users (writers, not developers).",
-    "Summarize ONLY user-facing changes from the commits and diff below. Ignore refactors, chores, tests, CI, dependency bumps, and internal tooling.",
+    "Summarize ONLY user-facing changes from the commits below and the full diff at the path below. Ignore refactors, chores, tests, CI, dependency bumps, and internal tooling.",
+    "The diff is too large to include here. Use your read or bash tools to inspect it selectively; do not print the entire file and do not change any files.",
     "Respond with ONLY a JSON object, no prose and no code fences, in exactly this shape:",
     '{"summary": "one short sentence headline", "highlights": ["user-facing change", "another user-facing change"]}',
     "Use plain ASCII punctuation only: no em dashes, no smart quotes, no ellipses.",
@@ -36,8 +37,8 @@ export function buildPrompt(commitSubjects: string[], diff: string): string {
     "Commits:",
     commits,
     "",
-    "Diff:",
-    diff,
+    "Full diff path:",
+    diffPath,
   ].join("\n");
 }
 
@@ -181,14 +182,19 @@ function main(): void {
   const existing = JSON.parse(readFileSync(changelogPath, "utf8")) as ChangelogEntry[];
 
   const lastTag = gitLastTag();
-  const prompt = buildPrompt(
-    collectCommits(commitRange(lastTag)),
-    collectDiff(diffRange(lastTag)),
-  );
-  const draft = parseEntry(runPi(prompt));
-  // --yes accepts the AI draft verbatim (non-interactive release); otherwise the
-  // author reviews/edits it in $EDITOR before it is written.
-  const reviewed = autoAccept ? draft : reviewInEditor(draft);
+  const diffDir = mkdtempSync(join(tmpdir(), "changelog-diff-"));
+  let reviewed: DraftEntry;
+  try {
+    const diffPath = join(diffDir, "changes.diff");
+    writeFileSync(diffPath, collectDiff(diffRange(lastTag)));
+    const prompt = buildPrompt(collectCommits(commitRange(lastTag)), diffPath);
+    const draft = parseEntry(runPi(prompt));
+    // --yes accepts the AI draft verbatim (non-interactive release); otherwise the
+    // author reviews/edits it in $EDITOR before it is written.
+    reviewed = autoAccept ? draft : reviewInEditor(draft);
+  } finally {
+    rmSync(diffDir, { recursive: true, force: true });
+  }
 
   const entry: ChangelogEntry = {
     version,

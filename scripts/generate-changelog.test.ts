@@ -11,11 +11,14 @@ import {
 } from "./generate-changelog";
 
 describe("generate-changelog", () => {
-  it("buildPrompt includes commits, diff, and the JSON shape", () => {
-    const p = buildPrompt(["feat: add X", "chore: bump dep"], "diff --git a b");
+  it("buildPrompt directs Pi to inspect the diff file instead of embedding it", () => {
+    const diffPath = "/tmp/changelog-diff/changes.diff";
+    const p = buildPrompt(["feat: add X", "chore: bump dep"], diffPath);
     expect(p).toContain("feat: add X");
     expect(p).toContain("- feat: add X");
-    expect(p).toContain("diff --git a b");
+    expect(p).toContain(diffPath);
+    expect(p).toContain("inspect it selectively");
+    expect(p).not.toContain("diff --git");
     expect(p).toContain('"summary"');
     expect(p).toContain('"highlights"');
   });

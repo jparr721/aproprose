@@ -6,7 +6,7 @@ import {
   stripCodeFences,
   commitRange,
   diffRange,
-  codexArgs,
+  piArgs,
   type ChangelogEntry,
 } from "./generate-changelog";
 
@@ -83,8 +83,8 @@ describe("generate-changelog", () => {
     expect(diffRange("v0.3.0")).toBe("v0.3.0..HEAD");
   });
 
-  it("codexArgs runs Codex directly without a model or default overrides", () => {
-    expect(codexArgs()).toEqual(["exec", "-"]);
+  it("piArgs runs Pi in print mode without model overrides", () => {
+    expect(piArgs()).toEqual(["-p"]);
   });
 
   it("prependEntry puts the new entry first", () => {

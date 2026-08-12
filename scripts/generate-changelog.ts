@@ -52,7 +52,7 @@ export function parseEntry(stdout: string): DraftEntry {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`Codex did not return valid JSON. Got:\n${stdout}`);
+    throw new Error(`Pi did not return valid JSON. Got:\n${stdout}`);
   }
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error(`Expected a JSON object from Codex, got: ${text}`);
@@ -120,20 +120,20 @@ function collectDiff(range: string): string {
   });
 }
 
-export function codexArgs(): string[] {
-  return ["exec", "-"];
+export function piArgs(): string[] {
+  return ["-p"];
 }
 
-function runCodex(prompt: string): string {
+function runPi(prompt: string): string {
   try {
-    return execFileSync("codex", codexArgs(), {
+    return execFileSync("pi", piArgs(), {
       encoding: "utf8",
       input: prompt,
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (e) {
     throw new Error(
-      `Failed to run "codex exec -" (is Codex installed and authenticated?): ${String(e)}`,
+      `Failed to run "pi -p" (is Pi installed and authenticated?): ${String(e)}`,
     );
   }
 }
@@ -185,7 +185,7 @@ function main(): void {
     collectCommits(commitRange(lastTag)),
     collectDiff(diffRange(lastTag)),
   );
-  const draft = parseEntry(runCodex(prompt));
+  const draft = parseEntry(runPi(prompt));
   // --yes accepts the AI draft verbatim (non-interactive release); otherwise the
   // author reviews/edits it in $EDITOR before it is written.
   const reviewed = autoAccept ? draft : reviewInEditor(draft);

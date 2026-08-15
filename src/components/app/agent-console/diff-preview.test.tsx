@@ -12,6 +12,7 @@ describe("AgentDiffPreview", () => {
       <AgentDiffPreview
         before="The harbor slept."
         after="The harbor shone."
+        className={undefined}
       />,
     );
 
@@ -23,5 +24,19 @@ describe("AgentDiffPreview", () => {
     expect(deletion.tagName).toBe("DEL");
     expect(deletion.className).toContain("bg-destructive/10");
     expect(deletion.className).toContain("text-destructive");
+  });
+
+  it("drops the prose flow margin so a card's gap owns the spacing", () => {
+    render(
+      <AgentDiffPreview
+        before="The harbor slept."
+        after="The harbor shone."
+        className={undefined}
+      />,
+    );
+
+    const paragraph = screen.getByText("shone.").closest("p");
+    expect(paragraph?.className).toContain("[&:not(:first-child)]:mt-0");
+    expect(paragraph?.className).not.toContain("[&:not(:first-child)]:mt-6");
   });
 });

@@ -24,6 +24,14 @@ export interface ManuscriptReviewSurfaceProps {
   proposal: ManuscriptPendingProposal;
 }
 
+/** The one row being edited and its uncommitted text. Keeping the draft out of
+ *  the store is what makes Save and Discard mean something: the staged proposal
+ *  only moves on Save. */
+interface ProposalEdit {
+  changeId: string;
+  text: string;
+}
+
 function decisionChangeId(row: ManuscriptReviewRow): string | null {
   switch (row.kind) {
     case "rewrite":
@@ -38,9 +46,10 @@ function decisionChangeId(row: ManuscriptReviewRow): string | null {
   }
 }
 
-function reviewRowClass(row: ManuscriptReviewRow): string {
+function reviewRowClass(row: ManuscriptReviewRow, editing: boolean): string {
   const changed =
     "scroll-mt-24 rounded-r-lg border-l-2 px-4 py-3 data-[active-review-change=true]:ring-1 data-[active-review-change=true]:ring-ring/30";
+  if (editing) return cn(changed, "border-accent-ink bg-accent-ink/15");
   switch (row.kind) {
     case "unchanged":
       return "py-1.5";
@@ -112,12 +121,12 @@ function ActiveManuscriptReviewSurface({
   const [activeChangeId, setActiveChangeId] = useState<string | null>(
     projection.navigationChangeIds[0] ?? null,
   );
-  const [editingRewriteId, setEditingRewriteId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<ProposalEdit | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setActiveChangeId(projection.navigationChangeIds[0] ?? null);
-    setEditingRewriteId(null);
+    setEdit(null);
   }, [proposal.id]);
 
   useEffect(() => {
@@ -155,6 +164,18 @@ function ActiveManuscriptReviewSurface({
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  const saveEdit = (): void => {
+    if (edit === null) {
+      throw new Error("Cannot save a manuscript proposal edit that is not open.");
+    }
+    updatePendingManuscriptText({
+      proposalId: proposal.id,
+      changeId: edit.changeId,
+      newText: edit.text,
+    });
+    setEdit(null);
+  };
+
   return (
     <div ref={surfaceRef}>
       <ManuscriptReviewHeader
@@ -182,6 +203,8 @@ function ActiveManuscriptReviewSurface({
       <div className="flex flex-col gap-3">
         {projection.rows.map((row) => {
           const changeId = decisionChangeId(row);
+          const draft =
+            edit !== null && edit.changeId === changeId ? edit.text : null;
           return (
             <div
               data-active-review-change={
@@ -192,36 +215,33 @@ function ActiveManuscriptReviewSurface({
               }
               data-agent-decision-change-id={changeId ?? undefined}
               data-review-row-kind={row.kind}
-              className={reviewRowClass(row)}
+              className={reviewRowClass(row, draft !== null)}
               key={`${proposal.id}:${row.key}`}
             >
               <ManuscriptReviewChange
                 characters={characters}
                 disabled={decisionsDisabled}
-                editingRewrite={
-                  row.kind === "rewrite" && editingRewriteId === row.changeId
-                }
+                draft={draft}
                 onAccept={(changeId) =>
                   acceptProposalChange(
                     requireCurrentProposal(proposal.id),
                     changeId,
                   )
                 }
-                onBeginRewriteEdit={setEditingRewriteId}
-                onEndRewriteEdit={() => setEditingRewriteId(null)}
+                onBeginEdit={(changeId, text) => setEdit({ changeId, text })}
+                onDiscardEdit={() => setEdit(null)}
+                onDraftChange={(text) =>
+                  setEdit((current) =>
+                    current === null ? null : { ...current, text },
+                  )
+                }
                 onReject={(changeId) =>
                   rejectProposalChange(
                     requireCurrentProposal(proposal.id),
                     changeId,
                   )
                 }
-                onTextChange={(changeId, newText) =>
-                  updatePendingManuscriptText({
-                    proposalId: proposal.id,
-                    changeId,
-                    newText,
-                  })
-                }
+                onSaveEdit={saveEdit}
                 row={row}
               />
             </div>

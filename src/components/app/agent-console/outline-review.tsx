@@ -113,6 +113,7 @@ function OutlinePreview(props: {
       <AgentDiffPreview
         after={`${nextTitle}\n${nextIntention}`}
         before={source.mutableText}
+        className={undefined}
       />
     );
   }

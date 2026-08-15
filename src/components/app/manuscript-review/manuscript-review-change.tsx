@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Check as IconCheck, Pencil as IconEdit, X as IconX } from "lucide-react";
 import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
@@ -22,7 +23,7 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import type { ManuscriptReviewRow } from "@/lib/ai/manuscript-review-projection";
-import type { Block, Character, DialogueSegment } from "@/lib/types";
+import type { Character, DialogueSegment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const COMPACT_PARAGRAPH = "[&:not(:first-child)]:mt-0";
@@ -31,10 +32,13 @@ export interface ManuscriptReviewChangeProps {
   row: ManuscriptReviewRow;
   characters: Character[];
   disabled: boolean;
-  editingRewrite: boolean;
-  onBeginRewriteEdit: (changeId: string) => void;
-  onEndRewriteEdit: () => void;
-  onTextChange: (changeId: string, value: string) => void;
+  /** The in-progress edit for this row, or `null` when it is not being edited.
+   *  The draft stays local until Save, so Discard is a real undo. */
+  draft: string | null;
+  onBeginEdit: (changeId: string, text: string) => void;
+  onDraftChange: (value: string) => void;
+  onSaveEdit: () => void;
+  onDiscardEdit: () => void;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
 }
@@ -171,37 +175,89 @@ function DecisionControls({
   );
 }
 
-function ProposalTextarea({
-  ariaLabel,
-  changeId,
-  className,
+function EditControls({
   disabled,
-  autoFocus,
-  onBlur,
-  sizingSuffix,
-  value,
-  onTextChange,
+  onSaveEdit,
+  onDiscardEdit,
 }: {
-  ariaLabel: string;
-  changeId: string;
-  className: string | undefined;
   disabled: boolean;
-  autoFocus: boolean;
-  onBlur: (() => void) | undefined;
-  sizingSuffix: string | undefined;
-  value: string;
-  onTextChange: (changeId: string, value: string) => void;
+  onSaveEdit: () => void;
+  onDiscardEdit: () => void;
 }) {
   return (
-    <div data-capture-keyboard onBlur={onBlur}>
+    <div className="flex items-center justify-end gap-2">
+      <Button disabled={disabled} onClick={onSaveEdit} size="sm">
+        <IconCheck data-icon="inline-start" />
+        Save
+      </Button>
+      <Button
+        disabled={disabled}
+        onClick={onDiscardEdit}
+        size="sm"
+        variant="outline"
+      >
+        <IconX data-icon="inline-start" />
+        Discard
+      </Button>
+    </div>
+  );
+}
+
+/** The well that makes edit mode read as a field rather than as prose. It
+ *  borrows the Input primitive's border and focus ring because the textarea
+ *  inside it is chromeless. Callers supply the textarea (and any block-type
+ *  decoration). */
+function EditSurface({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <TypographyEyebrow>Editing</TypographyEyebrow>
+      <div className="rounded-md border border-input bg-background px-3 py-2 transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ProposalTextarea({
+  ariaLabel,
+  className,
+  disabled,
+  draft,
+  sizingSuffix,
+  onDraftChange,
+  onSaveEdit,
+  onDiscardEdit,
+}: {
+  ariaLabel: string;
+  className: string | undefined;
+  disabled: boolean;
+  draft: string;
+  sizingSuffix: string | undefined;
+  onDraftChange: (value: string) => void;
+  onSaveEdit: () => void;
+  onDiscardEdit: () => void;
+}) {
+  return (
+    <div data-capture-keyboard>
       <AutoGrowTextarea
         ariaLabel={ariaLabel}
-        autoFocus={autoFocus}
+        autoFocus
         className={className}
         disabled={disabled}
-        onChange={(nextValue) => onTextChange(changeId, nextValue)}
+        onChange={onDraftChange}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onDiscardEdit();
+            return;
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            onSaveEdit();
+          }
+        }}
         sizingSuffix={sizingSuffix}
-        value={value}
+        value={draft}
       />
     </div>
   );
@@ -266,33 +322,21 @@ function DialogueTail({
   );
 }
 
-function InsertBody({
+function InsertPreview({
   row,
   characters,
-  disabled,
-  onTextChange,
 }: {
   row: Extract<ManuscriptReviewRow, { kind: "insert" }>;
   characters: Character[];
-  disabled: boolean;
-  onTextChange: (changeId: string, value: string) => void;
 }) {
   const change = row.change.change;
   const value = requiredText(change.newText, row.changeId);
   switch (change.type) {
     case "narration":
       return (
-        <ProposalTextarea
-          ariaLabel="Edit proposed insert"
-          autoFocus={false}
-          changeId={row.changeId}
-          className={PROSE}
-          disabled={disabled}
-          onTextChange={onTextChange}
-          onBlur={undefined}
-          sizingSuffix={undefined}
-          value={value}
-        />
+        <TypographyP className={cn(PROSE, COMPACT_PARAGRAPH)}>
+          {renderInline(value)}
+        </TypographyP>
       );
     case "dialogue":
       return (
@@ -301,22 +345,86 @@ function InsertBody({
             characters={characters}
             displayName={change.speaker}
           />
-          <div className={cn(PROSE, DIALOGUE_INDENT)}>
+          <TypographyP
+            className={cn(PROSE, DIALOGUE_INDENT, COMPACT_PARAGRAPH)}
+          >
             <span aria-hidden className={DIALOGUE_QUOTE}>
               {'"'}
             </span>
-            <ProposalTextarea
-              ariaLabel="Edit proposed insert"
-              autoFocus={false}
-              changeId={row.changeId}
-              className={undefined}
-              disabled={disabled}
-              onTextChange={onTextChange}
-              onBlur={undefined}
-              sizingSuffix={'"'}
-              value={value}
-            />
-          </div>
+            {renderInline(value)}
+            <span className="text-faint">{'"'}</span>
+          </TypographyP>
+          <DialogueTail
+            changeId={row.changeId}
+            segments={change.segments ?? []}
+          />
+        </div>
+      );
+    case null:
+      throw new Error(`Insert change ${row.changeId} requires a block type.`);
+    default:
+      return assertNever(change.type);
+  }
+}
+
+function InsertEditor({
+  row,
+  characters,
+  disabled,
+  draft,
+  onDraftChange,
+  onSaveEdit,
+  onDiscardEdit,
+}: {
+  row: Extract<ManuscriptReviewRow, { kind: "insert" }>;
+  characters: Character[];
+  disabled: boolean;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSaveEdit: () => void;
+  onDiscardEdit: () => void;
+}) {
+  const change = row.change.change;
+  switch (change.type) {
+    case "narration":
+      return (
+        <EditSurface>
+          <ProposalTextarea
+            ariaLabel="Edit proposed insert"
+            className={PROSE}
+            disabled={disabled}
+            draft={draft}
+            onDiscardEdit={onDiscardEdit}
+            onDraftChange={onDraftChange}
+            onSaveEdit={onSaveEdit}
+            sizingSuffix={undefined}
+          />
+        </EditSurface>
+      );
+    case "dialogue":
+      return (
+        <div className="flex flex-col gap-1">
+          <DialogueSpeaker
+            characters={characters}
+            displayName={change.speaker}
+          />
+          <EditSurface>
+            <div className={cn(PROSE, DIALOGUE_INDENT)}>
+              <span aria-hidden className={DIALOGUE_QUOTE}>
+                {'"'}
+              </span>
+              <ProposalTextarea
+                ariaLabel="Edit proposed insert"
+                className={undefined}
+                disabled={disabled}
+                draft={draft}
+                onDiscardEdit={onDiscardEdit}
+                onDraftChange={onDraftChange}
+                onSaveEdit={onSaveEdit}
+                sizingSuffix={'"'}
+              />
+            </div>
+          </EditSurface>
           <DialogueTail
             changeId={row.changeId}
             segments={change.segments ?? []}
@@ -332,57 +440,57 @@ function InsertBody({
 
 function RewriteEditor({
   row,
-  characters,
   disabled,
-  onEndRewriteEdit,
-  onTextChange,
+  draft,
+  onDraftChange,
+  onSaveEdit,
+  onDiscardEdit,
 }: {
   row: Extract<ManuscriptReviewRow, { kind: "rewrite" }>;
-  characters: Character[];
   disabled: boolean;
-  onEndRewriteEdit: () => void;
-  onTextChange: (changeId: string, value: string) => void;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSaveEdit: () => void;
+  onDiscardEdit: () => void;
 }) {
-  const original: Block = Object.assign({}, row.source, {
-    id: `review:${row.changeId}:rewrite-original`,
-    text: row.beforeText,
-  });
+  // The diff holds its preview-mode position and just re-diffs against the
+  // draft, so entering edit mode reads as a field opening beneath it rather
+  // than as the card reflowing.
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <TypographyEyebrow>Original</TypographyEyebrow>
-        <BlockBody
-          block={original}
-          editing={false}
-          hit={null}
-          speaker={findSpeaker(original, characters)}
-        />
-      </div>
-      <ProposalTextarea
-        ariaLabel="Edit proposed rewrite"
-        autoFocus
-        changeId={row.changeId}
+      <AgentDiffPreview
+        after={draft}
+        before={row.beforeText}
         className={PROSE}
-        disabled={disabled}
-        onBlur={onEndRewriteEdit}
-        onTextChange={onTextChange}
-        sizingSuffix={undefined}
-        value={requiredText(row.change.change.newText, row.changeId)}
       />
+      <EditSurface>
+        <ProposalTextarea
+          ariaLabel="Edit proposed rewrite"
+          className={PROSE}
+          disabled={disabled}
+          draft={draft}
+          onDiscardEdit={onDiscardEdit}
+          onDraftChange={onDraftChange}
+          onSaveEdit={onSaveEdit}
+          sizingSuffix={undefined}
+        />
+      </EditSurface>
     </div>
   );
 }
 
-function RewriteDecisionControls({
+function ProposalDecisionControls({
   changeId,
   disabled,
-  onBeginRewriteEdit,
+  text,
+  onBeginEdit,
   onAccept,
   onReject,
 }: {
   changeId: string;
   disabled: boolean;
-  onBeginRewriteEdit: (changeId: string) => void;
+  text: string;
+  onBeginEdit: (changeId: string, text: string) => void;
   onAccept: (changeId: string) => void;
   onReject: (changeId: string) => void;
 }) {
@@ -390,7 +498,7 @@ function RewriteDecisionControls({
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button
         disabled={disabled}
-        onClick={() => onBeginRewriteEdit(changeId)}
+        onClick={() => onBeginEdit(changeId, text)}
         size="sm"
         variant="outline"
       >
@@ -412,10 +520,11 @@ export function ManuscriptReviewChange({
   row,
   characters,
   disabled,
-  editingRewrite,
-  onBeginRewriteEdit,
-  onEndRewriteEdit,
-  onTextChange,
+  draft,
+  onBeginEdit,
+  onDraftChange,
+  onSaveEdit,
+  onDiscardEdit,
   onAccept,
   onReject,
 }: ManuscriptReviewChangeProps) {
@@ -429,52 +538,81 @@ export function ManuscriptReviewChange({
           speaker={findSpeaker(row.block, characters)}
         />
       );
-    case "rewrite":
+    case "rewrite": {
+      const proposed = requiredText(row.change.change.newText, row.changeId);
       return (
         <div className="flex flex-col gap-3">
           <ChangeHeading row={row} />
-          {editingRewrite ? (
-            <RewriteEditor
-              characters={characters}
-              disabled={disabled}
-              onEndRewriteEdit={onEndRewriteEdit}
-              onTextChange={onTextChange}
-              row={row}
+          {draft === null ? (
+            <AgentDiffPreview
+              after={proposed}
+              before={row.beforeText}
+              className={PROSE}
             />
           ) : (
-            <AgentDiffPreview
-              after={requiredText(row.change.change.newText, row.changeId)}
-              before={row.beforeText}
+            <RewriteEditor
+              disabled={disabled}
+              draft={draft}
+              onDiscardEdit={onDiscardEdit}
+              onDraftChange={onDraftChange}
+              onSaveEdit={onSaveEdit}
+              row={row}
             />
           )}
           <ChangeReason reason={row.change.change.reason} />
-          <RewriteDecisionControls
-            changeId={row.changeId}
-            disabled={disabled}
-            onBeginRewriteEdit={onBeginRewriteEdit}
-            onAccept={onAccept}
-            onReject={onReject}
-          />
+          {draft === null ? (
+            <ProposalDecisionControls
+              changeId={row.changeId}
+              disabled={disabled}
+              onAccept={onAccept}
+              onBeginEdit={onBeginEdit}
+              onReject={onReject}
+              text={proposed}
+            />
+          ) : (
+            <EditControls
+              disabled={disabled}
+              onDiscardEdit={onDiscardEdit}
+              onSaveEdit={onSaveEdit}
+            />
+          )}
         </div>
       );
+    }
     case "insert":
       return (
         <div className="flex flex-col gap-3">
           <ChangeHeading row={row} />
-          <InsertBody
-            characters={characters}
-            disabled={disabled}
-            onTextChange={onTextChange}
-            row={row}
-          />
+          {draft === null ? (
+            <InsertPreview characters={characters} row={row} />
+          ) : (
+            <InsertEditor
+              characters={characters}
+              disabled={disabled}
+              draft={draft}
+              onDiscardEdit={onDiscardEdit}
+              onDraftChange={onDraftChange}
+              onSaveEdit={onSaveEdit}
+              row={row}
+            />
+          )}
           <ChangeReason reason={row.change.change.reason} />
-          <DecisionControls
-            acceptDisabled={false}
-            changeId={row.changeId}
-            disabled={disabled}
-            onAccept={onAccept}
-            onReject={onReject}
-          />
+          {draft === null ? (
+            <ProposalDecisionControls
+              changeId={row.changeId}
+              disabled={disabled}
+              onAccept={onAccept}
+              onBeginEdit={onBeginEdit}
+              onReject={onReject}
+              text={requiredText(row.change.change.newText, row.changeId)}
+            />
+          ) : (
+            <EditControls
+              disabled={disabled}
+              onDiscardEdit={onDiscardEdit}
+              onSaveEdit={onSaveEdit}
+            />
+          )}
         </div>
       );
     case "remove":
@@ -556,12 +694,12 @@ export function ManuscriptReviewChange({
           <TypographyMuted className="text-destructive">
             Source changed - regenerate
           </TypographyMuted>
-          {change.kind === "rewrite" ? (
+          {proposedText === null ? null : (
             <Button disabled size="sm" variant="outline">
               <IconEdit data-icon="inline-start" />
               Edit proposal
             </Button>
-          ) : null}
+          )}
           <DecisionControls
             acceptDisabled
             changeId={row.changeId}

@@ -412,16 +412,18 @@ describe("ManuscriptReviewSurface header", () => {
 });
 
 describe("ManuscriptReviewSurface rows", () => {
-  it("shows a frozen rewrite diff and an editable inserted proposal", () => {
-    renderProposal(mixedProposal());
+  it("shows a frozen rewrite diff and a read-only inserted proposal", () => {
+    const { container } = renderProposal(mixedProposal());
 
     const deletion = screen.getByText("slept");
     const addition = screen.getByText("waited");
     expect(deletion.tagName).toBe("DEL");
     expect(addition.tagName).toBe("INS");
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(screen.getByText("A gull crossed the dark water.")).toBeTruthy();
     expect(
-      screen.getByRole("textbox", { name: "Edit proposed insert" }),
-    ).toHaveProperty("value", "A gull crossed the dark water.");
+      screen.getAllByRole("button", { name: "Edit proposal" }),
+    ).toHaveLength(2);
   });
 
   it("renders type-aware unchanged prose and every projected change kind in place", () => {
@@ -517,8 +519,8 @@ describe("ManuscriptReviewSurface rows", () => {
 });
 
 describe("ManuscriptReviewSurface rewrite editing", () => {
-  it("edits only canonical proposal text and recomputes the frozen diff on blur", () => {
-    const current = proposal("proposal-rewrite", [
+  function rewriteOnly(): ManuscriptPendingProposal {
+    return proposal("proposal-rewrite", [
       rewriteChange(
         "rewrite-only",
         frozenBlocks,
@@ -526,8 +528,14 @@ describe("ManuscriptReviewSurface rewrite editing", () => {
         "The harbor waited under rain.",
       ),
     ]);
-    renderProposal(current);
-    const projectBefore = useProjectStore.getState();
+  }
+
+  it("replaces the decisions with save and discard and tints the editing row", () => {
+    const { container } = renderProposal(rewriteOnly());
+    const row = container.querySelector('[data-review-row-kind="rewrite"]');
+    expect(row).toBeInstanceOf(HTMLElement);
+    if (!(row instanceof HTMLElement)) return;
+    expect(row.className).toContain("bg-success/10");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
 
@@ -535,16 +543,54 @@ describe("ManuscriptReviewSurface rewrite editing", () => {
       name: "Edit proposed rewrite",
     });
     expect(textbox).toHaveProperty("value", "The harbor waited under rain.");
-    const capture = textbox.closest("[data-capture-keyboard]");
-    expect(capture).toBeInstanceOf(HTMLElement);
-    expect(capture?.previousElementSibling?.textContent).toContain(
-      "The harbor slept under rain.",
+    expect(textbox.closest("[data-capture-keyboard]")).toBeInstanceOf(
+      HTMLElement,
     );
     expect(textbox.hasAttribute("data-prose-body")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit proposal" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+    expect(row.className).toContain("bg-accent-ink/15");
+    expect(row.className).not.toContain("bg-success/10");
+  });
 
-    fireEvent.change(textbox, {
-      target: { value: "The harbor gleamed under rain." },
+  it("stays in edit mode when the textarea loses focus", () => {
+    renderProposal(rewriteOnly());
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+    const textbox = screen.getByRole("textbox", {
+      name: "Edit proposed rewrite",
     });
+
+    fireEvent.blur(textbox);
+
+    expect(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+    ).toBe(textbox);
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("diffs the draft live and only commits the proposal text on save", () => {
+    renderProposal(rewriteOnly());
+    const projectBefore = useProjectStore.getState();
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { target: { value: "The harbor gleamed under rain." } },
+    );
+
+    expect(screen.getByText("gleamed").tagName).toBe("INS");
+    expect(screen.getByText("slept").tagName).toBe("DEL");
+    const staged = useAgentConsoleStore.getState().pendingProposal;
+    expect(staged?.kind).toBe("manuscript");
+    if (staged?.kind !== "manuscript") return;
+    expect(staged.changes[0]?.change.newText).toBe(
+      "The harbor waited under rain.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const pending = useAgentConsoleStore.getState().pendingProposal;
     expect(pending?.kind).toBe("manuscript");
@@ -552,18 +598,99 @@ describe("ManuscriptReviewSurface rewrite editing", () => {
     expect(pending.changes[0]?.change.newText).toBe(
       "The harbor gleamed under rain.",
     );
+    expect(
+      screen.queryByRole("textbox", { name: "Edit proposed rewrite" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeTruthy();
+    expect(screen.getByText("gleamed").tagName).toBe("INS");
     const projectAfter = useProjectStore.getState();
     expect(projectAfter.blocks).toBe(projectBefore.blocks);
     expect(projectAfter.chapterDirty).toBe(projectBefore.chapterDirty);
     expect(projectAfter.past).toBe(projectBefore.past);
     expect(projectAfter.future).toBe(projectBefore.future);
+  });
 
-    fireEvent.blur(textbox);
+  it("throws the draft away on discard and reopens from the staged text", () => {
+    renderProposal(rewriteOnly());
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { target: { value: "The harbor burned." } },
+    );
 
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    expect(pending?.kind).toBe("manuscript");
+    if (pending?.kind !== "manuscript") return;
+    expect(pending.changes[0]?.change.newText).toBe(
+      "The harbor waited under rain.",
+    );
     expect(
       screen.queryByRole("textbox", { name: "Edit proposed rewrite" }),
     ).toBeNull();
-    expect(screen.getByText("gleamed").tagName).toBe("INS");
+    expect(screen.getByText("waited").tagName).toBe("INS");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+
+    expect(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+    ).toHaveProperty("value", "The harbor waited under rain.");
+  });
+
+  it("saves on the platform enter chord and discards on escape", () => {
+    renderProposal(rewriteOnly());
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { target: { value: "The harbor gleamed under rain." } },
+    );
+
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { key: "Enter", metaKey: true },
+    );
+
+    const saved = useAgentConsoleStore.getState().pendingProposal;
+    expect(saved?.kind).toBe("manuscript");
+    if (saved?.kind !== "manuscript") return;
+    expect(saved.changes[0]?.change.newText).toBe(
+      "The harbor gleamed under rain.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { target: { value: "The harbor burned." } },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
+      { key: "Escape" },
+    );
+
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    expect(pending?.kind).toBe("manuscript");
+    if (pending?.kind !== "manuscript") return;
+    expect(pending.changes[0]?.change.newText).toBe(
+      "The harbor gleamed under rain.",
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Edit proposed rewrite" }),
+    ).toBeNull();
+  });
+
+  it("renders the diff in manuscript prose type in both modes", () => {
+    renderProposal(rewriteOnly());
+    const preview = screen.getByText("waited").closest("p");
+    expect(preview?.className).toContain(
+      "text-[length:var(--prose-size,17.5px)]",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+
+    expect(screen.getByText("waited").closest("p")?.className).toContain(
+      "text-[length:var(--prose-size,17.5px)]",
+    );
   });
 
   it("keeps a stale rewrite frozen, compact, and disables edit and acceptance", () => {
@@ -621,21 +748,43 @@ describe("ManuscriptReviewSurface insert editing", () => {
         null,
       ),
     ]);
-    renderProposal(current);
+    const { container } = renderProposal(current);
     const projectBefore = useProjectStore.getState();
+    const row = container.querySelector('[data-review-row-kind="insert"]');
+    expect(row).toBeInstanceOf(HTMLElement);
+    if (!(row instanceof HTMLElement)) return;
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(
+      screen.getByText("A gull crossed the dark water.").className,
+    ).toContain("text-[length:var(--prose-size,17.5px)]");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+
     const textbox = screen.getByRole("textbox", {
       name: "Edit proposed insert",
     });
+    expect(textbox).toHaveProperty("value", "A gull crossed the dark water.");
     expect(textbox.closest("[data-capture-keyboard]")).toBeTruthy();
     expect(textbox.hasAttribute("data-prose-body")).toBe(false);
+    expect(row.className).toContain("bg-accent-ink/15");
 
     fireEvent.change(textbox, { target: { value: "" } });
+
+    expect(textbox).toHaveProperty("value", "");
+    const staged = useAgentConsoleStore.getState().pendingProposal;
+    expect(staged?.kind).toBe("manuscript");
+    if (staged?.kind !== "manuscript") return;
+    expect(staged.changes[0]?.change.newText).toBe(
+      "A gull crossed the dark water.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const pending = useAgentConsoleStore.getState().pendingProposal;
     expect(pending?.kind).toBe("manuscript");
     if (pending?.kind !== "manuscript") return;
     expect(pending.changes[0]?.change.newText).toBe("");
-    expect(textbox).toHaveProperty("value", "");
+    expect(screen.queryByRole("textbox")).toBeNull();
     const projectAfter = useProjectStore.getState();
     expect(projectAfter.blocks).toBe(projectBefore.blocks);
     expect(projectAfter.chapterDirty).toBe(projectBefore.chapterDirty);
@@ -675,6 +824,10 @@ describe("ManuscriptReviewSurface insert editing", () => {
     expect(beat.className).toContain("leading-[1.6]");
     expect(beat.className).not.toContain("[&:not(:first-child)]:mt-6");
     expect(quote.className).not.toContain("[&:not(:first-child)]:mt-6");
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit proposal" }));
+
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
     const textbox = screen.getByRole("textbox", {
       name: "Edit proposed insert",
@@ -683,6 +836,7 @@ describe("ManuscriptReviewSurface insert editing", () => {
     fireEvent.change(textbox, {
       target: { value: "The tide has turned." },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const pending = useAgentConsoleStore.getState().pendingProposal;
     expect(pending?.kind).toBe("manuscript");
@@ -695,7 +849,9 @@ describe("ManuscriptReviewSurface insert editing", () => {
         { kind: "quote", text: "We leave at dawn." },
       ],
     });
-    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(within(insertRow).getByText("The tide has turned.")).toBeTruthy();
+    expect(within(insertRow).getByText("Mara")).toBeTruthy();
   });
 
   it("renders a stale insert proposal read-only and disables acceptance", () => {
@@ -723,6 +879,10 @@ describe("ManuscriptReviewSurface insert editing", () => {
     expect(
       screen.queryByRole("textbox", { name: "Edit proposed insert" }),
     ).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit proposal" })).toHaveProperty(
+      "disabled",
+      true,
+    );
     expect(screen.getByRole("button", { name: "Accept" })).toHaveProperty(
       "disabled",
       true,
@@ -763,6 +923,7 @@ describe("ManuscriptReviewSurface decisions and lifecycle", () => {
       screen.getByRole("textbox", { name: "Edit proposed rewrite" }),
       { target: { value: "The harbor gleamed under rain." } },
     );
+    fireEvent.click(within(alphaRow).getByRole("button", { name: "Save" }));
 
     fireEvent.click(within(alphaRow).getByRole("button", { name: "Accept" }));
 
@@ -947,13 +1108,11 @@ describe("ManuscriptReviewSurface decisions and lifecycle", () => {
     for (const button of screen.getAllByRole("button", { name: "Reject" })) {
       expect(button).toHaveProperty("disabled", true);
     }
-    expect(screen.getByRole("button", { name: "Edit proposal" })).toHaveProperty(
-      "disabled",
-      true,
-    );
-    expect(
-      screen.getByRole("textbox", { name: "Edit proposed insert" }),
-    ).toHaveProperty("disabled", true);
+    for (const button of screen.getAllByRole("button", {
+      name: "Edit proposal",
+    })) {
+      expect(button).toHaveProperty("disabled", true);
+    }
     expect(screen.getByRole("button", { name: "Close Review" })).toHaveProperty(
       "disabled",
       false,

@@ -69,7 +69,11 @@ function OverviewChangeReview(props: {
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-3">
       <TypographyEyebrow>Story Overview</TypographyEyebrow>
-      <AgentDiffPreview before={props.change.before} after={props.change.after} />
+      <AgentDiffPreview
+        after={props.change.after}
+        before={props.change.before}
+        className={undefined}
+      />
       <TypographyMuted>{props.change.reason}</TypographyMuted>
       <div className="flex gap-2">
         <Button

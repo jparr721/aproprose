@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.17.0",
+    "date": "2026-08-23",
+    "summary": "Aproprose is now available as a native Arch Linux package.",
+    "highlights": [
+      "Download the Arch Linux package from releases and install it with pacman.",
+      "The package adds Aproprose and its icon to your application launcher."
+    ]
+  },
+  {
     "version": "0.16.0",
     "date": "2026-08-23",
     "summary": "Proposal editing is now a deliberate save-or-discard workflow.",

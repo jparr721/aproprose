@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.16.0",
+    "date": "2026-08-23",
+    "summary": "Proposal editing is now a deliberate save-or-discard workflow.",
+    "highlights": [
+      "Proposals are read-only until you choose Edit proposal.",
+      "Fix: Draft changes stay local until saved, while rewrites update their diff as you type.",
+      "Use Cmd/Ctrl+Enter to save or Escape to discard."
+    ]
+  },
+  {
     "version": "0.15.0",
     "date": "2026-08-12",
     "summary": "Aproprose adds a more capable AI workspace, story intelligence, and full-document PDF search.",

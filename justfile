@@ -29,9 +29,11 @@ bundle:
     bun run tauri build
 
 # Build an Arch Linux package from the production binary.
+# `tauri build` (not bare `cargo build --release`) is required: tauri's build script
+# sets dev = !custom-protocol, so a plain cargo build embeds no frontend and the app
+# tries to load devUrl at runtime. --no-bundle skips the deb/appimage we don't need here.
 arch-package:
-    bun run build
-    cd src-tauri && cargo build --release
+    bun run tauri build --no-bundle
     ./scripts/create-arch-package.sh
 
 # Cut a release from main: full gate, bump versions, changelog (reviewed in $EDITOR), confirm, tag, push (X.Y.Z, must increase).

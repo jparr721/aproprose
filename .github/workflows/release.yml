@@ -145,12 +145,6 @@ jobs:
             echo
             echo 'RELEASE_BODY_EOF'
           } >> "$GITHUB_OUTPUT"
-      - name: Package for Arch Linux
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          bun run build
-          ( cd src-tauri && cargo build --release )
-          ./scripts/create-arch-package.sh "${GITHUB_REF_NAME#v}"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -160,6 +154,12 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           releaseBody: ${{ steps.notes.outputs.body }}
           args: ${{ matrix.args }}
+      # Runs after tauri-action so it packages the very binary tauri just built.
+      # Building it here with bare `cargo build --release` would produce a dev-mode
+      # binary (no embedded frontend) that fails to start - see the script's guard.
+      - name: Package for Arch Linux
+        if: matrix.platform == 'ubuntu-22.04'
+        run: ./scripts/create-arch-package.sh "${GITHUB_REF_NAME#v}"
       - name: Upload Arch Linux package
         if: matrix.platform == 'ubuntu-22.04'
         env:

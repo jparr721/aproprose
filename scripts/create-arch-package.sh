@@ -21,6 +21,29 @@ if [ ! -x "$binary" ]; then
   exit 1
 fi
 
+# Refuse to package a dev-mode binary. Tauri's build script sets `dev = !custom-protocol`,
+# so a bare `cargo build --release` embeds no frontend and the app starts up trying to
+# reach devUrl ("Could not connect to localhost"). Only the Tauri CLI passes that feature,
+# so assert the frontend actually made it into the binary by probing for a hashed asset
+# name from dist/ - embedded asset keys are stored uncompressed and are greppable.
+probe=""
+for asset in dist/assets/*; do
+  if [ -f "$asset" ]; then
+    probe="$(basename "$asset")"
+    break
+  fi
+done
+if [ -z "$probe" ]; then
+  echo "error: dist/assets is empty; build the frontend first" >&2
+  exit 1
+fi
+if ! grep -aqF "$probe" "$binary"; then
+  echo "error: $binary has no embedded frontend - it was built without tauri's" >&2
+  echo "       custom-protocol feature and would fail to start." >&2
+  echo "       build it with 'bun run tauri build --no-bundle', not 'cargo build --release'." >&2
+  exit 1
+fi
+
 install -Dm755 "$binary" "$stage/usr/bin/aproprose"
 install -Dm644 packaging/arch/aproprose.desktop "$stage/usr/share/applications/aproprose.desktop"
 install -Dm644 src-tauri/icons/128x128@2x.png "$stage/usr/share/icons/hicolor/256x256/apps/aproprose.png"

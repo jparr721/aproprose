@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.17.1",
+    "date": "2026-08-23",
+    "summary": "Fixed Arch Linux packages so the app launches with its built-in interface.",
+    "highlights": [
+      "Arch Linux releases now include the production app binary instead of requiring a local development server."
+    ]
+  },
+  {
     "version": "0.17.0",
     "date": "2026-08-23",
     "summary": "Aproprose is now available as a native Arch Linux package.",

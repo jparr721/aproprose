@@ -76,6 +76,9 @@ requires Windows code signing or Microsoft Store distribution.
 
 - **AppImage** (any distro): `chmod +x aproprose_*.AppImage` then run it.
 - **Debian / Ubuntu** (`.deb`): `sudo apt install ./aproprose_*.deb`.
+- **Arch Linux** (`.pkg.tar.zst`): download the Arch package from the release and run
+  `sudo pacman -U ./aproprose-*.pkg.tar.zst`. This installs Aproprose into your app
+  launcher with its icon; remove it later with `sudo pacman -Rns aproprose`.
 
 ## Architecture notes
 
@@ -110,6 +113,7 @@ requires Windows code signing or Microsoft Store distribution.
 just run        # full desktop app in dev mode (Vite + native window, hot reload)
 just build      # tsc + vite build (web bundle)
 just bundle     # production desktop bundle
+just arch-package # build a native Arch Linux package
 just typecheck  # tsc --noEmit
 just fmt        # cargo fmt + clippy
 ```

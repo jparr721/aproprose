@@ -28,6 +28,12 @@ build:
 bundle:
     bun run tauri build
 
+# Build an Arch Linux package from the production binary.
+arch-package:
+    bun run build
+    cd src-tauri && cargo build --release
+    ./scripts/create-arch-package.sh
+
 # Cut a release from main: full gate, bump versions, changelog (reviewed in $EDITOR), confirm, tag, push (X.Y.Z, must increase).
 version VERSION:
     @just _release "{{VERSION}}" interactive

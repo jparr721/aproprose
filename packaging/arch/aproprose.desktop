@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Aproprose
+Comment=AI-native, block-based LaTeX novel editor
+Exec=aproprose %U
+Icon=aproprose
+Terminal=false
+Categories=Office;WordProcessor;
+StartupNotify=true
+StartupWMClass=aproprose

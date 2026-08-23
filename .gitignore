@@ -42,3 +42,7 @@ docs/superpowers/
 # brainstorming visual companion
 .superpowers/
 .playwright-mcp/
+
+# Arch Linux packages produced by `just arch-package` (scripts/create-arch-package.sh
+# writes them to the repo root); build artifacts, never committed.
+*.pkg.tar.zst

@@ -47,6 +47,7 @@ import {
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useViewStore } from "@/stores/view-store";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -224,6 +225,7 @@ beforeEach(() => {
     project,
     activeChapterId: "chapter-1",
   });
+  useViewStore.setState({ aiComposerFocusRequested: false });
   useSettingsDialogStore.setState({
     open: false,
     tab: SETTINGS_TABS.APPEARANCE,
@@ -321,6 +323,21 @@ describe("AgentComposer draft behavior", () => {
     expect(
       container.querySelectorAll("[data-slot=input-group-addon]"),
     ).toHaveLength(1);
+  });
+
+  it("focuses the textbox without scrolling after a composer focus request", () => {
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+    const textbox = screen.getByRole("textbox", {
+      name: "Message AI Console",
+    }) as HTMLTextAreaElement;
+    const focus = vi.spyOn(textbox, "focus");
+
+    act(() => {
+      useViewStore.setState({ aiComposerFocusRequested: true });
+    });
+
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(document.activeElement).toBe(textbox);
   });
 
   it("keeps the AI Console textbox name when it contains text", () => {

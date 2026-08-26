@@ -119,6 +119,14 @@ export const KEYBINDINGS = {
     category: "editor",
     label: "Split block",
   },
+  ADD_SELECTION_TO_AI: {
+    id: "add-selection-to-ai",
+    key: "l",
+    modifiers: { ctrl: true },
+    description: "Add the selected blocks to the AI conversation",
+    category: "editor",
+    label: "Add selection to AI",
+  },
   OPEN_FIND: {
     id: "open-find",
     key: "f",

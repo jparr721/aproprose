@@ -318,6 +318,7 @@ beforeEach(() => {
   useViewStore.setState({
     aiOpen: false,
     focus: false,
+    aiComposerFocusRequested: false,
     manuscriptReviewProposalId: null,
     outlineOpen: false,
   });
@@ -391,6 +392,48 @@ describe("Editor Suggest from context", () => {
       refs: [],
       task: { kind: "conversation", targetChapterId: "chapter-1" },
     });
+  });
+});
+
+describe("Editor add selection to AI", () => {
+  it("adds the selected blocks in selection order and focuses the AI composer", () => {
+    useProjectStore.setState({
+      selectedId: "block-1",
+      selectedIds: ["block-2", "block-1"],
+    });
+    render(<Editor />);
+
+    act(() => invokeKeybinding(KEYBINDING_IDS.ADD_SELECTION_TO_AI));
+
+    expect(controller.dispatchAgentIntent).toHaveBeenCalledWith({
+      kind: "add-context",
+      refs: [
+        {
+          kind: "block",
+          chapterId: "chapter-1",
+          blockId: "block-2",
+        },
+        {
+          kind: "block",
+          chapterId: "chapter-1",
+          blockId: "block-1",
+        },
+      ],
+    });
+    expect(useViewStore.getState()).toMatchObject({
+      aiOpen: true,
+      focus: false,
+      aiComposerFocusRequested: true,
+    });
+  });
+
+  it("does nothing without a selected block", () => {
+    render(<Editor />);
+
+    act(() => invokeKeybinding(KEYBINDING_IDS.ADD_SELECTION_TO_AI));
+
+    expect(controller.dispatchAgentIntent).not.toHaveBeenCalled();
+    expect(useViewStore.getState().aiComposerFocusRequested).toBe(false);
   });
 });
 

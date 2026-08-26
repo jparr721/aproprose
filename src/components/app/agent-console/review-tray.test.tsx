@@ -234,10 +234,8 @@ function ConversationWithReview() {
         emptyDescription="Add manuscript context or ask a project question."
         emptyTitle="Ask about this project"
         messages={messages}
-        onNavigateSnapshot={async () => true}
         onOpenSettings={() => undefined}
         onRetry={async () => ({ status: "success" })}
-        summary={null}
       />
       <ReviewTray />
     </div>

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   copyText: vi.fn(),
@@ -14,15 +14,12 @@ vi.mock("sonner", () => ({
 }));
 
 import { AgentMessage } from "@/components/app/agent-console/agent-message";
-import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import type {
   AgentMessageMetadata,
   AgentUIMessage,
-  ContextSnapshot,
 } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
 import {
-  agentSessionStore,
   clearOutlineAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
@@ -60,31 +57,17 @@ function assistantMessage(
 }
 
 function renderAgentMessage(message: AgentUIMessage) {
-  const onNavigateSnapshot = vi.fn().mockResolvedValue(true);
   const onRetry = vi.fn().mockResolvedValue({ status: "success" });
   const onOpenSettings = vi.fn();
   render(
     <AgentMessage
       message={message}
-      onNavigateSnapshot={onNavigateSnapshot}
       onRetry={onRetry}
       onOpenSettings={onOpenSettings}
     />,
   );
-  return { onNavigateSnapshot, onRetry, onOpenSettings };
+  return { onRetry, onOpenSettings };
 }
-
-const snapshot: ContextSnapshot = {
-  id: "snapshot-1",
-  kind: "block",
-  chapterId: "ch1",
-  sourceId: "block-1",
-  order: 0,
-  sourceType: "narration",
-  label: "Narration block",
-  exactText: "Frozen source text.",
-  sourceFingerprint: "fingerprint-1",
-};
 
 const messageProject = {
   root: "/book",
@@ -106,6 +89,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 beforeEach(() => {
@@ -159,7 +143,7 @@ describe("AgentMessage content", () => {
       ),
     );
 
-    expect(screen.getByText("quiet answer").dataset.streamdown).toBe("strong");
+    expect(screen.getByText("quiet answer").tagName).toBe("STRONG");
   });
 
   it("does not render model usage for a message", () => {
@@ -195,335 +179,27 @@ describe("AgentMessage content", () => {
     ).toBeNull();
   });
 
-  it("renders consolidated model reasoning in the stock reasoning view", () => {
-    const message = assistantMessage(
-      "assistant-reasoning",
-      [
-        { type: "reasoning", text: "First consideration", state: "done" },
-        { type: "reasoning", text: "Second consideration", state: "done" },
-        { type: "text", text: "Visible answer" },
-      ],
-      metadata({}),
-    );
-
-    renderAgentMessage(message);
-
-    expect(screen.getByText("Visible answer")).toBeTruthy();
-    const trigger = screen.getByRole("button", {
-      name: /Thought for a few seconds/,
-    });
-    expect(screen.getAllByRole("button", { name: /Thought/ })).toHaveLength(1);
-
-    fireEvent.click(trigger);
-
-    expect(screen.getByText("First consideration")).toBeTruthy();
-    expect(screen.getByText("Second consideration")).toBeTruthy();
-  });
-
-  it("opens model reasoning while it is streaming", () => {
+  it("renders only reply text and hides reasoning and tool activity", () => {
     renderAgentMessage(
       assistantMessage(
-        "assistant-streaming-reasoning",
-        [{ type: "reasoning", text: "Inspecting the scene", state: "streaming" }],
-        metadata({ state: "streaming" }),
-      ),
-    );
-
-    expect(screen.getByRole("button", { name: /Thinking/ })).toBeTruthy();
-    expect(screen.getByText("Inspecting the scene")).toBeTruthy();
-  });
-
-  it("renders immutable context data as sent attachments", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-context",
-        [{ type: "data-context", data: { snapshots: [snapshot] } }],
-        metadata({}),
-      ),
-    );
-
-    expect(
-      screen.getByRole("button", { name: "Open Narration block context" }),
-    ).toBeTruthy();
-  });
-
-  it("labels character profile update activity", () => {
-    const [message] = sanitizeAgentMessages([
-      assistantMessage(
-        "assistant-character-update",
+        "assistant-reply-only",
         [
+          { type: "reasoning", text: "Private model reasoning", state: "done" },
           {
-            type: "tool-update_character_profile",
-            toolCallId: "call-character-update",
+            type: "tool-read_chapter",
+            toolCallId: "call-read",
             state: "output-available",
-            input: {
-              characterId: "c1",
-              profile: {
-                appearance: null,
-                mannerisms: "Counts every door.",
-                motivations: null,
-                relationships: null,
-                history: null,
-                voice: null,
-              },
-            },
+            input: { chapterId: "chapter-1" },
             output: {
               kind: "summary",
               summary: {
-                label: "Update character profile",
-                target: "Mara",
-                detail: "1 field",
-                itemCount: 1,
+                label: "Read chapter",
+                target: "Chapter One",
+                detail: "2 blocks",
+                itemCount: 2,
               },
             },
           },
-        ],
-        metadata({ task: { kind: "character-describe", characterId: "c1" } }),
-      ),
-    ]);
-    renderAgentMessage(message);
-
-    fireEvent.click(screen.getByRole("button", { name: "Tool activity" }));
-    expect(screen.getByText("Update character profile")).toBeTruthy();
-  });
-
-  it("renders finding cards whose actions add stable finding context without submitting", async () => {
-    const message = assistantMessage(
-      "assistant-findings",
-      [
-        {
-          type: "tool-run_critique",
-          toolCallId: "call-critique",
-          state: "output-available",
-          input: { chapterId: "ch1", focus: null },
-          output: {
-            kind: "summary",
-            summary: {
-              label: "Run critique",
-              target: "ch1",
-              detail: "2 findings",
-              itemCount: 2,
-            },
-          },
-        },
-        {
-          type: "data-findings",
-          data: {
-            kind: "critique",
-            chapterId: "ch1",
-            items: [
-              {
-                kind: "watch",
-                tag: "Pacing",
-                text: "The middle stalls.",
-                blockIds: ["block-2"],
-              },
-              {
-                kind: "strength",
-                tag: "Voice",
-                text: "The restraint lands.",
-                blockIds: [],
-              },
-            ],
-          },
-        },
-      ],
-      metadata({}),
-    );
-    useAgentConsoleStore.setState({ messages: [message] });
-
-    renderAgentMessage(message);
-
-    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
-    expect(screen.getByText("Completed")).toBeTruthy();
-    expect(screen.getByRole("group", { name: "Pacing finding" })).toBeTruthy();
-    expect(screen.getByText("The middle stalls.")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Add to Chat" })).toHaveLength(2);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Add to Chat" })[0]);
-    await waitFor(() =>
-      expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
-        {
-          kind: "finding",
-          chapterId: "ch1",
-          findingId: "assistant-findings:0",
-        },
-      ]),
-    );
-    expect(useAgentConsoleStore.getState().messages).toEqual([message]);
-    expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
-  });
-
-  it("adds a finding to the planner session that rendered the message", async () => {
-    const sessionId = { kind: "outline" as const, chapterId: "ch2" };
-    const message = assistantMessage(
-      "planner-findings",
-      [
-        {
-          type: "data-findings",
-          data: {
-            kind: "critique",
-            chapterId: "ch2",
-            items: [
-              {
-                kind: "watch",
-                tag: "Pacing",
-                text: "The turn arrives before the setup lands.",
-                blockIds: [],
-              },
-            ],
-          },
-        },
-      ],
-      metadata({}),
-    );
-    const outlineStore = agentSessionStore(sessionId);
-    outlineStore.setState({
-      ...EMPTY_AGENT_STATE,
-      messages: [message],
-      requestedProjectRoot: "/book",
-      activeProjectRoot: "/book",
-      hydratedProjectRoot: "/book",
-    });
-    render(
-      <AgentMessage
-        message={message}
-        onNavigateSnapshot={vi.fn().mockResolvedValue(true)}
-        onRetry={vi.fn().mockResolvedValue({ status: "success" })}
-        onOpenSettings={vi.fn()}
-        sessionId={sessionId}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Add to Chat" }));
-
-    await waitFor(() =>
-      expect(outlineStore.getState().draftContextRefs).toEqual([
-        {
-          kind: "finding",
-          chapterId: "ch2",
-          findingId: "planner-findings:0",
-        },
-      ]),
-    );
-    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([]);
-  });
-
-  it("disables Add to Chat while same-project persistence is transitioning", () => {
-    useProjectStore.setState({
-      project: messageProject,
-    });
-    useAgentConsoleStore.setState({
-      hydratedProjectRoot: "/book",
-      persistenceTransition: {
-        generation: 3,
-        kind: "load",
-        projectRoot: "/book",
-      },
-    });
-    const message = assistantMessage(
-      "assistant-locked-finding",
-      [
-        {
-          type: "data-findings",
-          data: {
-            kind: "critique",
-            chapterId: "ch1",
-            items: [
-              {
-                kind: "watch",
-                tag: "Pacing",
-                text: "The middle stalls.",
-                blockIds: [],
-              },
-            ],
-          },
-        },
-      ],
-      metadata({}),
-    );
-
-    renderAgentMessage(message);
-
-    expect(
-      (screen.getByRole("button", { name: "Add to Chat" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-  });
-
-  it("uses one finding index across every findings part in a message", async () => {
-    useProjectStore.setState({
-      project: messageProject,
-    });
-    useAgentConsoleStore.setState({ hydratedProjectRoot: "/book" });
-    const message = assistantMessage(
-      "assistant-split-findings",
-      [
-        {
-          type: "data-findings",
-          data: {
-            kind: "critique",
-            chapterId: "ch1",
-            items: [
-              {
-                kind: "watch",
-                tag: "Pacing",
-                text: "The middle stalls.",
-                blockIds: ["block-2"],
-              },
-            ],
-          },
-        },
-        {
-          type: "data-findings",
-          data: {
-            kind: "critique",
-            chapterId: "ch1",
-            items: [
-              {
-                kind: "strength",
-                tag: "Voice",
-                text: "The restraint lands.",
-                blockIds: [],
-              },
-            ],
-          },
-        },
-      ],
-      metadata({}),
-    );
-    useAgentConsoleStore.setState({ messages: [message] });
-
-    renderAgentMessage(message);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add to Chat" })[1]);
-
-    await waitFor(() =>
-      expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([
-        {
-          kind: "finding",
-          chapterId: "ch1",
-          findingId: "assistant-split-findings:1",
-        },
-      ]),
-    );
-    await waitFor(() =>
-      expect(
-        useAgentConsoleStore.getState().draftContextSources[
-          "finding:ch1:assistant-split-findings:1"
-        ],
-      ).toMatchObject({
-        available: true,
-        label: "Voice",
-        preview: "The restraint lands.",
-      }),
-    );
-  });
-
-  it("renders proposal and compaction data as compact status rows", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-status",
-        [
           {
             type: "data-proposal-event",
             data: {
@@ -533,347 +209,34 @@ describe("AgentMessage content", () => {
               text: "Accepted one manuscript change.",
             },
           },
-          {
-            type: "data-compaction",
-            data: {
-              throughMessageId: "assistant-old",
-              text: "Private compaction summary",
-            },
-          },
+          { type: "text", text: "Visible answer" },
         ],
         metadata({}),
       ),
     );
 
-    expect(screen.getByText("Accepted one manuscript change.")).toBeTruthy();
-    expect(screen.getByText("Older context compacted")).toBeTruthy();
-    expect(screen.queryByText("Private compaction summary")).toBeNull();
+    expect(screen.getByText("Visible answer")).toBeTruthy();
+    expect(screen.queryByText("Private model reasoning")).toBeNull();
+    expect(screen.queryByText("Read chapter")).toBeNull();
+    expect(screen.queryByText("Accepted one manuscript change.")).toBeNull();
   });
-});
 
-describe("AgentMessage safe tool activity", () => {
-  it("groups pending and running tools into one open activity task", () => {
+  it("shows an elapsed thinking indicator while an answer streams", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T12:00:05.000Z"));
     renderAgentMessage(
       assistantMessage(
-        "assistant-tools",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-pending",
-            state: "input-streaming",
-            input: { chapterId: "chapter-pending" },
-          },
-          {
-            type: "tool-run_critique",
-            toolCallId: "call-running",
-            state: "input-available",
-            input: {
-              chapterId: "chapter-running",
-              focus: "Never render this model instruction",
-            },
-          },
-        ],
-        metadata({ state: "streaming" }),
+        "assistant-thinking",
+        [{ type: "tool-read_chapter", toolCallId: "call-read", state: "input-available", input: { chapterId: "chapter-1" } }],
+        metadata({ state: "streaming", createdAt: "2026-08-25T12:00:00.000Z" }),
       ),
     );
 
-    const trigger = screen.getByRole("button", { name: /Using tools/ });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getByText("Run critique")).toBeTruthy();
-    expect(screen.getByText("Pending")).toBeTruthy();
-    expect(screen.getByText("Running")).toBeTruthy();
-    expect(screen.queryByText("chapter-pending")).toBeNull();
-    expect(screen.queryByText("chapter-running")).toBeNull();
-    expect(screen.queryByText("Never render this model instruction")).toBeNull();
+    expect(screen.getByText("Thinking 00:05")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.getByText("Thinking 00:06")).toBeTruthy();
   });
 
-  it("never renders a tool input", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-path-tool",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-path",
-            state: "input-available",
-            input: { chapterId: "/Users/author/novel/chapter.tex" },
-          },
-        ],
-        metadata({ state: "streaming" }),
-      ),
-    );
-
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("/Users/author");
-  });
-
-  it("renders only a completed tool name and state", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-complete-tool",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-complete",
-            state: "output-available",
-            input: { chapterId: "chapter-1" },
-            output: {
-              kind: "runtime",
-              summary: {
-                label: "Read chapter",
-                target: "Chapter One",
-                detail: "2 blocks",
-                itemCount: 2,
-              },
-              value: {
-                chapterId: "chapter-1",
-                title: "Chapter One",
-                blocks: [
-                  {
-                    id: "block-1",
-                    order: 0,
-                    type: "narration",
-                    text: "RAW PRIVATE CHAPTER BODY",
-                    fingerprint: "fingerprint-1",
-                  },
-                ],
-              },
-            },
-          },
-        ],
-        metadata({}),
-      ),
-    );
-
-    const trigger = screen.getByRole("button", { name: /Tool activity/ });
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(trigger);
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
-    expect(screen.queryByText("Chapter One")).toBeNull();
-    expect(screen.queryByText("2 blocks")).toBeNull();
-    expect(screen.queryByText("RAW PRIVATE CHAPTER BODY")).toBeNull();
-    expect(document.body.textContent).not.toContain("fingerprint-1");
-  });
-
-  it("reconstructs completed tool copy without raw errors or absolute paths", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-unsafe-summary",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-unsafe-summary",
-            state: "output-available",
-            input: { chapterId: "chapter-1" },
-            output: {
-              kind: "summary",
-              summary: {
-                label: "APICallError C:\\Users\\author\\private\\chapter.tex",
-                target: "Result at /Users/author/private/chapter.tex",
-                detail: "ENOENT /private/book/chapter.tex",
-                itemCount: 1,
-              },
-            },
-          },
-        ],
-        metadata({}),
-      ),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
-    expect(screen.queryByText("1 block")).toBeNull();
-    expect(document.body.textContent).not.toContain("APICallError");
-    expect(document.body.textContent).not.toContain("/Users/author");
-    expect(document.body.textContent).not.toContain("C:\\Users\\author");
-  });
-
-  it("shows safe tool error copy without exposing raw Unix or Windows paths", () => {
-    const rawError =
-      "ENOENT at /Users/author/private/chapter.tex from C:\\Users\\author\\private\\chapter.tex";
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-tool-error",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-error",
-            state: "output-error",
-            input: { chapterId: "chapter-1" },
-            errorText: rawError,
-          },
-        ],
-        metadata({ state: "error", errorCode: "tool" }),
-      ),
-    );
-
-    expect(
-      screen.getByRole("button", { name: /Tool activity needs attention/ }),
-    ).toBeTruthy();
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getByText("Error")).toBeTruthy();
-    expect(screen.queryByText("chapter-1")).toBeNull();
-    expect(document.body.textContent).not.toContain(rawError);
-    expect(document.body.textContent).not.toContain("/Users/author");
-    expect(document.body.textContent).not.toContain("C:\\Users\\author");
-  });
-
-  it("renders reopened failed and denied lifecycle rows", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-reopened-tool-lifecycle",
-        [
-          {
-            type: "tool-run_continuity",
-            toolCallId: "call-error",
-            state: "output-error",
-            input: { chapterId: "Chapter", focus: null },
-            errorText: "Tool execution failed.",
-          },
-          {
-            type: "tool-stage_outline_proposal",
-            toolCallId: "call-denied",
-            state: "output-denied",
-            input: { summary: "", changes: [] },
-            approval: { id: "call-denied", approved: false },
-          },
-        ],
-        metadata({ state: "error", errorCode: "tool" }),
-      ),
-    );
-
-    expect(screen.getByText("Check continuity")).toBeTruthy();
-    expect(screen.getByText("Stage outline proposal")).toBeTruthy();
-    expect(screen.getByText("Error")).toBeTruthy();
-    expect(screen.getByText("Denied")).toBeTruthy();
-    expect(screen.queryByText("Chapter")).toBeNull();
-    expect(screen.queryByText("Outline proposal")).toBeNull();
-  });
-
-  it("renders only generic targets after unsafe failed and denied inputs settle", () => {
-    const unicodeControlTarget = [
-      "UNICODE-CONTROL-PRIVATE-TEXT",
-      String.fromCodePoint(0x2603),
-      String.fromCharCode(0),
-    ].join("");
-    const [settled] = sanitizeAgentMessages([
-      assistantMessage(
-        "assistant-unsafe-target-lifecycle",
-        [
-          {
-            type: "tool-run_critique",
-            toolCallId: "call-instruction",
-            state: "output-error",
-            input: {
-              chapterId: "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
-              focus: "RAW-ERROR-PRIVATE-TEXT",
-            },
-            errorText: "RAW-ERROR-PRIVATE-TEXT",
-          },
-          {
-            type: "tool-read_outline",
-            toolCallId: "call-traversal",
-            state: "output-denied",
-            input: {
-              chapterId: "../../RELATIVE-TRAVERSAL-PRIVATE-TEXT",
-            },
-            approval: {
-              id: "RAW-APPROVAL-PRIVATE-ID",
-              approved: false,
-            },
-          },
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-unicode-control",
-            state: "output-error",
-            input: { chapterId: unicodeControlTarget },
-            errorText:
-              "ENOENT /Users/author/private/ABSOLUTE-PATH-PRIVATE-TEXT",
-          },
-        ] as AgentUIMessage["parts"],
-        metadata({ state: "error", errorCode: "tool" }),
-      ),
-    ]);
-
-    renderAgentMessage(settled);
-    expect(screen.getByText("Run critique")).toBeTruthy();
-    expect(screen.getByText("Read outline")).toBeTruthy();
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    for (const marker of [
-      "IGNORE-PREVIOUS-INSTRUCTIONS-PRIVATE-TEXT",
-      "RELATIVE-TRAVERSAL-PRIVATE-TEXT",
-      "UNICODE-CONTROL-PRIVATE-TEXT",
-      "ABSOLUTE-PATH-PRIVATE-TEXT",
-      "RAW-APPROVAL-PRIVATE-ID",
-      "RAW-ERROR-PRIVATE-TEXT",
-      "../../",
-      "/Users/author/private/",
-      String.fromCodePoint(0x2603),
-      String.fromCharCode(0),
-    ]) {
-      expect(document.body.textContent).not.toContain(marker);
-    }
-  });
-
-  it("does not inspect a tool output while rendering activity", () => {
-    vi.stubEnv("DEV", false);
-    const rawError = "ENOENT /Users/author/private/chapter.tex";
-    const output = {} as {
-      kind: "summary";
-      summary: never;
-    };
-    Object.defineProperty(output, "summary", {
-      get: () => {
-        throw new Error(rawError);
-      },
-    });
-    const malformedPart = {
-      type: "tool-read_chapter",
-      toolCallId: "call-malformed",
-      state: "output-available",
-      input: { chapterId: "chapter-1" },
-      output,
-    } as AgentUIMessage["parts"][number];
-
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-malformed-tool",
-        [malformedPart],
-        metadata({}),
-      ),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.body.textContent).not.toContain(rawError);
-  });
-
-  it("marks a stopped unfinished tool without inventing a result", () => {
-    renderAgentMessage(
-      assistantMessage(
-        "assistant-stopped",
-        [
-          {
-            type: "tool-read_chapter",
-            toolCallId: "call-stopped",
-            state: "input-available",
-            input: { chapterId: "chapter-1" },
-          },
-        ],
-        metadata({ state: "stopped" }),
-      ),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Tool activity/ }));
-    expect(screen.getByText("Read chapter")).toBeTruthy();
-    expect(screen.getAllByText("Stopped")).toHaveLength(2);
-    expect(screen.queryByText("Completed")).toBeNull();
-  });
 });
 
 describe("AgentMessage errors", () => {

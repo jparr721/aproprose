@@ -2,8 +2,7 @@
 // screen dialog listing changed files; each row expands on demand to its diff,
 // rendered with @pierre/diffs, and commits+syncs via the engine.
 
-import { useEffect, useState } from "react";
-import { PatchDiff } from "@pierre/diffs/react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ChevronRight as IconChevronRight } from "lucide-react";
 import {
   Dialog,
@@ -22,6 +21,12 @@ import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { gitDiff } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+
+const PatchDiff = lazy(() =>
+  import("@pierre/diffs/react").then(({ PatchDiff }) => ({
+    default: PatchDiff,
+  })),
+);
 
 /** The app theme ("light" | "sepia" | "dark") mapped to the diff's light/dark pair. */
 type DiffThemeType = "light" | "dark";
@@ -87,11 +92,22 @@ function FileRow({
               Couldn't load diff: {error}
             </TypographyMuted>
           ) : diff && diff.trim() ? (
-            <PatchDiff
-              patch={diff}
-              options={{ themeType, overflow: "wrap", disableFileHeader: true }}
-              className="overflow-hidden rounded-md"
-            />
+            <Suspense
+              fallback={
+                <div className="flex items-center gap-2 px-1 py-2">
+                  <Spinner className="size-3.5" />
+                  <TypographyMuted className="text-[11px]">
+                    Rendering diff
+                  </TypographyMuted>
+                </div>
+              }
+            >
+              <PatchDiff
+                patch={diff}
+                options={{ themeType, overflow: "wrap", disableFileHeader: true }}
+                className="overflow-hidden rounded-md"
+              />
+            </Suspense>
           ) : (
             <TypographyMuted className="px-1 py-2 text-[11px]">
               No textual diff (new or binary file).

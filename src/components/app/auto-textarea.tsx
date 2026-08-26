@@ -10,7 +10,7 @@
 // block near the end of the chapter" bug. No measuring also means height stays
 // correct across pane resizes and prose-size changes for free.
 
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { PROSE_BODY_ATTR } from "@/lib/prose-body";
 
@@ -26,6 +26,7 @@ export function AutoGrowTextarea({
   proseBody,
   caret,
   sizingSuffix,
+  deferUpdates = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -46,6 +47,8 @@ export function AutoGrowTextarea({
    * inline after the text (dialogue's closing quote) so both modes wrap alike.
    */
   sizingSuffix?: string;
+  /** Keep typing local and commit the final draft on blur or a command chord. */
+  deferUpdates?: boolean;
   /**
    * One-shot caret placement on mount: `"start"` for `i` / new-block insert,
    * `"end"` to land at the end, a number for an exact offset (block merges).
@@ -54,6 +57,21 @@ export function AutoGrowTextarea({
   caret?: "start" | "end" | number;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState(value);
+  const draftRef = useRef(value);
+
+  useEffect(() => {
+    if (!deferUpdates || value === draftRef.current) return;
+    draftRef.current = value;
+    setDraft(value);
+  }, [deferUpdates, value]);
+
+  const commitDraft = () => {
+    if (!deferUpdates || draftRef.current === value) return;
+    onChange(draftRef.current);
+  };
+
+  const displayValue = deferUpdates ? draft : value;
 
   // Focus + caret placement once when the textarea mounts (the block entering
   // edit mode). Focus is imperative — React's autoFocus attribute calls focus()
@@ -76,18 +94,40 @@ export function AutoGrowTextarea({
       {/* The replica owns the cell height. The trailing space keeps a trailing
           newline (and the empty value) one line tall, matching the textarea. */}
       <div aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words">
-        {`${value || placeholder || ""}${sizingSuffix ?? ""} `}
+        {`${displayValue || placeholder || ""}${sizingSuffix ?? ""} `}
       </div>
       <textarea
         ref={ref}
-        value={value}
+        value={displayValue}
         aria-label={ariaLabel}
         disabled={disabled}
         placeholder={placeholder}
         rows={1}
         spellCheck
-        onKeyDown={onKeyDown}
-        onChange={(e) => onChange(e.currentTarget.value)}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          if (
+            deferUpdates &&
+            (event.key === "Enter" ||
+              (event.key === "Backspace" &&
+                event.currentTarget.selectionStart === 0 &&
+                event.currentTarget.selectionEnd === 0) ||
+              event.metaKey ||
+              event.ctrlKey)
+          ) {
+            commitDraft();
+          }
+          onKeyDown?.(event);
+        }}
+        onChange={(event) => {
+          const next = event.currentTarget.value;
+          if (!deferUpdates) {
+            onChange(next);
+            return;
+          }
+          draftRef.current = next;
+          setDraft(next);
+        }}
         {...(proseBody ? { [PROSE_BODY_ATTR]: "" } : {})}
         className="col-start-1 row-start-1 block h-full w-full resize-none overflow-hidden border-0 bg-transparent p-0 outline-none placeholder:text-faint focus:ring-0"
       />

@@ -28,7 +28,6 @@ import {
   TypographyMuted,
 } from "@/components/ui/typography";
 import { retryAgentTurn } from "@/lib/ai/agent-controller";
-import { navigateToContextSnapshot } from "@/lib/ai/agent-navigation";
 import {
   PROJECT_AGENT_SESSION,
   type AgentPersistenceIssue,
@@ -215,7 +214,6 @@ function AgentSectionContent({
   title,
 }: AgentSectionProps) {
   const messages = useAgentSessionStore(sessionId, (state) => state.messages);
-  const summary = useAgentSessionStore(sessionId, (state) => state.summary);
   const pendingProposal = useAgentSessionStore(
     sessionId,
     (state) => state.pendingProposal,
@@ -263,11 +261,9 @@ function AgentSectionContent({
             emptyDescription={emptyDescription}
             emptyTitle={emptyTitle}
             messages={messages}
-            onNavigateSnapshot={navigateToContextSnapshot}
             onOpenSettings={openAiSettings}
             onRetry={(messageId) => retryAgentTurn(messageId, sessionId)}
             sessionId={sessionId}
-            summary={summary}
           />
           {sessionId.kind === "character" || pendingProposal === null ? null : (
             <ReviewTray sessionId={sessionId} />

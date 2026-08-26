@@ -104,6 +104,7 @@ export function BlockBody({
           <AutoGrowTextarea
             value={block.text}
             onChange={(v) => updateBlockText(block.id, v)}
+            deferUpdates
             autoFocus
             caret={caret}
             placeholder={PLACEHOLDERS.break}
@@ -124,6 +125,7 @@ export function BlockBody({
         <AutoGrowTextarea
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
+          deferUpdates
           autoFocus
           caret={caret}
           placeholder={PLACEHOLDERS.scene}
@@ -155,6 +157,7 @@ export function BlockBody({
             <AutoGrowTextarea
               value={value}
               onChange={onChange}
+              deferUpdates
               autoFocus={key === "q0"}
               caret={key === "q0" ? caret : undefined}
               placeholder={placeholder}
@@ -191,6 +194,7 @@ export function BlockBody({
                     key={`t${i}`}
                     value={seg.text}
                     onChange={(v) => setTailText(i, v)}
+                    deferUpdates
                     placeholder={PLACEHOLDERS.beat}
                     className={DIALOGUE_BEAT}
                   />
@@ -243,6 +247,7 @@ export function BlockBody({
             <AutoGrowTextarea
               value={block.text}
               onChange={(v) => updateBlockText(block.id, v)}
+              deferUpdates
               autoFocus
               caret={caret}
               placeholder={placeholder}
@@ -268,6 +273,7 @@ export function BlockBody({
         <AutoGrowTextarea
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
+          deferUpdates
           autoFocus
           caret={caret}
           className={LATEX_BODY}
@@ -282,6 +288,7 @@ export function BlockBody({
         <AutoGrowTextarea
           value={block.text}
           onChange={(v) => updateBlockText(block.id, v)}
+          deferUpdates
           autoFocus
           caret={caret}
           placeholder={PLACEHOLDERS.narration}

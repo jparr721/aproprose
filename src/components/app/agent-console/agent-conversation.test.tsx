@@ -7,7 +7,6 @@ import { AgentConversation } from "@/components/app/agent-console/agent-conversa
 import type {
   AgentMessageMetadata,
   AgentUIMessage,
-  ConversationSummary,
 } from "@/lib/ai/agent-types";
 
 function metadata(runId: string): AgentMessageMetadata {
@@ -37,17 +36,12 @@ function textMessage(
   };
 }
 
-function renderConversation(
-  messages: AgentUIMessage[],
-  summary: ConversationSummary | null,
-) {
+function renderConversation(messages: AgentUIMessage[]) {
   return render(
     <AgentConversation
       emptyDescription="Add manuscript context or ask a project question."
       emptyTitle="Ask about this project"
       messages={messages}
-      summary={summary}
-      onNavigateSnapshot={vi.fn().mockResolvedValue(true)}
       onRetry={vi.fn().mockResolvedValue(undefined)}
       onOpenSettings={vi.fn()}
     />,
@@ -61,7 +55,7 @@ afterEach(() => {
 
 describe("AgentConversation", () => {
   it("renders the project question empty state", () => {
-    renderConversation([], null);
+    renderConversation([]);
 
     expect(screen.getByText("Ask about this project")).toBeTruthy();
     expect(
@@ -70,14 +64,11 @@ describe("AgentConversation", () => {
   });
 
   it("renders persisted messages in chronological order", () => {
-    renderConversation(
-      [
-        textMessage("user-1", "user", "First question"),
-        textMessage("assistant-1", "assistant", "First answer"),
-        textMessage("user-2", "user", "Second question"),
-      ],
-      null,
-    );
+    renderConversation([
+      textMessage("user-1", "user", "First question"),
+      textMessage("assistant-1", "assistant", "First answer"),
+      textMessage("user-2", "user", "Second question"),
+    ]);
 
     const first = screen.getByText("First question");
     const answer = screen.getByText("First answer");
@@ -86,37 +77,24 @@ describe("AgentConversation", () => {
     expect(answer.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("interleaves one saved compaction marker after its boundary message", () => {
-    renderConversation(
-      [
-        textMessage("user-old", "user", "Older question"),
-        textMessage("assistant-boundary", "assistant", "Boundary answer"),
-        textMessage("user-new", "user", "Newer question"),
-      ],
-      {
-        throughMessageId: "assistant-boundary",
-        text: "Saved private summary",
-      },
+  it("keeps older messages unmounted until the writer requests them", () => {
+    const messages = Array.from({ length: 10 }, (_, index) =>
+      textMessage(`message-${index}`, index % 2 === 0 ? "user" : "assistant", `Message ${index}`),
     );
+    renderConversation(messages);
 
-    const marker = screen.getByText("Older context compacted");
-    const transcript = marker.parentElement;
-    if (transcript === null) throw new Error("Conversation content is missing");
-    const rows = Array.from(transcript.children);
-    const markerIndex = rows.indexOf(marker);
-
-    expect(screen.getAllByText("Older context compacted")).toHaveLength(1);
-    expect(rows).toHaveLength(4);
-    expect(rows[markerIndex - 1].textContent).toContain("Boundary answer");
-    expect(rows[markerIndex + 1].textContent).toContain("Newer question");
-    expect(screen.queryByText("Saved private summary")).toBeNull();
+    expect(screen.queryByText("Message 0")).toBeNull();
+    expect(screen.queryByText("Message 1")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 earlier messages" }));
+    expect(screen.getByText("Message 0")).toBeTruthy();
+    expect(screen.getByText("Message 1")).toBeTruthy();
   });
 
+
   it("renders the stock scroll-to-latest control when the transcript is scrolled up", async () => {
-    renderConversation(
-      [textMessage("assistant-long", "assistant", "A long transcript")],
-      null,
-    );
+    renderConversation([
+      textMessage("assistant-long", "assistant", "A long transcript"),
+    ]);
     const scrollRegion = screen.getByRole("region", {
       name: "Conversation messages",
     });
@@ -151,8 +129,6 @@ describe("AgentConversation", () => {
           emptyDescription="Add manuscript context or ask a project question."
           emptyTitle="Ask about this project"
           messages={[textMessage("assistant-scroll", "assistant", "Transcript row")]}
-          summary={null}
-          onNavigateSnapshot={vi.fn().mockResolvedValue(true)}
           onRetry={vi.fn().mockResolvedValue(undefined)}
           onOpenSettings={vi.fn()}
         />

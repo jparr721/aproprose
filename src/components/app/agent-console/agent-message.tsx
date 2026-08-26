@@ -1,6 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { isStaticToolUIPart } from "ai";
-import { SentContextAttachments } from "@/components/app/agent-console/context-attachments";
+import { useEffect, useState } from "react";
+import { IconBrain, IconCopy } from "@tabler/icons-react";
 import {
   Message,
   MessageAction,
@@ -8,37 +7,9 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
-import {
-  ChainOfThought,
-  ChainOfThoughtStep,
-} from "@/components/ai-elements/chain-of-thought";
-import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { TypographyMuted } from "@/components/ui/typography";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Check as IconCheck,
-  ChevronDown as IconChevronDown,
-  Copy as IconCopy,
-  CircleAlert as IconExclamationCircle,
-} from "lucide-react";
-import {
-  flattenMessageFindings,
-  type FlattenedMessageFinding,
-} from "@/lib/ai/agent-context";
-import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import {
   agentFailureActionLabel,
@@ -49,9 +20,7 @@ import type {
   AgentFailure,
   AgentSessionId,
   AgentSettingsTarget,
-  AgentMessageMetadata,
   AgentUIMessage,
-  ContextSnapshot,
 } from "@/lib/ai/agent-types";
 import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import {
@@ -62,9 +31,10 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "sonner";
 
+const RESPONSE_PAGE_SIZE = 12_000;
+
 export interface AgentMessageProps {
   message: AgentUIMessage;
-  onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>;
   onRetry: (userMessageId: string) => Promise<{
     status: "success" | "stopped" | "failure";
     failure?: AgentFailure;
@@ -73,68 +43,62 @@ export interface AgentMessageProps {
   sessionId?: AgentSessionId;
 }
 
-type AgentMessagePart = AgentUIMessage["parts"][number];
-type StaticAgentToolPart = Extract<AgentMessagePart, { type: `tool-${string}` }>;
-
-function toolTitle(type: string): string {
-  switch (type) {
-    case "tool-read_chapter":
-      return "Read chapter";
-    case "tool-read_outline":
-      return "Read outline";
-    case "tool-read_lore":
-      return "Read lore";
-    case "tool-run_critique":
-      return "Run critique";
-    case "tool-run_continuity":
-      return "Check continuity";
-    case "tool-read_conversation_context":
-      return "Read conversation context";
-    case "tool-read_pending_proposal":
-      return "Read proposal";
-    case "tool-stage_manuscript_proposal":
-      return "Stage manuscript proposal";
-    case "tool-stage_outline_proposal":
-      return "Stage outline proposal";
-    case "tool-update_character_profile":
-      return "Update character profile";
-    default:
-      throw new Error(`Unknown agent tool part: ${type}`);
-  }
+function formatElapsedTime(startedAt: string, now: number): string {
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((now - Date.parse(startedAt)) / 1_000),
+  );
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function isUnfinishedTool(part: StaticAgentToolPart): boolean {
+function ThinkingIndicator({ startedAt }: { startedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  const elapsed = formatElapsedTime(startedAt, now);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
-    part.state === "input-streaming" ||
-    part.state === "input-available" ||
-    part.state === "approval-requested" ||
-    part.state === "approval-responded"
+    <div className="flex items-center gap-2 text-muted-foreground" role="status">
+      <IconBrain className="size-4" />
+      <Shimmer as="span" className="text-sm">
+        {`Thinking ${elapsed}`}
+      </Shimmer>
+    </div>
   );
 }
 
-function toolStatus(
-  part: StaticAgentToolPart,
-  messageState: AgentMessageMetadata["state"],
-): { label: string; status: "complete" | "active" | "pending" } {
-  if (messageState === "stopped" && isUnfinishedTool(part)) {
-    return { label: "Stopped", status: "complete" };
-  }
-  switch (part.state) {
-    case "input-streaming":
-      return { label: "Pending", status: "pending" };
-    case "input-available":
-      return { label: "Running", status: "active" };
-    case "approval-requested":
-      return { label: "Awaiting approval", status: "active" };
-    case "approval-responded":
-      return { label: "Approval received", status: "active" };
-    case "output-available":
-      return { label: "Completed", status: "complete" };
-    case "output-denied":
-      return { label: "Denied", status: "complete" };
-    case "output-error":
-      return { label: "Error", status: "complete" };
-  }
+function ResponseText({
+  text,
+  isAnimating,
+}: {
+  text: string;
+  isAnimating: boolean;
+}) {
+  const [visibleLength, setVisibleLength] = useState(RESPONSE_PAGE_SIZE);
+  const visibleText = text.slice(0, visibleLength);
+
+  return (
+    <>
+      <MessageResponse isAnimating={isAnimating}>{visibleText}</MessageResponse>
+      {visibleText.length < text.length ? (
+        <Button
+          onClick={() =>
+            setVisibleLength((length) => length + RESPONSE_PAGE_SIZE)
+          }
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Show more reply
+        </Button>
+      ) : null}
+    </>
+  );
 }
 
 function InlineMessageError({ message }: { message: string }) {
@@ -143,173 +107,6 @@ function InlineMessageError({ message }: { message: string }) {
       {message}
     </TypographyMuted>
   );
-}
-
-function unsupportedPart(part: AgentMessagePart, key: string): ReactNode {
-  const error = new Error(`Unsupported agent message part: ${part.type}`);
-  if (import.meta.env.DEV) throw error;
-  return <InlineMessageError key={key} message={error.message} />;
-}
-
-function ToolActivity({
-  parts,
-  messageState,
-}: {
-  parts: StaticAgentToolPart[];
-  messageState: AgentMessageMetadata["state"];
-}) {
-  const statuses = parts.map((part) => toolStatus(part, messageState));
-  const isActive = statuses.some((status) => status.status === "active");
-  const needsAttention = statuses.some(
-    (status) => status.label === "Error" || status.label === "Denied",
-  );
-  const title = isActive
-    ? "Using tools"
-    : needsAttention
-      ? "Tool activity needs attention"
-      : "Tool activity";
-  const HeaderIcon = needsAttention ? IconExclamationCircle : IconCheck;
-  return (
-    <Task defaultOpen={isActive || needsAttention}>
-      <TaskTrigger title={title}>
-        <Button
-          className="w-full justify-start text-muted-foreground"
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          {isActive ? <Spinner /> : <HeaderIcon className="size-4" />}
-          <span className="flex-1 text-left">{title}</span>
-          <IconChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-        </Button>
-      </TaskTrigger>
-      <TaskContent>
-        <ChainOfThought>
-          {parts.map((part, index) => {
-            const status = statuses[index];
-            return (
-              <ChainOfThoughtStep
-                description={status.label}
-                key={part.toolCallId}
-                label={toolTitle(part.type)}
-                status={status.status}
-              />
-            );
-          })}
-        </ChainOfThought>
-      </TaskContent>
-    </Task>
-  );
-}
-
-function Findings({
-  entries,
-  disabled,
-  sessionId,
-}: {
-  entries: FlattenedMessageFinding[];
-  disabled: boolean;
-  sessionId: AgentSessionId;
-}) {
-  return entries.map((entry) => {
-    const finding = entry.finding;
-    return (
-      <Card
-        aria-label={`${finding.tag} finding`}
-        key={entry.id}
-        role="group"
-        size="sm"
-      >
-        <CardHeader>
-          <CardTitle>{finding.tag}</CardTitle>
-          <CardAction>
-            <Button
-              disabled={disabled}
-              onClick={() => {
-                void dispatchAgentIntent(
-                  {
-                    kind: "add-context",
-                    refs: [
-                      {
-                        kind: "finding",
-                        chapterId: entry.chapterId,
-                        findingId: entry.id,
-                      },
-                    ],
-                  },
-                  sessionId,
-                );
-              }}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Add to Chat
-            </Button>
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <TypographyMuted>{finding.text}</TypographyMuted>
-        </CardContent>
-      </Card>
-    );
-  });
-}
-
-function renderPart(
-  part: AgentMessagePart,
-  index: number,
-  message: AgentUIMessage,
-  messageMetadata: AgentMessageMetadata,
-  findings: FlattenedMessageFinding[],
-  authorMutationsDisabled: boolean,
-  sessionId: AgentSessionId,
-  onNavigateSnapshot: (snapshot: ContextSnapshot) => Promise<boolean>,
-): ReactNode {
-  const key = `${message.id}:part:${index}`;
-  if (isStaticToolUIPart(part)) {
-    return null;
-  }
-  switch (part.type) {
-    case "text":
-      return (
-        <MessageResponse
-          isAnimating={messageMetadata.state === "streaming"}
-          key={key}
-        >
-          {part.text}
-        </MessageResponse>
-      );
-    case "data-context":
-      return (
-        <SentContextAttachments
-          key={key}
-          snapshots={part.data.snapshots}
-          onNavigate={onNavigateSnapshot}
-        />
-      );
-    case "data-findings":
-      return (
-        <Findings
-          disabled={authorMutationsDisabled}
-          entries={findings.filter((entry) => entry.partIndex === index)}
-          key={key}
-          sessionId={sessionId}
-        />
-      );
-    case "data-proposal-event":
-      return <TypographyMuted key={key}>{part.data.text}</TypographyMuted>;
-    case "data-compaction":
-      return <TypographyMuted key={key}>Older context compacted</TypographyMuted>;
-    case "reasoning":
-    case "step-start":
-      return null;
-    case "dynamic-tool":
-    case "source-url":
-    case "source-document":
-    case "file":
-      return unsupportedPart(part, key);
-  }
 }
 
 function retryUserMessageId(message: AgentUIMessage, sessionId: AgentSessionId): string {
@@ -333,7 +130,6 @@ function retryUserMessageId(message: AgentUIMessage, sessionId: AgentSessionId):
 
 export function AgentMessage({
   message,
-  onNavigateSnapshot,
   onRetry,
   onOpenSettings,
   sessionId: requestedSessionId,
@@ -342,31 +138,14 @@ export function AgentMessage({
   const projectRoot = useProjectStore(
     (state) => state.project?.root ?? null,
   );
-  const authorMutationsDisabled = useAgentSessionStore(sessionId,
-    (state) => agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
+  const authorMutationsDisabled = useAgentSessionStore(sessionId, (state) =>
+    agentConsoleOwnershipStatus(state, projectRoot) !== "ready",
   );
   const [retryFailure, setRetryFailure] = useState<AgentFailure | null>(null);
   const messageMetadata = message.metadata;
   if (messageMetadata === undefined) {
     return <InlineMessageError message={`Agent message metadata is missing: ${message.id}`} />;
   }
-  const findings = flattenMessageFindings(message);
-  const toolParts = message.parts.filter((part): part is StaticAgentToolPart =>
-    isStaticToolUIPart(part),
-  );
-  const firstToolIndex = message.parts.findIndex((part) =>
-    isStaticToolUIPart(part),
-  );
-  const reasoningParts = message.parts.filter(
-    (part) => part.type === "reasoning",
-  );
-  const reasoningText = reasoningParts.map((part) => part.text).join("\n\n");
-  const firstReasoningIndex = message.parts.findIndex(
-    (part) => part.type === "reasoning",
-  );
-  const lastPart = message.parts.at(-1);
-  const isReasoningStreaming =
-    messageMetadata.state === "streaming" && lastPart?.type === "reasoning";
   const failure =
     messageMetadata.state === "error"
       ? messageMetadata.failure ?? agentFailureFromReason("unknown", "openai")
@@ -388,44 +167,30 @@ export function AgentMessage({
       toast.success("Message copied");
       return;
     }
-    toast.error("Couldn't copy the message to the clipboard");
+    toast.error("Couldn't copy to the clipboard");
   };
+
   return (
     <Message from={message.role}>
       <MessageContent>
-        {message.parts.map((part, index) =>
-          index === firstReasoningIndex ? (
-            <Reasoning
-              className="w-full"
-              isStreaming={isReasoningStreaming}
-              key={`${message.id}:reasoning`}
-            >
-              <ReasoningTrigger />
-              <ReasoningContent>{reasoningText}</ReasoningContent>
-            </Reasoning>
-          ) : index === firstToolIndex ? (
-            <ToolActivity
-              key={`${message.id}:tools`}
-              messageState={messageMetadata.state}
-              parts={toolParts}
+        {messageMetadata.state === "streaming" ? (
+          <ThinkingIndicator startedAt={messageMetadata.createdAt} />
+        ) : null}
+        {message.parts
+          .filter((part) => part.type === "text")
+          .map((part, index) => (
+            <ResponseText
+              isAnimating={messageMetadata.state === "streaming"}
+              key={`${message.id}:text:${index}`}
+              text={part.text}
             />
-          ) : (
-            renderPart(
-              part,
-              index,
-              message,
-              messageMetadata,
-              findings,
-              authorMutationsDisabled,
-              sessionId,
-              onNavigateSnapshot,
-            )
-          ),
-        )}
+          ))}
         {messageMetadata.state === "stopped" ? (
           <TypographyMuted>Stopped</TypographyMuted>
         ) : null}
-        {failure === null ? null : <InlineMessageError message={safeAgentErrorText(failure)} />}
+        {failure === null ? null : (
+          <InlineMessageError message={safeAgentErrorText(failure)} />
+        )}
         {retryFailure === null ? null : (
           <InlineMessageError message={safeAgentErrorText(retryFailure)} />
         )}

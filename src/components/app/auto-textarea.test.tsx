@@ -7,7 +7,7 @@
 // call focus() without preventScroll, letting the browser reveal-scroll the
 // field. Both showed up as the page jumping when clicking a block to edit it.
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutoGrowTextarea } from "@/components/app/auto-textarea";
 
@@ -97,5 +97,20 @@ describe("AutoGrowTextarea", () => {
       <AutoGrowTextarea value="" onChange={() => {}} placeholder="What do they say?" />,
     );
     expect(document.querySelector("[aria-hidden]")?.textContent).toBe("What do they say? ");
+  });
+
+  it("stages a block edit locally until the editor loses focus", () => {
+    const onChange = vi.fn();
+    renderInViewport(
+      <AutoGrowTextarea deferUpdates value="Original" onChange={onChange} />,
+    );
+    const textarea = screen.getByRole("textbox");
+
+    fireEvent.change(textarea, { target: { value: "Draft" } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect((textarea as HTMLTextAreaElement).value).toBe("Draft");
+
+    fireEvent.blur(textarea);
+    expect(onChange).toHaveBeenCalledWith("Draft");
   });
 });

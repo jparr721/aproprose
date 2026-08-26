@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   AgentMessage,
   type AgentMessageProps,
@@ -8,21 +9,17 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { TypographyMuted } from "@/components/ui/typography";
+import { Button } from "@/components/ui/button";
 import type {
-  AgentUIMessage,
   AgentSessionId,
-  ConversationSummary,
 } from "@/lib/ai/agent-types";
 import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 
+const RECENT_MESSAGE_COUNT = 8;
+
 export interface AgentConversationProps
-  extends Pick<
-    AgentMessageProps,
-    "onNavigateSnapshot" | "onOpenSettings" | "onRetry"
-  > {
-  messages: AgentUIMessage[];
-  summary: ConversationSummary | null;
+  extends Pick<AgentMessageProps, "onOpenSettings" | "onRetry"> {
+  messages: AgentMessageProps["message"][];
   emptyTitle: string;
   emptyDescription: string;
   sessionId?: AgentSessionId;
@@ -30,8 +27,6 @@ export interface AgentConversationProps
 
 export function AgentConversation({
   messages,
-  summary,
-  onNavigateSnapshot,
   onRetry,
   onOpenSettings,
   emptyTitle,
@@ -39,6 +34,9 @@ export function AgentConversation({
   sessionId: requestedSessionId,
 }: AgentConversationProps) {
   const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
+  const [visibleCount, setVisibleCount] = useState(RECENT_MESSAGE_COUNT);
+  const visibleMessages = messages.slice(-visibleCount);
+  const hiddenMessageCount = messages.length - visibleMessages.length;
   return (
     <Conversation className="min-h-0">
       <ConversationContent scrollClassName="overflow-y-auto">
@@ -48,21 +46,31 @@ export function AgentConversation({
             title={emptyTitle}
           />
         ) : (
-          messages.flatMap((message) => [
-            <AgentMessage
-              key={message.id}
-              message={message}
-              onNavigateSnapshot={onNavigateSnapshot}
-              onOpenSettings={onOpenSettings}
-              onRetry={onRetry}
-              sessionId={sessionId}
-            />,
-            summary?.throughMessageId === message.id ? (
-              <TypographyMuted key={`compaction-${message.id}`}>
-                Older context compacted
-              </TypographyMuted>
-            ) : null,
-          ])
+          <>
+            {hiddenMessageCount > 0 ? (
+              <Button
+                onClick={() =>
+                  setVisibleCount((count) =>
+                    Math.min(messages.length, count + RECENT_MESSAGE_COUNT),
+                  )
+                }
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Show {hiddenMessageCount} earlier messages
+              </Button>
+            ) : null}
+            {visibleMessages.map((message) => (
+              <AgentMessage
+                key={message.id}
+                message={message}
+                onOpenSettings={onOpenSettings}
+                onRetry={onRetry}
+                sessionId={sessionId}
+              />
+            ))}
+          </>
         )}
       </ConversationContent>
       <ConversationScrollButton aria-label="Scroll to latest message" />

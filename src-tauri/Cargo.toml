@@ -31,5 +31,6 @@ tauri-plugin-os = "2.3.2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
 tempfile = "3"
 

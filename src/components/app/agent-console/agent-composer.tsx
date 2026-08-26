@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ChatStatus, LanguageModelUsage } from "ai";
 import {
   Context,
@@ -40,6 +41,7 @@ import { useProjectStore } from "@/stores/project-store";
 import {
   useSettingsDialogStore,
 } from "@/stores/settings-dialog-store";
+import { useViewStore } from "@/stores/view-store";
 
 export interface AgentComposerProps {
   task: AgentTask | null;
@@ -102,6 +104,26 @@ export function AgentComposer({
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
   const blocksTargetEditing = ownershipStatus !== "ready";
+  const aiComposerFocusRequested = useViewStore(
+    (state) => state.aiComposerFocusRequested,
+  );
+  const composerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (
+      sessionId.kind !== "project" ||
+      !aiComposerFocusRequested ||
+      blocksTargetEditing
+    )
+      return;
+    const textarea = composerRef.current?.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Message AI Console"]',
+    );
+    if (textarea === null || textarea === undefined) return;
+    textarea.focus({ preventScroll: true });
+    useViewStore.getState().consumeAiComposerFocusRequest();
+  }, [aiComposerFocusRequested, blocksTargetEditing, sessionId.kind]);
+
 
   const handleSubmit = async (): Promise<"submitted" | "failed"> => {
     if (
@@ -143,6 +165,7 @@ export function AgentComposer({
 
   return (
     <div
+      ref={composerRef}
       aria-label="Agent composer"
       className="flex shrink-0 flex-col gap-2 border-t border-border bg-background p-3"
       role="region"

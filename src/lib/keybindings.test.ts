@@ -10,6 +10,9 @@ describe("keybindings registry", () => {
   it("binds split-block to mod+shift+enter", () => {
     expect(toHotkeyString(KEYBINDINGS.SPLIT_BLOCK)).toBe("mod+shift+enter");
   });
+  it("binds add selection to AI to mod+l", () => {
+    expect(toHotkeyString(KEYBINDINGS.ADD_SELECTION_TO_AI)).toBe("mod+l");
+  });
   it("keeps save on mod+s and labels it Save & build", () => {
     expect(toHotkeyString(KEYBINDINGS.SAVE_CHAPTER)).toBe("mod+s");
     expect(KEYBINDINGS.SAVE_CHAPTER.label).toBe("Save & build");

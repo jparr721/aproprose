@@ -82,6 +82,17 @@ describe("view-store AI console", () => {
     expect(state).not.toHaveProperty("sidebarOpen");
   });
 
+  it("opens the AI dock and requests composer focus", () => {
+    useViewStore.setState({ aiOpen: false, focus: true });
+    useViewStore.getState().requestAiComposerFocus();
+
+    expect(useViewStore.getState()).toMatchObject({
+      aiOpen: true,
+      focus: false,
+      aiComposerFocusRequested: true,
+    });
+  });
+
 });
 
 describe("view-store applyLayoutPreset", () => {

@@ -314,6 +314,27 @@ export function Editor() {
     authoringOptions,
   );
 
+  useKeybindingWithOptions(
+    KEYBINDING_IDS.ADD_SELECTION_TO_AI,
+    () => {
+      if (manuscriptReviewIsActive()) return;
+      const state = useProjectStore.getState();
+      const chapterId = state.activeChapterId;
+      const blockIds = selectionTargetIds(state.selectedIds, state.selectedId);
+      if (chapterId === null || blockIds.length === 0) return;
+      useViewStore.getState().requestAiComposerFocus();
+      void dispatchAgentIntent({
+        kind: "add-context",
+        refs: blockIds.map((blockId) => ({
+          kind: "block" as const,
+          chapterId,
+          blockId,
+        })),
+      });
+    },
+    historyOptions,
+  );
+
   // Inline emphasis: Cmd/Ctrl+B bold, Cmd/Ctrl+I italic. Toggle the marker around
   // the focused prose-body textarea's selection, mirroring SPLIT_BLOCK's read of
   // document.activeElement. The textarea is controlled, so the new selection is

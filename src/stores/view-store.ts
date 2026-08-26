@@ -34,6 +34,8 @@ interface ViewState {
   outlineOpen: boolean;
   manuscriptReviewProposalId: string | null;
   focus: boolean;
+  /** An ephemeral request consumed by the project AI composer after it mounts. */
+  aiComposerFocusRequested: boolean;
   /** Whether the build-error viewer dialog is open. Lifted here so the badge,
    *  the failure toast, and the command palette can all open the same viewer. */
   buildErrorsOpen: boolean;
@@ -46,6 +48,8 @@ interface ViewState {
   toggleAi: () => void;
   setAiOpen: (open: boolean) => void;
   openAiConsole: () => void;
+  requestAiComposerFocus: () => void;
+  consumeAiComposerFocusRequest: () => void;
   togglePdf: () => void;
   toggleOutline: () => void;
   openOutline: () => void;
@@ -92,6 +96,7 @@ export const useViewStore = create<ViewState>()(
       manuscriptReviewProposalId: null,
       focus: false,
       buildErrorsOpen: false,
+      aiComposerFocusRequested: false,
 
       pending: null,
 
@@ -104,6 +109,14 @@ export const useViewStore = create<ViewState>()(
           aiOpen: true,
           focus: false,
         }),
+      requestAiComposerFocus: () =>
+        set({
+          aiOpen: true,
+          focus: false,
+          aiComposerFocusRequested: true,
+        }),
+      consumeAiComposerFocusRequest: () =>
+        set({ aiComposerFocusRequested: false }),
       togglePdf: () => set((s) => ({ pdfOpen: !s.pdfOpen, focus: false })),
       toggleOutline: () =>
         set((s) => {

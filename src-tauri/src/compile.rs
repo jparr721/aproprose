@@ -105,8 +105,8 @@ async fn compile_with_tool(
 }
 
 pub fn pdf_output_path(root: &Path, main_file: &str) -> PathBuf {
-    let stem = Path::new(main_file).file_stem().unwrap_or_default();
-    root.join(stem).with_extension("pdf")
+    let basename = Path::new(main_file).file_name().unwrap_or_default();
+    root.join(basename).with_extension("pdf")
 }
 
 async fn run_build(
@@ -267,6 +267,14 @@ mod tests {
     }
 
     #[test]
+    fn output_path_preserves_dotted_main_basename() {
+        assert_eq!(
+            pdf_output_path(Path::new("book"), "nested/book.v1.tex"),
+            Path::new("book/book.v1.pdf")
+        );
+    }
+
+    #[test]
     fn discovery_checks_platform_executables_in_supplied_paths() {
         let directory = tempfile::tempdir().unwrap();
         let name = if cfg!(windows) {
@@ -326,6 +334,34 @@ mod tests {
             b"xx"
         );
         assert_eq!(result.pdf_base64.as_deref(), Some("cGRmIGJ5dGVz"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn controlled_compiler_returns_dotted_output_and_preserves_unrelated_pdf() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("book.pdf"), "unrelated pdf").unwrap();
+        std::fs::write(directory.path().join("book.v1.pdf"), "old pdf").unwrap();
+        let tool = controlled_tool(
+            directory.path(),
+            "test \"$1\" = nested/book.v1.tex || exit 2; if [ -e book.v1.pdf ]; then echo 'stale dotted output remains' >&2; exit 3; fi; printf 'pdf bytes' > book.v1.pdf",
+            1,
+        );
+
+        let result = compile_with_tool(
+            directory.path(),
+            "nested/book.v1.tex",
+            Some(tool),
+            Duration::from_secs(2),
+        )
+        .await;
+
+        assert!(result.ok, "{}", result.log);
+        assert_eq!(result.pdf_base64.as_deref(), Some("cGRmIGJ5dGVz"));
+        assert_eq!(
+            std::fs::read(directory.path().join("book.pdf")).unwrap(),
+            b"unrelated pdf"
+        );
     }
 
     #[cfg(unix)]

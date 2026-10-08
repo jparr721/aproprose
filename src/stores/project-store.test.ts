@@ -47,6 +47,7 @@ import {
   readTextFile,
   writeAppData,
   writeProjectMeta,
+  writeSkeleton,
   writeTextFile,
 } from "@/lib/tauri";
 import type {
@@ -267,6 +268,82 @@ const pendingManuscriptFixture = (blocks: Block[], changes: BlockChange[]) =>
     currentOverview: "",
     now: "2026-07-30T00:01:00.000Z",
   });
+
+describe("chapter reordering", () => {
+  const project: ProjectInfo = {
+    ...projectFixture("/book"),
+    chapters: Array.from({ length: 4 }, (_, index) => ({
+      id: `ch${index + 1}`,
+      label: String(index + 1),
+      title: `Chapter ${index + 1}`,
+      file: `chapter-${index + 1}.tex`,
+      wordCount: 10,
+    })),
+  };
+
+  it.each([
+    ["ch1", 3, ["ch2", "ch3", "ch4", "ch1"]],
+    ["ch4", 0, ["ch4", "ch1", "ch2", "ch3"]],
+    ["ch1", 1, ["ch2", "ch1", "ch3", "ch4"]],
+    ["ch3", 1, ["ch1", "ch3", "ch2", "ch4"]],
+  ])("persists %s at position %i without losing active edits", async (id, toIndex, order) => {
+    const refresh = vi.spyOn(useStoryRefreshStore.getState(), "enqueueChapterTopology")
+      .mockImplementation(() => undefined);
+    const blocks: Block[] = [mkBlock({ id: "dirty-block", dirty: true })];
+    useProjectStore.setState({ project, activeChapterId: "ch2", blocks, chapterDirty: true });
+    vi.mocked(writeSkeleton).mockClear();
+    vi.mocked(writeSkeleton).mockImplementationOnce(async (_root, model) => ({
+      ...project,
+      chapters: model.chapters.map((chapter) => {
+        const original = project.chapters.find((candidate) => candidate.file === chapter.file);
+        if (!original) throw new Error(`Unexpected chapter file: ${chapter.file}`);
+        return original;
+      }),
+    }));
+
+    await useProjectStore.getState().moveChapter(id, toIndex);
+
+    expect(writeSkeleton).toHaveBeenCalledTimes(1);
+    expect(writeSkeleton).toHaveBeenCalledWith("/book", {
+      metadata: project.metadata,
+      chapters: order.map((chapterId) => ({
+        title: `Chapter ${chapterId.slice(2)}`,
+        file: `chapter-${chapterId.slice(2)}.tex`,
+      })),
+    });
+    expect(useProjectStore.getState().project?.chapters.map((chapter) => chapter.id)).toEqual(order);
+    expect(project.chapters.map((chapter) => chapter.id)).toEqual(["ch1", "ch2", "ch3", "ch4"]);
+    expect(useProjectStore.getState()).toMatchObject({ activeChapterId: "ch2", chapterDirty: true });
+    expect(useProjectStore.getState().blocks).toBe(blocks);
+    expect(refresh).toHaveBeenCalledWith("/book");
+    refresh.mockRestore();
+  });
+
+  it.each([
+    ["ch2", 1], ["missing", 0], ["ch1", -1], ["ch1", 4], ["ch1", 1.5], ["ch1", NaN],
+  ])("does not write for a no-op or invalid destination: %s, %s", async (id, toIndex) => {
+    useProjectStore.setState({ project });
+    vi.mocked(writeSkeleton).mockClear();
+
+    await useProjectStore.getState().moveChapter(id, toIndex);
+
+    expect(writeSkeleton).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().project).toBe(project);
+  });
+
+  it("preserves order and dirty edits when persistence fails", async () => {
+    const refresh = vi.spyOn(useStoryRefreshStore.getState(), "enqueueChapterTopology")
+      .mockImplementation(() => undefined);
+    useProjectStore.setState({ project, activeChapterId: "ch2", chapterDirty: true });
+    vi.mocked(writeSkeleton).mockRejectedValueOnce(new Error("disk full"));
+
+    await useProjectStore.getState().moveChapter("ch1", 3);
+
+    expect(useProjectStore.getState()).toMatchObject({ project, activeChapterId: "ch2", chapterDirty: true, error: "Error: disk full" });
+    expect(refresh).not.toHaveBeenCalled();
+    refresh.mockRestore();
+  });
+});
 
 beforeEach(() => {
   useStoryRefreshStore.getState().cancel();

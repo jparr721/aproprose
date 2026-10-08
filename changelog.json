@@ -1,10 +1,19 @@
 [
   {
-    "version": "0.17.5",
+    "version": "0.17.6",
     "date": "2026-10-07",
     "summary": "The AI dock reopens reliably after resizing.",
     "highlights": [
       "Dragging the dock closed no longer breaks the first reopen."
+    ]
+  },
+  {
+    "version": "0.17.5",
+    "date": "2026-10-07",
+    "summary": "Chapter navigation is aligned and easier to rearrange.",
+    "highlights": [
+      "Chapter numbers line up with the Add chapter button, with chapter actions replacing the number on hover or focus.",
+      "Drag chapter rows to reorder the manuscript without losing your active chapter or unsaved edits."
     ]
   },
   {

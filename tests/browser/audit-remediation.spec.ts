@@ -1,5 +1,20 @@
 import { test, expect } from "./fixtures";
 
+test("browser shortcuts and the native fixture use the runner OS", async ({ page }) => {
+  await page.goto("/tests/workshop.html");
+  const identity = await page.evaluate(() => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "__TAURI_OS_PLUGIN_INTERNALS__");
+    if (descriptor === undefined) throw new Error("Native platform fixture is missing");
+    const native: unknown = descriptor.value;
+    if (native === null || typeof native !== "object" || !("platform" in native)) {
+      throw new Error("Native platform fixture is invalid");
+    }
+    return { usesMeta: /mac/i.test(navigator.userAgent), platform: native.platform };
+  });
+  expect(identity.usesMeta).toBe(process.platform === "darwin");
+  expect(identity.platform).toBe(process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux");
+});
+
 for (const width of [960, 1440]) {
   test(`workspace and find widgets fit at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 820 });

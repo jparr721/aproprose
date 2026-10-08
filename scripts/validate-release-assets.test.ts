@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { validateManifest, verifyArtifactSignature } from "./validate-release-assets";
-import { observeApplication } from "./smoke-release-artifact";
+import { observeApplication, prepareMacWindowObserver } from "./smoke-release-artifact";
 
 const assets = ["aproprose.app.tar.gz", "aproprose.AppImage", "aproprose-setup.exe", "aproprose.pkg.tar.zst"];
 const platforms = ["darwin-aarch64", "linux-x86_64", "windows-x86_64"];
@@ -68,6 +68,15 @@ it("cryptographically rejects an altered updater artifact", () => {
 });
 
 describe("artifact launch observation", () => {
+  it.runIf(process.platform === "darwin")("prepares a compiled observer before inspecting the application", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "aproprose-window-observer-"));
+    directories.push(directory);
+    const observeWindow = await prepareMacWindowObserver(directory);
+    expect(readFileSync(join(directory, "window-observer")).byteLength).toBeGreaterThan(0);
+    await expect(observeWindow(process.pid)).resolves.toBe(false);
+    await expect(observeWindow(process.pid)).resolves.toBe(false);
+  }, 120_000);
+
   it("fails when the launched process exits before the settle interval", async () => {
     const child = spawn(process.execPath, ["-e", "process.exit(7)"], { stdio: "ignore" });
     await expect(observeApplication(child, async () => true, 1_000, 400)).rejects.toThrow(/exited/);

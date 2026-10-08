@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -78,6 +78,14 @@ let visible = windows.contains { window in
 print(visible ? "visible" : "missing")
 `;
 
+export async function prepareMacWindowObserver(directory: string): Promise<(pid: number) => Promise<boolean>> {
+  const source = join(directory, "window-observer.swift");
+  const executable = join(directory, "window-observer");
+  writeFileSync(source, macWindowProbe);
+  await runCommand("swiftc", [source, "-o", executable], 120_000);
+  return async (pid: number): Promise<boolean> => await runCommand(executable, [String(pid)], 5_000) === "visible";
+}
+
 async function hasVisibleWindow(pid: number): Promise<boolean> {
   switch (process.platform) {
     case "linux":
@@ -88,8 +96,6 @@ async function hasVisibleWindow(pid: number): Promise<boolean> {
         if (error instanceof Error && "code" in error && error.code === 1) return false;
         throw error;
       }
-    case "darwin":
-      return await runCommand("swift", ["-e", macWindowProbe, String(pid)], 15_000) === "visible";
     case "win32":
       return await runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$app = Get-Process -Id ${pid} -ErrorAction Stop; $app.Refresh(); if ($app.MainWindowHandle -ne 0 -and -not $app.HasExited) { 'visible' } else { 'missing' }`], 5_000) === "visible";
     default:
@@ -161,6 +167,7 @@ async function main(): Promise<void> {
   const output: string[] = [];
   try {
     const executable = await prepareExecutable(resolve(bundleArgument), directory);
+    const observeWindow = process.platform === "darwin" ? await prepareMacWindowObserver(directory) : hasVisibleWindow;
     child = spawn(executable, [], {
       detached: process.platform !== "win32",
       stdio: "pipe",
@@ -172,7 +179,7 @@ async function main(): Promise<void> {
     await new Promise<void>((resolveSpawn, reject) => { launched.once("spawn", resolveSpawn); launched.once("error", reject); });
     const pid = launched.pid;
     if (pid === undefined) throw new Error("Packaged application started without a process ID");
-    await observeApplication(launched, () => hasVisibleWindow(pid), 30_000, 3_000);
+    await observeApplication(launched, () => observeWindow(pid), 30_000, 3_000);
     console.log(`Packaged application launched with a visible window: ${executable}`);
   } catch (error) {
     throw new Error(`Packaged application smoke failed. Output: ${output.join("")}`, { cause: error });

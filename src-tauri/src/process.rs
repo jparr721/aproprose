@@ -117,11 +117,10 @@ pub fn find_program(program: &str, paths: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn runner_retains_raw_output_exit_status_and_launch_errors() {
         let directory = tempfile::tempdir().unwrap();
@@ -147,7 +146,6 @@ mod tests {
         assert!(error.to_string().contains("missing-program"));
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn runner_enforces_explicit_timeout() {
         let directory = tempfile::tempdir().unwrap();

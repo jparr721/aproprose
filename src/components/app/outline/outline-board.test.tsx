@@ -7,10 +7,12 @@ import { OutlineBoard } from "@/components/app/outline/outline-board";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
+import { useViewStore } from "@/stores/view-store";
 
-afterEach(() => cleanup());
+afterEach(() => { useViewStore.getState().cancelPending(); cleanup(); });
 
 beforeEach(() => {
+  useProjectStore.setState({ chapterDirty: false, remoteDivergence: null });
   useOutlineBoardStore.setState({
     openChapterId: null,
     chapterView: "manual",
@@ -37,6 +39,14 @@ beforeEach(() => {
 });
 
 describe("OutlineBoard", () => {
+  it("guards outline Add before replacing a dirty chapter", () => {
+    useProjectStore.setState({ chapterDirty: true, activeChapterId: "ch1" });
+    render(<OutlineBoard />);
+    fireEvent.click(screen.getByRole("button", { name: "Add chapter" }));
+    expect(useViewStore.getState().pending).not.toBeNull();
+    expect(useProjectStore.getState().project?.chapters).toHaveLength(2);
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+  });
   it("renders one column per chapter grouped into act bands", () => {
     render(<OutlineBoard />);
     expect(screen.getByText("Quiet Town")).toBeTruthy();

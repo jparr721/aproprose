@@ -1,10 +1,11 @@
-// backup-review-dialog.tsx — "what changed since the last backup". A near-full-
+// backup-review-dialog.tsx - "what changed since the last backup". A near-full-
 // screen dialog listing changed files; each row expands on demand to its diff,
 // rendered with @pierre/diffs, and commits+syncs via the engine.
 
 import { notifyAppError, openNotifications } from "@/lib/notifications";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { ChevronRight as IconChevronRight } from "lucide-react";
+import { IconChevronRight } from "@tabler/icons-react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -65,11 +66,13 @@ function FileRow({
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <button
-        type="button"
+    <Card className="gap-0 py-0">
+      <CardHeader className="p-0">
+      <Button
+        variant="ghost"
+        aria-expanded={open}
         onClick={() => void toggle()}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs text-foreground transition-colors hover:bg-muted/50"
+        className="h-auto justify-start rounded-none px-3 py-2.5 text-left"
       >
         <IconChevronRight
           className={cn(
@@ -77,20 +80,21 @@ function FileRow({
             open && "rotate-90",
           )}
         />
-        <span className="w-5 shrink-0 font-mono text-[11px] text-muted-foreground">
+        <span className="w-5 shrink-0 text-muted-foreground">
           {status.trim()}
         </span>
         <span className="truncate">{path}</span>
-      </button>
+      </Button>
+      </CardHeader>
       {open ? (
-        <div className="border-t border-border p-2">
+        <CardContent className="border-t border-border p-2">
           {loading ? (
             <div className="flex items-center gap-2 px-1 py-2">
               <Spinner className="size-3.5" />
-              <TypographyMuted className="text-[11px]">Loading diff</TypographyMuted>
+              <TypographyMuted className="text-xs">Loading diff</TypographyMuted>
             </div>
           ) : error ? (
-            <TypographyMuted className="px-1 py-2 text-[11px] text-destructive">
+            <TypographyMuted className="px-1 py-2 text-xs text-destructive">
               <Button variant="ghost" size="sm" onClick={openNotifications}>View notifications</Button>
             </TypographyMuted>
           ) : diff && diff.trim() ? (
@@ -98,7 +102,7 @@ function FileRow({
               fallback={
                 <div className="flex items-center gap-2 px-1 py-2">
                   <Spinner className="size-3.5" />
-                  <TypographyMuted className="text-[11px]">
+                  <TypographyMuted className="text-xs">
                     Rendering diff
                   </TypographyMuted>
                 </div>
@@ -111,13 +115,13 @@ function FileRow({
               />
             </Suspense>
           ) : (
-            <TypographyMuted className="px-1 py-2 text-[11px]">
+            <TypographyMuted className="px-1 py-2 text-xs">
               No textual diff (new or binary file).
             </TypographyMuted>
           )}
-        </div>
+        </CardContent>
       ) : null}
-    </div>
+    </Card>
   );
 }
 

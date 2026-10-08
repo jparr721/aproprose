@@ -18,6 +18,7 @@ export function FindOptionToggle({
       variant={active ? "secondary" : "ghost"}
       aria-pressed={active}
       title={title}
+      aria-label={title}
       onClick={onClick}
     >
       {children}

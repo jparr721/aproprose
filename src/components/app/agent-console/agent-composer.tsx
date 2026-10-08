@@ -251,7 +251,7 @@ export function AgentComposer({
         <TypographyMuted>AI conversation is loading.</TypographyMuted>
       ) : null}
       {runError === null ? null : (
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <TypographyMuted className="text-destructive" role="alert">
             {safeAgentErrorText(runError)}
           </TypographyMuted>

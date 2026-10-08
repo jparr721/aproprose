@@ -1,4 +1,4 @@
-// backup-setup-dialog.tsx — two flows. For a git repo aproprose hasn't seen
+// backup-setup-dialog.tsx - two flows. For a git repo aproprose hasn't seen
 // before: pick an auto-sync window or stay manual. For a project with no GitHub
 // backup yet: name the repo + visibility, then create it and push.
 
@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
+import { BackupScheduleFields } from "@/components/app/backup-schedule-fields";
 import { Spinner } from "@/components/ui/spinner";
 import { TypographyMuted } from "@/components/ui/typography";
 import { useSyncStore } from "@/stores/sync-store";
@@ -87,27 +87,10 @@ export function BackupSetupDialog({
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-5 py-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="auto-sync">Auto-sync</Label>
-                <Switch id="auto-sync" checked={autoSync} onCheckedChange={setAutoSync} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <Label>Every</Label>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {intervalMinutes} min
-                  </span>
-                </div>
-                <Slider
-                  min={1}
-                  max={60}
-                  step={1}
-                  value={[intervalMinutes]}
-                  onValueChange={([v]) => setIntervalMinutes(v)}
-                  disabled={!autoSync}
-                />
+              <BackupScheduleFields autoSync={autoSync} intervalMinutes={intervalMinutes} available={true} onAutoSyncChange={setAutoSync} onIntervalChange={setIntervalMinutes} />
+              <div>
                 <TypographyMuted className="text-xs">
-                  When off, your work is still safe — use "Sync now" whenever you like.
+                  When off, use "Sync now" to back up your work.
                 </TypographyMuted>
               </div>
             </div>

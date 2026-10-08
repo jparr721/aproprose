@@ -52,6 +52,18 @@ beforeEach(() => {
 });
 
 describe("AiTab", () => {
+  it("associates provider, key, model, and writing preference labels", async () => {
+    mocks.getAiKeyStatus.mockResolvedValue({ status: "configured" });
+    mocks.listTextModels.mockResolvedValue(["gpt-5-mini"]);
+    render(<AiTab />);
+    await waitFor(() => expect(mocks.listTextModels).toHaveBeenCalledOnce());
+    expect(screen.getByRole("combobox", { name: "AI provider" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "AI model" })).toBeTruthy();
+    expect(screen.getByLabelText("OpenAI key")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Writing voice" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Writing and editing instructions" })).toBeTruthy();
+  });
+
   it("shows OpenAI as the default selectable provider", async () => {
     render(<AiTab />);
 

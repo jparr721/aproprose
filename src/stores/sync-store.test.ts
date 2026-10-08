@@ -9,7 +9,9 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { useSyncStore, STATUS_POLL_MS } from "@/stores/sync-store";
-import { gitRepoStatus, syncProject } from "@/lib/tauri";
+import { gitRepoStatus, syncProject, readAppData } from "@/lib/tauri";
+import { useProjectStore } from "@/stores/project-store";
+import { projectRemoteRevision } from "@/lib/project-operations";
 import type { RepoStatus } from "@/lib/types";
 
 const CLEAN: RepoStatus = {
@@ -107,7 +109,7 @@ describe("a status read racing a concurrent sync (must not clobber the sync's re
     const staleRead = useSyncStore.getState().refreshStatus();
 
     // A sync completes to "synced" while that read is still in flight.
-    vi.mocked(syncProject).mockResolvedValue({ kind: "synced" });
+    vi.mocked(syncProject).mockResolvedValue({ outcome: { kind: "synced" }, changedFiles: [] });
     await useSyncStore.getState().syncNow();
     expect(useSyncStore.getState().status).toBe("synced");
 
@@ -138,7 +140,7 @@ describe("a status read racing a concurrent sync (must not clobber the sync's re
     vi.mocked(gitRepoStatus).mockResolvedValue(CONFLICTED);
     const staleRead = useSyncStore.getState().refreshStatus();
 
-    vi.mocked(syncProject).mockResolvedValue({ kind: "conflict", files: ["content/ch1.tex"] });
+    vi.mocked(syncProject).mockResolvedValue({ outcome: { kind: "conflict", files: ["content/ch1.tex"] }, changedFiles: ["content/ch1.tex"] });
     await useSyncStore.getState().syncNow();
     expect(useSyncStore.getState().status).toBe("conflict");
     expect(useSyncStore.getState().conflictedFiles).toEqual(["content/ch1.tex"]);
@@ -149,5 +151,101 @@ describe("a status read racing a concurrent sync (must not clobber the sync's re
 
     expect(useSyncStore.getState().status).toBe("conflict");
     expect(useSyncStore.getState().conflictedFiles).toEqual(["content/ch1.tex"]);
+  });
+});
+
+describe("sync lifecycle ownership", () => {
+  it("invalidates unknown pull paths before an obsolete A-B-A sync releases its queue", async () => {
+    const root = "/unknown-obsolete";
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init(root);
+    const revision = projectRemoteRevision(root);
+    let finish!: (value: Awaited<ReturnType<typeof syncProject>>) => void;
+    vi.mocked(syncProject).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const syncing = useSyncStore.getState().syncNow();
+    await Promise.resolve();
+    await useSyncStore.getState().init("/other");
+    await useSyncStore.getState().init(root);
+    const reconcile = vi.spyOn(useProjectStore.getState(), "reconcileRemoteChanges").mockResolvedValue(undefined);
+    finish({ outcome: { kind: "error", message: "Path discovery failed" }, changedFiles: null });
+    await syncing;
+    expect(projectRemoteRevision(root)).toBe(revision + 1);
+    expect(reconcile).not.toHaveBeenCalled();
+    reconcile.mockRestore();
+  });
+
+  it("does not invalidate known-empty pull paths", async () => {
+    const root = "/known-empty";
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init(root);
+    const revision = projectRemoteRevision(root);
+    vi.mocked(syncProject).mockResolvedValueOnce({ outcome: { kind: "clean" }, changedFiles: [] });
+    await useSyncStore.getState().syncNow();
+    expect(projectRemoteRevision(root)).toBe(revision);
+    expect(useSyncStore.getState().status).toBe("clean");
+  });
+
+  it("reconciles against metadata captured before the pull starts", async () => {
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init("/repo");
+    const beforePull = useProjectStore.getState();
+    let finish!: (value: Awaited<ReturnType<typeof syncProject>>) => void;
+    vi.mocked(syncProject).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const reconcile = vi.spyOn(useProjectStore.getState(), "reconcileRemoteChanges").mockResolvedValue(undefined);
+    const syncing = useSyncStore.getState().syncNow();
+    await Promise.resolve();
+    useProjectStore.setState({ meta: { ...beforePull.meta, outline: { ...beforePull.meta.outline, premise: "Local edit during pull" } } });
+    finish({ outcome: { kind: "synced" }, changedFiles: [".aproprose/meta.json"] });
+    await syncing;
+    expect(reconcile).toHaveBeenCalledWith("/repo", [".aproprose/meta.json"], {
+      lifecycleGeneration: beforePull.lifecycleGeneration,
+      editRevision: beforePull.editRevision,
+      meta: beforePull.meta,
+    });
+    reconcile.mockRestore();
+  });
+
+  it("does not install delayed init preferences after another root is opened", async () => {
+    let finish!: (value: null) => void;
+    vi.mocked(readAppData).mockReturnValueOnce(new Promise<null>((resolve) => { finish = resolve; }));
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    const first = useSyncStore.getState().init("/first");
+    await useSyncStore.getState().init("/second");
+    finish(null);
+    await first;
+    expect(useSyncStore.getState().root).toBe("/second");
+  });
+
+  it("ignores an obsolete sync finalizer across A-B-A", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof syncProject>>) => void;
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init("/a");
+    vi.mocked(syncProject).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const obsolete = useSyncStore.getState().syncNow();
+    await Promise.resolve();
+    await useSyncStore.getState().init("/b");
+    await useSyncStore.getState().init("/a");
+    useSyncStore.setState({ status: "dirty", lastError: "Current lifecycle" });
+    finish({ outcome: { kind: "offline" }, changedFiles: [] });
+    await obsolete;
+    expect(useSyncStore.getState().status).toBe("dirty");
+    expect(useSyncStore.getState().lastError).toBe("Current lifecycle");
+  });
+
+  it("reconciles pulled files even when the push fails", async () => {
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init("/repo");
+    const beforePull = useProjectStore.getState();
+    const reconcile = vi.spyOn(useProjectStore.getState(), "reconcileRemoteChanges").mockResolvedValue(undefined);
+    vi.mocked(syncProject).mockResolvedValue({ outcome: { kind: "error", message: "push failed" }, changedFiles: ["content/ch1.tex"] });
+    await useSyncStore.getState().syncNow();
+    expect(reconcile).toHaveBeenCalledWith("/repo", ["content/ch1.tex"], {
+      lifecycleGeneration: beforePull.lifecycleGeneration,
+      editRevision: beforePull.editRevision,
+      meta: beforePull.meta,
+    });
+    expect(useSyncStore.getState().status).toBe("error");
+    expect(useSyncStore.getState().lastError).toContain("push failed");
+    reconcile.mockRestore();
   });
 });

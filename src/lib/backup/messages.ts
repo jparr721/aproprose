@@ -3,12 +3,14 @@ import type { RepoStatus, SyncOutcome, SyncStatus } from "@/lib/types";
 
 /** The auto-commit message for a timer/manual backup. */
 export function backupMessage(date: Date): string {
-  return `Backup — ${date.toLocaleString()}`;
+  return `Backup - ${date.toLocaleString()}`;
 }
 
 /** Map an engine outcome to the UI status shown in the top bar. */
 export function outcomeToStatus(outcome: SyncOutcome): SyncStatus {
   switch (outcome.kind) {
+    case "error":
+      return "error";
     case "clean":
       return "clean";
     case "synced":
@@ -38,16 +40,18 @@ export function deriveIdleStatus(s: RepoStatus): SyncStatus {
 /** A human-readable detail line for a sync outcome, or null when none is needed. */
 export function outcomeMessage(outcome: SyncOutcome): string | null {
   switch (outcome.kind) {
+    case "error":
+      return outcome.message;
     case "needsSetup":
       return outcome.reason;
     case "authMissing":
-      return "GitHub authentication failed — run `gh auth login`.";
+      return "GitHub authentication failed - run `gh auth login`.";
     case "offline":
-      return "Couldn't reach GitHub — will retry.";
+      return "Couldn't reach GitHub - will retry.";
     case "pushRejected":
       return "The remote has newer changes; will reconcile on the next sync.";
     case "conflict":
-      return "Merge conflict — resolve it in git, then sync again.";
+      return "Merge conflict - resolve it in git, then sync again.";
     case "clean":
     case "synced":
       return null;

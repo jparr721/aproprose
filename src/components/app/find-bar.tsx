@@ -4,7 +4,7 @@
 // keys; all match/replace logic lives in the find store. Marked `data-find-widget`
 // so editor history/format shortcuts stay native while typing here (see lib/dom.ts).
 
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import {
   WholeWord as IconAbc,
   ChevronDown as IconChevronDown,
@@ -15,40 +15,17 @@ import {
   Replace as IconReplace,
   X as IconX,
 } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { FindOptionToggle } from "@/components/app/find-option-toggle";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { useFindStore } from "@/stores/find-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSearchSurfaceStore } from "@/stores/search-surface-store";
-
-function OptionToggle({
-  active,
-  title,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  title: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <InputGroupButton
-      size="icon-xs"
-      variant={active ? "secondary" : "ghost"}
-      aria-pressed={active}
-      title={title}
-      onClick={onClick}
-    >
-      {children}
-    </InputGroupButton>
-  );
-}
 
 export function FindBar() {
   const open = useSearchSurfaceStore((state) => state.openSurface === "editor");
@@ -142,9 +119,9 @@ export function FindBar() {
       : "";
 
   return (
-    <div
+    <Card
       data-find-widget
-      className="absolute right-4 top-3 z-20 flex items-start gap-1 rounded-lg border border-border bg-card p-1.5 font-sans shadow-md animate-in fade-in-0 slide-in-from-top-2 duration-150"
+      className="absolute right-3 top-3 z-20 w-[calc(100%-1.5rem)] max-w-lg flex-row items-start gap-1 p-1.5 shadow-md animate-in fade-in-0 slide-in-from-top-2 duration-150"
     >
       <Button
         variant="ghost"
@@ -156,12 +133,13 @@ export function FindBar() {
         {replaceExpanded ? <IconChevronDown /> : <IconChevronRight />}
       </Button>
 
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-1">
-          <InputGroup className="w-72">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <InputGroup className="min-w-0 flex-[1_1_14rem]">
             <InputGroupInput
               ref={inputRef}
               value={query}
+              aria-label="Find in manuscript"
               placeholder="Find"
               aria-invalid={error != null}
               title={error ?? undefined}
@@ -172,15 +150,15 @@ export function FindBar() {
               {counter}
             </InputGroupAddon>
             <InputGroupAddon align="inline-end">
-              <OptionToggle active={caseSensitive} title="Match case" onClick={toggleCase}>
+              <FindOptionToggle active={caseSensitive} title="Match case" onClick={toggleCase}>
                 <IconLetterCase />
-              </OptionToggle>
-              <OptionToggle active={wholeWord} title="Match whole word" onClick={toggleWord}>
+              </FindOptionToggle>
+              <FindOptionToggle active={wholeWord} title="Match whole word" onClick={toggleWord}>
                 <IconAbc />
-              </OptionToggle>
-              <OptionToggle active={regex} title="Use regular expression" onClick={toggleRegex}>
+              </FindOptionToggle>
+              <FindOptionToggle active={regex} title="Use regular expression" onClick={toggleRegex}>
                 <IconRegex />
-              </OptionToggle>
+              </FindOptionToggle>
             </InputGroupAddon>
           </InputGroup>
           <Button
@@ -215,10 +193,11 @@ export function FindBar() {
         </div>
 
         {replaceExpanded ? (
-          <div className="flex items-center gap-1">
-            <InputGroup className="w-72">
+          <div className="flex flex-wrap items-center gap-1">
+            <InputGroup className="min-w-0 flex-[1_1_14rem]">
               <InputGroupInput
                 value={replacement}
+                aria-label="Replace in manuscript"
                 placeholder="Replace"
                 onChange={(e) => setReplacement(e.target.value)}
                 onKeyDown={onReplaceKey}
@@ -248,6 +227,6 @@ export function FindBar() {
 
         {error != null ? <div className="px-1 text-xs text-destructive">{error}</div> : null}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -185,11 +185,17 @@ export const useViewStore = create<ViewState>()(
 
       requestGuarded: (action) => {
         get().pending?.cancel();
+        const { lifecycleGeneration, activeChapterId } = useProjectStore.getState();
         const request = new Promise<
           GuardedActionResult<Awaited<ReturnType<typeof action>>>
         >((resolve, reject) => {
           const pending: PendingGuardedAction = {
             run: () => {
+              const live = useProjectStore.getState();
+              if (live.lifecycleGeneration !== lifecycleGeneration || live.activeChapterId !== activeChapterId) {
+                resolve({ status: "canceled" });
+                return;
+              }
               try {
                 void Promise.resolve(action()).then(
                   (value) => resolve({ status: "ran", value }),
@@ -201,7 +207,7 @@ export const useViewStore = create<ViewState>()(
             },
             cancel: () => resolve({ status: "canceled" }),
           };
-          if (useProjectStore.getState().chapterDirty) {
+          if (useProjectStore.getState().chapterDirty || useProjectStore.getState().remoteDivergence !== null) {
             set({ pending });
           } else {
             set({ pending: null });

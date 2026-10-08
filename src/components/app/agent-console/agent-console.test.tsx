@@ -175,6 +175,18 @@ afterEach(async () => {
 });
 
 describe("AgentConsole shell", () => {
+  it.each(["load", "corrupt"] as const)("stops loading after terminal %s failure and exposes recovery", (kind) => {
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      persistenceIssue: { kind, projectRoot: project.root, message: "Unreadable conversation" },
+    });
+    const { container } = render(<AgentConsole />);
+    expect(screen.getByText("AI conversation could not be loaded.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset AI Conversation" })).toBeTruthy();
+    expect(screen.queryByText("Loading AI conversation")).toBeNull();
+    expect(container.querySelector('[data-slot="spinner"]')).toBeNull();
+  });
+
   it("omits the project sidebar header and keeps an accessible close action", () => {
     render(<AgentConsole />);
 
@@ -187,6 +199,7 @@ describe("AgentConsole shell", () => {
   });
 
   it("shows activity beside the composer before the first assistant message arrives", () => {
+
     render(<AgentConsole />);
     expect(screen.queryByText("Thinking")).toBeNull();
 
@@ -392,6 +405,18 @@ describe("AgentConsole shell", () => {
     render(<AgentConsole />);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reset AI Conversation" })).toBeNull();
+  });
+
+  it.each(["load", "corrupt"] as const)("describes available recovery after a terminal collection %s failure", (kind) => {
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      persistenceIssue: { kind, scope: "collection", projectRoot: project.root, message: "Collection unavailable" },
+    });
+    const { container } = render(<AgentConsole />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset AI Conversation" })).toBeNull();
+    expect(screen.getByText("Retry loading the conversation to restore AI access.")).toBeTruthy();
+    expect(container.querySelector('[data-slot="spinner"]')).toBeNull();
   });
 
   it("hides and reopens the same conversation, draft, mode, attachments, and proposal", () => {

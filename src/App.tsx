@@ -9,6 +9,7 @@
 // its action (top bar: compile / panel toggles; editor: save / undo / redo) via
 // the `useKeybinding` hook and the `src/lib/keybindings.ts` registry.
 
+import { notifyAppError } from "@/lib/notifications";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +24,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { toast } from "sonner";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
@@ -104,8 +104,10 @@ export function Workspace() {
         <ResizablePanelGroup
           orientation="horizontal"
           className="min-w-0 flex-1 [&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-250 [&>[data-panel]]:ease-in-out motion-reduce:[&>[data-panel]]:transition-none [&:has([data-separator=active])>[data-panel]]:transition-none"
-          onLayoutChanged={() => {
-            if (showAi) setRightPanelWidth(Math.round(liveWidth.current));
+          onLayoutChanged={(layout) => {
+            if (!showAi) return;
+            if (layout.right === 0) useViewStore.getState().setAiOpen(false);
+            else setRightPanelWidth(Math.round(liveWidth.current));
           }}
         >
           <ResizablePanel id="main" minSize={360}>
@@ -127,16 +129,8 @@ export function Workspace() {
             minSize={320}
             maxSize={640}
             groupResizeBehavior="preserve-pixel-size"
-            onResize={(size, _id, previousSize) => {
+            onResize={(size) => {
               if (showAi && size.inPixels >= 320) liveWidth.current = size.inPixels;
-              if (
-                showAi &&
-                size.asPercentage === 0 &&
-                previousSize !== undefined &&
-                previousSize.asPercentage > 0
-              ) {
-                useViewStore.getState().setAiOpen(false);
-              }
             }}
           >
             <div className="h-full min-w-80">
@@ -189,11 +183,9 @@ function ProcessExitGuard(): null {
           saveChanges: () => useProjectStore.getState().saveChapter(),
         });
         if (safeToExit) void appWindow.close();
-        else toast.error("Couldn't save changes", { description: "Close canceled." });
+        else notifyAppError("chapter-save", "Editor", useProjectStore.getState().project?.root ?? null, new Error("Close canceled: unsaved changes"));
       } catch (error) {
-        toast.error("Couldn't save changes", {
-          description: error instanceof Error ? error.message : String(error),
-        });
+        notifyAppError("chapter-save", "Editor", useProjectStore.getState().project?.root ?? null, error);
       } finally {
         saving.current = false;
       }
@@ -250,11 +242,11 @@ function App() {
             <Workspace />
           </SidebarInset>
           <CommandPalette />
-          <SettingsDialog />
         </SidebarProvider>
       ) : (
         <Welcome />
       )}
+      <SettingsDialog />
       <UnsavedGuard />
       <MigrationGuard />
       <UpdateChecker />

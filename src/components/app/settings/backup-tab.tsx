@@ -1,3 +1,4 @@
+import { reportNotification } from "@/lib/notifications";
 import { useEffect, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -51,7 +52,8 @@ export function BackupTab() {
     void gitToolingStatus()
       .then(setTooling)
       .catch((e) => {
-        console.error("gitToolingStatus failed:", e);
+        console.error("Git tooling status failed", { error: e });
+        reportNotification({ type: "backup-status", source: "Backup", projectRoot: null, provider: null });
         setTooling(null);
       });
   }, []);

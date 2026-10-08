@@ -1,6 +1,5 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { createStore } from "zustand/vanilla";
-import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri", () => ({
@@ -50,6 +49,7 @@ import type {
 } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
+import { useNotificationStore } from "@/stores/notification-store";
 import {
   createStoryRefreshState,
   type StoryRefreshStoreDependencies,
@@ -176,7 +176,7 @@ function refreshStoreDependencies(
 }
 
 beforeEach(() => {
-  vi.mocked(toast.error).mockClear();
+  useNotificationStore.setState({ notifications: [] });
   useSettingsDialogStore.setState({ open: false, aiTarget: null });
   useProjectStore.setState({
     project: projectFixture("/book"),
@@ -255,7 +255,7 @@ describe("story refresh runtime queue", () => {
     });
   });
 
-  it("shows a Settings toast when missing credentials fail before inference", async () => {
+  it("records a Settings notification when missing credentials fail before inference", async () => {
     const error = Object.assign(new Error("Missing key"), {
       failure: { reason: "key-missing" },
     });
@@ -269,12 +269,9 @@ describe("story refresh runtime queue", () => {
       status: "failed",
       pendingFingerprints: { ch1: "fp-1" },
     });
-    expect(toast.error).toHaveBeenCalledWith(
-      "Add an OpenAI key, then submit again.",
-      expect.objectContaining({
-        action: expect.objectContaining({ label: "Open AI settings" }),
-      }),
-    );
+    expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({
+      type: "ai-key-missing", source: "Story refresh", projectRoot: "/book", provider: "openai",
+    }));
   });
 
   it("commits a valid character patch beside an isolated character failure", async () => {
@@ -321,7 +318,7 @@ describe("story refresh runtime queue", () => {
           },
         },
       ],
-      characterFailures: [{ characterId: "c2", message: "Timed out" }],
+      characterFailures: [{ characterId: "c2", message: "Timed out", error: new Error("Timed out") }],
     };
     const build = vi.fn<typeof buildStoryRefresh>().mockResolvedValue(result);
     const store = createStore(
@@ -342,7 +339,7 @@ describe("story refresh runtime queue", () => {
 
   it("retries the still-unapplied character observations", async () => {
     const failed = refreshResultFixture({ characterId: null, inputFingerprint: null });
-    failed.characterFailures = [{ characterId: "c1", message: "Timed out" }];
+    failed.characterFailures = [{ characterId: "c1", message: "Timed out", error: new Error("Timed out") }];
     failed.knowledge = {
       ...emptyProjectKnowledge(),
       chapters: {
@@ -420,12 +417,9 @@ describe("story refresh runtime queue", () => {
     await flushPromises();
 
     expect(build).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith(
-      expect.stringContaining("Choose a model"),
-      expect.objectContaining({
-        action: expect.objectContaining({ label: "Open AI settings" }),
-      }),
-    );
+    expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({
+      type: "ai-model-unselected", source: "Story refresh", projectRoot: "/book",
+    }));
 
     expect(store.getState()).toMatchObject({
       status: "failed",

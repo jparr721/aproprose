@@ -5,8 +5,8 @@
 // body into seamless borderless textareas (see BlockBody). Hovering (or selecting)
 // reveals the gutter grip and the floating action row (BlockToolbar).
 
+import { notifyAppError } from "@/lib/notifications";
 import { memo, useState, type CSSProperties } from "react";
-import { toast } from "sonner";
 import { ClipboardList as IconClipboardText, Copy as IconCopy, GripVertical as IconGripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -97,10 +97,10 @@ function BlockImpl({
     // selText is the snapshot taken on right-click (the menu gesture has since
     // dropped the live selection); the item is disabled when it's empty.
     if (!selText.trim()) return;
-    if (!(await copyText(selText))) toast.error("Couldn't copy to the clipboard");
+    if (!(await copyText(selText))) notifyAppError("clipboard", "Clipboard", useProjectStore.getState().project?.root ?? null, new Error("clipboard operation failed"));
   };
   const onCopyBlock = async () => {
-    if (!(await copyText(blockText))) toast.error("Couldn't copy to the clipboard");
+    if (!(await copyText(blockText))) notifyAppError("clipboard", "Clipboard", useProjectStore.getState().project?.root ?? null, new Error("clipboard operation failed"));
   };
   const copyActions: BlockAction[] = [
     { icon: IconCopy, label: "Copy", onSelect: () => void onCopySelection(), disabled: !selText.trim() },

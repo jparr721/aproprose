@@ -197,3 +197,15 @@ describe("agent failure normalization", () => {
     expect(failure.message).not.toContain("insufficient_quota");
   });
 });
+
+
+describe("notification error types", () => {
+  it.each([
+    [401, "key-rejected"], [402, "quota"], [403, "permission"],
+    [404, "model-unavailable"], [413, "context-limit"], [422, "request-format"],
+    [429, "rate-limit"], [408, "timeout"], [503, "provider-unavailable"], [409, "conflict"],
+  ])("assigns HTTP %s its own actionable notification type", (statusCode, type) => {
+    const error = new Error("Provider detail", { cause: { statusCode } });
+    expect(classifyAiError(error, "openai", null).type).toBe(type);
+  });
+});

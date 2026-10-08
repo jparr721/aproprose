@@ -2,6 +2,7 @@
 // status icon otherwise; a popover with details and manual actions. When the
 // project isn't a backed-up repo, it offers "Back up to GitHub".
 
+import { openNotifications } from "@/lib/notifications";
 import {
   CloudAlert,
   CloudCheck,
@@ -137,7 +138,7 @@ export function SyncStatus({
               chapters show an error until you resolve and resync.
             </TypographyMuted>
           ) : lastError ? (
-            <TypographyMuted className="text-xs">{lastError}</TypographyMuted>
+            <Button variant="ghost" size="sm" onClick={openNotifications}>View notifications</Button>
           ) : (
             <TypographyMuted className="text-xs">
               {changedFiles.length > 0

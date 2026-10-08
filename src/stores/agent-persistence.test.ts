@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { useNotificationStore } from "@/stores/notification-store";
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -3438,4 +3439,24 @@ describe("agent persistence", () => {
       "sessions.character:deleted-character",
     );
   });
+});
+
+
+it.each(["load", "corrupt"] as const)("records scoped conversation %s failures", async (kind) => {
+  const root = `/books/notification-${kind}`;
+  useProjectStore.setState({ project: project(root) });
+  const planner = agentSessionStore({ kind: "outline", chapterId: "notification-chapter" });
+  planner.getState().resetProject();
+  if (kind === "load") tauri.readAppData.mockRejectedValueOnce(new Error("read denied"));
+  else tauri.readAppData.mockResolvedValueOnce({ v: 1, sessions: { "outline:notification-chapter": { v: 3, draftText: 42 } } });
+  await hydrateAgentOutlineSession(root, "notification-chapter");
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: `conversation-${kind}`, projectRoot: root }));
+});
+
+it("records scoped conversation collection save failures", async () => {
+  const root = "/books/notification-save";
+  tauri.readAppData.mockResolvedValueOnce(null);
+  tauri.writeAppData.mockRejectedValueOnce(new Error("disk full"));
+  await expect(saveAgentSessionCollection(root)).rejects.toThrow("disk full");
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "conversation-save", projectRoot: root }));
 });

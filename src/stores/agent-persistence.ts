@@ -1,3 +1,4 @@
+import { reportNotification } from "@/lib/notifications";
 import { useEffect } from "react";
 import { isEqual } from "es-toolkit";
 import { z } from "zod";
@@ -641,6 +642,7 @@ function persistenceError(
   root: string,
   error: unknown,
 ): AgentPersistenceError {
+  reportNotification({ type: `conversation-${kind}`, source: "Conversation", projectRoot: root, provider: null });
   return new AgentPersistenceError({
     kind,
     projectRoot: root,
@@ -1222,6 +1224,7 @@ export async function loadAgentSessionCollection(
   }
   const parsedCollection = persistedAgentSessionCollectionSchema.safeParse(raw);
   if (!parsedCollection.success) {
+    reportNotification({ type: "conversation-corrupt", source: "Conversation", projectRoot: root, provider: null });
     return {
       project: migratedProject,
       outlines: {},
@@ -1251,6 +1254,7 @@ export async function loadAgentSessionCollection(
         );
       } catch {
         outlines[chapterId] = emptyPersistedAgentState();
+        reportNotification({ type: "conversation-corrupt", source: "Outline conversation", projectRoot: root, provider: null });
         corruptOutlineChapterIds.push(chapterId);
       }
       continue;
@@ -1265,6 +1269,7 @@ export async function loadAgentSessionCollection(
         );
       } catch {
         characters[characterId] = emptyPersistedAgentState();
+        reportNotification({ type: "conversation-corrupt", source: "Character conversation", projectRoot: root, provider: null });
         corruptCharacterIds.push(characterId);
       }
     }
@@ -1338,17 +1343,15 @@ async function saveAgentSessionCollectionNow(root: string): Promise<void> {
       characterId,
     });
   }
-  await writeAppData(agentSessionCollectionKey(root), {
-    v: 1,
-    sessions,
-  });
+  await writeAppData(agentSessionCollectionKey(root), { v: 1, sessions });
 }
 
 export function saveAgentSessionCollection(root: string): Promise<void> {
   const previous = sessionCollectionSaveQueues.get(root) ?? Promise.resolve();
   const save = previous
     .catch(() => undefined)
-    .then(() => saveAgentSessionCollectionNow(root));
+    .then(() => saveAgentSessionCollectionNow(root))
+    .catch((error: unknown) => { throw persistenceError("save", root, error); });
   const tracked = save.finally(() => {
     if (sessionCollectionSaveQueues.get(root) === tracked) {
       sessionCollectionSaveQueues.delete(root);
@@ -1397,6 +1400,7 @@ async function hydrateAgentScopedSessionOwned(
   } catch (error) {
     if (!ownsHydration()) return;
     store.getState().hydrate(root, emptyPersistedAgentState());
+    reportNotification({ type: "conversation-load", source: "Conversation", projectRoot: root, provider: null });
     store.getState().setPersistenceIssue({
       kind: "load",
       projectRoot: root,
@@ -1423,6 +1427,7 @@ async function hydrateAgentScopedSessionOwned(
   } catch (error) {
     if (!ownsHydration()) return;
     store.getState().hydrate(root, emptyPersistedAgentState());
+    reportNotification({ type: "conversation-corrupt", source: "Conversation", projectRoot: root, provider: null });
     store.getState().setPersistenceIssue({
       kind: "corrupt",
       projectRoot: root,

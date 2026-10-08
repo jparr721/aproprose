@@ -1,3 +1,4 @@
+import { notifyAppError } from "@/lib/notifications";
 import { useState } from "react";
 import { IconCopy } from "@tabler/icons-react";
 import {
@@ -137,7 +138,7 @@ export function AgentMessage({
       toast.success("Message copied");
       return;
     }
-    toast.error("Couldn't copy to the clipboard");
+    notifyAppError("clipboard", "Clipboard", null, new Error("clipboard operation failed"));
   };
 
   return (

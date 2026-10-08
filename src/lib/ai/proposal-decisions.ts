@@ -1,3 +1,4 @@
+import { notifyAppError } from "@/lib/notifications";
 import { toast } from "sonner";
 import { recordProposalEvent } from "@/lib/ai/agent-controller";
 import {
@@ -117,7 +118,7 @@ function showOutlineUndo(token: OutlineUndoToken): void {
           .getState()
           .undoAgentOutlineProposal(token);
         if (!undone) {
-          toast.error("Couldn't undo outline changes");
+          notifyAppError("proposal-undo", "Proposal", useProjectStore.getState().project?.root ?? null, new Error("Outline has changed"));
         }
       },
     },
@@ -126,14 +127,10 @@ function showOutlineUndo(token: OutlineUndoToken): void {
 
 function showProposalApplyFailure(result: ProposalApplyFailure): void {
   if (result.status === "stale") {
-    toast.error("Proposal source changed", {
-      description: "Keep this proposal open and ask the agent to regenerate it.",
-    });
+    notifyAppError("proposal-stale", "Proposal", useProjectStore.getState().project?.root ?? null, result);
     return;
   }
-  toast.error("Proposal couldn't be applied", {
-    description: "Keep this proposal open and ask the agent to replace it.",
-  });
+  notifyAppError("proposal-apply", "Proposal", useProjectStore.getState().project?.root ?? null, result);
 }
 
 function closeExhaustedManuscriptReview(proposal: PendingProposal): void {

@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { StoryRefreshStatus } from "@/components/app/outline/story-refresh-status";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type { ChapterKnowledge } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 const chapterKnowledge = (sourceFingerprint: string): ChapterKnowledge => ({
@@ -104,21 +105,21 @@ describe("StoryRefreshStatus", () => {
     expect(screen.getByRole("status")).toBeTruthy();
   });
 
-  it("shows an actionable retry after failure", () => {
-    const retry = vi.fn();
+  it("keeps provider diagnostics out of the outline and opens Notifications", () => {
     useStoryRefreshStore.setState({
       status: "failed",
-      error: "HTTP 429 - rate limited",
-      retry,
+      error: 'HTTP 401 - User not found. {"error":{"code":401}}',
     });
 
     render(<StoryRefreshStatus />);
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(screen.getByRole("alert").textContent).toContain(
-      "HTTP 429 - rate limited",
-    );
-    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/HTTP 401/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View notifications" }));
+    expect(useSettingsDialogStore.getState()).toMatchObject({
+      open: true,
+      tab: "notifications",
+    });
   });
 
   it("reports when no current chapter has been refreshed", () => {

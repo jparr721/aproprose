@@ -1,3 +1,4 @@
+import { useNotificationStore } from "@/stores/notification-store";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock Tauri APIs before importing the store.
@@ -346,6 +347,7 @@ describe("chapter reordering", () => {
 });
 
 beforeEach(() => {
+  useNotificationStore.setState({ notifications: [] });
   useStoryRefreshStore.getState().cancel();
   vi.mocked(writeTextFile).mockClear();
   useProjectStore.setState({
@@ -2579,4 +2581,20 @@ describe("story refresh commits", () => {
       "Newer premise.",
     );
   });
+});
+
+
+it("attributes delayed metadata errors to the operation's project after closing", async () => {
+  const root = "/books/notification-owner";
+  const write = deferred<void>();
+  vi.mocked(writeProjectMeta).mockReturnValueOnce(write.promise);
+  useProjectStore.setState({ project: projectFixture(root) });
+  useProjectStore.getState().setPremise("A delayed change");
+  await Promise.resolve();
+  useProjectStore.getState().closeProject();
+  useProjectStore.setState({ project: projectFixture("/books/other") });
+  write.reject(new Error("disk full"));
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "metadata-save", projectRoot: root }));
+  expect(useNotificationStore.getState().notifications.some((item) => item.type === "metadata-save" && item.projectRoot !== root)).toBe(false);
 });

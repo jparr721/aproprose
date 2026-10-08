@@ -2238,15 +2238,33 @@ describe("selectChapter completion ownership", () => {
     const source = deferred<string>();
     vi.mocked(readTextFile).mockReturnValueOnce(source.promise);
     useProjectStore.setState({ project: original, activeChapterId: "ch1" });
+    const generation = useProjectStore.getState().lifecycleGeneration;
     const loading = useProjectStore.getState().selectChapter("ch1");
-    const current = transition === "close" ? null : projectFixture(transition === "switch" ? "/books/next" : original.root);
-    const currentBlocks = [mkBlock({ id: "current", text: "Current manuscript" })];
-    useProjectStore.setState({ project: current, activeChapterId: "current-chapter", blocks: currentBlocks, chapterDirty: true });
+    const current = transition === "close" ? null : {
+      ...projectFixture(transition === "switch" ? "/books/next" : original.root),
+      chapters: [{ ...original.chapters[0], id: "current-chapter", file: "current-chapter.tex" }],
+    };
+    if (transition !== "switch") useProjectStore.getState().closeProject();
+    if (current !== null) {
+      vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: current, mainFile: "main.tex", detectedChapters: null });
+      vi.mocked(readAppData).mockResolvedValue(null);
+      vi.mocked(readProjectMeta).mockResolvedValueOnce(null);
+      vi.mocked(readTextFile).mockResolvedValueOnce("Current manuscript.");
+      await useProjectStore.getState().loadProjectAt(current.root);
+      const currentBlock = useProjectStore.getState().blocks[0];
+      useProjectStore.getState().updateBlockText(currentBlock.id, "Current unsaved manuscript.");
+    }
+    const currentState = useProjectStore.getState();
+    const expectedState = { project: current, activeChapterId: current === null ? null : "current-chapter", chapterDirty: current !== null };
+    expect(currentState).toMatchObject(expectedState);
+    expect(currentState.lifecycleGeneration).toBeGreaterThan(generation);
+    const currentBlocks = currentState.blocks;
+    vi.mocked(writeAppData).mockClear();
 
     source.resolve("Old project prose.");
     await loading;
 
-    expect(useProjectStore.getState()).toMatchObject({ project: current, activeChapterId: "current-chapter", chapterDirty: true });
+    expect(useProjectStore.getState()).toMatchObject(expectedState);
     expect(useProjectStore.getState().blocks).toBe(currentBlocks);
     expect(writeAppData).not.toHaveBeenCalled();
   });

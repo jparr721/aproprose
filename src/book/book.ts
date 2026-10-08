@@ -77,7 +77,14 @@ export class Book {
       });
       this.chapters.set(chapterId, loaded);
     }
-    return structuredClone(await loaded);
+    let record: ChapterRecord;
+    try {
+      record = await loaded;
+    } catch (error) {
+      if (this.chapters.get(chapterId) === loaded) this.chapters.delete(chapterId);
+      throw error;
+    }
+    return structuredClone(record);
   }
 
   async readChapter(chapterId: string): Promise<BookChapterValue> {

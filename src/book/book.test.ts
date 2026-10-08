@@ -116,6 +116,54 @@ describe("Book frozen source view", () => {
     await expect(mismatched.readChapter("ch1")).rejects.toThrow("Chapter source identity mismatch");
   });
 
+  it("retries a failed chapter read and retains the successful source for later search", async () => {
+    const failure = new Error("Temporary chapter read failure");
+    const loadChapter = vi.fn(async () => ({ chapterId: "ch2", title: "Bagel", blocks: blocks() }))
+      .mockRejectedValueOnce(failure);
+    const book = new Book({ project: project(), meta: structuredClone(EMPTY_META), chapter: null, loadChapter });
+
+    await expect(book.readChapter("ch2")).rejects.toBe(failure);
+    expect((await book.readChapter("ch2")).title).toBe("Bagel");
+    expect((await book.search({ query: "bagel", chapterIds: ["ch2"], limit: 10 })).matches[0].blockId).toBe("dialogue");
+    expect(loadChapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares failed and retried loads without sharing returned chapter values", async () => {
+    const failure = new Error("Temporary chapter read failure");
+    const loadChapter = vi.fn(async () => ({ chapterId: "ch2", title: "Bagel", blocks: blocks() }))
+      .mockRejectedValueOnce(failure);
+    const book = new Book({ project: project(), meta: structuredClone(EMPTY_META), chapter: null, loadChapter });
+
+    const failedReads = await Promise.allSettled([
+      book.readChapterRecord("ch2"),
+      book.search({ query: "bagel", chapterIds: ["ch2"], limit: 10 }),
+    ]);
+    expect(failedReads).toEqual([
+      { status: "rejected", reason: failure },
+      { status: "rejected", reason: failure },
+    ]);
+    expect(loadChapter).toHaveBeenCalledTimes(1);
+
+    const [first, second] = await Promise.all([book.readChapter("ch2"), book.readChapter("ch2")]);
+    expect(loadChapter).toHaveBeenCalledTimes(2);
+    expect(first).toEqual(second);
+    expect(first).not.toBe(second);
+    first.blocks[0].text = "Changed returned value";
+    expect(second.blocks[0].text).toBe("I remember.");
+    expect((await book.readChapterRecord("ch2")).value.blocks[0].text).toBe("I remember.");
+    expect(loadChapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a corrected chapter source after an identity failure", async () => {
+    const loadChapter = vi.fn(async () => ({ chapterId: "ch2", title: "Bagel", blocks: blocks() }))
+      .mockResolvedValueOnce({ chapterId: "ch1", title: "Dad", blocks: blocks() });
+    const book = new Book({ project: project(), meta: structuredClone(EMPTY_META), chapter: null, loadChapter });
+
+    await expect(book.readChapterRecord("ch2")).rejects.toThrow("Chapter source identity mismatch");
+    expect((await book.readChapterRecord("ch2")).header.id).toBe("ch2");
+    expect(loadChapter).toHaveBeenCalledTimes(2);
+  });
+
   it("round-trips real chapter records without serializing injected collaborators", async () => {
     const book = new Book({
       project: project(), meta: structuredClone(EMPTY_META),

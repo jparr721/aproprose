@@ -805,16 +805,20 @@ export function materializeManuscriptChanges(
             ? resolveBlockLocator(precondition.anchor, blocks)
             : null;
         const append = item.change.afterId === null && precondition.kind === "insert" && precondition.boundary === "immediate";
-        const successor = append && precondition.expectedNext !== null ? resolveBlockLocator(precondition.expectedNext, blocks) : null;
+        const beforeSuccessor = precondition.kind === "insert" && precondition.anchor === null && precondition.expectedNext !== null;
+        const successor = (append || beforeSuccessor) && precondition.expectedNext !== null ? resolveBlockLocator(precondition.expectedNext, blocks) : null;
         if (append && precondition.expectedNext !== null && successor === null) {
           throw new AgentProposalError("source-missing", "The append insertion boundary changed.");
+        }
+        if (beforeSuccessor && successor === null) {
+          throw new AgentProposalError("source-missing", "The bridge insertion boundary changed.");
         }
         return {
           ...item.change,
           afterId: anchor?.id ?? null,
           insertionGroup: JSON.stringify([item.change.afterId, append ? successor?.id ?? null : anchor?.id ?? null]),
-          ...(append ? { beforeId: successor?.id ?? null } : {}),
-          toIndex: precondition.kind === "insert" && precondition.anchor === null && precondition.expectedNext !== null ? 0 : null,
+          ...(append || beforeSuccessor ? { beforeId: successor?.id ?? null } : {}),
+          toIndex: null,
         };
       }
       const locator =

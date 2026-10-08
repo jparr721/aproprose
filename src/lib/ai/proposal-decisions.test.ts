@@ -37,6 +37,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { recordProposalEvent } from "@/lib/ai/agent-controller";
+import { buildContinuationIntent } from "@/lib/ai/agent-continuation";
 import {
   buildManuscriptPendingProposal,
   buildOutlinePendingProposal,
@@ -229,6 +230,23 @@ const insertionApprovalCases = insertionAnchors.flatMap((first) =>
   )),
 );
 
+const bridgePrefixes: Array<{ label: string; blocks: Block[] }> = [
+  { label: "scene", blocks: [{ ...blockFixture("scene", "Kitchen"), type: "chapter", level: "scene" }] },
+  { label: "scratchpad", blocks: [{ ...blockFixture("notes", "Scene notes"), type: "scratchpad" }] },
+  { label: "latex", blocks: [{ ...blockFixture("literal", "Literal source"), type: "latex" }] },
+  {
+    label: "mixed",
+    blocks: [
+      { ...blockFixture("scene", "Kitchen"), type: "chapter", level: "scene" },
+      { ...blockFixture("notes", "Scene notes"), type: "scratchpad" },
+      { ...blockFixture("literal", "Literal source"), type: "latex" },
+    ],
+  },
+];
+const bridgeApprovalCases = bridgePrefixes.flatMap((prefix) => approvalBatches.flatMap((batches) =>
+  [false, true].map((reopen) => ({ ...prefix, batches, reopen })),
+));
+
 const setPending = (proposal: PendingProposal): void => {
   useAgentConsoleStore.setState({
     proposalRecords: [{ proposal, source: { kind: "legacy" }, decisions: {}, replacedByProposalId: null }],
@@ -365,6 +383,44 @@ describe("proposal decisions", () => {
     }
     expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(expected);
     expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+  });
+
+  it.each(bridgeApprovalCases)("keeps the $label prefix before opening bridge prose for batches $batches with reopen $reopen", async ({ blocks, batches, reopen }) => {
+    useProjectStore.setState({ blocks });
+    const intent = buildContinuationIntent("ch1", blocks, []);
+    expect(intent.task).toEqual({ kind: "bridge", chapterId: "ch1", anchorBlockId: null, successorBlockId: null });
+    const proposal = buildManuscriptPendingProposal({
+      run: runFixture(intent.task),
+      raw: { chapterId: "ch1", summary: "Write the opening", changes: ["First", "Second", "Third"].map((text) => manuscriptInsert(null, text)) },
+      blocks,
+      currentPending: null,
+      originatingMessageId: "assistant-1",
+      makeId: idFactory(),
+      currentOverview: "",
+      now: "2026-10-08T00:00:00.000Z",
+    });
+    const immutableOriginal = structuredClone(proposal);
+    const expected = [...blocks.map((block) => block.text), "First", "Second", "Third"];
+    setPending(proposal);
+    for (const batch of batches) {
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null || pending.kind !== "manuscript") throw new Error("Expected pending opening bridge insertions");
+      expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+      const preview = projectManuscriptReview(useProjectStore.getState().blocks, pending);
+      expect(preview.rows.map((row) => {
+        if (row.kind === "unchanged") return row.block.text;
+        if (row.kind === "insert") return row.change.change.newText;
+        throw new Error(`Unexpected bridge review row: ${row.kind}`);
+      })).toEqual(expected);
+      const selected = new Set(batch.map((index) => `change-${index}`));
+      acceptAllProposalChanges({ ...pending, changes: pending.changes.filter((item) => selected.has(item.id)) });
+      if (reopen) {
+        const snapshot = await toAgentSnapshot();
+        useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot))));
+      }
+      expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(immutableOriginal);
+    }
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(expected);
   });
 
   it("keeps sibling outline additions reviewable after accepting one", () => {

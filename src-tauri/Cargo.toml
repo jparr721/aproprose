@@ -33,4 +33,3 @@ tauri-plugin-process = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 tempfile = "3"
-

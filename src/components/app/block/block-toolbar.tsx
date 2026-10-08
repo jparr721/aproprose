@@ -40,7 +40,7 @@ export function BlockToolbar({
     select(block.id);
     if (!dictation.supported) {
       toast.info("Dictation isn't available in this webview", {
-        description: "Use your OS dictation shortcut — it types into the focused block.",
+        description: "Use your OS dictation shortcut - it types into the focused block.",
       });
       return;
     }
@@ -93,7 +93,7 @@ export function BlockToolbar({
                 mode: "writing",
                 text: SUGGEST_DIRECTIVE,
                 refs: [{ kind: "block", chapterId, blockId: block.id }],
-                task: { kind: "conversation", targetChapterId: chapterId },
+                task: { kind: "next-beat", chapterId, blockIds: [block.id] },
               });
             }}
           >

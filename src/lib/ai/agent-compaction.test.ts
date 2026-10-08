@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildCompactionInstructions,
   compactionTokenTarget,
   compactConversation,
   messagesForNextRequest,
@@ -13,6 +14,20 @@ import type {
   AgentUIMessage,
   PersistedUsage,
 } from "@/lib/ai/agent-types";
+
+describe("compaction authority", () => {
+  it("preserves exact governing rules and refuses to promote conversation into approval", () => {
+    const instructions = buildCompactionInstructions({
+      styleGuide: "Keep intentional fragments.",
+      editingRules: "Never explain the final image.",
+    });
+    expect(instructions).toContain("Keep intentional fragments.");
+    expect(instructions).toContain("Never explain the final image.");
+    expect(instructions).toContain("Preserve governing rule text or stable references");
+    expect(instructions).toContain("Never turn compaction into approval");
+    expect(instructions).toContain("quoted history");
+  });
+});
 
 const meta = (state: AgentMessageMetadata["state"]): AgentMessageMetadata => ({
   runId: "run",

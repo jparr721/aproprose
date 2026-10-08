@@ -35,7 +35,7 @@ vi.mock("sonner", () => ({
 const knowledgeModel = new MockLanguageModelV3();
 
 function aiOptions(signal: AbortSignal): StoryKnowledgeAiOptions {
-  return { model: knowledgeModel, signal };
+  return { model: knowledgeModel, signal, preferences: { styleGuide: "", editingRules: "" } };
 }
 
 function characterFixture(id: string, name: string): Character {
@@ -146,6 +146,35 @@ beforeEach(() => {
   vi.mocked(generateText).mockReset();
   vi.mocked(toast.warning).mockReset();
   vi.mocked(toast.error).mockReset();
+});
+
+describe("background author authority", () => {
+  it("passes both frozen declarations to every specialist without suppressing contradictory source facts", async () => {
+    const captured = new TypeError("Capture background request");
+    vi.mocked(generateText).mockRejectedValue(captured);
+    const options = {
+      ...aiOptions(new AbortController().signal),
+      preferences: {
+        styleGuide: "Preserve intentional fragments.",
+        editingRules: "The ending must remain ambiguous.",
+      },
+    };
+    const requests = [
+      () => analyzeStoryChunk(mapInputFixture(), options),
+      () => reduceChapterKnowledge({ sourceFingerprint: "source", analyses: [] }, options),
+      () => reduceStoryFields({ current: { premise: "Goal", overview: "Intent" }, chapters: [] }, options),
+      () => reduceCharacterPatch({ character: characterFixture("c1", "Mara"), observations: [], appliedObservationIds: [] }, options),
+      () => reduceCharacterCandidates({ groups: [] }, options),
+    ];
+    for (const request of requests) await expect(request()).rejects.toThrow(captured);
+    expect(generateText).toHaveBeenCalledTimes(5);
+    for (const [request] of vi.mocked(generateText).mock.calls) {
+      expect(request.system).toContain(options.preferences.styleGuide);
+      expect(request.system).toContain(options.preferences.editingRules);
+      expect(request.system).toContain("Preserve source facts and quoted evidence exactly");
+      expect(request.system).toContain("SPECIALIST CONTRACT: knowledge-");
+    }
+  });
 });
 
 describe("story chunk analysis", () => {

@@ -1,12 +1,14 @@
 import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 
+import type { AuthorPreferences } from "@/author";
 import { textFingerprint } from "@/lib/ai/agent-context";
 import { withAiRetry } from "@/lib/ai/errors";
 import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import type { StoryKnowledgeChunk } from "@/lib/story-knowledge/chunking";
 import { durableEvidenceIdentity } from "@/lib/story-knowledge/chunking";
 import type { UnknownCharacterGroup } from "@/lib/story-knowledge/merge";
+import { buildStoryKnowledgeInstructions } from "@/lib/story-knowledge/prompts";
 import type {
   Character,
   CharacterKnowledgePatch,
@@ -28,43 +30,6 @@ const CHARACTER_PROFILE_FIELDS = [
   "history",
   "voice",
 ] as const satisfies readonly CharacterProfileField[];
-
-const MAP_SYSTEM_CONTRACT = [
-  "Analyze supplied prose only.",
-  "Use exact character IDs.",
-  "Speaker and outline assignments are strong identity context.",
-  "Temporary reactions are not permanent traits.",
-  "Unknown people remain unknown.",
-  "Every observation must cite offered source IDs.",
-].join(" ");
-
-const CHAPTER_REDUCE_SYSTEM_CONTRACT = [
-  "Compact story signals.",
-  "Deduplicate synonymous observations.",
-  "Retain source evidence by returning only offered observation IDs.",
-  "Avoid chapter recap prose.",
-].join(" ");
-
-const STORY_REDUCE_SYSTEM_CONTRACT = [
-  "Chapter order matters.",
-  "The current author logline and overview are authoritative.",
-  "Change them only for material evidence.",
-  `The overview maximum is ${STORY_OVERVIEW_MAX_CHARS} characters.`,
-  "Return a whole-story synthesis, not a chapter recap.",
-].join(" ");
-
-const CHARACTER_REDUCE_SYSTEM_CONTRACT = [
-  "Return additions and exact corrections only.",
-  "Cite known observation IDs.",
-  "Preserve current field prose.",
-  "Emit no blank operations.",
-].join(" ");
-
-const CANDIDATE_REDUCE_SYSTEM_CONTRACT = [
-  "Use only eligible group fingerprints.",
-  "Retain evidence-supported details.",
-  "Do not merge distinct normalized names.",
-].join(" ");
 
 const profileFieldSchema = z.enum(CHARACTER_PROFILE_FIELDS);
 
@@ -159,6 +124,7 @@ export const characterCandidateReductionResultSchema = z.object({
 export interface StoryKnowledgeAiOptions {
   model: LanguageModel;
   signal: AbortSignal;
+  preferences: AuthorPreferences;
 }
 
 export interface AnalyzeStoryChunkInput {
@@ -272,7 +238,7 @@ export async function analyzeStoryChunk(
     generateText({
       model: options.model,
       output: Output.object({ schema: resultSchema }),
-      system: MAP_SYSTEM_CONTRACT,
+      system: buildStoryKnowledgeInstructions("knowledge-map", options.preferences),
       prompt: renderedPrompt,
       abortSignal: options.signal,
     }),
@@ -372,7 +338,7 @@ export async function reduceChapterKnowledge(
     generateText({
       model: options.model,
       output: Output.object({ schema: resultSchema }),
-      system: CHAPTER_REDUCE_SYSTEM_CONTRACT,
+      system: buildStoryKnowledgeInstructions("knowledge-chapter", options.preferences),
       prompt: renderedPrompt,
       abortSignal: options.signal,
     }),
@@ -420,7 +386,7 @@ export async function reduceStoryFields(
     generateText({
       model: options.model,
       output: Output.object({ schema: resultSchema }),
-      system: STORY_REDUCE_SYSTEM_CONTRACT,
+      system: buildStoryKnowledgeInstructions("knowledge-story", options.preferences),
       prompt: renderedPrompt,
       abortSignal: options.signal,
     }),
@@ -483,7 +449,7 @@ export async function reduceCharacterPatch(
     generateText({
       model: options.model,
       output: Output.object({ schema: resultSchema }),
-      system: CHARACTER_REDUCE_SYSTEM_CONTRACT,
+      system: buildStoryKnowledgeInstructions("knowledge-character", options.preferences),
       prompt: renderedPrompt,
       abortSignal: options.signal,
     }),
@@ -533,7 +499,7 @@ export async function reduceCharacterCandidates(
     generateText({
       model: options.model,
       output: Output.object({ schema: resultSchema }),
-      system: CANDIDATE_REDUCE_SYSTEM_CONTRACT,
+      system: buildStoryKnowledgeInstructions("knowledge-candidates", options.preferences),
       prompt: renderedPrompt,
       abortSignal: options.signal,
     }),

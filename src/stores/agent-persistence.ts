@@ -73,6 +73,11 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
       analysis: z.enum(["critique", "continuity"]),
     })
     .strict(),
+  z.strictObject({
+    kind: z.literal("next-beat"),
+    chapterId: z.string(),
+    blockIds: z.array(z.string()),
+  }),
   z
     .object({
       kind: z.literal("outline-sculpt"),

@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe("BlockToolbar Suggest", () => {
-  it("submits a Writing conversation with the clicked block as context", () => {
+  it("submits a read-only next-beat task with the clicked block as context", () => {
     render(
       <TooltipProvider>
         <BlockToolbar
@@ -75,7 +75,7 @@ describe("BlockToolbar Suggest", () => {
       refs: [
         { kind: "block", chapterId: "chapter-1", blockId: "block-1" },
       ],
-      task: { kind: "conversation", targetChapterId: "chapter-1" },
+      task: { kind: "next-beat", chapterId: "chapter-1", blockIds: ["block-1"] },
     });
     expect(useProjectStore.getState().selectedId).toBe("block-1");
     expect(useViewStore.getState().aiOpen).toBe(true);

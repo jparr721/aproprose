@@ -1,7 +1,10 @@
+import { Book } from "@/book";
+import type { PurposeAgentPolicy } from "@/agents";
+import type { AuthorPreferences } from "@/lib/ai/author-preferences";
 import { reportAiError } from "@/lib/notifications";
 import { generateText, type LanguageModel } from "ai";
 import {
-  COMPACTION_SYSTEM,
+  buildCompactionInstructions,
   compactionTokenTarget,
   compactConversation,
   messagesForNextRequest,
@@ -9,7 +12,6 @@ import {
 } from "@/lib/ai/agent-compaction";
 import {
   blockFingerprint,
-  cardFingerprint,
   draftContextRefKey,
   findingFingerprint,
   flattenMessageFindings,
@@ -19,7 +21,7 @@ import { buildCharacterGrounding } from "@/lib/ai/character-grounding";
 import { settleAgentMessages } from "@/lib/ai/agent-messages";
 import { getModel } from "@/lib/ai/model";
 import { resolveModelContextWindow } from "@/lib/ai/models";
-import { buildAgentInstructions } from "@/lib/ai/agent-prompts";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
 import {
   buildManuscriptPendingProposal,
   buildOverviewPendingProposal,
@@ -42,14 +44,11 @@ import type {
   AgentSessionId,
   AgentTask,
   AgentUIMessage,
-  ChapterToolValue,
   ContextSnapshot,
   ConversationContextToolValue,
   DraftContextRef,
   DraftContextSource,
   DraftSourceLocator,
-  LoreToolValue,
-  OutlineToolValue,
   PendingProposal,
   ProposalEventData,
 } from "@/lib/ai/agent-types";
@@ -108,6 +107,7 @@ export interface AgentControllerDependencies {
     model: LanguageModel,
     source: string,
     signal: AbortSignal,
+    preferences: AuthorPreferences,
   ) => Promise<string>;
   stream: (input: StreamAgentRunInput) => Promise<StreamAgentRunResult>;
   recordFailure: (entry: AgentFailureLogEntry) => Promise<void>;
@@ -745,37 +745,14 @@ async function resolveOutlinePlannerGroundingInput(
       `Outline planner grounding failed for chapter ${chapterId} at target source ${chapterId}: frozen target did not match the planner session.`,
     );
   }
-  const previousRef = capture.project.chapters[index - 1] ?? null;
-  const nextRef = capture.project.chapters[index + 1] ?? null;
-  const load = async (
-    source: "target" | "previous" | "next",
-    sourceChapterId: string,
-  ): Promise<LoadedChapter> => {
-    try {
-      return await loadChapterSnapshot(
-        capture.project,
-        sourceChapterId,
-        capture.activeChapter,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new OutlinePlannerGroundingError(
-        `Outline planner grounding failed for chapter ${chapterId} at ${source} source ${sourceChapterId}: ${message}`,
-        { cause: error },
-      );
-    }
-  };
-  const [previous, next] = await Promise.all([
-    previousRef === null ? Promise.resolve(null) : load("previous", previousRef.id),
-    nextRef === null ? Promise.resolve(null) : load("next", nextRef.id),
-  ]);
+
   return {
     chapters: capture.project.chapters,
     meta: capture.meta,
     targetChapterId: chapterId,
     target,
-    previous,
-    next,
+    previous: null,
+    next: null,
   };
 }
 
@@ -840,73 +817,6 @@ async function loadExactTaskAndTarget(args: {
             chapterId,
             args.activeChapter,
           ),
-  };
-}
-
-function outlineValue(
-  project: ProjectInfo,
-  meta: ProjectMeta,
-  chapterId: string | null,
-): OutlineToolValue {
-  const selected =
-    chapterId === null
-      ? project.chapters
-      : project.chapters.filter((chapter) => chapter.id === chapterId);
-  if (chapterId !== null && selected.length === 0) {
-    throw new Error(`Outline chapter not found: ${chapterId}`);
-  }
-  return {
-    premise: meta.outline.premise,
-    overview: meta.outline.overview,
-    characters: meta.characters.map((character) => ({
-      ...character,
-      profile: { ...character.profile },
-    })),
-    chapters: selected.map((chapter) => {
-      const outline = getChapterOutline(meta.chapters, chapter.id);
-      return {
-        chapterId: chapter.id,
-        title: chapter.title,
-        act: outline.act,
-        plotPoint: outline.plotPoint,
-        premise: outline.premise,
-        goal: outline.goal,
-        conflict: outline.conflict,
-        turn: outline.turn,
-        characterIds: [...outline.characterIds],
-        cards: outline.cards.map((card, order) => ({
-          id: card.id,
-          order,
-          title: card.title,
-          intention: card.intention,
-          characterIds: [...card.characterIds],
-          loreIds: [...card.loreIds],
-          continuityFlags: structuredClone(card.continuityFlags),
-          fingerprint: cardFingerprint(card),
-        })),
-      };
-    }),
-  };
-}
-
-function loreValue(meta: ProjectMeta, query: string | null): LoreToolValue {
-  const normalized = query?.trim().toLocaleLowerCase() ?? null;
-  const entries =
-    normalized === null || normalized.length === 0
-      ? meta.lore
-      : meta.lore.filter((entry) =>
-          [entry.title, entry.description, ...entry.tags].some((value) =>
-            value.toLocaleLowerCase().includes(normalized),
-          ),
-        );
-  return {
-    entries: entries.map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      description: entry.description,
-      characterIds: [...entry.characterIds],
-      tags: [...entry.tags],
-    })),
   };
 }
 
@@ -1290,6 +1200,7 @@ export function createAgentController(
 
   const toolEnvironment = (args: {
     run: AgentRun;
+    policy: PurposeAgentPolicy;
     model: LanguageModel;
     styleGuide: string;
     editingRules: string;
@@ -1301,20 +1212,12 @@ export function createAgentController(
     signal: AbortSignal;
     sessionId: AgentSessionId;
   }): AgentToolEnvironment => {
-    const chapterSnapshots = new Map<string, ChapterToolValue>();
-    if (args.targetChapter !== null) {
-      chapterSnapshots.set(args.targetChapter.chapterId, {
-        chapterId: args.targetChapter.chapterId,
-        title: args.targetChapter.title,
-        blocks: args.targetChapter.blocks.map((block, order) => ({
-          id: block.id,
-          order,
-          type: block.type,
-          text: block.text,
-          fingerprint: blockFingerprint(block),
-        })),
-      });
-    }
+    const book = new Book({
+      project: args.project,
+      meta: args.meta,
+      chapter: args.targetChapter,
+      loadChapter: (chapterId) => loadChapterSnapshot(args.project, chapterId, args.targetChapter),
+    });
     const requireTarget = (chapterId: string): LoadedChapter => {
       checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
       if (
@@ -1335,30 +1238,15 @@ export function createAgentController(
     return {
       run: args.run,
       signal: args.signal,
+      book,
+      policy: args.policy,
+      assertRunOwnership: () => checkToolRun(args.run.projectRoot, args.run.id, args.sessionId),
       readChapter: async (chapterId) => {
         checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
-        const cached = chapterSnapshots.get(chapterId);
-        if (cached !== undefined) return structuredClone(cached);
         try {
-          const chapter = await loadChapterSnapshot(
-            args.project,
-            chapterId,
-            args.targetChapter,
-          );
+          const chapter = await book.readChapter(chapterId);
           checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
-          const snapshot: ChapterToolValue = {
-            chapterId: chapter.chapterId,
-            title: chapter.title,
-            blocks: chapter.blocks.map((block, order) => ({
-              id: block.id,
-              order,
-              type: block.type,
-              text: block.text,
-              fingerprint: blockFingerprint(block),
-            })),
-          };
-          chapterSnapshots.set(chapterId, snapshot);
-          return structuredClone(snapshot);
+          return chapter;
         } catch (error) {
           if (isAbortError(error)) throw error;
           throw taggedError("tool", error);
@@ -1366,11 +1254,11 @@ export function createAgentController(
       },
       readOutline: async (chapterId) => {
         checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
-        return outlineValue(args.project, args.meta, chapterId);
+        return book.readOutline(chapterId);
       },
       readLore: async (query) => {
         checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
-        return loreValue(args.meta, query);
+        return book.readLore(query);
       },
       runCritique: async (chapterId, focus, signal) => {
         const chapter = requireTarget(chapterId);
@@ -1735,7 +1623,9 @@ export function createAgentController(
           currentSummary: summary,
           tokenTarget: compactionTokenTarget(capture.lastUsage),
           summarize: (source) =>
-            dependencies.summarize(model, source, abortController.signal),
+            dependencies.summarize(model, source, abortController.signal, {
+              styleGuide: capture.styleGuide, editingRules: capture.editingRules,
+            }),
         });
         if (!ownsCurrentRun()) return { status: "stopped" };
         summary = compacted.summary;
@@ -1765,7 +1655,7 @@ export function createAgentController(
         user,
       ];
       failurePhase = null;
-      const baseInstructions = buildAgentInstructions({
+      const policy = compileAgentPolicy({
         mode: run.mode,
         task: run.task,
         styleGuide: capture.styleGuide,
@@ -1773,11 +1663,12 @@ export function createAgentController(
         sessionId: capture.sessionId,
       });
       const instructions =
-        [baseInstructions, plannerGrounding, describeGrounding]
+        [policy.instructions, plannerGrounding, describeGrounding]
           .filter((part): part is string => part !== null)
           .join("\n\n");
       const environment = toolEnvironment({
         run,
+        policy,
         model,
         styleGuide: capture.styleGuide,
         editingRules: capture.editingRules,
@@ -2541,10 +2432,10 @@ const productionController = createAgentController({
   id: () => uid("agent"),
   getModel,
   getContextWindow: resolveModelContextWindow,
-  summarize: async (model, source, signal) => {
+  summarize: async (model, source, signal, preferences) => {
     const result = await generateText({
       model,
-      system: COMPACTION_SYSTEM,
+      system: buildCompactionInstructions(preferences),
       prompt: source,
       abortSignal: signal,
     });

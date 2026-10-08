@@ -221,7 +221,7 @@ function assertManuscriptTask(
   run: AgentRun,
   currentPending: PendingProposal | null,
 ): void {
-  if (run.task.kind === "chapter-analysis" || run.task.kind === "outline-sculpt") {
+  if (run.task.kind === "chapter-analysis" || run.task.kind === "next-beat" || run.task.kind === "outline-sculpt") {
     throw new AgentProposalError("task-boundary", "This task is read-only for manuscript changes.");
   }
   assertFollowUpMatches(run, currentPending, "manuscript");
@@ -507,10 +507,10 @@ export function buildOverviewPendingProposal(args: {
   makeId: () => string;
   now: string;
 }): OverviewPendingProposal {
-  if (args.run.task.kind === "chapter-analysis") {
+  if (args.run.task.kind === "chapter-analysis" || args.run.task.kind === "next-beat") {
     throw new AgentProposalError(
       "task-boundary",
-      "A chapter-analysis task is read-only for story overview changes.",
+      "This task is read-only for story overview changes.",
     );
   }
   if (

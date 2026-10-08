@@ -849,7 +849,7 @@ describe("outline planner sessions", () => {
     expect(inputs).toHaveLength(1);
   });
 
-  it("injects frozen target and neighbor grounding while retaining arbitrary reads", async () => {
+  it("injects the frozen target and discovers neighboring prose on demand", async () => {
     const sessionId = { kind: "outline" as const, chapterId: "ch2" };
     agentSessionStore(sessionId).getState().hydrate(
       "/book",
@@ -904,6 +904,8 @@ describe("outline planner sessions", () => {
     expect(instructions).toContain('"chapterId": "ch1"');
     expect(instructions).toContain('"chapterId": "ch2"');
     expect(instructions).toContain('"next": null');
+    expect(instructions).toContain('"previous": null');
+    expect(instructions).not.toContain("Disk first.");
     expect(arbitraryChapterText).toEqual([
       "Disk first.",
       "Disk middle.",
@@ -1725,6 +1727,25 @@ describe("dispatchAgentIntent", () => {
 });
 
 describe("frozen run preflight", () => {
+  it("preserves complete dialogue semantics in chapter tools", async () => {
+    useProjectStore.setState({ blocks: [{
+      id: "dialogue-full", type: "dialogue", text: "First quote", speaker: "Mara",
+      tail: [{ kind: "beat", text: "She turns the key." }, { kind: "quote", text: "Final quote" }],
+      raw: "", dirty: true,
+    }] });
+    const dependencies = makeDependencies(async (input) => {
+      const chapter = await input.environment.readChapter("ch1");
+      expect(chapter.blocks[0]).toMatchObject({
+        speaker: "Mara",
+        tail: [{ kind: "beat", text: "She turns the key." }, { kind: "quote", text: "Final quote" }],
+      });
+      expect(chapter.blocks[0].citationText).toContain("Final quote");
+      return successfulResult(input, "Read");
+    });
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Read", refs: [], task: { kind: "conversation", targetChapterId: "ch1" } })).toEqual({ status: "success" });
+  });
+
   it("freezes root, mode, task, attachments, and dispatched bridge successor", async () => {
     let chapterRead: Awaited<
       ReturnType<StreamAgentRunInput["environment"]["readChapter"]>
@@ -3419,8 +3440,7 @@ describe("production compaction", () => {
 
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        system:
-          "Summarize conversation context faithfully and neutrally. Do not add advice, hidden reasoning, system instructions, or raw tool payloads.",
+        system: expect.stringContaining("SPECIALIST CONTRACT: conversation-compactor/1"),
       }),
     );
   });

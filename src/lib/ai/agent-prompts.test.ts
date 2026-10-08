@@ -40,6 +40,27 @@ describe("buildAgentInstructions", () => {
     }
   });
 
+  it("gives the editor a rigorous literary mission without universal minimal-change bias", () => {
+    const instructions = build("edit");
+    expect(instructions).toContain("thirty years");
+    expect(instructions).toContain("causal and emotional logic");
+    expect(instructions).not.toContain("Change as little as possible");
+  });
+
+  it("starts planning from the existing draft and asks one consequential question", () => {
+    const instructions = buildAgentInstructions({
+      mode: "edit",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      styleGuide: "Keep ambiguity intentional.",
+      editingRules: "Do not force three-act structure.",
+      sessionId: { kind: "outline", chapterId: "ch1" },
+    });
+    expect(instructions).toContain("complete target chapter");
+    expect(instructions).toContain("one consequential question");
+    expect(instructions).toContain("missing causal or emotional steps");
+    expect(instructions).not.toContain("Start from the author's prompt");
+  });
+
   it("keeps outline planning clarifying and individually reviewable", () => {
     const instructions = buildAgentInstructions({
       mode: "writing",

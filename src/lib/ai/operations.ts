@@ -81,7 +81,7 @@ const critiqueNoteSchema = z.object({
 export const critiqueResultSchema = z.object({
   notes: z
     .array(critiqueNoteSchema)
-    .describe("a balanced handful of notes, leading with at least one strength"),
+    .describe("supported high-impact craft findings; preserve genuine strengths without a praise quota"),
 });
 
 const continuityFlagSchema = z.object({
@@ -126,7 +126,7 @@ export async function critique(
   const { output } = await generateText({
     model: opts.model,
     output: Output.object({ schema: critiqueResultSchema }),
-    system: authorSystem(CRITIQUE_SYSTEM, "voice", opts.preferences),
+    system: authorSystem(CRITIQUE_SYSTEM, "voice+editing", opts.preferences),
     prompt: buildAnchoredGrounding(ctx),
     abortSignal: opts.signal,
   });
@@ -146,7 +146,7 @@ export async function continuityCheck(
   const { output } = await generateText({
     model: opts.model,
     output: Output.object({ schema: continuityResultSchema }),
-    system: authorSystem(CONTINUITY_SYSTEM, "voice", opts.preferences),
+    system: authorSystem(CONTINUITY_SYSTEM, "voice+editing", opts.preferences),
     prompt: buildAnchoredGrounding(ctx),
     abortSignal: opts.signal,
   });

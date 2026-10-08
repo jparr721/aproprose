@@ -27,10 +27,26 @@ const meta: ProjectMeta = {
 const manuscript = (chapterId: string) => ({
   chapterId,
   title: chapterId.toUpperCase(),
-  blocks: [{ type: "narration" as const, text: `Prose ${chapterId}` }],
+  blocks: [{ id: chapterId, type: "narration" as const, text: `Prose ${chapterId}`, raw: "", dirty: false }],
 });
 
 describe("buildOutlinePlannerGrounding", () => {
+  it("grounds complete dialogue and notes without reading neighboring manuscript", () => {
+    const grounding = buildOutlinePlannerGrounding({ chapters, meta, targetChapterId: "b", previous: null, next: null,
+      target: { chapterId: "b", title: "B", blocks: [
+        { id: "speech", type: "dialogue", text: "First", speaker: "Dad", tail: [{ kind: "beat", text: "He waits" }, { kind: "quote", text: "Final" }], raw: "", dirty: true },
+        { id: "note", type: "scratchpad", text: "Unresolved motive", raw: "", dirty: true },
+      ] },
+    }, 1000);
+    expect(grounding).toContain("He waits");
+    expect(grounding).toContain("Final");
+    expect(grounding).toContain("Unresolved motive");
+    expect(grounding).toContain('"previous": null');
+    expect(grounding).toContain('"previousChapterId": "a"');
+    expect(grounding).toContain('"nextChapterId": "c"');
+    expect(grounding).toContain('"truncated": false');
+  });
+
   it("grounds a middle chapter with both current neighbors", () => {
     const grounding = buildOutlinePlannerGrounding({
       chapters,
@@ -125,6 +141,7 @@ describe("buildOutlinePlannerGrounding", () => {
       title: chapterId.toUpperCase(),
       blocks: [
         {
+          id: chapterId, raw: "", dirty: false,
           type: "narration" as const,
           text: `HEAD-${chapterId}-TAIL-${chapterId}`,
         },
@@ -153,8 +170,10 @@ describe("buildOutlinePlannerGrounding", () => {
         0,
       ),
     ).toBeLessThanOrEqual(18);
-    expect(manuscriptChapters.every((chapter) => chapter.truncated)).toBe(true);
-    expect(grounding).not.toContain("TAIL");
+    expect(value.manuscript.previous.truncated).toBe(true);
+    expect(value.manuscript.next.truncated).toBe(true);
+    expect(value.manuscript.target.prose).toBe("HEAD-b-TAIL-b");
+    expect(value.manuscript.target.truncated).toBe(false);
   });
 
   it("expands profiles only for cast relevant to the target neighborhood", () => {

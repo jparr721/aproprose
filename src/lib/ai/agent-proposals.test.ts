@@ -492,6 +492,12 @@ describe("proposal task boundaries", () => {
     ).toThrow(AgentProposalError);
   });
 
+  it("keeps next-beat suggestions read-only at the proposal boundary", () => {
+    const task = { kind: "next-beat", chapterId: "ch1", blockIds: ["a"] } satisfies AgentRun["task"];
+    expect(() => buildManuscript(task, [insert("a", "No.")], [block("a", "Left.")])).toThrow(/read-only/);
+    expect(() => buildOverviewPendingProposal({ run: run(task), currentPending: null, summary: "No", overview: "No", reason: "No", currentOverview: "", originatingMessageId: "assistant-1", makeId: () => "overview-id", now: "2026-10-07T00:00:00.000Z" })).toThrow(/read-only/);
+  });
+
   it("rejects writes from a chapter-analysis task", () => {
     expect(() =>
       buildManuscript(

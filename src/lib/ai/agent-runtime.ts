@@ -12,6 +12,7 @@ import {
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
 import {
+  activeAgentTools,
   createAgentTools,
   type AgentToolEnvironment,
   type AgentToolSet,
@@ -156,10 +157,10 @@ export async function streamAgentRun(
     model: input.model,
     instructions: input.instructions,
     tools,
-    stopWhen: [
-      stepCountIs(8),
-      proposalStageSucceeded,
-    ],
+    activeTools: activeAgentTools(input.environment.policy.capabilities),
+    stopWhen: input.environment.policy.stopAfterProposal
+      ? [stepCountIs(input.environment.policy.stepBudget), proposalStageSucceeded]
+      : [stepCountIs(input.environment.policy.stepBudget)],
     onStepFinish: async (step) => {
       for (const part of step.content) {
         if (part.type !== "tool-error") continue;

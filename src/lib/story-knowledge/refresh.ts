@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 
+import type { AuthorPreferences } from "@/author";
 import {
   candidateInputFingerprint,
   chapterTopologyFingerprint,
@@ -48,6 +49,7 @@ export interface StoryRefreshCapture {
   provider: AiProvider;
   modelId: string;
   reconcileCandidates: boolean;
+  preferences: AuthorPreferences;
 }
 
 export type StoryRefreshFollowUpReason =
@@ -334,7 +336,7 @@ export async function buildStoryRefresh(
               capture.meta.characters,
             ),
           },
-          { model: await resolveModel(), signal },
+          { model: await resolveModel(), signal, preferences: capture.preferences },
         ),
       );
       signal.throwIfAborted();
@@ -357,7 +359,7 @@ export async function buildStoryRefresh(
               sourceFingerprint: parsed.sourceFingerprint,
               analyses,
             },
-            { model: await resolveModel(), signal },
+            { model: await resolveModel(), signal, preferences: capture.preferences },
           );
     signal.throwIfAborted();
     knowledge.chapters[parsed.chapter.id] = cloneChapterKnowledge(chapterKnowledge);
@@ -383,7 +385,7 @@ export async function buildStoryRefresh(
           knowledge: knowledge.chapters[chapter.id],
         })),
       },
-      { model: await resolveModel(), signal },
+      { model: await resolveModel(), signal, preferences: capture.preferences },
     );
     signal.throwIfAborted();
     story = { ...reducedStory };
@@ -413,7 +415,7 @@ export async function buildStoryRefresh(
         appliedObservationIds:
           knowledge.appliedCharacterObservationIds[character.id] ?? [],
       },
-      { model: await resolveModel(), signal },
+      { model: await resolveModel(), signal, preferences: capture.preferences },
     );
     return {
       characterId: character.id,
@@ -486,7 +488,7 @@ export async function buildStoryRefresh(
         ? []
         : await dependencies.reduceCharacterCandidates(
             { groups },
-            { model: await resolveModel(), signal },
+            { model: await resolveModel(), signal, preferences: capture.preferences },
           );
     signal.throwIfAborted();
     const groupByFingerprint = new Map(

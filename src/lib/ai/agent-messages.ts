@@ -6,6 +6,7 @@ import {
   type ToolSet,
 } from "ai";
 import { z } from "zod";
+import { authorQuestionSchema } from "@/lib/ai/agent-tools";
 import type {
   AgentMessageMetadata,
   AgentToolOutput,
@@ -41,6 +42,7 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
     chapterId: z.string(),
     analysis: z.enum(["critique", "continuity"]),
   }),
+  z.object({ kind: z.literal("next-beat"), chapterId: z.string(), blockIds: z.array(z.string()) }),
   z.object({ kind: z.literal("outline-sculpt"), chapterId: z.string() }),
   z.object({
     kind: z.literal("character-describe"),
@@ -142,6 +144,13 @@ interface AgentToolDescriptor {
 }
 
 const agentToolDescriptors: Record<AgentToolName, AgentToolDescriptor> = {
+  ask_author: { title: "Question for author", targetFallback: "Author question", itemName: "question" },
+  read_book_manifest: { title: "Read book manifest", targetFallback: "Book", itemName: "chapter" },
+  read_book_metadata: { title: "Read book metadata", targetFallback: "Book", itemName: "field" },
+  read_story_knowledge: { title: "Read story knowledge", targetFallback: "Story observations", itemName: "chapter" },
+  read_character: { title: "Read character", targetFallback: "Character", itemName: "field" },
+  read_chapter_range: { title: "Read chapter range", targetFallback: "Chapter", itemName: "block" },
+  search_book: { title: "Search book", targetFallback: "Book search", itemName: "match" },
   read_chapter: {
     title: "Read chapter",
     targetFallback: "Chapter",
@@ -247,6 +256,13 @@ function inputValue(input: unknown, key: string): unknown {
 function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
   const descriptor = agentToolDescriptors[name];
   switch (name) {
+    case "ask_author": return authorQuestionSchema.parse(input);
+    case "read_book_manifest":
+    case "read_book_metadata":
+    case "read_story_knowledge": return {};
+    case "read_character": return { characterId: safeTarget(inputValue(input, "characterId"), descriptor.targetFallback) };
+    case "read_chapter_range": return { chapterId: safeTarget(inputValue(input, "chapterId"), descriptor.targetFallback), start: 0, limit: 1 };
+    case "search_book": return { query: "Archived search", chapterIds: null, limit: 1 };
     case "read_chapter":
       return {
         chapterId: safeTarget(
@@ -309,6 +325,13 @@ function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
 function genericFailedToolInput(name: AgentToolName): unknown {
   const descriptor = agentToolDescriptors[name];
   switch (name) {
+    case "ask_author": return { question: "Question unavailable", rationale: "Tool execution failed", options: [] };
+    case "read_book_manifest":
+    case "read_book_metadata":
+    case "read_story_knowledge": return {};
+    case "read_character": return { characterId: descriptor.targetFallback };
+    case "read_chapter_range": return { chapterId: descriptor.targetFallback, start: 0, limit: 1 };
+    case "search_book": return { query: "Archived search", chapterIds: null, limit: 1 };
     case "read_chapter":
     case "read_outline":
       return { chapterId: descriptor.targetFallback };

@@ -530,7 +530,7 @@ describe("agent console authoring flows", () => {
 
     expect(stageError).toBeInstanceOf(Error);
     expect((stageError as Error).message).toContain(
-      "The frozen character run cannot stage source changes.",
+      "Agent tool is not permitted for action character-developer: stage_overview_proposal",
     );
     expect(characterStore.getState().pendingProposal).toBeNull();
   });
@@ -1299,7 +1299,7 @@ describe("agent console authoring flows", () => {
             },
           ],
         });
-        await expect(attemptedStage).rejects.toThrow("read-only");
+        await expect(attemptedStage).rejects.toThrow("Agent tool is not permitted for action");
 
         if (
           input.run.task.kind !== "chapter-analysis" ||
@@ -2052,6 +2052,7 @@ describe("agent console authoring flows", () => {
                     order: 0,
                     type: "narration",
                     text: "Mara closed the ledger.",
+                    citationText: "Mara closed the ledger.",
                     fingerprint: "64e5c668",
                   },
                   {
@@ -2059,6 +2060,7 @@ describe("agent console authoring flows", () => {
                     order: 1,
                     type: "narration",
                     text: "At dawn, the harbor bells woke her.",
+                    citationText: "At dawn, the harbor bells woke her.",
                     fingerprint: "106a8c7e",
                   },
                   {
@@ -2066,6 +2068,7 @@ describe("agent console authoring flows", () => {
                     order: 2,
                     type: "narration",
                     text: "She found the summons under the door.",
+                    citationText: "She found the summons under the door.",
                     fingerprint: "bd042c29",
                   },
                 ],

@@ -1,14 +1,19 @@
 import type { LanguageModelUsage, UIMessage } from "ai";
+import type { BookChapterValue, BookManifest, BookSearchResult } from "@/book/types";
+import type { ContentSnapshotRef } from "@/content/record";
 import type {
   ActKind,
   BeatType,
   Block,
   BlockChange,
   CharacterProfile,
+  Character,
   Card,
   CritiqueNote,
   ContinuityFlag,
   ProjectMeta,
+  ProjectKnowledge,
+  NovelMetadata,
   SculptChange,
 } from "@/lib/types";
 
@@ -119,6 +124,7 @@ export type AgentTask =
       chapterId: string;
       analysis: "critique" | "continuity";
     }
+  | { kind: "next-beat"; chapterId: string; blockIds: string[] }
   | { kind: "outline-sculpt"; chapterId: string }
   | { kind: "character-describe"; characterId: string }
   | { kind: "proposal-follow-up"; proposalId: string };
@@ -398,16 +404,14 @@ export type AgentToolOutput<T> =
   | { kind: "runtime"; summary: AgentToolSummary; value: T }
   | { kind: "summary"; summary: AgentToolSummary };
 
-export interface ChapterToolValue {
-  chapterId: string;
-  title: string;
-  blocks: Array<{
-    id: string;
-    order: number;
-    type: Block["type"];
-    text: string;
-    fingerprint: string;
-  }>;
+export type ChapterToolValue = BookChapterValue;
+
+export interface ChapterRangeToolValue extends ChapterToolValue {
+  totalBlocks: number;
+  start: number;
+  endExclusive: number;
+  hasMore: boolean;
+  source: ContentSnapshotRef<"chapter">;
 }
 
 export interface OutlineToolValue {
@@ -476,6 +480,34 @@ export interface PendingProposalToolValue {
 }
 
 export interface AgentUiTools {
+  ask_author: {
+    input: { question: string; rationale: string; options: string[] };
+    output: AgentToolOutput<{ question: string; rationale: string; options: string[] }>;
+  };
+  read_book_manifest: {
+    input: Record<string, never>;
+    output: AgentToolOutput<BookManifest>;
+  };
+  read_book_metadata: {
+    input: Record<string, never>;
+    output: AgentToolOutput<NovelMetadata>;
+  };
+  read_story_knowledge: {
+    input: Record<string, never>;
+    output: AgentToolOutput<ProjectKnowledge>;
+  };
+  read_character: {
+    input: { characterId: string };
+    output: AgentToolOutput<Character>;
+  };
+  read_chapter_range: {
+    input: { chapterId: string; start: number; limit: number };
+    output: AgentToolOutput<ChapterRangeToolValue>;
+  };
+  search_book: {
+    input: { query: string; chapterIds: string[] | null; limit: number };
+    output: AgentToolOutput<BookSearchResult>;
+  };
   read_chapter: {
     input: { chapterId: string };
     output: AgentToolOutput<ChapterToolValue>;

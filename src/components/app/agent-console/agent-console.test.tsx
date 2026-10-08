@@ -175,22 +175,33 @@ afterEach(async () => {
 });
 
 describe("AgentConsole shell", () => {
-  it("shows thinking in the fixed header before the first assistant message arrives", () => {
+  it("omits the project sidebar header and its redundant close action", () => {
+    render(<AgentConsole />);
+
+    const shell = screen.getByRole("region", { name: "AI Console" });
+    expect(shell.querySelector("header")).toBeNull();
+    expect(screen.queryByText("Quiet Novel / 1. The Crossing")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close AI Console" })).toBeNull();
+    expect(screen.getByRole("log")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Agent composer" })).toBeTruthy();
+  });
+
+  it("shows activity beside the composer before the first assistant message arrives", () => {
     render(<AgentConsole />);
     expect(screen.queryByText("Thinking")).toBeNull();
 
     act(() => useAgentConsoleStore.getState().beginPreflight());
 
     const activity = screen.getByRole("status", { name: "AI activity" });
-    const header = screen.getByText("AI Console").closest("header");
-    expect(activity.textContent).toBe("Thinking");
+    expect(activity.textContent).toBe("Working on your request");
     expect(activity.querySelector('[data-slot="spinner"]')).not.toBeNull();
-    expect(activity.closest("header")).toBe(header);
+    expect(screen.getByRole("region", { name: "Agent composer" }).contains(activity)).toBe(true);
     expect(screen.getByRole("log").contains(activity)).toBe(false);
     expect(useAgentConsoleStore.getState().messages).toEqual([]);
 
     act(() => useAgentConsoleStore.getState().markStreaming());
-    expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+    expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
+    expect(screen.queryByText("Thinking")).toBeNull();
 
     act(() => useAgentConsoleStore.getState().finishRun(message, null));
     expect(screen.queryByRole("status", { name: "AI activity" })).toBeNull();
@@ -198,11 +209,11 @@ describe("AgentConsole shell", () => {
   });
 
   it.each(["stopped", "error"] satisfies AgentMessageMetadata["state"][])(
-    "clears the header activity when a run ends with %s",
+    "clears the busy activity when a run ends with %s",
     (state) => {
       useAgentConsoleStore.setState({ runStatus: "streaming" });
       render(<AgentConsole />);
-      expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
 
       act(() => {
         if (state === "stopped") {
@@ -233,6 +244,7 @@ describe("AgentConsole shell", () => {
   ] satisfies AgentSessionId[])(
     "keeps the $kind panel activity isolated from the project console",
     (sessionId) => {
+      const close = vi.fn();
       const session = agentSessionStore(sessionId);
       session.setState({
         ...EMPTY_AGENT_STATE,
@@ -250,7 +262,7 @@ describe("AgentConsole shell", () => {
             contextLabel="Quiet Novel"
             emptyDescription="Ask a question"
             emptyTitle="Scoped conversation"
-            onClose={vi.fn()}
+            onClose={close}
             placeholder="Ask a question"
             sessionId={sessionId}
             task={null}
@@ -260,7 +272,11 @@ describe("AgentConsole shell", () => {
       );
       const console = within(screen.getByRole("region", { name: "AI Console" }));
       const scoped = within(screen.getByRole("region", { name: "Scoped AI panel" }));
-      expect(console.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(scoped.getByText("Scoped AI panel").closest("header")).not.toBeNull();
+      expect(scoped.getByText("Quiet Novel")).toBeTruthy();
+      fireEvent.click(scoped.getByRole("button", { name: "Close scoped AI panel" }));
+      expect(close).toHaveBeenCalledOnce();
+      expect(console.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
       expect(scoped.queryByRole("status", { name: "AI activity" })).toBeNull();
 
       act(() => {
@@ -269,27 +285,25 @@ describe("AgentConsole shell", () => {
       });
 
       expect(console.queryByRole("status", { name: "AI activity" })).toBeNull();
-      expect(scoped.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(scoped.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
     },
   );
 
-  it("renders header, conversation, tray, and composer in fixed DOM order", () => {
+  it("renders conversation, tray, and composer in fixed DOM order without a header", () => {
     useAgentConsoleStore.setState({ pendingProposal: proposal });
     render(<AgentConsole />);
 
     const shell = screen.getByRole("region", { name: "AI Console" });
-    const header = screen.getByText("AI Console").closest("header");
     const conversation = screen.getByRole("log");
     const tray = shell.querySelector("[data-agent-review-tray]");
     const composer = screen.getByRole("region", { name: "Agent composer" });
-    if (header === null || tray === null) {
+    if (tray === null) {
       throw new Error("Agent console region is missing");
     }
     const children = Array.from(shell.children);
 
-    expect(children.indexOf(header)).toBeLessThan(
-      children.indexOf(conversation),
-    );
+    expect(shell.querySelector("header")).toBeNull();
+    expect(children[0]).toBe(conversation);
     expect(children.indexOf(conversation)).toBeLessThan(
       children.indexOf(tray),
     );
@@ -299,7 +313,7 @@ describe("AgentConsole shell", () => {
     expect(screen.queryByText(project.root)).toBeNull();
   });
 
-  it("keeps header, banner, tray, and composer outside the scroll contract", () => {
+  it("keeps banner, tray, and composer outside the scroll contract", () => {
     useAgentConsoleStore.setState({
       pendingProposal: proposal,
       persistenceIssue: {
@@ -315,11 +329,10 @@ describe("AgentConsole shell", () => {
     const viewport = screen.getByRole("region", {
       name: "Conversation messages",
     });
-    const header = screen.getByText("AI Console").closest("header");
     const banner = screen.getByRole("alert");
     const tray = shell.querySelector<HTMLElement>("[data-agent-review-tray]");
     const composer = screen.getByRole("region", { name: "Agent composer" });
-    if (header === null || tray === null) {
+    if (tray === null) {
       throw new Error("Agent console regions are missing");
     }
 
@@ -329,7 +342,7 @@ describe("AgentConsole shell", () => {
     );
     expect(viewport.className.split(" ")).toContain("overflow-y-auto");
 
-    for (const region of [header, banner, tray, composer]) {
+    for (const region of [banner, tray, composer]) {
       expect(region.parentElement).toBe(shell);
       expect(region.className.split(" ")).not.toContain("overflow-y-auto");
       expect(region.className.split(" ")).not.toContain("overflow-y-scroll");
@@ -383,18 +396,23 @@ describe("AgentConsole shell", () => {
     function Harness() {
       const aiOpen = useViewStore((state) => state.aiOpen);
       const openAiConsole = useViewStore((state) => state.openAiConsole);
-      return aiOpen ? (
-        <AgentConsole />
-      ) : (
-        <button onClick={openAiConsole} type="button">
-          Reopen AI Console
-        </button>
+      return (
+        <>
+          <button onClick={() => useViewStore.getState().setAiOpen(false)} type="button">
+            Hide AI Console
+          </button>
+          {aiOpen ? <AgentConsole /> : (
+            <button onClick={openAiConsole} type="button">
+              Reopen AI Console
+            </button>
+          )}
+        </>
       );
     }
 
     render(<Harness />);
     fireEvent.click(
-      screen.getByRole("button", { name: "Close AI Console" }),
+      screen.getByRole("button", { name: "Hide AI Console" }),
     );
 
     expect(useViewStore.getState().aiOpen).toBe(false);
@@ -416,8 +434,8 @@ describe("AgentConsole shell", () => {
       "Preserve this next turn",
     );
     expect(
-      screen.getByRole("button", { name: "Edit" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+      screen.getByRole("combobox", { name: "Agent mode" }).textContent,
+    ).toBe("Edit");
     expect(screen.getByText("Tighten the crossing")).toBeTruthy();
   });
 
@@ -457,7 +475,7 @@ describe("AgentConsole shell", () => {
       await waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledOnce());
       render(<AgentConsole />);
 
-      expect(screen.getByText("Second Novel / 1. The Crossing")).toBeTruthy();
+      expect(screen.getByRole("region", { name: "AI Console" }).querySelector("header")).toBeNull();
       expect(screen.queryByText("The bridge can stay quiet.")).toBeNull();
       expect(screen.queryByText("Older context compacted")).toBeNull();
       expect(screen.queryByText("Tighten the crossing")).toBeNull();
@@ -469,8 +487,8 @@ describe("AgentConsole shell", () => {
       expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
       expect(
-        screen.getByRole("button", { name: "Close AI Console" }),
-      ).toBeTruthy();
+        screen.queryByRole("button", { name: "Close AI Console" }),
+      ).toBeNull();
     } finally {
       releaseWrite();
       await switching;

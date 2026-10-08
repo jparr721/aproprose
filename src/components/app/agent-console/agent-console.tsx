@@ -214,7 +214,6 @@ function AgentSectionContent({
   title,
 }: AgentSectionProps) {
   const messages = useAgentSessionStore(sessionId, (state) => state.messages);
-  const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
   const pendingProposal = useAgentSessionStore(
     sessionId,
     (state) => state.pendingProposal,
@@ -238,22 +237,12 @@ function AgentSectionContent({
       data-agent-console
       data-agent-section
     >
-      <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-        <div className="min-w-0">
-          <TypographyLarge>{title}</TypographyLarge>
-          <TypographyMuted className="truncate">{contextLabel}</TypographyMuted>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {ownershipStatus === "ready" && runStatus !== "idle" ? (
-            <TypographyMuted
-              aria-label="AI activity"
-              className="flex items-center gap-2"
-              role="status"
-            >
-              <Spinner aria-hidden="true" />
-              Thinking
-            </TypographyMuted>
-          ) : null}
+      {sessionId.kind === "project" ? null : (
+        <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+          <div className="min-w-0">
+            <TypographyLarge>{title}</TypographyLarge>
+            <TypographyMuted className="truncate">{contextLabel}</TypographyMuted>
+          </div>
           <Button
             aria-label={closeLabel}
             onClick={onClose}
@@ -263,8 +252,8 @@ function AgentSectionContent({
           >
             <IconX />
           </Button>
-        </div>
-      </header>
+        </header>
+      )}
       {persistenceIssue === null ? null : (
         <AgentPersistenceBanner issue={persistenceIssue} sessionId={sessionId} />
       )}

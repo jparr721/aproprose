@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { IconBrain, IconCopy } from "@tabler/icons-react";
+import { useState } from "react";
+import { IconCopy } from "@tabler/icons-react";
 import {
   Message,
   MessageAction,
@@ -7,7 +7,6 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { TypographyMuted } from "@/components/ui/typography";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
@@ -41,35 +40,6 @@ export interface AgentMessageProps {
   }>;
   onOpenSettings: (target: AgentSettingsTarget) => void;
   sessionId?: AgentSessionId;
-}
-
-function formatElapsedTime(startedAt: string, now: number): string {
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((now - Date.parse(startedAt)) / 1_000),
-  );
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = elapsedSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function ThinkingIndicator({ startedAt }: { startedAt: string }) {
-  const [now, setNow] = useState(() => Date.now());
-  const elapsed = formatElapsedTime(startedAt, now);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  return (
-    <div className="flex items-center gap-2 text-muted-foreground" role="status">
-      <IconBrain className="size-4" />
-      <Shimmer as="span" className="text-sm">
-        {`Thinking ${elapsed}`}
-      </Shimmer>
-    </div>
-  );
 }
 
 function ResponseText({
@@ -173,9 +143,6 @@ export function AgentMessage({
   return (
     <Message from={message.role}>
       <MessageContent>
-        {messageMetadata.state === "streaming" ? (
-          <ThinkingIndicator startedAt={messageMetadata.createdAt} />
-        ) : null}
         {message.parts
           .filter((part) => part.type === "text")
           .map((part, index) => (

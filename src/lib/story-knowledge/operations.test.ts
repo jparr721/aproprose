@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
@@ -28,7 +29,7 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { warning: vi.fn() },
+  toast: { warning: vi.fn(), error: vi.fn() },
 }));
 
 const knowledgeModel = new MockLanguageModelV3();
@@ -352,7 +353,7 @@ describe("story chunk analysis", () => {
     expect(second.profile.mannerisms).toBe("Mara checks every lock twice.");
   });
 
-  it("forwards abort and retries one failed generation", async () => {
+  it("forwards abort and retries one transient network failure", async () => {
     const abort = new AbortController();
     vi.mocked(generateText)
       .mockRejectedValueOnce(new TypeError("fetch failed"))
@@ -362,6 +363,8 @@ describe("story chunk analysis", () => {
 
     expect(generateText).toHaveBeenCalledTimes(2);
     expect(vi.mocked(generateText).mock.calls[1][0].abortSignal).toBe(abort.signal);
+    expect(toast.warning).toHaveBeenCalledOnce();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("prompts for evidence-only analysis without permanent traits from reactions", async () => {

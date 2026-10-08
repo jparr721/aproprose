@@ -1,11 +1,20 @@
 [
   {
-    "version": "0.17.6",
+    "version": "0.17.7",
     "date": "2026-10-07",
     "summary": "AI chat attachment previews stay compact and readable.",
     "highlights": [
       "Hover over attached manuscript blocks, outline cards, and findings to see a fixed-width preview limited to four wrapped lines.",
       "Previews fit the window while preserving the full saved text and attachment navigation."
+    ]
+  },
+  {
+    "version": "0.17.6",
+    "date": "2026-10-07",
+    "summary": "Scrollbars stay clear of your writing and settings.",
+    "highlights": [
+      "Settings fields, character counters, and changelog dates remain visible beside the scrollbar.",
+      "Scroll areas preserve content space in left-to-right and right-to-left layouts."
     ]
   },
   {

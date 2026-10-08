@@ -1,4 +1,5 @@
 import { ChangelogList } from "@/components/app/changelog-list";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   TypographyEyebrow,
   TypographyForeground,
@@ -21,10 +22,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 export function AboutTab() {
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2 rounded-lg border bg-card p-3">
-        <InfoRow label="Version" value={APP_VERSION} />
-        <InfoRow label="License" value="-" />
-      </div>
+      <Card className="py-3">
+        <CardContent className="flex flex-col gap-2 px-3">
+          <InfoRow label="Version" value={APP_VERSION} />
+          <InfoRow label="License" value="-" />
+        </CardContent>
+      </Card>
       <div className="flex flex-col gap-2">
         <TypographyEyebrow>Changelog</TypographyEyebrow>
         <ChangelogList incoming={null} />

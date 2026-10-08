@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
   TypographyEyebrow,
@@ -55,7 +56,7 @@ export function StatsTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-3 divide-x overflow-hidden rounded-lg border bg-card">
+      <Card className="grid grid-cols-3 gap-0 divide-x overflow-hidden py-0">
         <StatCell
           label="Words written"
           value={total.toLocaleString()}
@@ -67,18 +68,19 @@ export function StatsTab() {
           value={`${streak} day${streak === 1 ? "" : "s"}`}
           caption={longest > 0 ? `Best: ${longest.toLocaleString()}` : undefined}
         />
-      </div>
+      </Card>
 
-      <div className="flex flex-col gap-3 rounded-lg border bg-card p-3">
-        <div className="flex items-center justify-between gap-3">
-          <TypographyEyebrow>Daily goal</TypographyEyebrow>
+      <Card className="gap-3 py-3">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3 px-3">
+          <CardTitle>Daily goal</CardTitle>
           <DailyGoalInput
             value={goal}
             submitLabel={goal === null ? "Set" : "Save"}
             onSubmit={setGoal}
             className="w-52"
           />
-        </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 px-3">
         {goal === null ? (
           <TypographyMuted className="text-xs">
             Set a goal to track how often you hit it.
@@ -113,14 +115,17 @@ export function StatsTab() {
             </Button>
           </>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="flex flex-col gap-2">
-        <TypographyEyebrow>Activity</TypographyEyebrow>
-        <div className="rounded-lg border bg-card p-3">
+      <Card className="gap-3 py-3">
+        <CardHeader className="px-3">
+          <CardTitle>Activity</CardTitle>
+        </CardHeader>
+        <CardContent className="px-3">
           <ContributionChart days={days} goal={goal} />
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -6,7 +6,6 @@ import { ReviewTray } from "@/components/app/agent-console/review-tray";
 import { AiConsoleErrorBoundary } from "@/components/app/error-boundary";
 import {
   Alert,
-  AlertAction,
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
@@ -290,11 +289,13 @@ function AgentSectionContent({
         </>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2">
-          {project === null ? null : <Spinner className="motion-reduce:animate-none" />}
+          {project === null || (persistenceIssue !== null && persistenceIssue.kind !== "save") ? null : <Spinner className="motion-reduce:animate-none" />}
           <TypographyMuted>
             {project === null
               ? "Open a project to use AI Console."
-              : "Loading AI conversation"}
+              : persistenceIssue !== null && persistenceIssue.kind !== "save"
+                ? "Reset the conversation to restore AI access."
+                : "Loading AI conversation"}
           </TypographyMuted>
         </div>
       )}

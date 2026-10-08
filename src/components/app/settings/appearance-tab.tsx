@@ -1,8 +1,15 @@
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
-import { Field } from "@/components/app/settings/field";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { Theme } from "@/lib/types";
 
@@ -13,6 +20,7 @@ const THEMES: { value: Theme; label: string }[] = [
 ];
 
 export function AppearanceTab() {
+  const proseLabelId = useId();
   const theme = useSettingsStore((s) => s.theme);
   const proseSize = useSettingsStore((s) => s.proseSize);
   const setTheme = useSettingsStore((s) => s.setTheme);
@@ -20,8 +28,9 @@ export function AppearanceTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Field label="Color">
-        <ButtonGroup>
+      <FieldSet>
+        <FieldLegend>Color</FieldLegend>
+        <ButtonGroup aria-label="Color theme">
           {THEMES.map((t) => (
             <Button
               key={t.value}
@@ -32,12 +41,15 @@ export function AppearanceTab() {
             </Button>
           ))}
         </ButtonGroup>
-      </Field>
+      </FieldSet>
 
       <Separator />
 
-      <Field label="Prose size" hint={`${proseSize}px`}>
+      <Field>
+        <FieldLabel id={proseLabelId}>Prose size</FieldLabel>
+        <FieldDescription>{proseSize}px</FieldDescription>
         <Slider
+          aria-labelledby={proseLabelId}
           min={14}
           max={22}
           step={0.5}

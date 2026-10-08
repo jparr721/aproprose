@@ -34,7 +34,7 @@ import {
   TypographyMuted,
   TypographyMutedSpan,
 } from "@/components/ui/typography";
-import { Field } from "@/components/app/settings/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { PreferenceAssistant } from "@/components/app/settings/preference-assistant";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
@@ -125,10 +125,12 @@ function ApiKeyField({
   };
 
   return (
-    <Field label={`${providerLabels[provider]} key`}>
+    <Field>
+      <FieldLabel htmlFor={`ai-key-${provider}`}>{providerLabels[provider]} key</FieldLabel>
       <div className="flex items-center gap-2">
         <InputGroup className="flex-1">
           <InputGroupInput
+            id={`ai-key-${provider}`}
             type={show ? "text" : "password"}
             value={draft}
             onChange={(e) => setDraft(e.currentTarget.value)}
@@ -223,7 +225,8 @@ function ProviderField() {
   const setAiProvider = useSettingsStore((state) => state.setAiProvider);
 
   return (
-    <Field label="AI provider">
+    <Field>
+      <FieldLabel htmlFor="ai-provider">AI provider</FieldLabel>
       <Select
         value={aiProvider}
         onValueChange={(value) => {
@@ -235,7 +238,7 @@ function ProviderField() {
           resetModelMetadata();
         }}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger id="ai-provider">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -301,7 +304,8 @@ function AiModelField({
 
   if (!keyConfigured) {
     return (
-      <Field label="AI model">
+      <Field>
+        <FieldLabel>AI model</FieldLabel>
         <TypographyMuted className="text-xs">
           Add a key above to choose a model.
         </TypographyMuted>
@@ -310,13 +314,14 @@ function AiModelField({
   }
 
   return (
-    <Field label="AI model">
+    <Field>
+      <FieldLabel htmlFor="ai-model">AI model</FieldLabel>
       <Select
         value={aiModel ?? undefined}
         onValueChange={(v) => setAiModel(v)}
         disabled={loading || options.length === 0}
       >
-        <SelectTrigger className="w-full" ref={modelRef}>
+        <SelectTrigger id="ai-model" ref={modelRef}>
           <SelectValue placeholder={loading ? "Loading models" : "Select a model"} />
         </SelectTrigger>
         <SelectContent>
@@ -363,13 +368,14 @@ function PreferencesFields({ keyConfigured }: { keyConfigured: boolean }) {
   const setEditingRules = useSettingsStore((s) => s.setEditingRules);
   return (
     <>
-      <Field
-        label="Writing voice"
-        hint={`${styleGuide.length}/${PREFERENCE_MAX_CHARS}`}
-        action={<PreferenceAssistant field="styleGuide" keyConfigured={keyConfigured} />}
-      >
+      <Field>
+        <div className="flex items-center justify-between gap-2">
+          <FieldLabel htmlFor="writing-voice">Writing voice</FieldLabel>
+          <PreferenceAssistant field="styleGuide" keyConfigured={keyConfigured} />
+        </div>
+        <FieldDescription>{styleGuide.length}/{PREFERENCE_MAX_CHARS}</FieldDescription>
         <Textarea
-          aria-label="Writing voice"
+          id="writing-voice"
           value={styleGuide}
           onChange={(e) => setStyleGuide(e.currentTarget.value)}
           maxLength={PREFERENCE_MAX_CHARS}
@@ -378,13 +384,14 @@ function PreferencesFields({ keyConfigured }: { keyConfigured: boolean }) {
         />
         <TypographyMuted className="text-xs">Shapes every AI response.</TypographyMuted>
       </Field>
-      <Field
-        label="Writing and editing instructions"
-        hint={`${editingRules.length}/${PREFERENCE_MAX_CHARS}`}
-        action={<PreferenceAssistant field="editingRules" keyConfigured={keyConfigured} />}
-      >
+      <Field>
+        <div className="flex items-center justify-between gap-2">
+          <FieldLabel htmlFor="writing-instructions">Writing and editing instructions</FieldLabel>
+          <PreferenceAssistant field="editingRules" keyConfigured={keyConfigured} />
+        </div>
+        <FieldDescription>{editingRules.length}/{PREFERENCE_MAX_CHARS}</FieldDescription>
         <Textarea
-          aria-label="Writing and editing instructions"
+          id="writing-instructions"
           value={editingRules}
           onChange={(event) => setEditingRules(event.currentTarget.value)}
           maxLength={PREFERENCE_MAX_CHARS}

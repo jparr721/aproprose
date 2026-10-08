@@ -17,14 +17,14 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupInput, InputGroupAddon } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { TypographyMuted } from "@/components/ui/typography";
+import { TypographyMuted, TypographyForeground, TypographyMutedSpan } from "@/components/ui/typography";
 import { copyText } from "@/lib/clipboard";
 import {
   base64ToBytes,
@@ -329,19 +329,19 @@ export function PdfPane() {
       onFocusCapture={() => activateSearchSurface("pdf")}
       className="flex h-full min-h-0 flex-col bg-muted"
     >
-      <div className="flex h-10 items-center justify-between border-b border-border bg-background px-3">
-        <div className="flex items-center gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background px-3 py-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
           <span className="flex items-center gap-0.5">
-            <span
+            <TypographyForeground
               className={cn(
-                "font-mono text-xs",
+                "text-xs",
                 pdfActive
                   ? "font-medium text-accent-ink"
                   : "text-muted-foreground",
               )}
             >
               preview.pdf
-            </span>
+            </TypographyForeground>
             {pdfPath ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -358,10 +358,9 @@ export function PdfPane() {
               </Tooltip>
             ) : null}
           </span>
-          <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-success" />
+          <TypographyMutedSpan className="text-xs">
             {at ? `compiled ${(durationMs / 1000).toFixed(1)}s` : "loaded"}
-          </span>
+          </TypographyMutedSpan>
         </div>
         <div className="flex items-center gap-1.5">
           <Button
@@ -374,12 +373,12 @@ export function PdfPane() {
             {compiling ? <Spinner /> : <IconRefresh />}
           </Button>
           {numPages > 0 ? (
-            <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-muted-foreground">
-              <Input
+            <InputGroup className="h-7 w-24">
+              <InputGroupInput
                 value={pageText}
                 inputMode="numeric"
                 aria-label="Current page"
-                className="h-6 w-9 rounded-sm px-1 text-center text-[11.5px] tabular-nums md:text-[11.5px]"
+                className="px-1 text-center text-xs tabular-nums md:text-xs"
                 onFocus={(event) => {
                   setEditingPage(true);
                   event.currentTarget.select();
@@ -397,10 +396,10 @@ export function PdfPane() {
                   }
                 }}
               />
-              <span className="text-faint">/ {numPages}</span>
-            </span>
+              <InputGroupAddon align="inline-end">/ {numPages}</InputGroupAddon>
+            </InputGroup>
           ) : null}
-          <span className="flex items-center gap-1 text-[11.5px] tabular-nums text-muted-foreground">
+          <span className="flex items-center gap-1 text-xs tabular-nums text-muted-foreground">
             <Button
               variant="ghost"
               size="icon-xs"
@@ -409,12 +408,12 @@ export function PdfPane() {
             >
               <IconMinus />
             </Button>
-            <span className="flex items-center">
-              <Input
+            <InputGroup className="h-7 w-20">
+              <InputGroupInput
                 value={zoomText}
                 inputMode="numeric"
                 aria-label="Zoom percent"
-                className="h-6 w-10 rounded-sm px-1 text-center text-[11.5px] tabular-nums md:text-[11.5px]"
+                className="px-1 text-center text-xs tabular-nums md:text-xs"
                 onFocus={(event) => {
                   setEditingZoom(true);
                   event.currentTarget.select();
@@ -432,8 +431,8 @@ export function PdfPane() {
                   }
                 }}
               />
-              <span className="pl-0.5 text-faint">%</span>
-            </span>
+              <InputGroupAddon align="inline-end">%</InputGroupAddon>
+            </InputGroup>
             <Button
               variant="ghost"
               size="icon-xs"

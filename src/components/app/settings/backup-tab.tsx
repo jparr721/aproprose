@@ -1,14 +1,11 @@
 import { reportNotification } from "@/lib/notifications";
 import { useEffect, useState } from "react";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
+import { BackupScheduleFields } from "@/components/app/backup-schedule-fields";
 import {
-  TypographyForeground,
   TypographyInlineCode,
   TypographyMuted,
-  TypographyMutedSpan,
 } from "@/components/ui/typography";
-import { Field } from "@/components/app/settings/field";
+import { FieldLegend, FieldSet } from "@/components/ui/field";
 import { useSyncStore } from "@/stores/sync-store";
 import { gitToolingStatus } from "@/lib/tauri";
 import type { ToolingStatus } from "@/lib/types";
@@ -59,27 +56,11 @@ export function BackupTab() {
   }, []);
 
   return (
-    <Field label="Backup & sync">
+    <FieldSet>
+      <FieldLegend>Backup &amp; sync</FieldLegend>
       <ToolingNotice tooling={tooling} />
 
-      <div className="flex items-center justify-between">
-        <TypographyForeground className="text-sm">Auto-sync this project</TypographyForeground>
-        <Switch checked={autoSync} disabled={!isRepo} onCheckedChange={setAutoSync} />
-      </div>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <TypographyMutedSpan className="text-sm">Every</TypographyMutedSpan>
-          <TypographyMutedSpan className="text-xs tabular-nums">{intervalMinutes} min</TypographyMutedSpan>
-        </div>
-        <Slider
-          min={1}
-          max={60}
-          step={1}
-          value={[intervalMinutes]}
-          onValueChange={([v]) => setIntervalMinutes(v)}
-          disabled={!autoSync || !isRepo}
-        />
-      </div>
-    </Field>
+      <BackupScheduleFields autoSync={autoSync} intervalMinutes={intervalMinutes} available={isRepo} onAutoSyncChange={setAutoSync} onIntervalChange={setIntervalMinutes} />
+    </FieldSet>
   );
 }

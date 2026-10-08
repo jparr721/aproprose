@@ -519,7 +519,7 @@ export type SyncOutcome =
 
 export interface SyncResult {
   outcome: SyncOutcome;
-  changedFiles: string[];
+  changedFiles: string[] | null;
 }
 
 export type SyncStatus =

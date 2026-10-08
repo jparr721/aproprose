@@ -221,7 +221,7 @@ export const useSyncStore = create<SyncState>((set, get) => {
             meta: project.meta,
           };
           const synced = await syncProject(root, backupMessage(new Date()));
-          if (synced.changedFiles.length > 0) noteProjectRemoteChanges(root);
+          if (synced.changedFiles === null || synced.changedFiles.length > 0) noteProjectRemoteChanges(root);
           if (!current()) return null;
           await useProjectStore.getState().reconcileRemoteChanges(root, synced.changedFiles, beforePull);
           return synced;

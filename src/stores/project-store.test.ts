@@ -17,6 +17,8 @@ vi.mock("@/lib/tauri", () => ({
   writeAppData: vi.fn().mockResolvedValue(undefined),
   writeProjectMeta: vi.fn().mockResolvedValue(undefined),
   writeTextFile: vi.fn(),
+  gitRepoStatus: vi.fn().mockResolvedValue({ isRepo: true, hasRemote: true, remoteUrl: null, branch: "main", ahead: 0, behind: 0, dirty: false, changedFiles: [], conflictedFiles: [] }),
+  syncProject: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -48,6 +50,7 @@ import {
   readPdf,
   readProjectMeta,
   readTextFile,
+  syncProject,
   writeAppData,
   writeProjectMeta,
   writeSkeleton,
@@ -385,10 +388,76 @@ describe("owned project persistence", () => {
     useProjectStore.setState({ project: projectFixture("/owned"), status: "ready", activeChapterId: "ch1", meta: storyMetaFixture() });
     vi.mocked(writeTextFile).mockReset();
     vi.mocked(readTextFile).mockReset().mockResolvedValue("Remote chapter");
+    vi.mocked(openProject).mockReset();
+    vi.mocked(writeSkeleton).mockReset();
+    vi.mocked(syncProject).mockReset();
     vi.mocked(readProjectMeta).mockReset().mockResolvedValue(null);
     vi.mocked(readAppData).mockResolvedValue(null);
     vi.spyOn(useSyncStore.getState(), "init").mockResolvedValue(undefined);
     vi.spyOn(useSyncStore.getState(), "refreshStatus").mockResolvedValue(undefined);
+  });
+
+  it.each([false, true])("reconciles unknown pull paths while preserving dirty=%s", async (dirty) => {
+    const blocks = [mkBlock({ text: "Local draft", dirty })];
+    useProjectStore.setState({ blocks, chapterDirty: dirty });
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/owned"), mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readTextFile).mockResolvedValueOnce("Unknown-path remote text");
+    await useProjectStore.getState().reconcileRemoteChanges("/owned", null, useProjectStore.getState());
+    if (dirty) {
+      expect(useProjectStore.getState().blocks).toBe(blocks);
+      expect(useProjectStore.getState().remoteDivergence).not.toBeNull();
+      await expect(useProjectStore.getState().saveChapter()).resolves.toMatchObject({ status: "blocked" });
+    } else {
+      expect(useProjectStore.getState().blocks[0].text).toBe("Unknown-path remote text");
+      expect(useProjectStore.getState().remoteDivergence).toBeNull();
+    }
+  });
+
+  it.each(["open", "closed", "reopened"])("invalidates queued manuscript, skeleton, and metadata writes on unknown paths when %s", async (lifecycle) => {
+    const pulled = deferred<Awaited<ReturnType<typeof syncProject>>>();
+    vi.mocked(syncProject).mockReturnValueOnce(pulled.promise);
+    useSyncStore.setState({ root: "/owned", inFlight: false });
+    const syncing = useSyncStore.getState().syncNow();
+    await flushPromises();
+    const block = mkBlock({ text: "Queued manuscript", dirty: true });
+    const blocks = [block];
+    useProjectStore.setState({ blocks, chapterDirty: true });
+    const saving = useProjectStore.getState().saveChapter();
+    const renaming = useProjectStore.getState().renameChapter("ch1", "Queued title");
+    vi.mocked(writeProjectMeta).mockClear();
+    useProjectStore.getState().setPremise("Queued premise");
+    if (lifecycle !== "open") {
+      useProjectStore.getState().closeProject();
+      if (lifecycle === "reopened") useProjectStore.setState({ project: projectFixture("/owned"), status: "ready", activeChapterId: "ch1" });
+    }
+    pulled.resolve({ outcome: { kind: "error", message: "Path discovery failed" }, changedFiles: null });
+    await Promise.all([syncing, saving, renaming]);
+    await flushPromises();
+    expect(writeTextFile).not.toHaveBeenCalled();
+    expect(writeSkeleton).not.toHaveBeenCalled();
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+    if (lifecycle === "open") {
+      expect(useProjectStore.getState().blocks).toBe(blocks);
+      expect(useProjectStore.getState().remoteDivergence).not.toBeNull();
+    }
+  });
+
+  it("rejects an older queued skeleton snapshot after a clean unknown-path reload", async () => {
+    const pulled = deferred<Awaited<ReturnType<typeof syncProject>>>();
+    vi.mocked(syncProject).mockReturnValueOnce(pulled.promise);
+    useSyncStore.setState({ root: "/owned", inFlight: false });
+    const syncing = useSyncStore.getState().syncNow();
+    await flushPromises();
+    const renaming = useProjectStore.getState().renameChapter("ch1", "Obsolete local title");
+    const remoteProject = { ...projectFixture("/owned"), chapters: [{ ...projectFixture("/owned").chapters[0], title: "Remote title" }] };
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: remoteProject, mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readTextFile).mockResolvedValueOnce("Remote chapter after unknown paths");
+    pulled.resolve({ outcome: { kind: "error", message: "Path discovery failed" }, changedFiles: null });
+    await Promise.all([syncing, renaming]);
+    expect(writeSkeleton).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().project?.chapters[0].title).toBe("Remote title");
+    expect(useProjectStore.getState().blocks[0].text).toBe("Remote chapter after unknown paths");
+    expect(useProjectStore.getState().remoteDivergence).toBeNull();
   });
 
   it("persists captured text without replacing edits and history made during save", async () => {

@@ -11,6 +11,7 @@ vi.mock("@/lib/tauri", () => ({
 import { useSyncStore, STATUS_POLL_MS } from "@/stores/sync-store";
 import { gitRepoStatus, syncProject, readAppData } from "@/lib/tauri";
 import { useProjectStore } from "@/stores/project-store";
+import { projectRemoteRevision } from "@/lib/project-operations";
 import type { RepoStatus } from "@/lib/types";
 
 const CLEAN: RepoStatus = {
@@ -154,6 +155,36 @@ describe("a status read racing a concurrent sync (must not clobber the sync's re
 });
 
 describe("sync lifecycle ownership", () => {
+  it("invalidates unknown pull paths before an obsolete A-B-A sync releases its queue", async () => {
+    const root = "/unknown-obsolete";
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init(root);
+    const revision = projectRemoteRevision(root);
+    let finish!: (value: Awaited<ReturnType<typeof syncProject>>) => void;
+    vi.mocked(syncProject).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const syncing = useSyncStore.getState().syncNow();
+    await Promise.resolve();
+    await useSyncStore.getState().init("/other");
+    await useSyncStore.getState().init(root);
+    const reconcile = vi.spyOn(useProjectStore.getState(), "reconcileRemoteChanges").mockResolvedValue(undefined);
+    finish({ outcome: { kind: "error", message: "Path discovery failed" }, changedFiles: null });
+    await syncing;
+    expect(projectRemoteRevision(root)).toBe(revision + 1);
+    expect(reconcile).not.toHaveBeenCalled();
+    reconcile.mockRestore();
+  });
+
+  it("does not invalidate known-empty pull paths", async () => {
+    const root = "/known-empty";
+    vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
+    await useSyncStore.getState().init(root);
+    const revision = projectRemoteRevision(root);
+    vi.mocked(syncProject).mockResolvedValueOnce({ outcome: { kind: "clean" }, changedFiles: [] });
+    await useSyncStore.getState().syncNow();
+    expect(projectRemoteRevision(root)).toBe(revision);
+    expect(useSyncStore.getState().status).toBe("clean");
+  });
+
   it("reconciles against metadata captured before the pull starts", async () => {
     vi.mocked(gitRepoStatus).mockResolvedValue(CLEAN);
     await useSyncStore.getState().init("/repo");

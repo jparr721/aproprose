@@ -262,7 +262,7 @@ export function drainProjectMetaWrites(root: string): Promise<void> {
 interface ProjectState {
   lifecycleGeneration: number;
   editRevision: number;
-  remoteDivergence: { changedFiles: string[] } | null;
+  remoteDivergence: { reason: "remote-pull" | "chapter-deleted" | "skeleton-write"; changedFiles: string[] | null } | null;
   status: ProjectStatus;
   project: ProjectInfo | null;
   meta: ProjectMeta;
@@ -380,7 +380,7 @@ interface ProjectState {
 
   // persistence + build
   saveChapter: () => Promise<SaveOutcome>;
-  reconcileRemoteChanges: (root: string, changedFiles: string[], beforePull: ProjectSyncSnapshot) => Promise<void>;
+  reconcileRemoteChanges: (root: string, changedFiles: string[] | null, beforePull: ProjectSyncSnapshot) => Promise<void>;
   compileNow: () => Promise<void>;
 
   // metadata
@@ -783,10 +783,12 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
   ): Promise<ProjectInfo | null> => {
     const { project, lifecycleGeneration } = get();
     if (project === null) return null;
+    const remoteRevision = projectRemoteRevision(project.root);
     let dispatched = false;
     try {
       return await queueProjectOperation(project.root, async () => {
         if (!owns(lifecycleGeneration, project.root)) return null;
+        if (projectRemoteRevision(project.root) !== remoteRevision) throw new Error(`Remote files changed before the queued project write for ${project.root}. Reopen the project to resolve the local draft.`);
         assertWritable();
         const current = get().project;
         if (current === null) return null;
@@ -802,7 +804,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
       if (dispatched) noteProjectRemoteChanges(project.root);
       if (owns(lifecycleGeneration, project.root)) {
         const message = String(error);
-        set({ error: message, remoteDivergence: { changedFiles: ["metadata.tex", "chapters.tex"] } });
+        set({ error: message, ...(dispatched ? { remoteDivergence: { reason: "skeleton-write", changedFiles: ["metadata.tex", "chapters.tex"] } } : {}) });
         notifyAppError(notificationType, "Project", project.root, error);
       }
       return null;
@@ -1651,11 +1653,12 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
 
     saveChapter: async () => {
       const { project, activeChapterId, blocks, chapterDirty, lifecycleGeneration, remoteDivergence, editRevision } = get();
-      if (remoteDivergence !== null) return { status: "blocked", message: "Remote files changed. Reopen the project before saving." };
+      if (remoteDivergence !== null) return { status: "blocked", message: "Project files changed on disk. Reopen the project before saving." };
       if (!project || !activeChapterId || !chapterDirty) return { status: "clean" };
       const chapter = project.chapters.find((c) => c.id === activeChapterId);
       if (!chapter) return { status: "failed", message: "The active chapter is missing from the project" };
       const request = chapterRequest;
+      const remoteRevision = projectRemoteRevision(project.root);
       const save = ++saveRequest;
       const current = (): boolean => owns(lifecycleGeneration, project.root) && get().activeChapterId === activeChapterId && chapterRequest === request;
       const ownsSaving = (): boolean => owns(lifecycleGeneration, project.root) && get().activeChapterId === activeChapterId && saveRequest === save;
@@ -1664,6 +1667,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         const source = serializeChapter(blocks);
         const persisted = await queueProjectOperation(project.root, async () => {
           if (!current()) return false;
+          if (projectRemoteRevision(project.root) !== remoteRevision) throw new Error(`Remote files changed before the queued chapter write for ${project.root}. Reopen the project to resolve the local draft.`);
           assertWritable();
           await writeTextFile(project.root, chapter.file, source);
           return true;
@@ -1748,9 +1752,9 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     },
 
     reconcileRemoteChanges: async (root, changedFiles, beforePull) => {
-      if (changedFiles.length === 0 || !owns(beforePull.lifecycleGeneration, root)) return;
+      if ((changedFiles !== null && changedFiles.length === 0) || !owns(beforePull.lifecycleGeneration, root)) return;
       const { lifecycleGeneration, blocks, meta, activeChapterId, chapterDirty, editRevision } = get();
-      const divergence = { changedFiles };
+      const divergence = { reason: "remote-pull" as const, changedFiles };
       chapterRequest += 1;
       compileRequest += 1;
       set((state) => ({ remoteDivergence: divergence, compile: { ...state.compile, status: "idle" } }));

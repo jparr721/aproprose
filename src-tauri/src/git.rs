@@ -129,7 +129,7 @@ pub enum SyncOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
     pub outcome: SyncOutcome,
-    pub changed_files: Vec<String>,
+    pub changed_files: Option<Vec<String>>,
 }
 
 /// Parse `git status --porcelain=v1 --branch` into a RepoStatus. The caller
@@ -413,7 +413,7 @@ pub async fn sync_with_changes(root: &Path, message: &str) -> Result<SyncResult,
             outcome: SyncOutcome::NeedsSetup {
                 reason: "project directory does not own a git repository".into(),
             },
-            changed_files: vec![],
+            changed_files: Some(vec![]),
         });
     }
     if origin_url(root).await.is_none() {
@@ -421,7 +421,7 @@ pub async fn sync_with_changes(root: &Path, message: &str) -> Result<SyncResult,
             outcome: SyncOutcome::NeedsSetup {
                 reason: "no 'origin' remote".into(),
             },
-            changed_files: vec![],
+            changed_files: Some(vec![]),
         });
     }
     let pre = repo_status(root).await?;
@@ -430,7 +430,7 @@ pub async fn sync_with_changes(root: &Path, message: &str) -> Result<SyncResult,
             outcome: SyncOutcome::Conflict {
                 files: pre.conflicted_files.clone(),
             },
-            changed_files: pre.conflicted_files,
+            changed_files: Some(pre.conflicted_files),
         });
     }
     if pre.dirty {
@@ -459,11 +459,11 @@ pub async fn sync_with_changes(root: &Path, message: &str) -> Result<SyncResult,
     let revision = before.stdout.trim();
     let pull = run(root, "git", &["pull", "--no-rebase", "--no-edit"]).await;
     let changed_files = match changed_since(root, revision).await {
-        Ok(paths) => paths,
+        Ok(paths) => Some(paths),
         Err(message) => {
             return Ok(SyncResult {
                 outcome: SyncOutcome::Error { message },
-                changed_files: vec![],
+                changed_files: None,
             })
         }
     };
@@ -821,8 +821,66 @@ mod tests {
         assert!(run(&other, "git", &["commit", "-m", "remote"]).await.ok);
         assert!(run(&other, "git", &["push"]).await.ok);
         let result = sync_with_changes(&work, "sync").await.unwrap();
-        assert!(result.changed_files.contains(&"a.tex".to_string()));
-        assert!(result.changed_files.contains(&"metadata.tex".to_string()));
+        let changed_files = result.changed_files.unwrap();
+        assert!(changed_files.contains(&"a.tex".to_string()));
+        assert!(changed_files.contains(&"metadata.tex".to_string()));
+        std::fs::remove_dir_all(work.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sync_reports_unknown_changes_when_enumeration_fails_after_pull_updates_files() {
+        let (origin, work) = repo_with_origin();
+        let other = work.parent().unwrap().join("other");
+        assert!(
+            run(
+                work.parent().unwrap(),
+                "git",
+                &["clone", origin.to_str().unwrap(), other.to_str().unwrap()]
+            )
+            .await
+            .ok
+        );
+        assert!(
+            run(&other, "git", &["config", "user.email", "t@t.t"])
+                .await
+                .ok
+        );
+        assert!(run(&other, "git", &["config", "user.name", "t"]).await.ok);
+        std::fs::write(other.join("a.tex"), "remote change").unwrap();
+        assert!(run(&other, "git", &["commit", "-am", "remote"]).await.ok);
+        assert!(run(&other, "git", &["push"]).await.ok);
+        let remote_revision = run(&other, "git", &["rev-parse", "HEAD"]).await;
+        assert!(remote_revision.ok);
+        let before = run(&work, "git", &["rev-parse", "HEAD"]).await;
+        assert!(before.ok);
+        assert!(
+            run(
+                &work,
+                "git",
+                &["config", "diff.orderFile", ".git/missing-order-file"]
+            )
+            .await
+            .ok
+        );
+
+        let result = sync_with_changes(&work, "sync").await.unwrap();
+
+        let after = run(&work, "git", &["rev-parse", "HEAD"]).await;
+        assert!(after.ok);
+        assert_ne!(before.stdout, after.stdout);
+        assert_eq!(after.stdout, remote_revision.stdout);
+        assert_eq!(std::fs::read(work.join("a.tex")).unwrap(), b"remote change");
+        assert!(matches!(
+            &result.outcome,
+            SyncOutcome::Error { message }
+                if message.contains("cannot determine files changed by pull")
+                    && message.contains("missing-order-file")
+        ));
+        assert_eq!(result.changed_files, None);
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["changedFiles"],
+            serde_json::Value::Null
+        );
         std::fs::remove_dir_all(work.parent().unwrap()).unwrap();
     }
 
@@ -859,7 +917,7 @@ mod tests {
             result.outcome,
             SyncOutcome::Error { .. } | SyncOutcome::PushRejected
         ));
-        assert!(result.changed_files.contains(&"a.tex".to_string()));
+        assert!(result.changed_files.unwrap().contains(&"a.tex".to_string()));
         assert_eq!(
             std::fs::read_to_string(work.join("a.tex")).unwrap(),
             "remote change"
@@ -1089,8 +1147,9 @@ mod tests {
     #[tokio::test]
     async fn sync_clean_repo_is_clean() {
         let (_origin, work) = repo_with_origin();
-        let out = sync(&work, "noop").await.unwrap();
-        assert!(matches!(out, SyncOutcome::Clean));
+        let result = sync_with_changes(&work, "noop").await.unwrap();
+        assert!(matches!(result.outcome, SyncOutcome::Clean));
+        assert_eq!(result.changed_files, Some(vec![]));
         let _ = std::fs::remove_dir_all(work.parent().unwrap());
     }
 
@@ -1199,7 +1258,7 @@ mod tests {
         // A changes the same line and syncs → conflict.
         std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
         let result = sync_with_changes(&work_a, "a-change").await.unwrap();
-        assert!(result.changed_files.contains(&"a.tex".to_string()));
+        assert!(result.changed_files.unwrap().contains(&"a.tex".to_string()));
         let out = result.outcome;
         assert!(
             matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()])

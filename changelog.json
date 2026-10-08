@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.17.3",
+    "date": "2026-10-07",
+    "summary": "Aproprose is now smoother to edit and clearer to use with AI.",
+    "highlights": [
+      "Sidebar chapters, characters, and lore sections now expand and collapse smoothly.",
+      "Typing in manuscript blocks is more responsive.",
+      "AI panels show a Thinking indicator before a response arrives.",
+      "AI errors explain the next step, retry temporary failures, and link to relevant AI settings.",
+      "Press Ctrl+L, or Cmd+L on macOS, to add selected blocks to the AI conversation.",
+      "Launching Aproprose again focuses the existing window instead of opening another."
+    ]
+  },
+  {
     "version": "0.17.2",
     "date": "2026-10-07",
     "summary": "AI follow-ups stay visible with clear, compact progress.",

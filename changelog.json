@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.17.5",
+    "date": "2026-10-07",
+    "summary": "Chapter navigation is aligned and easier to rearrange.",
+    "highlights": [
+      "Chapter numbers line up with the Add chapter button, with chapter actions replacing the number on hover or focus.",
+      "Drag chapter rows to reorder the manuscript without losing your active chapter or unsaved edits."
+    ]
+  },
+  {
     "version": "0.17.4",
     "date": "2026-10-07",
     "summary": "A quieter AI console keeps writing and editing controls close to your draft.",

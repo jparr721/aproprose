@@ -407,6 +407,18 @@ describe("AgentConsole shell", () => {
     expect(screen.queryByRole("button", { name: "Reset AI Conversation" })).toBeNull();
   });
 
+  it.each(["load", "corrupt"] as const)("describes available recovery after a terminal collection %s failure", (kind) => {
+    useAgentConsoleStore.setState({
+      hydratedProjectRoot: null,
+      persistenceIssue: { kind, scope: "collection", projectRoot: project.root, message: "Collection unavailable" },
+    });
+    const { container } = render(<AgentConsole />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset AI Conversation" })).toBeNull();
+    expect(screen.getByText("Retry loading the conversation to restore AI access.")).toBeTruthy();
+    expect(container.querySelector('[data-slot="spinner"]')).toBeNull();
+  });
+
   it("hides and reopens the same conversation, draft, mode, attachments, and proposal", () => {
     useAgentConsoleStore.setState({
       mode: "edit",

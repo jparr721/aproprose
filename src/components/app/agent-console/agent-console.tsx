@@ -295,7 +295,9 @@ function AgentSectionContent({
             {project === null
               ? "Open a project to use AI Console."
               : persistenceIssue !== null && persistenceIssue.kind !== "save"
-                ? "Reset the conversation to restore AI access."
+                ? canResetAgentSessionPersistence(persistenceIssue)
+                  ? "Retry or reset the conversation to restore AI access."
+                  : "Retry loading the conversation to restore AI access."
                 : "Loading AI conversation"}
           </TypographyMuted>
         </div>

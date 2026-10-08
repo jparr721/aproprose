@@ -303,7 +303,8 @@ describe("AgentConsole shell", () => {
     const children = Array.from(shell.children);
 
     expect(shell.querySelector("header")).toBeNull();
-    expect(children[0]).toBe(conversation);
+    expect(children[0].contains(screen.getByRole("button", { name: "Close AI Console" }))).toBe(true);
+    expect(children[1]).toBe(conversation);
     expect(children.indexOf(conversation)).toBeLessThan(
       children.indexOf(tray),
     );
@@ -382,6 +383,15 @@ describe("AgentConsole shell", () => {
         .getByRole("region", { name: "Character Describe" })
         .querySelector("[data-agent-review-tray]"),
     ).toBeNull();
+  });
+
+  it("offers retry without destructive reset for an unreadable collection envelope", () => {
+    useAgentConsoleStore.setState({
+      persistenceIssue: { kind: "corrupt", scope: "collection", projectRoot: project.root, message: "The scoped AI collection could not be read" },
+    });
+    render(<AgentConsole />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset AI Conversation" })).toBeNull();
   });
 
   it("hides and reopens the same conversation, draft, mode, attachments, and proposal", () => {

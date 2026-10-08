@@ -35,6 +35,7 @@ describe("view-store outline toggle", () => {
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,
+      rightSurface: useViewStore.getState().changesOpen ? "changes" : useViewStore.getState().aiOpen ? "ai" : null,
     });
     expect(persisted.outlineOpen).toBe(true);
   });

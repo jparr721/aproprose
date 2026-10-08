@@ -1,15 +1,14 @@
 // view-store.ts -- view state shared across the chrome.
 //
-// Panel visibility (AI / PDF / focus) is read+written by the top bar, the editor
+// Panel visibility (Changes / AI / PDF / focus) is read+written by the top bar, the editor
 // layout, and the command palette,
 // so it belongs in a shared store rather than a context. It also owns the
 // "discard unsaved edits?" guard: any state-wiping action (open project, switch
 // chapter, close) routes through requestGuarded, which defers to a confirm
 // dialog when the chapter is dirty.
 //
-// The right dock width and PDF / Outline open flags are persisted to the app
-// config dir through the Tauri-backed storage adapter. The rest of the state is
-// ephemeral and the pending guarded action is not serializable.
+// The right dock surface/width and PDF / Outline flags are persisted through
+// the Tauri-backed storage adapter. Selection and guarded actions are ephemeral.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -29,6 +28,8 @@ interface PendingGuardedAction {
 
 interface ViewState {
   aiOpen: boolean;
+  changesOpen: boolean;
+  selectedChange: { sessionKey: string; proposalId: string } | null;
   pdfOpen: boolean;
   /** Whether the full-page Outline storyboard replaces the editor (persisted). */
   outlineOpen: boolean;
@@ -46,6 +47,11 @@ interface ViewState {
   rightPanelWidth: number;
 
   toggleAi: () => void;
+  toggleChanges: () => void;
+  setChangesOpen: (open: boolean) => void;
+  openChanges: () => void;
+  selectChange: (sessionKey: string, proposalId: string) => void;
+  clearChangeSelection: () => void;
   setAiOpen: (open: boolean) => void;
   openAiConsole: () => void;
   requestAiComposerFocus: () => void;
@@ -71,6 +77,7 @@ const persistedViewStateSchema = z.object({
   rightPanelWidth: z.number().finite(),
   pdfOpen: z.boolean(),
   outlineOpen: z.boolean(),
+  rightSurface: z.enum(["ai", "changes"]).nullable().optional(),
 });
 
 function mergePersistedViewState(
@@ -84,6 +91,12 @@ function mergePersistedViewState(
     rightPanelWidth: parsed.rightPanelWidth,
     pdfOpen: parsed.pdfOpen,
     outlineOpen: parsed.outlineOpen,
+    ...(parsed.rightSurface === undefined
+      ? {}
+      : {
+          aiOpen: parsed.rightSurface === "ai",
+          changesOpen: parsed.rightSurface === "changes",
+        }),
   };
 }
 
@@ -91,6 +104,8 @@ export const useViewStore = create<ViewState>()(
   persist(
     (set, get) => ({
       aiOpen: true,
+      changesOpen: false,
+      selectedChange: null,
       pdfOpen: false,
       outlineOpen: false,
       manuscriptReviewProposalId: null,
@@ -102,16 +117,33 @@ export const useViewStore = create<ViewState>()(
 
       rightPanelWidth: 360,
 
-      toggleAi: () => set((s) => ({ aiOpen: !s.aiOpen, focus: false })),
-      setAiOpen: (aiOpen) => set({ aiOpen }),
+      toggleAi: () =>
+        set((s) => ({ aiOpen: !s.aiOpen, changesOpen: false, focus: false })),
+      toggleChanges: () =>
+        set((s) => ({ changesOpen: !s.changesOpen, aiOpen: false, focus: false })),
+      setChangesOpen: (changesOpen) =>
+        set(changesOpen ? { changesOpen, aiOpen: false, focus: false } : { changesOpen }),
+      openChanges: () => set({ changesOpen: true, aiOpen: false, focus: false }),
+      selectChange: (sessionKey, proposalId) =>
+        set({
+          selectedChange: { sessionKey, proposalId },
+          changesOpen: true,
+          aiOpen: false,
+          focus: false,
+        }),
+      clearChangeSelection: () => set({ selectedChange: null }),
+      setAiOpen: (aiOpen) =>
+        set(aiOpen ? { aiOpen, changesOpen: false, focus: false } : { aiOpen }),
       openAiConsole: () =>
         set({
           aiOpen: true,
+          changesOpen: false,
           focus: false,
         }),
       requestAiComposerFocus: () =>
         set({
           aiOpen: true,
+          changesOpen: false,
           focus: false,
           aiComposerFocusRequested: true,
         }),
@@ -145,8 +177,8 @@ export const useViewStore = create<ViewState>()(
       applyLayoutPreset: (preset) => {
         if (preset === "focus") set({ focus: true });
         else if (preset === "two")
-          set({ focus: false, aiOpen: true, pdfOpen: false });
-        else set({ focus: false, aiOpen: true, pdfOpen: true });
+          set({ focus: false, aiOpen: true, changesOpen: false, pdfOpen: false });
+        else set({ focus: false, aiOpen: true, changesOpen: false, pdfOpen: true });
       },
 
       setRightPanelWidth: (rightPanelWidth) => set({ rightPanelWidth }),
@@ -192,13 +224,12 @@ export const useViewStore = create<ViewState>()(
     {
       name: "view",
       storage: createJSONStorage(() => tauriStateStorage),
-      // Persisted so a relaunch lands back in the same layout: the right dock
-      // width and whether the PDF / Outline surfaces were open. AI visibility
-      // stays ephemeral and `pending` is not serializable.
-      partialize: ({ rightPanelWidth, pdfOpen, outlineOpen }) => ({
+      // Restore the workspace layout without persisting proposal payloads or guards.
+      partialize: ({ rightPanelWidth, pdfOpen, outlineOpen, aiOpen, changesOpen }) => ({
         rightPanelWidth,
         pdfOpen,
         outlineOpen,
+        rightSurface: changesOpen ? "changes" : aiOpen ? "ai" : null,
       }),
       merge: mergePersistedViewState,
     },

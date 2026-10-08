@@ -5,12 +5,13 @@
 import { useState, useEffect } from "react";
 import {
   FileText,
-  PanelRight,
   Play,
   Save,
   SaveCheck,
   SaveOff,
 } from "lucide-react";
+import { IconFileDiff, IconSparkles } from "@tabler/icons-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -29,6 +30,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { useKeybinding } from "@/hooks/use-keybinding";
+import { useAgentChanges } from "@/hooks/use-agent-changes";
 import { KEYBINDINGS, KEYBINDING_IDS } from "@/lib/keybindings";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -101,9 +103,13 @@ export function TopBar() {
   const sidebarState = useSidebar().state;
 
   const aiOpen = useViewStore((s) => s.aiOpen);
+  const changesOpen = useViewStore((s) => s.changesOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
   const toggleAi = useViewStore((s) => s.toggleAi);
+  const toggleChanges = useViewStore((s) => s.toggleChanges);
+  const { pendingCount, runStatus, activeSessionId } = useAgentChanges();
+  const generating = runStatus !== "idle" && activeSessionId !== null && activeSessionId.kind !== "character";
   const togglePdf = useViewStore((s) => s.togglePdf);
   const buildErrorsOpen = useViewStore((s) => s.buildErrorsOpen);
   const setBuildErrorsOpen = useViewStore((s) => s.setBuildErrorsOpen);
@@ -183,21 +189,48 @@ export function TopBar() {
               <FileText /> PDF
               <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_PDF} className="ml-0.5" />
             </Button>
-            {/* Right-panel toggle, mirroring the left SidebarTrigger (⌘⇧A). */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Toggle AI Console"
-              aria-pressed={aiOpen && !focus}
-              onClick={toggleAi}
-              className={cn(
-                "text-muted-foreground",
-                aiOpen && !focus && "bg-accent text-foreground",
-              )}
-            >
-              <PanelRight />
-              <span className="sr-only">Toggle AI Console</span>
-            </Button>
+            <div className="h-4 w-px bg-border" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  data-changes-toggle
+                  variant={changesOpen && !focus ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  aria-label={`Changes - ${pendingCount} pending`}
+                  aria-pressed={changesOpen && !focus}
+                  aria-busy={generating}
+                  onClick={toggleChanges}
+                  className={cn(
+                    "relative transition-all duration-200 motion-reduce:transition-none",
+                    pendingCount > 0 && "text-ai-ink shadow-[0_0_12px_var(--ai-edge)]",
+                    generating && "motion-safe:animate-pulse",
+                  )}
+                >
+                  <IconFileDiff />
+                  {generating ? (
+                    <Spinner className="absolute -top-1 -right-1 size-3 text-ai-ink motion-reduce:animate-none" />
+                  ) : pendingCount > 0 ? (
+                    <Badge className="absolute -top-1.5 -right-1.5 h-4 min-w-4 px-1 text-xs">{pendingCount}</Badge>
+                  ) : null}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{generating ? `Changes - generating - ${pendingCount} pending` : `Changes - ${pendingCount} pending`}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  data-ai-toggle
+                  variant={aiOpen && !focus ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  aria-label="Toggle AI Console"
+                  aria-pressed={aiOpen && !focus}
+                  onClick={toggleAi}
+                >
+                  <IconSparkles className={cn(generating && "text-ai-ink motion-safe:animate-pulse")} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>AI conversation <KeybindingHint keybinding={KEYBINDINGS.TOGGLE_AI} /></TooltipContent>
+            </Tooltip>
           </>
         ) : null}
         <WindowControls />

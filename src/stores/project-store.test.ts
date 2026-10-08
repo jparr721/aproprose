@@ -28,6 +28,7 @@ vi.mock("sonner", () => ({
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 import { useSyncStore } from "@/stores/sync-store";
+import { useViewStore } from "@/stores/view-store";
 import { noteProjectRemoteChanges, queueProjectOperation } from "@/lib/project-operations";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import {
@@ -391,10 +392,114 @@ describe("owned project persistence", () => {
     vi.mocked(openProject).mockReset();
     vi.mocked(writeSkeleton).mockReset();
     vi.mocked(syncProject).mockReset();
+    vi.mocked(deleteChapterCmd).mockReset();
+    useViewStore.getState().cancelPending();
     vi.mocked(readProjectMeta).mockReset().mockResolvedValue(null);
     vi.mocked(readAppData).mockResolvedValue(null);
     vi.spyOn(useSyncStore.getState(), "init").mockResolvedValue(undefined);
     vi.spyOn(useSyncStore.getState(), "refreshStatus").mockResolvedValue(undefined);
+  });
+
+  it.each(["typing", "navigation"])("preserves %s while add chapter is writing the skeleton", async (change) => {
+    const skeleton = deferred<ProjectInfo>();
+    const project = projectFixture("/owned");
+    const second = { ...project.chapters[0], id: "ch2", file: "two.tex" };
+    const created = { ...second, id: "ch3", file: "three.tex" };
+    project.chapters.push(second);
+    const block = mkBlock({ id: "add-race" });
+    useProjectStore.setState({ project, blocks: [block] });
+    vi.mocked(writeSkeleton).mockReturnValueOnce(skeleton.promise);
+    const adding = useProjectStore.getState().addChapter("Chapter Three");
+    await flushPromises();
+    if (change === "typing") useProjectStore.getState().updateBlockText(block.id, "Draft during add");
+    else await useProjectStore.getState().selectChapter("ch2");
+    const live = useProjectStore.getState();
+    skeleton.resolve({ ...project, chapters: [...project.chapters, created] });
+    await adding;
+    expect(useProjectStore.getState().activeChapterId).toBe(live.activeChapterId);
+    expect(useProjectStore.getState().blocks).toBe(live.blocks);
+    expect(useProjectStore.getState().chapterDirty).toBe(live.chapterDirty);
+    expect(useProjectStore.getState().project?.chapters).toContainEqual(created);
+  });
+
+  it.each(["typing", "navigation"])("preserves %s while the remembered chapter lookup is pending", async (change) => {
+    const remembered = deferred<string | null>();
+    const project = projectFixture("/remembered");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project, mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readAppData).mockResolvedValueOnce(null).mockReturnValueOnce(remembered.promise);
+    const loading = useProjectStore.getState().loadProjectAt(project.root);
+    await flushPromises();
+    expect(useProjectStore.getState().status).toBe("ready");
+    await useProjectStore.getState().selectChapter("ch2");
+    if (change === "typing") useProjectStore.getState().updateBlockText(useProjectStore.getState().blocks[0].id, "Typed in chosen chapter");
+    const live = useProjectStore.getState();
+    remembered.resolve("ch1");
+    await loading;
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks).toBe(live.blocks);
+    expect(useProjectStore.getState().chapterDirty).toBe(live.chapterDirty);
+  });
+
+  it.each([false, true])("keeps a visible draft edited during active deletion with another chapter=%s", async (hasSecondChapter) => {
+    const deletion = deferred<ProjectInfo>();
+    const project = projectFixture("/owned");
+    const remaining = hasSecondChapter ? [{ ...project.chapters[0], id: "ch2", file: "two.tex" }] : [];
+    project.chapters.push(...remaining);
+    const block = mkBlock({ id: "delete-race" });
+    useProjectStore.setState({ project, blocks: [block] });
+    vi.mocked(deleteChapterCmd).mockReturnValueOnce(deletion.promise);
+    const deleting = useProjectStore.getState().deleteChapter("ch1");
+    await flushPromises();
+    useProjectStore.getState().updateBlockText(block.id, "Draft after confirmation");
+    const live = useProjectStore.getState();
+    deletion.resolve({ ...project, chapters: remaining });
+    await deleting;
+    const state = useProjectStore.getState();
+    expect(state.activeChapterId).toBe("ch1");
+    expect(state.project?.chapters.find((chapter) => chapter.id === state.activeChapterId)).toEqual(project.chapters[0]);
+    expect(state.blocks).toBe(live.blocks);
+    expect(state.chapterDirty).toBe(true);
+    expect(state.remoteDivergence).not.toBeNull();
+    await expect(state.saveChapter()).resolves.toMatchObject({ status: "blocked" });
+  });
+
+  it("preserves navigation and typing in another chapter during deletion", async () => {
+    const deletion = deferred<ProjectInfo>();
+    const project = projectFixture("/owned");
+    const second = { ...project.chapters[0], id: "ch2", file: "two.tex" };
+    project.chapters.push(second);
+    useProjectStore.setState({ project });
+    vi.mocked(deleteChapterCmd).mockReturnValueOnce(deletion.promise);
+    const deleting = useProjectStore.getState().deleteChapter("ch1");
+    await flushPromises();
+    await useProjectStore.getState().selectChapter("ch2");
+    useProjectStore.getState().updateBlockText(useProjectStore.getState().blocks[0].id, "Keep chapter two draft");
+    const live = useProjectStore.getState();
+    deletion.resolve({ ...project, chapters: [second] });
+    await deleting;
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks).toBe(live.blocks);
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+    expect(useProjectStore.getState().remoteDivergence).toBeNull();
+  });
+
+  it("blocks a save queued behind deletion from recreating the preserved draft file", async () => {
+    const deletion = deferred<ProjectInfo>();
+    const project = projectFixture("/owned");
+    const block = mkBlock({ id: "delete-queued-save" });
+    useProjectStore.setState({ project, blocks: [block] });
+    vi.mocked(deleteChapterCmd).mockReturnValueOnce(deletion.promise);
+    const deleting = useProjectStore.getState().deleteChapter("ch1");
+    await flushPromises();
+    useProjectStore.getState().updateBlockText(block.id, "Draft after confirmation");
+    const saving = useProjectStore.getState().saveChapter();
+    deletion.resolve({ ...project, chapters: [] });
+    await deleting;
+    await expect(saving).resolves.toMatchObject({ status: "blocked" });
+    expect(writeTextFile).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().blocks[0].text).toBe("Draft after confirmation");
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
   });
 
   it.each([false, true])("reconciles unknown pull paths while preserving dirty=%s", async (dirty) => {

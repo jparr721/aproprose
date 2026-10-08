@@ -630,8 +630,11 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
   const owns = (generation: number, root: string): boolean =>
     get().lifecycleGeneration === generation && get().project?.root === root;
   const assertWritable = (): void => {
-    if (get().remoteDivergence !== null) {
-      throw new Error("Remote project files changed. Reopen the project and confirm discarding the local draft to load remote changes.");
+    const divergence = get().remoteDivergence;
+    if (divergence !== null) {
+      throw new Error(divergence.reason === "remote-pull"
+        ? "Remote project files changed. Reopen the project and confirm discarding the preserved draft to load them."
+        : "Project files changed on disk. Reopen the project and confirm discarding the preserved draft to load them.");
     }
   };
   const captureWriteGuard = (root: string): (() => void) => {
@@ -742,6 +745,8 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     void writeAppData(LAST_PROJECT_KEY, root).catch((error: unknown) => {
       if (owns(generation, root)) toast.error("Couldn't remember the project", { description: String(error) });
     });
+    const initialChapterRequest = chapterRequest;
+    const initialEditRevision = get().editRevision;
     set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
     useStatsStore
       .getState()
@@ -758,7 +763,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     const target =
       (savedChapterId && project.chapters.find((c) => c.id === savedChapterId)) ||
       project.chapters[0];
-    if (target) await get().selectChapter(target.id);
+    if (target && chapterRequest === initialChapterRequest && get().editRevision === initialEditRevision) await get().selectChapter(target.id);
     if (!owns(generation, root)) return;
 
     const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
@@ -1004,12 +1009,13 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
 
     addChapter: async (title) => {
       await useViewStore.getState().requestGuarded(async () => {
-        const generation = get().lifecycleGeneration;
+        const { lifecycleGeneration: generation, activeChapterId, editRevision } = get();
+        const request = chapterRequest;
         const updated = await mutateSkeleton("chapter-create", async (project) => {
           const model = toModel(project);
           return writeSkeleton(project.root, { ...model, chapters: [...model.chapters, { title, file: null }] });
         });
-        if (updated === null || !owns(generation, updated.root)) return;
+        if (updated === null || !owns(generation, updated.root) || get().activeChapterId !== activeChapterId || get().editRevision !== editRevision || chapterRequest !== request) return;
         const created = updated.chapters.at(-1);
         if (created !== undefined) await get().selectChapter(created.id);
       });
@@ -1032,7 +1038,8 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     },
 
     deleteChapter: async (id) => {
-      const generation = get().lifecycleGeneration;
+      const { lifecycleGeneration: generation, project: snapshot, editRevision } = get();
+      const request = chapterRequest;
       const updated = await mutateSkeleton("chapter-delete", async (project) => {
         const chapter = project.chapters.find((entry) => entry.id === id);
         if (chapter === undefined) return project;
@@ -1040,6 +1047,20 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         return deleteChapterCmd(project.root, { ...model, chapters: model.chapters.filter((_, index) => project.chapters[index].id !== id) }, chapter.file);
       });
       if (updated !== null && owns(generation, updated.root)) {
+        if (snapshot !== null && get().activeChapterId === id && (get().editRevision !== editRevision || chapterRequest !== request)) {
+          const deleted = snapshot.chapters.find((chapter) => chapter.id === id);
+          if (deleted !== undefined) {
+            noteProjectRemoteChanges(updated.root);
+            compileRequest += 1;
+            set((state) => ({
+              project: snapshot,
+              remoteDivergence: { reason: "chapter-deleted", changedFiles: [deleted.file] },
+              saveError: "This chapter was deleted from disk while you were editing. Copy the preserved draft before reopening the project.",
+              compile: { ...state.compile, status: "idle" },
+            }));
+            return;
+          }
+        }
         set((s) => {
           const meta = {
             ...s.meta,

@@ -179,7 +179,9 @@ function UnsavedGuard() {
           <AlertDialogDescription>
             {remoteDivergence === null
               ? "This chapter has edits that haven't been saved to disk. Continuing will discard them."
-              : "Backup pulled changes while this project was open. Continuing discards the preserved draft and opens the files from disk."}
+              : remoteDivergence.reason === "chapter-deleted"
+                ? "This chapter was deleted from disk while you were editing. Continuing discards the preserved draft and opens the files from disk."
+                : "Project files changed on disk while this draft was open. Continuing discards the preserved draft and opens the files from disk."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

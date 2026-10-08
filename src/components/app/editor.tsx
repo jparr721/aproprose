@@ -219,9 +219,9 @@ export function Editor() {
         <div className="mx-auto flex w-full max-w-[720px] flex-col px-7 pb-48 pt-9">
           {remoteDivergence === null ? null : (
             <Alert className="mb-4">
-              <AlertTitle>Backup changed this project</AlertTitle>
+              <AlertTitle>{remoteDivergence.reason === "chapter-deleted" ? "Deleted chapter draft preserved" : remoteDivergence.reason === "remote-pull" ? "Backup changed this project" : "Project files need resolution"}</AlertTitle>
               <AlertDescription>
-                Your draft is preserved here. Saving is paused to protect the files pulled from backup.
+                Your draft is preserved here. Saving is paused to protect the files on disk.
                 Copy any draft you want to keep before reopening the project.
               </AlertDescription>
               <div className="mt-2">

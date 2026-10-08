@@ -2257,14 +2257,25 @@ describe("agent console authoring flows", () => {
         throw new Error("Expected Book A to be flushed before Book B loaded.");
       }
       expect(persistedA).toEqual({
-        v: 3,
+        v: 4,
         mode: "edit",
         messages: safeExpectedMessages(expectedPersistedBookATranscript),
         summary: null,
         draftText: "Book A draft",
         draftContextRefs: [],
         draftSourceLocators: {},
-        pendingProposal: expectedPersistedBookAProposal,
+        proposalRecords: [{
+          proposal: expectedPersistedBookAProposal,
+          source: {
+            kind: "run",
+            runId: "flow-1",
+            task: { kind: "conversation", targetChapterId: "ch1" },
+            text: "Revise the final beat in Book A.",
+          },
+          decisions: {},
+          replacedByProposalId: null,
+        }],
+        currentProposalId: "flow-4",
         lastUsage: usage,
         interruptedRun: expectedInterruptedRun,
       });

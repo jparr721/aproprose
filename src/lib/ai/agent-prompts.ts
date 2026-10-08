@@ -91,7 +91,10 @@ function taskInstructions(task: AgentTask): string {
       task.successorBlockId === null
         ? "There is no later prose boundary; append after the anchor."
         : `Preserve successor prose block ${task.successorBlockId} and every later block.`;
-    return `FROZEN TASK: bridge after ${task.anchorBlockId}. ${rightBoundary}`;
+    const leftBoundary = task.anchorBlockId === null
+      ? "The chapter has no prose. Insert its opening with afterId null."
+      : `Insert only after prose block ${task.anchorBlockId}.`;
+    return `FROZEN TASK: continuation. ${leftBoundary} ${rightBoundary} You must use stage_manuscript_proposal to stage a nonempty insertion. A conversational suggestion alone does not complete this task. Do not stage an overview-only proposal.`;
   }
   if (task.kind === "selected-block-edit") {
     return `FROZEN TASK: ${task.operation} only blocks ${task.blockIds.join(", ")} in chapter ${task.chapterId}.`;

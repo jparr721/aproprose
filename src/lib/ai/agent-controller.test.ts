@@ -49,6 +49,7 @@ import {
   draftContextRefKey,
 } from "@/lib/ai/agent-context";
 import { modelContextWindow } from "@/lib/ai/agent-compaction";
+import { buildManuscriptPendingProposal, buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
 import type {
   AgentToolFailure,
   StreamAgentRunInput,
@@ -359,16 +360,17 @@ function manuscriptProposalFixture(
   projectRoot: string,
   chapterId: string,
 ): PendingProposal {
-  return {
-    id,
-    kind: "manuscript",
-    projectRoot,
-    chapterId,
-    summary: `Manuscript proposal ${id}`,
-    createdAt: "2026-07-30T12:00:00.000Z",
+  let index = 0;
+  return buildManuscriptPendingProposal({
+    run: { id: "fixture-run", projectRoot, mode: "writing", task: conversationTask(chapterId), userMessageId: "fixture-user", attachments: [], startedAt: "2026-07-30T12:00:00.000Z" },
+    raw: { chapterId, summary: `Manuscript proposal ${id}`, changes: [{ kind: "insert", blockId: null, afterId: "b3", type: "narration", speaker: null, newText: "A continuation.", toIndex: null, reason: "Continue" }] },
+    blocks: activeBlocks,
+    currentPending: null,
     originatingMessageId: "assistant-1",
-    changes: [],
-  };
+    makeId: () => index++ === 0 ? id : `${id}:change`,
+    currentOverview: "",
+    now: "2026-07-30T12:00:00.000Z",
+  });
 }
 
 function outlineProposalFixture(
@@ -376,16 +378,17 @@ function outlineProposalFixture(
   projectRoot: string,
   chapterId: string,
 ): PendingProposal {
-  return {
-    id,
-    kind: "outline",
-    projectRoot,
-    chapterId,
-    summary: `Outline proposal ${id}`,
-    createdAt: "2026-07-30T12:00:00.000Z",
+  let index = 0;
+  return buildOutlinePendingProposal({
+    run: { id: "fixture-run", projectRoot, mode: "edit", task: { kind: "outline-sculpt", chapterId }, userMessageId: "fixture-user", attachments: [], startedAt: "2026-07-30T12:00:00.000Z" },
+    raw: { chapterId, summary: `Outline proposal ${id}`, changes: [{ kind: "rewrite", cardId: "card-1", title: "Escape", intention: null, toIndex: null, reason: "Raise stakes" }] },
+    cards: outlineChapter.cards,
+    currentPending: null,
     originatingMessageId: "assistant-1",
-    changes: [],
-  };
+    makeId: () => index++ === 0 ? id : `${id}:change`,
+    currentOverview: "",
+    now: "2026-07-30T12:00:00.000Z",
+  });
 }
 
 interface CapturedToolRun {
@@ -465,14 +468,13 @@ function originalTurn(
 
 function persistedState(messages: AgentUIMessage[]): PersistedAgentState {
   return {
-    v: 3,
+    ...emptyPersistedAgentState(),
     mode: "edit",
     messages,
     summary: null,
     draftText: "New project draft",
     draftContextRefs: [],
     draftSourceLocators: {},
-    pendingProposal: null,
     lastUsage: null,
     interruptedRun: null,
   };
@@ -2622,16 +2624,7 @@ describe("run settlement and cancellation", () => {
       task: conversationTask("ch1"),
     });
     await vi.waitFor(() => expect(captured).not.toBeNull());
-    const proposal: PendingProposal = {
-      id: "proposal-1",
-      kind: "manuscript",
-      projectRoot: "/book",
-      chapterId: "ch1",
-      summary: "A staged change",
-      createdAt: "2026-07-30T12:00:00.000Z",
-      originatingMessageId: "assistant",
-      changes: [],
-    };
+    const proposal = manuscriptProposalFixture("proposal-1", "/book", "ch1");
     useAgentConsoleStore.getState().replacePendingProposal(proposal);
 
     controller.stopAgentRun();
@@ -3092,113 +3085,115 @@ describe("retry and local events", () => {
 });
 
 describe("proposal staging lifecycle", () => {
-  it("opens an active manuscript proposal in editor review", async () => {
+  it("retains independent proposals without taking over the editor", async () => {
     const run = await captureToolRun();
-    const proposal = manuscriptProposalFixture(
-      "active-proposal",
-      "/book",
-      "ch1",
-    );
-
-    run.input.environment.replacePendingProposal(proposal);
-
-    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
-    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(
-      proposal.id,
-    );
-    await run.finish();
-  });
-
-  it("stages an active manuscript proposal without closing an open Outline", async () => {
-    const run = await captureToolRun();
-    const proposal = manuscriptProposalFixture(
-      "background-proposal",
-      "/book",
-      "ch1",
-    );
-    useViewStore.setState({ outlineOpen: true, manuscriptReviewProposalId: null });
-
-    run.input.environment.replacePendingProposal(proposal);
-
-    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
-    expect(useViewStore.getState()).toMatchObject({
-      outlineOpen: true,
-      manuscriptReviewProposalId: null,
+    const first = manuscriptProposalFixture("first", "/book", "ch1");
+    const second = manuscriptProposalFixture("second", "/book", "ch1");
+    run.input.environment.replacePendingProposal(first);
+    run.input.environment.replacePendingProposal(second);
+    expect(useAgentConsoleStore.getState().proposalRecords.map((record) => record.proposal.id)).toEqual(["first", "second"]);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(second);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+    expect(useAgentConsoleStore.getState().proposalRecords[1].source).toEqual({
+      kind: "run", runId: run.input.run.id, task: run.input.run.task, text: "Stage a proposal.",
     });
     await run.finish();
   });
 
-  it("keeps an inactive chapter proposal pending without opening review", async () => {
+  it("keeps Outline and the ordinary editor available while staging", async () => {
     const run = await captureToolRun();
-    const proposal = manuscriptProposalFixture(
-      "inactive-proposal",
-      "/book",
-      "ch2",
-    );
-
+    useViewStore.setState({ outlineOpen: true });
+    const proposal = manuscriptProposalFixture("background", "/book", "ch2");
     run.input.environment.replacePendingProposal(proposal);
-
-    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
+    expect(useViewStore.getState().outlineOpen).toBe(true);
     expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
     await run.finish();
   });
 
-  it("closes manuscript review when an outline proposal replaces it", async () => {
-    const run = await captureToolRun();
-    const proposal = outlineProposalFixture(
-      "outline-proposal",
-      "/book",
-      "ch1",
-    );
-    useViewStore.getState().openManuscriptReview("old-proposal");
-
-    run.input.environment.replacePendingProposal(proposal);
-
-    expect(useAgentConsoleStore.getState().pendingProposal).toBe(proposal);
-    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
-    await run.finish();
+  it.each(["text", "empty", "overview"])("does not count a %s response as a continuation draft", async (output) => {
+    const dependencies = makeDependencies(async (input) => {
+      if (output === "empty") {
+        input.environment.replacePendingProposal(input.environment.buildManuscriptProposal({ summary: "Empty", changes: [] }));
+      }
+      if (output === "overview") {
+        input.environment.replacePendingProposal(input.environment.buildOverviewProposal({ summary: "Overview", overview: "New premise", reason: "Update" }));
+      }
+      return successfulResult(input, "Consider a twist.");
+    });
+    const controller = createAgentController(dependencies);
+    const result = await controller.submitAgentRequest({
+      kind: "run", mode: "writing", text: "Suggest", refs: [],
+      task: { kind: "bridge", chapterId: "ch1", anchorBlockId: "b3", successorBlockId: null },
+    });
+    expect(result.status).toBe("failure");
+    expect(dependencies.stream).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().proposalRecords).toEqual([]);
+    expect(useAgentConsoleStore.getState().runError).toMatchObject({ action: null, message: "No continuation draft was produced. Open AI to review the response before trying again." });
+    if (output === "text") {
+      expect(JSON.stringify(useAgentConsoleStore.getState().messages)).toContain("Consider a twist.");
+    }
   });
 
-  it("closes the old review before replacing and opening the new proposal", async () => {
-    const run = await captureToolRun();
-    const oldProposal = manuscriptProposalFixture(
-      "old-proposal",
-      "/book",
-      "ch1",
-    );
-    const newProposal = manuscriptProposalFixture(
-      "new-proposal",
-      "/book",
-      "ch1",
-    );
-    useAgentConsoleStore.getState().replacePendingProposal(oldProposal);
-    useViewStore.getState().openManuscriptReview(oldProposal.id);
-    const transitions: Array<{
-      pendingProposalId: string | null;
-      reviewProposalId: string | null;
-    }> = [];
-    const unsubscribe = useViewStore.subscribe((state) => {
-      transitions.push({
-        pendingProposalId:
-          useAgentConsoleStore.getState().pendingProposal?.id ?? null,
-        reviewProposalId: state.manuscriptReviewProposalId,
+  it("stages an opening for a chapter without prose", async () => {
+    useProjectStore.setState({ blocks: [] });
+    const dependencies = makeDependencies(async (input) => {
+      const proposal = input.environment.buildManuscriptProposal({
+        summary: "Opening", changes: [{ kind: "insert", blockId: null, afterId: null, type: "narration", speaker: null, newText: "The tide turned.", toIndex: null, reason: "Begin" }],
       });
+      input.environment.replacePendingProposal(proposal);
+      return successfulResult(input, "Opening staged");
     });
+    const controller = createAgentController(dependencies);
+    const result = await controller.submitAgentRequest({
+      kind: "run", mode: "writing", text: "Suggest", refs: [],
+      task: { kind: "bridge", chapterId: "ch1", anchorBlockId: null, successorBlockId: null },
+    });
+    expect(result.status).toBe("success");
+    expect(useAgentConsoleStore.getState().pendingProposal).toMatchObject({ changes: [{ change: { afterId: null, newText: "The tide turned." } }] });
+    expect(useViewStore.getState().changesOpen).toBe(true);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
 
-    run.input.environment.replacePendingProposal(newProposal);
-    unsubscribe();
-
-    expect(transitions).toEqual([
-      {
-        pendingProposalId: oldProposal.id,
-        reviewProposalId: null,
-      },
-      {
-        pendingProposalId: newProposal.id,
-        reviewProposalId: newProposal.id,
-      },
-    ]);
-    await run.finish();
+  it.each(["success", "error", "stop", "edit", "dismiss"])("finalizes follow-up replacement only for an unchanged successful target: %s", async (outcome) => {
+    const original = manuscriptProposalFixture("original", "/book", "ch1");
+    useAgentConsoleStore.getState().replacePendingProposal(original);
+    const pending = deferred<StreamAgentRunResult>();
+    let captured: StreamAgentRunInput | null = null;
+    const dependencies = makeDependencies(async (input) => {
+      captured = input;
+      const proposal = input.environment.buildManuscriptProposal({
+        summary: "Replacement", changes: [{ kind: "insert", blockId: null, afterId: "b3", type: "narration", speaker: null, newText: "A better continuation.", toIndex: null, reason: "Improve" }],
+      });
+      input.environment.replacePendingProposal(proposal);
+      return pending.promise;
+    });
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest({
+      kind: "run", mode: "writing", text: "Improve the draft", refs: [],
+      task: { kind: "proposal-follow-up", proposalId: original.id },
+    });
+    await vi.waitFor(() => expect(captured).not.toBeNull());
+    if (captured === null) throw new Error("Expected captured follow-up");
+    const input: StreamAgentRunInput = captured;
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+    if (outcome === "edit") useAgentConsoleStore.getState().updatePendingManuscriptText({ proposalId: original.id, changeId: original.changes[0].id, newText: "Author edit" });
+    if (outcome === "dismiss") useAgentConsoleStore.getState().decideProposalChanges(original.id, [original.changes[0].id], { status: "dismissed", decidedAt: "2026-07-30T12:00:00.000Z" });
+    if (outcome === "stop") controller.stopAgentRun();
+    if (outcome === "error") pending.reject(new Error("Transport failed"));
+    else pending.resolve(successfulResult(input, "Replacement staged"));
+    const result = await submission;
+    const records = useAgentConsoleStore.getState().proposalRecords;
+    if (outcome === "success") {
+      expect(result.status).toBe("success");
+      expect(records).toHaveLength(2);
+      expect(records[0].replacedByProposalId).toBe(records[1].proposal.id);
+    } else {
+      expect(result.status).toBe(outcome === "stop" ? "stopped" : "failure");
+      expect(records).toHaveLength(1);
+      expect(records[0].replacedByProposalId).toBeNull();
+    }
   });
 });
 

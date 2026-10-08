@@ -10,6 +10,7 @@ import type {
   ManuscriptPendingChange,
   ManuscriptPendingProposal,
   OutlinePendingChange,
+  PendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import { projectManuscriptReview } from "@/lib/ai/manuscript-review-projection";
@@ -272,6 +273,38 @@ export async function navigateToProposalChange(
     chapterId,
     outlineLocator(change),
   );
+}
+
+export async function navigateToProposalSource(proposal: PendingProposal): Promise<boolean> {
+  const initial = useProjectStore.getState();
+  if (initial.project === null || initial.project.root !== proposal.projectRoot) return false;
+  if (proposal.kind === "overview") {
+    useViewStore.getState().openOutline();
+    return true;
+  }
+  if (!initial.project.chapters.some((chapter) => chapter.id === proposal.chapterId)) return false;
+  if (proposal.kind === "outline") {
+    useViewStore.getState().openOutline();
+    useOutlineBoardStore.getState().closeChapter();
+    return true;
+  }
+  if (initial.activeChapterId !== proposal.chapterId) {
+    const result = await useViewStore.getState().requestGuarded(async () => {
+      if (useProjectStore.getState().project?.root !== proposal.projectRoot) return false;
+      await useProjectStore.getState().selectChapter(proposal.chapterId);
+      return true;
+    });
+    if (result.status === "canceled" || !result.value) return false;
+  }
+  const current = useProjectStore.getState();
+  if (current.project === null || current.project.root !== proposal.projectRoot || current.activeChapterId !== proposal.chapterId) return false;
+  const view = useViewStore.getState();
+  view.closeManuscriptReview();
+  if (view.outlineOpen) view.toggleOutline();
+  const first = proposal.changes[0];
+  const locator = first === undefined ? null : manuscriptLocator(first);
+  const source = locator === null ? undefined : current.blocks.find((block) => block.id === locator.sourceId);
+  return source === undefined ? clearSelectionAtChapterEnd() : selectBlock(source);
 }
 
 function isManuscriptChange(

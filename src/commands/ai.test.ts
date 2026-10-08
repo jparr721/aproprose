@@ -271,7 +271,7 @@ describe("AI run commands", () => {
             blockId: "block-1",
           },
         ],
-        task: { kind: "conversation", targetChapterId: "chapter-1" },
+        task: { kind: "bridge", chapterId: "chapter-1", anchorBlockId: "block-2", successorBlockId: null },
       },
     },
     {

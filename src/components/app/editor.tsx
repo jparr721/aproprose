@@ -39,6 +39,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import {
   TypographyForeground,
   TypographyLarge,
@@ -54,7 +55,8 @@ import { useSearchSurfaceStore } from "@/stores/search-surface-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
-import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
+import { buildContinuationIntent } from "@/lib/ai/agent-continuation";
+import { getAgentChangesSnapshot, useAgentChanges } from "@/hooks/use-agent-changes";
 import { useKeybindingWithOptions } from "@/hooks/use-keybinding";
 import type { UseKeybindingOptions } from "@/hooks/use-keybinding";
 import { KEYBINDING_IDS } from "@/lib/keybindings";
@@ -128,22 +130,17 @@ function liveWordCount(blocks: BlockT[]): number {
 function AddBlockRow() {
   const insertAfter = useProjectStore((s) => s.insertAfter);
   const selectedId = useProjectStore((s) => s.selectedId);
+  const busy = useAgentChanges().runStatus !== "idle";
 
   const add = (type: BlockType) => insertAfter(selectedId, { type });
   const suggest = () => {
     const state = useProjectStore.getState();
+    if (getAgentChangesSnapshot().runStatus !== "idle") return;
     const chapterId = state.activeChapterId;
     if (chapterId === null) return;
-    const refs = selectionTargetIds(state.selectedIds, state.selectedId).map(
-      (blockId) => ({ kind: "block" as const, chapterId, blockId }),
-    );
-    void dispatchAgentIntent({
-      kind: "run",
-      mode: "writing",
-      text: SUGGEST_DIRECTIVE,
-      refs,
-      task: { kind: "conversation", targetChapterId: chapterId },
-    });
+    void dispatchAgentIntent(buildContinuationIntent(
+      chapterId, state.blocks, selectionTargetIds(state.selectedIds, state.selectedId),
+    ));
   };
 
   return (
@@ -164,8 +161,10 @@ function AddBlockRow() {
         size="sm"
         className="rounded-full border border-ai-edge bg-ai-tint text-ai-ink hover:bg-ai-edge/60"
         onClick={suggest}
+        disabled={busy}
+        aria-busy={busy}
       >
-        <IconSparkles className="size-3.5" />
+        {busy ? <Spinner className="motion-reduce:animate-none" /> : <IconSparkles className="size-3.5" />}
         Suggest from context
       </Button>
     </div>

@@ -358,7 +358,8 @@ describe("ReviewTray manuscript summary", () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Couldn't open proposal context",
+        "Proposal context unavailable",
+        expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }),
       ),
     );
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
@@ -381,8 +382,8 @@ describe("ReviewTray manuscript summary", () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Couldn't open proposal context",
-        { description: "Error: Navigation failed" },
+        "Proposal context unavailable",
+        expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }),
       ),
     );
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
@@ -512,9 +513,7 @@ describe("ReviewTray manuscript summary", () => {
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
     expect(screen.getByRole("button", { name: "Accept All" })).toBeTruthy();
     expect(recordProposalEvent).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Proposal source changed", {
-      description: "Keep this proposal open and ask the agent to regenerate it.",
-    });
+    expect(toast.error).toHaveBeenCalledWith("Proposal source changed", expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }));
   });
 });
 
@@ -753,9 +752,7 @@ describe("ReviewTray outline decisions", () => {
     expect(writeProjectMeta).not.toHaveBeenCalled();
     expect(recordProposalEvent).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Proposal couldn't be applied", {
-      description: "Keep this proposal open and ask the agent to replace it.",
-    });
+    expect(toast.error).toHaveBeenCalledWith("Proposal could not be applied", expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }));
   });
 
   it("renders and accepts an add for a valid sparse empty outline", () => {
@@ -861,9 +858,7 @@ describe("ReviewTray outline decisions", () => {
     expect(screen.getByRole("button", { name: "Accept All" })).toBeTruthy();
     expect(recordProposalEvent).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Proposal couldn't be applied", {
-      description: "Keep this proposal open and ask the agent to replace it.",
-    });
+    expect(toast.error).toHaveBeenCalledWith("Proposal could not be applied", expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }));
   });
   it("navigates a review card without closing the tray", async () => {
     const cards = useProjectStore.getState().meta.chapters.ch1.cards;

@@ -2,6 +2,7 @@ import { CharacterCandidatesDialog } from "@/components/app/outline/character-ca
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { TypographyMuted } from "@/components/ui/typography";
+import { openNotifications } from "@/lib/notifications";
 import type { ProjectKnowledge } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
@@ -31,11 +32,9 @@ export function StoryRefreshStatus() {
   const knowledge = useProjectStore((state) => state.meta.knowledge);
   const status = useStoryRefreshStore((state) => state.status);
   const progress = useStoryRefreshStore((state) => state.progress);
-  const error = useStoryRefreshStore((state) => state.error);
   const latestSavedFingerprints = useStoryRefreshStore(
     (state) => state.latestSavedFingerprints,
   );
-  const retry = useStoryRefreshStore((state) => state.retry);
   const chapterIds = project === null ? [] : project.chapters.map((chapter) => chapter.id);
 
   return (
@@ -52,11 +51,9 @@ export function StoryRefreshStatus() {
       ) : null}
       {status === "failed" ? (
         <>
-          <TypographyMuted role="alert" className="text-destructive">
-            {error}
-          </TypographyMuted>
-          <Button variant="outline" size="sm" onClick={retry}>
-            Retry
+          <TypographyMuted>Story refresh paused</TypographyMuted>
+          <Button variant="ghost" size="sm" onClick={openNotifications}>
+            View notifications
           </Button>
         </>
       ) : null}

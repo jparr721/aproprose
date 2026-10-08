@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { useNotificationStore } from "@/stores/notification-store";
 import {
   act,
   cleanup,
@@ -85,6 +86,7 @@ const project: ProjectInfo = {
 afterEach(() => cleanup());
 
 beforeEach(() => {
+  useNotificationStore.setState({ notifications: [] });
   vi.clearAllMocks();
   viewerCallbacks.onPageChange = null;
   adapter.loadDocument.mockResolvedValue(undefined);
@@ -216,6 +218,7 @@ describe("PdfPane viewer lifecycle", () => {
       }),
     );
     expect(screen.getByText("Search dispatch failed")).toBeTruthy();
+    expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "pdf-search", source: "PDF preview" }));
     expect(screen.queryByText("PDF preview unavailable")).toBeNull();
   });
 
@@ -371,4 +374,12 @@ describe("PdfPane viewer lifecycle", () => {
       await screen.findByRole("button", { name: "Copied PDF path" }),
     ).toBeTruthy();
   });
+});
+
+
+it("records PDF load failures in notification history", async () => {
+  adapter.loadDocument.mockRejectedValueOnce(new Error("Invalid PDF"));
+  renderPane();
+  await screen.findByText("PDF preview unavailable");
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "pdf-preview", source: "PDF preview" }));
 });

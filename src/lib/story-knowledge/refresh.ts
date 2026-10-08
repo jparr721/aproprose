@@ -75,6 +75,7 @@ export interface StoryRefreshResult {
   characterFailures: Array<{
     characterId: string;
     message: string;
+    error: unknown;
   }>;
 }
 
@@ -464,6 +465,7 @@ export async function buildStoryRefresh(
       characterFailures.push({
         characterId: characters[index].id,
         message: rejectionMessage(settled.reason),
+        error: settled.reason,
       });
     }
   }

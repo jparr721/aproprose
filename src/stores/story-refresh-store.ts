@@ -1,7 +1,8 @@
 import { create, type StateCreator } from "zustand";
 
-import { describeAiError, showAiError } from "@/lib/ai/errors";
+import { describeAiError } from "@/lib/ai/errors";
 import { modelUnselectedFailure } from "@/lib/ai/agent-failure";
+import { reportAiError } from "@/lib/notifications";
 import { parseChapter } from "@/lib/latex";
 import type {
   buildStoryRefresh,
@@ -219,6 +220,9 @@ export function createStoryRefreshState(
         );
         controller = null;
         if (result.characterFailures.length > 0) {
+          for (const failure of result.characterFailures) {
+            reportAiError(failure.error, provider, "Story refresh", root, null);
+          }
           set({
             status: "failed",
             error: characterFailureMessage(result.characterFailures),
@@ -258,7 +262,7 @@ export function createStoryRefreshState(
           set({ status: "idle", progress: EMPTY_PROGRESS, error: null });
           return;
         }
-        showAiError(error, provider);
+        reportAiError(error, provider, "Story refresh", root, null);
         set({ status: "failed", error: dependencies.describeError(error) });
       }
     };

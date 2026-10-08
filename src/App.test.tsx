@@ -23,7 +23,8 @@ vi.mock("@/components/app/outline/outline-pane", () => ({
   OutlinePane: () => <div>Outline Pane</div>,
 }));
 
-import { Workspace } from "@/App";
+import App, { Workspace } from "@/App";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { EMPTY_META } from "@/lib/migration";
@@ -88,6 +89,17 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+describe("App notifications", () => {
+  it("opens notification settings after a project fails to open", () => {
+    useProjectStore.setState({ status: "empty", project: null, error: "Project unavailable" });
+    useSettingsDialogStore.setState({ open: false, tab: "appearance" });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "View notifications" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^Notifications/ }).getAttribute("aria-selected")).toBe("true");
+  });
 });
 
 describe("Workspace", () => {

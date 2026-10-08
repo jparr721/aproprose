@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { useNotificationStore } from "@/stores/notification-store";
 import {
   cleanup,
   fireEvent,
@@ -36,6 +37,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 afterEach(cleanup);
 
 beforeEach(() => {
+  useNotificationStore.setState({ notifications: [] });
   mocks.getAiKeyStatus.mockReset().mockResolvedValue({ status: "missing" });
   mocks.setAiKey.mockReset().mockResolvedValue({ status: "saved" });
   mocks.listTextModels.mockReset().mockResolvedValue([]);
@@ -120,6 +122,7 @@ describe("AiTab", () => {
     );
     expect(document.body.textContent).not.toContain("/Users/author/.config");
     expect(document.body.textContent).not.toContain("provider response body");
+    expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "ai-settings-unavailable", source: "AI settings" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
@@ -141,4 +144,20 @@ describe("AiTab", () => {
     });
     expect(useSettingsDialogStore.getState().aiTarget).toBeNull();
   });
+});
+
+
+it("records model listing failures with their distinct type", async () => {
+  mocks.getAiKeyStatus.mockResolvedValue({ status: "configured" });
+  mocks.listTextModels.mockRejectedValue(Object.assign(new Error("private model response"), { statusCode: 401 }));
+  render(<AiTab />);
+  await screen.findByRole("alert");
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "ai-key-rejected", provider: "openai" }));
+});
+
+it("records key status failures returned as values", async () => {
+  mocks.getAiKeyStatus.mockResolvedValue({ status: "unavailable", failure: { reason: "settings-unavailable", message: "AI settings are unavailable. Retry.", action: "retry", settingsTarget: null } });
+  render(<AiTab />);
+  await screen.findByRole("alert");
+  expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "ai-settings-unavailable" }));
 });

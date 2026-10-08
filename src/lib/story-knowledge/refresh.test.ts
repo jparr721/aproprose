@@ -702,7 +702,7 @@ describe("story refresh orchestration", () => {
     expect(result.characterUpdates).toHaveLength(1);
     expect(result.characterUpdates[0]).toMatchObject({ characterId: "c1" });
     expect(result.characterFailures).toEqual([
-      { characterId: "c2", message: "Jon reduction failed" },
+      { characterId: "c2", message: "Jon reduction failed", error: expect.any(Error) },
     ]);
   });
 
@@ -752,7 +752,7 @@ describe("story refresh orchestration", () => {
       "c7",
     ]);
     expect(result.characterFailures).toEqual([
-      { characterId: "c3", message: "Character 3 failed" },
+      { characterId: "c3", message: "Character 3 failed", error: expect.any(Error) },
     ]);
   });
 

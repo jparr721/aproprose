@@ -7,6 +7,8 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { NotificationsTab } from "@/components/app/settings/notifications-tab";
+import { useNotificationStore } from "@/stores/notification-store";
 import { AppearanceTab } from "@/components/app/settings/appearance-tab";
 import { AiTab } from "@/components/app/settings/ai-tab";
 import { BackupTab } from "@/components/app/settings/backup-tab";
@@ -22,6 +24,7 @@ import {
 } from "@/stores/settings-dialog-store";
 
 export function SettingsDialog() {
+  const pendingCount = useNotificationStore((state) => state.notifications.filter((item) => item.resolvedAt === null).length);
   const open = useSettingsDialogStore((s) => s.open);
   const tab = useSettingsDialogStore((s) => s.tab);
   const setOpen = useSettingsDialogStore((s) => s.setOpen);
@@ -37,7 +40,7 @@ export function SettingsDialog() {
       <DialogContent className="flex h-[80vh] flex-col gap-4 sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Appearance, AI, backup, and keyboard shortcuts.</DialogDescription>
+          <DialogDescription>Appearance, AI, notifications, backup, and keyboard shortcuts.</DialogDescription>
         </DialogHeader>
         <Tabs
           className="min-h-0 flex-1 gap-4"
@@ -50,6 +53,7 @@ export function SettingsDialog() {
           <TabsList className="w-40 shrink-0" variant="line">
             <TabsTrigger value={SETTINGS_TABS.APPEARANCE}>Appearance</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.AI}>AI</TabsTrigger>
+            <TabsTrigger value={SETTINGS_TABS.NOTIFICATIONS}>Notifications{pendingCount > 0 ? ` (${pendingCount})` : ""}</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.BACKUP}>Backup</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.KEYBOARD}>Keyboard</TabsTrigger>
             <TabsTrigger value={SETTINGS_TABS.STATS}>Stats</TabsTrigger>
@@ -60,6 +64,9 @@ export function SettingsDialog() {
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.AI}>
             <ScrollArea className="h-full"><div className="p-1"><AiTab /></div></ScrollArea>
+          </TabsContent>
+          <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.NOTIFICATIONS}>
+            <ScrollArea className="h-full"><div className="p-1"><NotificationsTab /></div></ScrollArea>
           </TabsContent>
           <TabsContent className="min-h-0 flex-1 outline-none" value={SETTINGS_TABS.BACKUP}>
             <ScrollArea className="h-full"><div className="p-1"><BackupTab /></div></ScrollArea>

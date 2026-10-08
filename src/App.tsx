@@ -9,6 +9,7 @@
 // its action (top bar: compile / panel toggles; editor: save / undo / redo) via
 // the `useKeybinding` hook and the `src/lib/keybindings.ts` registry.
 
+import { notifyAppError } from "@/lib/notifications";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +24,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { toast } from "sonner";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { ThemeController } from "@/components/app/theme-controller";
 import { TopBar } from "@/components/app/top-bar";
@@ -189,11 +189,9 @@ function ProcessExitGuard(): null {
           saveChanges: () => useProjectStore.getState().saveChapter(),
         });
         if (safeToExit) void appWindow.close();
-        else toast.error("Couldn't save changes", { description: "Close canceled." });
+        else notifyAppError("chapter-save", "Editor", useProjectStore.getState().project?.root ?? null, new Error("Close canceled: unsaved changes"));
       } catch (error) {
-        toast.error("Couldn't save changes", {
-          description: error instanceof Error ? error.message : String(error),
-        });
+        notifyAppError("chapter-save", "Editor", useProjectStore.getState().project?.root ?? null, error);
       } finally {
         saving.current = false;
       }
@@ -250,11 +248,11 @@ function App() {
             <Workspace />
           </SidebarInset>
           <CommandPalette />
-          <SettingsDialog />
         </SidebarProvider>
       ) : (
         <Welcome />
       )}
+      <SettingsDialog />
       <UnsavedGuard />
       <MigrationGuard />
       <UpdateChecker />

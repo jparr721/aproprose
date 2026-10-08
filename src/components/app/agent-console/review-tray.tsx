@@ -1,3 +1,4 @@
+import { notifyAppError } from "@/lib/notifications";
 import { useState } from "react";
 import {
   Check as IconCheck,
@@ -50,7 +51,6 @@ import {
   useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
-import { toast } from "sonner";
 
 interface ManuscriptReviewTrayProps {
   proposal: ManuscriptPendingProposal;
@@ -112,12 +112,10 @@ function ManuscriptReviewTray({
   const openReview = (): void => {
     void openManuscriptProposalInEditor(proposal)
       .then((opened) => {
-        if (!opened) toast.error("Couldn't open proposal context");
+        if (!opened) notifyAppError("proposal-context", "Proposal", proposal.projectRoot, new Error("proposal-context operation failed"));
       })
       .catch((error) => {
-        toast.error("Couldn't open proposal context", {
-          description: String(error),
-        });
+        notifyAppError("proposal-context", "Proposal", proposal.projectRoot, error);
       });
   };
 
@@ -191,9 +189,7 @@ function OutlineReviewTray({
       throw new Error(`Pending proposal change not found: ${changeId}`);
     }
     void navigateToProposalChange(proposal.chapterId, change).catch((error) => {
-      toast.error("Couldn't open proposal context", {
-        description: String(error),
-      });
+      notifyAppError("proposal-context", "Proposal", proposal.projectRoot, error);
     });
   };
 

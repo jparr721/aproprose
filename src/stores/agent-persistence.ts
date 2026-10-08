@@ -880,6 +880,14 @@ function appendTransition(work: () => Promise<void>): Promise<void> {
   return pending;
 }
 
+async function waitForPersistenceTransitions(): Promise<void> {
+  let pending: Promise<void>;
+  do {
+    pending = transition;
+    await pending;
+  } while (pending !== transition);
+}
+
 function ownsPersistenceCapture(
   capture: AgentPersistenceTransitionCapture,
 ): boolean {
@@ -1237,11 +1245,19 @@ export async function retryAgentSessionPersistence(
     }
     return;
   }
+  await waitForPersistenceTransitions();
+  if (useProjectStore.getState().project?.root !== root) {
+    throw new AgentConsoleOwnershipError();
+  }
   const store = agentSessionStore(sessionId);
   if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
     await hydrateAgentScopedSessionOwned(root, sessionId);
-    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
-      const issue = store.getState().persistenceIssue;
+    if (useProjectStore.getState().project?.root !== root) {
+      throw new AgentConsoleOwnershipError();
+    }
+    const hydratedState = agentSessionStore(sessionId).getState();
+    if (agentConsoleOwnershipStatus(hydratedState, root) !== "ready") {
+      const issue = hydratedState.persistenceIssue;
       throw issue === null ? new AgentConsoleOwnershipError() : new AgentPersistenceError(issue);
     }
     return;
@@ -1665,6 +1681,8 @@ async function hydrateAgentScopedSessionOwned(
   root: string,
   sessionId: ScopedAgentSessionId,
 ): Promise<void> {
+  await waitForPersistenceTransitions();
+  if (useProjectStore.getState().project?.root !== root) return;
   const store = agentSessionStore(sessionId);
   if (agentConsoleOwnershipStatus(store.getState(), root) === "ready") return;
   const capture = store.getState().beginPersistenceTransition(root, "load");

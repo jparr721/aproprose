@@ -8,6 +8,7 @@ import type {
   AgentMessageMetadata,
   AgentPersistenceIssue,
   AgentProposalRecord,
+  AgentSessionId,
   AgentUIMessage,
   AgentUiTools,
   DraftContextRef,
@@ -1835,6 +1836,108 @@ describe("agent persistence", () => {
     await switching;
     expect(tauri.readAppData).toHaveBeenCalledWith(agentStateKey("/books/new"));
   });
+
+  it.each([
+    { kind: "outline", chapterId: "waiting-session" },
+    { kind: "character", characterId: "waiting-session" },
+  ] satisfies Exclude<AgentSessionId, { kind: "project" }>[])(
+    "waits for the old project save before hydrating its new $kind session",
+    async (sessionId) => {
+      const oldRoot = "/books/scoped-save-old";
+      const nextRoot = "/books/scoped-save-new";
+      useProjectStore.setState({ project: project(oldRoot), status: "ready" });
+      await transitionAgentProject(oldRoot);
+      useAgentConsoleStore.getState().setDraftText("Old project draft");
+      const oldWrite = deferred<void>();
+      tauri.writeAppData.mockReturnValueOnce(oldWrite.promise);
+      useProjectStore.setState({
+        project: project(nextRoot),
+        meta: { ...EMPTY_META, characters: [{
+          id: "waiting-session", name: "Mara", role: "Courier", color: "#123456",
+          profile: { appearance: "", mannerisms: "", motivations: "", relationships: "", history: "", voice: "" },
+        }] },
+      });
+      const switching = transitionAgentProject(nextRoot);
+      await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentStateKey(oldRoot), expect.objectContaining({ draftText: "Old project draft" }),
+      ));
+      vi.useFakeTimers();
+      let settled = false;
+      const hydration = (sessionId.kind === "outline"
+        ? hydrateAgentOutlineSession(nextRoot, sessionId.chapterId)
+        : hydrateAgentCharacterSession(nextRoot, sessionId.characterId)
+      ).then(() => {
+        settled = true;
+        const store = agentSessionStore(sessionId);
+        store.getState().setDraftText("New scoped draft");
+        store.getState().beginPreflight();
+        return store;
+      });
+      let settledBeforeSave = false;
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        settledBeforeSave = settled;
+      } finally {
+        oldWrite.resolve(undefined);
+      }
+      const [, hydratedStore] = await Promise.all([switching, hydration]);
+
+      expect(settledBeforeSave).toBe(false);
+      expect(agentSessionStore(sessionId)).toBe(hydratedStore);
+      expect(hydratedStore.getState()).toMatchObject({
+        hydratedProjectRoot: nextRoot,
+        draftText: "New scoped draft",
+        runStatus: "submitted",
+      });
+      await saveAgentSessionCollection(nextRoot);
+      expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentSessionCollectionKey(nextRoot),
+        expect.objectContaining({ sessions: expect.objectContaining({
+          [`${sessionId.kind}:waiting-session`]: expect.objectContaining({ draftText: "New scoped draft" }),
+        }) }),
+      );
+    },
+  );
+
+  it.each([
+    { kind: "outline", chapterId: "waiting-session" },
+    { kind: "character", characterId: "waiting-session" },
+  ] satisfies Exclude<AgentSessionId, { kind: "project" }>[])(
+    "cancels stale $kind hydration when the project changes during its wait",
+    async (sessionId) => {
+      const oldRoot = "/books/scoped-switch-old";
+      const firstRoot = "/books/scoped-switch-first";
+      const secondRoot = "/books/scoped-switch-second";
+      useProjectStore.setState({ project: project(oldRoot), status: "ready" });
+      await transitionAgentProject(oldRoot);
+      const oldWrite = deferred<void>();
+      tauri.writeAppData.mockReturnValueOnce(oldWrite.promise);
+      tauri.readAppData.mockImplementation(async (key: string) =>
+        key === agentSessionCollectionKey(secondRoot)
+          ? { v: 1, sessions: { [`${sessionId.kind}:waiting-session`]: persistedState("Current scoped draft", []) } }
+          : null,
+      );
+      useProjectStore.setState({ project: project(firstRoot) });
+      const firstSwitch = transitionAgentProject(firstRoot);
+      await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentStateKey(oldRoot), expect.anything(),
+      ));
+      const hydration = sessionId.kind === "outline"
+        ? hydrateAgentOutlineSession(firstRoot, sessionId.chapterId)
+        : hydrateAgentCharacterSession(firstRoot, sessionId.characterId);
+      useProjectStore.setState({ project: project(secondRoot) });
+      const secondSwitch = transitionAgentProject(secondRoot);
+      oldWrite.resolve(undefined);
+      await Promise.all([firstSwitch, secondSwitch, hydration]);
+
+      expect(tauri.readAppData).not.toHaveBeenCalledWith(agentSessionCollectionKey(firstRoot));
+      expect(agentSessionStore(sessionId).getState()).toMatchObject({
+        hydratedProjectRoot: secondRoot,
+        draftText: "Current scoped draft",
+        persistenceTransition: null,
+      });
+    },
+  );
 
   it("closes manuscript review synchronously when switching roots", async () => {
     await transitionAgentProject("/books/review-old");
@@ -3756,6 +3859,7 @@ describe("agent persistence", () => {
 
     const firstHydration = hydrateAgentOutlineSession(root, chapterId);
     const secondHydration = hydrateAgentOutlineSession(root, chapterId);
+    await vi.waitFor(() => expect(tauri.readAppData).toHaveBeenCalledOnce());
     planner.getState().hydrate(root, emptyPersistedAgentState());
     planner.getState().beginPreflight();
     read.resolve({

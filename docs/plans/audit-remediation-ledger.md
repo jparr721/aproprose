@@ -2,7 +2,7 @@
 
 - Task: resolve all 25 findings from the code-quality audit in one PR.
 - Acceptance source: `docs/plans/audit-remediation-task.md` and the audit in the initiating conversation.
-- Target: `main`; intake `d49a55b`, refreshed integration `7e80500`, latest rebased target `28afd5d` at version 0.18.1. Branch source version now 0.18.2.
+- Target: `main`; intake `d49a55b`, refreshed integrations `7e80500` and `28afd5d`, latest rebased target `827e65a` at version 0.18.3. Branch source version now 0.18.4.
 - Branch: `codex/audit-remediation`.
 - Worktree: `/Users/jarredparr/.config/jp-skills/worktrees/aproprose/codex/audit-remediation` (created, dedicated).
 - Starting checkout: `/Users/jarredparr/.codex/worktrees/385b/aproprose` (application files untouched).
@@ -307,6 +307,52 @@ residual risk: inherited descendant-process cleanup remains deferred in #72.
 - Frontend/browser gates and isolated QA package/smoke are repeating after dependency alignment. Total gate is not complete and no push claimed until package/smoke succeeds.
 - Evidence logs remain in pipeline-owned scratch, including `r2-chapters-red.log`, `r2-lint.log`, `r2-native.log`, `r2-native-ignored.log`, and `r2-bundle.log`; preserve findings/results in the owning ledger before final scratch cleanup.
 - Fresh round 3 push/fight remains pending.
+
+### Latest main reintegration complete
+
+- Both rebases completed: incoming Changes 0.18.2 (`e4c323c`, #71), then Tauri alignment 0.18.3 (`827e65a`, #74). Round-2 docs were committed before rebase (`e73dd2f` historical pre-rebase reference). Branch source is synchronized to 0.18.4; frozen install and version gate passed.
+- Upstream #74 already supplies API `~2.12.1`; redundant own alignment commit was dropped. Incoming CLI 2.11.2 retained. Earlier old-base package build was interrupted and is not a passing bundle result.
+- Controller integration maps incoming proposal records, follow-up finalization, and bridge validation into five extracted controller/submission/tool/lifecycle files. Observed 11 initial focused failures, then 104 focused tests and typecheck passed. Evidence: `controller-main-integration-evidence.md` in pipeline scratch.
+- Persistence integration passes 125 focused tests while preserving all incoming tests, v4 Changes records/schema, collection retry/reset locks, and explicit coordinator protocol.
+- Root UI preserves incoming Changes dock, narrow-modal inert/aria-hidden behavior, close/retry semantics, shared primitives, and recovery spinner fix. Terminal collection failures cannot reset; two new regressions first failed, then recovery text uses canReset to describe available Retry.
+- Full integrated gate active; evidence logs `integrated-typecheck.log`, `integrated-build.log`, `integrated-frontend.log`, `integrated-browser.log`, `integrated-lint.log`, `integrated-native.log`, and `integrated-ignored.log`. No complete gate or native bundle pass claimed yet.
+- Browser 960px proof now checks actual narrow-modal inert/aria-hidden behavior and closes the modal before editor/PDF width and Find assertions; 1440px still checks co-docked panes.
+- Round-2 four accepted groups remain fixed. No round 3 consumed; next review requires a newly pushed, fully gated head.
+- Supervisor rebase scratch checkpoint transferred into this owning ledger and its owned scratch file removed. No source edits or extra reviews performed by supervisor.
+
+### Integrated gate in progress / one frontend failure
+
+| Command / lane | Result |
+| --- | --- |
+| Typecheck, frontend build, version 0.18.4 guard | PASS |
+| Browser suite | PASS: 36 |
+| Rust format / strict Clippy | PASS |
+| Native suite | PASS: 84, 2 ignored |
+| Explicit ignored lane | PASS: 2 |
+| Full frontend suite | 137 files: 1777 passed, 1 failed; not green |
+| Actual isolated QA bundle / artifact smoke | RUNNING: session 94312 |
+
+- Failed frontend case is reopen ownership; worker investigates whether its fixture bypasses actual lifecycle. No weakened assertion or passing claim authorized.
+- Package evidence pending in `integrated-bundle.log` / `integrated-artifact.log`.
+- Standalone integrated fixes committed: `8e25f45` collection recovery text after two observed red regressions; `c6fbd53` narrow-modal browser coverage.
+- Target `827e65a` stable at last fetch. Complete gate and push remain pending; round 3 still unconsumed. Supervisor edits ledger only and preserves root's dirty planning files.
+
+### Integrated frontend stable
+
+- Complete frontend rerun PASS: 137 files, 1778 tests in 25.49 seconds; evidence `integrated-frontend-stable.log`.
+- Reopen fixture repair `761730c` exercises real public lifecycle transitions with distinct chapter, current dirty state, block identity, and cursor assertions. Observed one red / five focused green; evidence `chapter-reopen-red.log` and `chapter-reopen-green.log`.
+- Artifact fixture repair `26fc8a5` removes an unsupported startup-under-400ms assumption while retaining rejected/exited assertions. Full gate observed red, then 11 focused tests and all 1778 frontend tests passed. Production observer behavior unchanged.
+- Other integrated gates above remain green. Actual QA package session 94312 is still active in final native compilation; package/smoke is not yet claimed passing.
+- No round 3 push yet; complete gate remains pending package/smoke.
+
+### Integrated full gate green / round 3 ready
+
+- Actual isolated QA 0.18.4 package PASS: optimized release build 4m39s (`integrated-bundle.log`).
+- Actual copied packaged app launch PASS: visible window stable through 3-second settle (`integrated-artifact.log`). User's production app untouched.
+- Final typecheck PASS (`integrated-typecheck-final.log`).
+- All integrated local lanes green on stable source: 137 frontend files / 1778 tests; 36 browser tests; 84 native tests plus 2 explicitly run ignored tests; Rust format/strict Clippy; frontend build/typecheck/version; native QA package and launch.
+- Root will commit planning/ledger documentation and push rebased work branch with force-with-lease against expected remote `a6afd2d`; never force-push target. Next fresh full round 3 reviews the confirmed pushed head only.
+- Round count remains 2 completed / cap 5, minimum 3. No round 3 review consumed yet; simplification, final exact-commit gate plus CI, merge, real-data QA, and deck delivery remain required.
 
 - QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.

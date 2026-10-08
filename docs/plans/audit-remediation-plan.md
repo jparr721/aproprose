@@ -75,3 +75,11 @@ Detailed per-finding acceptance is in audit-remediation-task.md. Workers must re
 - P also owns a strict stored-metadata boundary and its regression tests. Validate malformed provided nested fields in repository and legacy storage before permissive migrations; retain supported historical missing-field defaults and import recovery behavior.
 - Admit every accepted metadata write immediately to the shared root queue. Native canonical roots own load completion, recents, sync, and persistence; alias discovery reopens through the canonical queue before installing a snapshot.
 - Native managed-chapter validation must consume every supported declaration/body pair and reject unsupported or malformed entries, including mixed valid/corrupt files, without replacing their bytes.
+
+## Changes panel integration amendment
+
+- Refreshed base is `827e65a` (0.18.3), including the persistent Changes panel and upstream Tauri API alignment. The synchronized audit version is 0.18.4.
+- Preserve retained proposal records, version 4 persistence schema and migration, scoped collection corruption locks, Retry recovery, and reset restrictions while retaining the extracted controller seams and explicit persistence coordinator.
+- Preserve the incoming narrow right-panel overlay: its open state makes the covered main surface inert, and the actual close action restores authoring. Browser proof checks that interaction at 960px, then editor/PDF stacking and find bounds; 1440px retains co-docked AI, editor, and PDF checks.
+- Terminal AI collection failures describe available Retry recovery and never direct users to an unavailable reset. Preserve the existing reset eligibility predicate as the authority.
+- Upstream now supplies the Tauri API alignment fix; the redundant local dependency alignment commit was dropped during rebase. Frozen dependency installation and native packaging remain required gates.

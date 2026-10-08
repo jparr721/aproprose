@@ -9,6 +9,7 @@
 import { notifyAppError, reportNotification } from "@/lib/notifications";
 import type { AppNotificationType } from "@/lib/notification-model";
 import { create } from "zustand";
+import { safeParse } from "zod";
 import { sumBy } from "es-toolkit";
 import { arrayMove } from "@dnd-kit/sortable";
 import { toast } from "sonner";
@@ -111,7 +112,7 @@ import {
   setChapterPlotPoint as setChapterPlotPointModel,
 } from "@/lib/outline/model";
 import { runMigrations, EMPTY_META } from "@/lib/migration";
-import { metaBlobSchema } from "@/lib/migration/schema";
+import { storedProjectMetaSchema } from "@/lib/migration/schema";
 import { updateLore, removeLore } from "@/lib/lore/model";
 import { DEFAULT_CHARACTER_COLOR } from "@/lib/characters/colors";
 import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
@@ -175,15 +176,6 @@ const LOADING_RESET = {
 
 const RECENTS_KEY = "recents";
 const LAST_PROJECT_KEY = "last-project";
-const storedProjectMetaSchema = metaBlobSchema.extend({
-  version: metaBlobSchema.shape.version.unwrap().optional(),
-  characters: metaBlobSchema.shape.characters.unwrap().optional(),
-  lore: metaBlobSchema.shape.lore.unwrap().optional(),
-  statuses: metaBlobSchema.shape.statuses.unwrap().optional(),
-  outline: metaBlobSchema.shape.outline.unwrap().optional(),
-  knowledge: metaBlobSchema.shape.knowledge.unwrap().optional(),
-});
-
 /** Stable, filesystem-safe key for a project's metadata blob. */
 function metaKey(root: string): string {
   return `meta-${pathHash(root)}`;
@@ -703,11 +695,15 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
       let parsed: unknown;
       try { parsed = JSON.parse(inRepo); }
       catch (error) { throw new Error(`Cannot read ${root}/.aproprose/meta.json: ${String(error)}`); }
-      const validated = storedProjectMetaSchema.safeParse(parsed);
+      const validated = safeParse(storedProjectMetaSchema, parsed);
       if (!validated.success) throw new Error(`Invalid project metadata in ${root}/.aproprose/meta.json: ${validated.error.message}`);
       return { meta: runMigrations(parsed), source: "repo" };
     }
-    const legacy = await readAppData<ProjectMeta>(metaKey(root));
+    const legacy = await readAppData<unknown>(metaKey(root));
+    if (legacy !== null) {
+      const validated = safeParse(storedProjectMetaSchema, legacy);
+      if (!validated.success) throw new Error(`Invalid project metadata in legacy app data ${metaKey(root)} for ${root}: ${validated.error.message}`);
+    }
     return { meta: runMigrations(legacy), source: legacy === null ? "empty" : "legacy" };
   };
 

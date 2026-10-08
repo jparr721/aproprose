@@ -172,4 +172,28 @@ export const metaBlobSchema = z.object({
   knowledge: projectKnowledgeSchema.catch(emptyProjectKnowledge()),
 }).passthrough();
 
+function withoutRecoveryDefaults(schema: z.core.$ZodType): z.core.$ZodType {
+  if (schema instanceof z.ZodCatch || schema instanceof z.ZodOptional) {
+    return z.optional(withoutRecoveryDefaults(schema.unwrap()));
+  }
+  if (schema instanceof z.ZodNullable) {
+    return z.nullable(withoutRecoveryDefaults(schema.unwrap()));
+  }
+  if (schema instanceof z.ZodArray) {
+    return z.array(withoutRecoveryDefaults(schema.element));
+  }
+  if (schema instanceof z.ZodRecord) {
+    return z.record(schema.keyType, withoutRecoveryDefaults(schema.valueType));
+  }
+  if (schema instanceof z.ZodObject) {
+    return schema.extend(Object.fromEntries(
+      Object.entries(schema.shape).map(([key, field]) => [key, withoutRecoveryDefaults(field)]),
+    ));
+  }
+  return schema;
+}
+
+// Historical omissions may migrate; malformed stored values must remain intact.
+export const storedProjectMetaSchema = withoutRecoveryDefaults(metaBlobSchema);
+
 export type MetaBlob = z.infer<typeof metaBlobSchema>;

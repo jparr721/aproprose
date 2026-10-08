@@ -790,6 +790,59 @@ describe("owned project persistence", () => {
     expect(useProjectStore.getState().remoteDivergence).toBeNull();
   });
 
+  for (const source of ["repository", "legacy"]) {
+    it.each([
+      { field: "outline.premise", raw: { outline: { premise: ["Retain me"] } } },
+      { field: "characters", raw: { characters: ["invalid character"] } },
+      { field: "character.name", raw: { characters: [{ name: ["Retain me"] }] } },
+      { field: "character.profile", raw: { characters: [{ profile: { voice: {} } }] } },
+      { field: "lore.tags", raw: { lore: [{ tags: ["valid", 1] }] } },
+      { field: "statuses", raw: { statuses: { ch1: "invalid" } } },
+      { field: "chapter.premise", raw: { chapters: { ch1: { premise: ["Retain me"] } } } },
+      { field: "card.flags", raw: { chapters: { ch1: { cards: [{ continuityFlags: [{ sev: "invalid" }] }] } } } },
+      { field: "knowledge.summary", raw: { knowledge: { chapters: { ch1: { summary: ["Retain me"] } } } } },
+      { field: "knowledge.candidate", raw: { knowledge: { characterCandidates: [{ profile: { voice: [] } }] } } },
+      { field: "knowledge.evidence", raw: { knowledge: { chapters: { ch1: { characterObservations: [{ evidence: [{ order: "invalid" }] }] } } } } },
+      { field: "legacy.acts", raw: { outline: { acts: [{ kind: "invalid" }] } } },
+      { field: "legacy.chapterBeats", raw: { chapterBeats: { ch1: { goal: [] } } } },
+    ])(`rejects corrupt nested ${source} metadata at $field without overwriting it`, async ({ raw }) => {
+      vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/corrupt-nested"), mainFile: null, detectedChapters: null });
+      if (source === "repository") vi.mocked(readProjectMeta).mockResolvedValueOnce(JSON.stringify(raw));
+      else vi.mocked(readAppData).mockResolvedValueOnce(raw);
+      vi.mocked(writeProjectMeta).mockClear();
+
+      await useProjectStore.getState().loadProjectAt("/corrupt-nested");
+
+      expect(useProjectStore.getState().status).toBe("empty");
+      expect(useProjectStore.getState().error).toContain("Invalid project metadata");
+      expect(writeProjectMeta).not.toHaveBeenCalled();
+    });
+
+    it(`migrates supported missing historical fields from ${source} metadata`, async () => {
+      const raw = {
+        version: 2,
+        characters: [{ id: "c1", name: "Mara", color: "clay", role: "Guide" }],
+        lore: [{ id: "l1", title: "The city" }],
+        outline: { premise: "Retained premise" },
+        chapters: { ch1: { premise: "Retained chapter", cards: [{ id: "card1", title: "Retained card", continuityFlags: [{ sev: "warn", text: "Retained warning" }] }] } },
+      };
+      vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/historical"), mainFile: null, detectedChapters: null });
+      if (source === "repository") vi.mocked(readProjectMeta).mockResolvedValueOnce(JSON.stringify(raw));
+      else vi.mocked(readAppData).mockResolvedValueOnce(raw);
+
+      await useProjectStore.getState().loadProjectAt("/historical");
+
+      expect(useProjectStore.getState().status).toBe("ready");
+      expect(useProjectStore.getState().meta).toMatchObject({
+        version: 5,
+        characters: [{ profile: emptyCharacterProfile() }],
+        lore: [{ description: "", tags: [], characterIds: [] }],
+        outline: { premise: "Retained premise", overview: "" },
+        chapters: { ch1: { premise: "Retained chapter", cards: [{ title: "Retained card", continuityFlags: [{ text: "Retained warning", blockIds: [] }] }] } },
+      });
+    });
+  }
+
   it.each(["{broken", "[]", '{"chapters":"broken"}', '{"characters":"broken"}', '{"outline":"broken"}'])("rejects corrupt in-repo metadata %s without replacing it from legacy storage", async (serialized) => {
     vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/corrupt"), mainFile: "main.tex", detectedChapters: null });
     vi.mocked(readProjectMeta).mockResolvedValueOnce(serialized);

@@ -176,6 +176,7 @@ const LOADING_RESET = {
 
 const RECENTS_KEY = "recents";
 const LAST_PROJECT_KEY = "last-project";
+
 /** Stable, filesystem-safe key for a project's metadata blob. */
 function metaKey(root: string): string {
   return `meta-${pathHash(root)}`;
@@ -689,7 +690,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
 
   // Shared tail of loading a ready project (used by loadProjectAt + migrate +
   // create): record recents, remember for relaunch, select first chapter, PDF.
-  const readMeta = async (root: string): Promise<{ meta: ProjectMeta; source: "repo" | "legacy" | "empty" }> => {
+  const readMeta = async (root: string, requestedRoot: string): Promise<{ meta: ProjectMeta; source: "repo" | "legacy" | "empty" }> => {
     const inRepo = await readProjectMeta(root);
     if (inRepo !== null) {
       let parsed: unknown;
@@ -699,18 +700,24 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
       if (!validated.success) throw new Error(`Invalid project metadata in ${root}/.aproprose/meta.json: ${validated.error.message}`);
       return { meta: runMigrations(parsed), source: "repo" };
     }
-    const legacy = await readAppData<unknown>(metaKey(root));
+    let legacyKey = metaKey(root);
+    let legacy = await readAppData<unknown>(legacyKey);
+    if (legacy === null && requestedRoot !== root) {
+      legacyKey = metaKey(requestedRoot);
+      legacy = await readAppData<unknown>(legacyKey);
+    }
     if (legacy !== null) {
       const validated = safeParse(storedProjectMetaSchema, legacy);
-      if (!validated.success) throw new Error(`Invalid project metadata in legacy app data ${metaKey(root)} for ${root}: ${validated.error.message}`);
+      if (!validated.success) throw new Error(`Invalid project metadata in legacy app data ${legacyKey} for ${root}: ${validated.error.message}`);
     }
     return { meta: runMigrations(legacy), source: legacy === null ? "empty" : "legacy" };
   };
 
-  const finishLoad = async (root: string, project: ProjectInfo, generation: number) => {
+  const finishLoad = async (requestedRoot: string, project: ProjectInfo, generation: number) => {
+    const root = project.root;
     await drainProjectMetaWrites(root);
     if (get().lifecycleGeneration !== generation) return;
-    const loaded = await readMeta(root);
+    const loaded = await readMeta(root, requestedRoot);
     if (get().lifecycleGeneration !== generation) return;
     const { meta } = loaded;
     if (loaded.source === "legacy") {
@@ -722,7 +729,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     }
 
     const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
-    const recents = [entry, ...get().recents.filter((r) => r.root !== root)].slice(0, 12);
+    const recents = [entry, ...get().recents.filter((r) => r.root !== root && r.root !== requestedRoot)].slice(0, 12);
     persistRecents(recents, root);
     void writeAppData(LAST_PROJECT_KEY, root).catch((error: unknown) => {
       if (owns(generation, root)) toast.error("Couldn't remember the project", { description: String(error) });
@@ -873,7 +880,17 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         if (!outcome.project) {
           throw new Error("managed project returned without data");
         }
-        await finishLoad(root, outcome.project, generation);
+        let project = outcome.project;
+        if (project.root !== root) {
+          const canonicalRoot = project.root;
+          const reopened = await queueProjectOperation(canonicalRoot, () => openProjectCmd(canonicalRoot));
+          if (get().lifecycleGeneration !== generation) return;
+          if (reopened.status !== "managed" || reopened.project === null) {
+            throw new Error(`Managed project layout changed while reopening ${canonicalRoot}`);
+          }
+          project = reopened.project;
+        }
+        await finishLoad(root, project, generation);
       } catch (e) {
         if (get().lifecycleGeneration === generation) {
           notifyAppError("project-open", "Project", root, e);
@@ -1770,7 +1787,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         const outcome = await openProjectCmd(root);
         if (!owns(lifecycleGeneration, root)) return;
         if (outcome.status !== "managed" || outcome.project === null) throw new Error("Synced project no longer has a managed project layout");
-        const nextMeta = await readMeta(root);
+        const nextMeta = await readMeta(root, root);
         if (!owns(lifecycleGeneration, root)) return;
         const chapter = outcome.project.chapters.find((entry) => entry.id === activeChapterId) ?? outcome.project.chapters[0];
         const source = chapter === undefined ? null : await readTextFile(root, chapter.file);

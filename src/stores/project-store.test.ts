@@ -32,6 +32,7 @@ import { useViewStore } from "@/stores/view-store";
 import { saveBeforeExit } from "@/lib/exit-guard";
 import { runUpdateFlow } from "@/lib/updater";
 import { noteProjectRemoteChanges, queueProjectOperation } from "@/lib/project-operations";
+import { pathHash } from "@/lib/path-hash";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import {
   characterProfileFingerprint,
@@ -788,6 +789,114 @@ describe("owned project persistence", () => {
     expect(trace).toEqual(["first start", "first end", "second", "pull"]);
     expect(useProjectStore.getState().meta.outline.overview).toBe("Second local overview");
     expect(useProjectStore.getState().remoteDivergence).toBeNull();
+  });
+
+  it("uses the native canonical root for chapter, metadata, recents, and sync ownership", async () => {
+    const root = "/canonical/book";
+    const alias = "/alias/book";
+    useProjectStore.setState({ recents: [
+      { root: alias, name: "Book", openedAt: 1 },
+      { root, name: "Book", openedAt: 2 },
+    ] });
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture(root), mainFile: null, detectedChapters: null });
+    vi.mocked(readProjectMeta).mockClear();
+    vi.mocked(writeAppData).mockClear();
+
+    await useProjectStore.getState().loadProjectAt(alias);
+
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().blocks[0].text).toBe("Remote chapter");
+    expect(readProjectMeta).toHaveBeenCalledWith(root);
+    expect(readProjectMeta).not.toHaveBeenCalledWith(alias);
+    expect(readAppData).toHaveBeenCalledWith(`last-chapter-${pathHash(root)}`);
+    expect(useSyncStore.getState().init).toHaveBeenCalledWith(root);
+    expect(writeAppData).toHaveBeenCalledWith("last-project", root);
+    expect(useProjectStore.getState().recents[0].root).toBe(root);
+    expect(useProjectStore.getState().recents).toHaveLength(1);
+  });
+
+  it("reconciles pulls after opening an alias instead of saving the stale manuscript", async () => {
+    const root = "/canonical/pulled";
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture(root), mainFile: null, detectedChapters: null });
+    vi.mocked(useSyncStore.getState().init).mockImplementation(async (openedRoot) => {
+      useSyncStore.setState({ root: openedRoot, inFlight: false });
+    });
+    await useProjectStore.getState().loadProjectAt("/alias/pulled");
+    vi.mocked(syncProject).mockResolvedValueOnce({ outcome: { kind: "synced" }, changedFiles: ["chapter-one.tex"] });
+    vi.mocked(readTextFile).mockResolvedValueOnce("Pulled manuscript");
+
+    await useSyncStore.getState().syncNow();
+
+    expect(syncProject).toHaveBeenCalledWith(root, expect.any(String));
+    expect(useProjectStore.getState().blocks[0].text).toBe("Pulled manuscript");
+    expect(useProjectStore.getState().remoteDivergence).toBeNull();
+  });
+
+  it("reopens an alias through the canonical queue after pending skeleton writes", async () => {
+    const root = "/canonical/queued";
+    const alias = "/alias/queued";
+    const gate = deferred<void>();
+    const original = projectFixture(root);
+    const updated = { ...original, chapters: [{ ...original.chapters[0], title: "Committed title" }] };
+    const writing = queueProjectOperation(root, async () => gate.promise);
+    useProjectStore.getState().closeProject();
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: original, mainFile: null, detectedChapters: null })
+      .mockResolvedValueOnce({ status: "managed", project: updated, mainFile: null, detectedChapters: null });
+
+    const loading = useProjectStore.getState().loadProjectAt(alias);
+    await flushPromises();
+    const statusWhileWriting = useProjectStore.getState().status;
+    gate.resolve();
+    await Promise.all([writing, loading]);
+
+    expect(statusWhileWriting).toBe("loading");
+    expect(openProject).toHaveBeenNthCalledWith(2, root);
+    expect(useProjectStore.getState().project).toEqual(updated);
+  });
+
+  it("migrates alias-only historical metadata into the canonical repository", async () => {
+    const root = "/canonical/historical";
+    const alias = "/alias/historical";
+    const legacy = { ...storyMetaFixture(), outline: { premise: "Retained alias premise", overview: "" } };
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture(root), mainFile: null, detectedChapters: null });
+    vi.mocked(readAppData).mockClear().mockResolvedValueOnce(null).mockResolvedValueOnce(legacy);
+    vi.mocked(writeProjectMeta).mockClear();
+
+    await useProjectStore.getState().loadProjectAt(alias);
+
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Retained alias premise");
+    expect(readAppData).toHaveBeenCalledWith(`meta-${pathHash(root)}`);
+    expect(readAppData).toHaveBeenCalledWith(`meta-${pathHash(alias)}`);
+    expect(writeProjectMeta).toHaveBeenCalledWith(root, JSON.stringify(legacy));
+  });
+
+  it("rejects malformed alias-only historical metadata before migration writes", async () => {
+    const root = "/canonical/corrupt-alias";
+    const alias = "/alias/corrupt-alias";
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture(root), mainFile: null, detectedChapters: null });
+    vi.mocked(readAppData).mockResolvedValueOnce(null).mockResolvedValueOnce({ outline: { premise: ["Retain me"] } });
+    vi.mocked(writeProjectMeta).mockClear();
+
+    await useProjectStore.getState().loadProjectAt(alias);
+
+    expect(useProjectStore.getState().status).toBe("empty");
+    expect(useProjectStore.getState().error).toContain(`meta-${pathHash(alias)}`);
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it.each(["repository", "legacy"])("keeps canonical %s metadata authoritative over alias legacy data", async (source) => {
+    const root = "/canonical/authoritative";
+    const alias = "/alias/authoritative";
+    const canonical = { ...storyMetaFixture(), outline: { premise: "Canonical premise", overview: "" } };
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture(root), mainFile: null, detectedChapters: null });
+    vi.mocked(readAppData).mockClear();
+    if (source === "repository") vi.mocked(readProjectMeta).mockResolvedValueOnce(JSON.stringify(canonical));
+    else vi.mocked(readAppData).mockResolvedValueOnce(canonical);
+
+    await useProjectStore.getState().loadProjectAt(alias);
+
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Canonical premise");
+    expect(readAppData).not.toHaveBeenCalledWith(`meta-${pathHash(alias)}`);
   });
 
   for (const source of ["repository", "legacy"]) {

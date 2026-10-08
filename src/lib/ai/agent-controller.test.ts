@@ -78,6 +78,7 @@ import { EMPTY_META } from "@/lib/migration";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type {
   Block,
+  BlockChange,
   ChapterOutline,
   ProjectInfo,
   ProjectMeta,
@@ -3762,5 +3763,39 @@ describe("historic proposal mode authority", () => {
     expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Try again", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("original run metadata") } });
     expect(getModel).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+  });
+});
+
+
+describe("existing non-prose selected actions", () => {
+  it.each(["structure", "clean"] as const)("allows %s on existing selected block types through actual SDK and JSON reopen", async (operation) => {
+    const source = operation === "structure" ? "``One.'' ``Two.''\n" : "Narration first.\n\n% @scratch: A private intention.\n";
+    useProjectStore.setState({ blocks: parseChapter(source) });
+    expect(useProjectStore.getState().blocks.map((item) => item.type)).toEqual(operation === "structure" ? ["latex"] : ["narration", "scratchpad"]);
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => new MockLanguageModelV3({ doStream: async () => {
+      const blocks = useProjectStore.getState().blocks;
+      const changes: BlockChange[] = blocks.map((item, index) => ({ kind: "rewrite", blockId: item.id, afterId: null, type: "narration", speaker: null, newText: `Preserved selected wording ${index}.`, toIndex: null, reason: "Apply the selected operation" }));
+      if (operation === "structure") changes.push({ kind: "insert", blockId: null, afterId: blocks[0].id, type: "dialogue", speaker: "Mara", newText: "Two.", toIndex: null, reason: "Separate the quote" });
+      return providerOriginStream([
+        { type: "tool-call", toolCallId: "selected", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Work on these selected blocks", changes }) },
+        { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } },
+      ]);
+    } });
+    const controller = createAgentController(dependencies);
+    const task: AgentTask = { kind: "selected-block-edit", chapterId: "ch1", blockIds: useProjectStore.getState().blocks.map((item) => item.id), operation };
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Apply the selected operation", refs: [], task })).toEqual({ status: "success" });
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected selected proposal");
+    expect(original.changes).toHaveLength(2);
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    useProjectStore.setState({ blocks: parseChapter(source) });
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same operation", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+    const latest = useAgentConsoleStore.getState().proposalRecords.at(-1);
+    if (latest?.source.kind !== "run") throw new Error("Expected selected replacement");
+    expect(latest.source.origin).toMatchObject({ kind: "selected-block-edit", operation });
+    expect(dependencies.stream.mock.calls.at(-1)?.[0].environment.policy.action).toBe(operation === "clean" ? "copyeditor" : "block-structurer");
+    expect(latest.proposal.changes).toHaveLength(2);
   });
 });

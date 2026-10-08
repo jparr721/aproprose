@@ -139,3 +139,21 @@ describe("proposal origin receipts", () => {
     expect(resolve([original], blocks, original.proposal.id)).toMatchObject({ mode: "writing", task: origin.task });
   });
 });
+
+
+describe("selection source types", () => {
+  it.each(["chapter", "narration", "dialogue", "lore", "scratchpad", "latex"] as const)("preserves actual %s selection type on strict relocation", (type) => {
+    const originalBlock: Block = { id: "original", type, text: "Selected source text.", raw: "", dirty: false };
+    const currentBlock: Block = { ...originalBlock, id: "reopened" };
+    const selection = { ...task, blockIds: [originalBlock.id] };
+    const original = record();
+    original.source = { kind: "run", runId: "selection", task: selection, text: "Clean", origin: captureProposalOrigin({ task: selection, mode: "edit", blocks: [originalBlock] }) };
+    expect(resolve([original], [currentBlock], original.proposal.id).task).toMatchObject({ blockIds: [currentBlock.id] });
+  });
+
+  it.each(["anchor", "successor"] as const)("rejects a non-prose bridge %s", (boundary) => {
+    const sourceBlocks = [blocks[0], { ...blocks[1], type: "scratchpad" } satisfies Block];
+    const bridgeTask = { kind: "bridge", chapterId: "ch1", anchorBlockId: sourceBlocks[boundary === "anchor" ? 1 : 0].id, successorBlockId: boundary === "anchor" ? null : sourceBlocks[1].id } satisfies AgentTask;
+    expect(() => captureProposalOrigin({ task: bridgeTask, mode: "writing", blocks: sourceBlocks })).toThrow("boundary is not prose");
+  });
+});

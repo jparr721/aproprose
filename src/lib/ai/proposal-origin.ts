@@ -46,12 +46,17 @@ function requireProse(locator: SourceLocator): void {
 }
 
 function resolveBoundary(locator: SourceLocator, blocks: Block[]): string {
-  requireProse(locator);
   const block = resolveBlockLocator(locator, blocks);
   if (block === null) {
     throw new ProposalOriginError("source-missing", `The original selected source is missing or changed: ${locator.sourceId}. Start the original action again to select the current prose.`);
   }
+  if (block.type !== locator.sourceType) invalidOrigin(`The original selected source type changed: ${locator.sourceId}.`);
   return block.id;
+}
+
+function resolveBridgeBoundary(locator: SourceLocator, blocks: Block[]): string {
+  requireProse(locator);
+  return resolveBoundary(locator, blocks);
 }
 
 export function captureProposalOrigin(args: {
@@ -65,15 +70,14 @@ export function captureProposalOrigin(args: {
       invalidOrigin("The original selection must contain distinct source blocks.");
     }
     const locators = task.blockIds.map((id) => blockLocator(blocks, id));
-    locators.forEach(requireProse);
     return { kind: task.kind, mode, chapterId: task.chapterId, operation: task.operation, blocks: locators };
   }
   if (task.kind === "bridge") {
-    return {
-      kind: task.kind, mode, chapterId: task.chapterId,
-      anchor: task.anchorBlockId === null ? null : blockLocator(blocks, task.anchorBlockId),
-      successor: task.successorBlockId === null ? null : blockLocator(blocks, task.successorBlockId),
-    };
+    const anchor = task.anchorBlockId === null ? null : blockLocator(blocks, task.anchorBlockId);
+    const successor = task.successorBlockId === null ? null : blockLocator(blocks, task.successorBlockId);
+    if (anchor !== null) requireProse(anchor);
+    if (successor !== null) requireProse(successor);
+    return { kind: task.kind, mode, chapterId: task.chapterId, anchor, successor };
   }
   return { kind: "task", mode, task };
 }
@@ -236,8 +240,8 @@ export function resolveProposalOrigin(args: {
     task: {
       kind: "bridge",
       chapterId: retainedOrigin.chapterId,
-      anchorBlockId: retainedOrigin.anchor === null ? null : resolveBoundary(retainedOrigin.anchor, args.blocks),
-      successorBlockId: retainedOrigin.successor === null ? null : resolveBoundary(retainedOrigin.successor, args.blocks),
+      anchorBlockId: retainedOrigin.anchor === null ? null : resolveBridgeBoundary(retainedOrigin.anchor, args.blocks),
+      successorBlockId: retainedOrigin.successor === null ? null : resolveBridgeBoundary(retainedOrigin.successor, args.blocks),
     },
   };
 }

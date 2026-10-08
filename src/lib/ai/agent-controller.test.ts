@@ -3629,9 +3629,8 @@ describe("specialist proposal follow-up origin", () => {
 });
 
 
-describe("global overview follow-up origin", () => {
-  it("retains a chapter-targeted writer origin for a global overview replacement", async () => {
-    const dependencies = makeDependencies(null);
+function overviewOriginDependencies() {
+  const dependencies = makeDependencies(null);
     dependencies.stream.mockImplementation(streamAgentRun);
     dependencies.getModel = async () => {
       let staged = false;
@@ -3644,6 +3643,12 @@ describe("global overview follow-up origin", () => {
         return providerOriginStream(chunks);
       } });
     };
+  return dependencies;
+}
+
+describe("global overview follow-up origin", () => {
+  it("retains a chapter-targeted writer origin for a global overview replacement", async () => {
+    const dependencies = overviewOriginDependencies();
     const controller = createAgentController(dependencies);
     expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise the overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
     const original = useAgentConsoleStore.getState().pendingProposal;
@@ -3714,5 +3719,48 @@ describe("specialist follow-up completion and stale boundaries", () => {
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
     expect(useAgentConsoleStore.getState().messages).toEqual([]);
+  });
+});
+
+
+describe("historic proposal mode authority", () => {
+  it.each(["retained", "missing"] as const)("does not stamp a guessed original mode with %s metadata", async (history) => {
+    const dependencies = overviewOriginDependencies();
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const oldSnapshot = await toAgentSnapshot();
+    for (const record of oldSnapshot.proposalRecords) if (record.source.kind === "run") delete record.source.origin;
+    if (history === "missing") oldSnapshot.messages = [];
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(oldSnapshot))));
+    for (const mode of ["edit", "writing"] as const) {
+      const original = useAgentConsoleStore.getState().pendingProposal;
+      if (original === null) throw new Error("Expected pending old overview");
+      expect(await controller.submitAgentRequest({ kind: "run", mode, text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+      const input = dependencies.stream.mock.calls.at(-1)?.[0];
+      if (input === undefined) throw new Error("Expected follow-up stream");
+      expect(input.environment.policy.action).toBe(history === "retained" || mode === "writing" ? "writer" : "literary-editor");
+      const source = useAgentConsoleStore.getState().proposalRecords.at(-1)?.source;
+      if (source?.kind !== "run") throw new Error("Expected run source");
+      expect(source.origin).toMatchObject({ mode: history === "retained" ? "writing" : "legacy" });
+      useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    }
+  });
+
+  it.each(["mode", "task"] as const)("refuses conflicting original run %s metadata before provider invocation", async (conflict) => {
+    const dependencies = overviewOriginDependencies();
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const oldSnapshot = await toAgentSnapshot();
+    for (const record of oldSnapshot.proposalRecords) if (record.source.kind === "run") delete record.source.origin;
+    if (conflict === "mode") oldSnapshot.messages[0].metadata.mode = "edit";
+    else oldSnapshot.messages[0].metadata.task = conversationTask("ch2");
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(oldSnapshot))));
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected old proposal");
+    const getModel = vi.fn(dependencies.getModel);
+    dependencies.getModel = getModel;
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Try again", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("original run metadata") } });
+    expect(getModel).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
   });
 });

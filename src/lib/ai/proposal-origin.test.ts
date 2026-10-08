@@ -25,7 +25,7 @@ function record(): AgentProposalRecord {
 }
 
 function resolve(records: AgentProposalRecord[], liveBlocks: Block[], proposalId: string) {
-  return resolveProposalOrigin({ task: { kind: "proposal-follow-up", proposalId }, mode: "writing", projectRoot: "/book", targetChapterId: "ch1", blocks: liveBlocks, records });
+  return resolveProposalOrigin({ task: { kind: "proposal-follow-up", proposalId }, mode: "writing", projectRoot: "/book", targetChapterId: "ch1", blocks: liveBlocks, records, messages: [] });
 }
 
 describe("proposal origin receipts", () => {

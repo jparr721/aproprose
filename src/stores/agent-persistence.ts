@@ -278,18 +278,20 @@ const pendingProposalSchema = z
     });
   });
 
+const proposalOriginModeSchema = z.enum(["writing", "edit", "legacy"]);
+
 const proposalOriginSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("legacy") }),
   z.strictObject({
-    kind: z.literal("selected-block-edit"), mode: agentModeSchema,
+    kind: z.literal("selected-block-edit"), mode: proposalOriginModeSchema,
     chapterId: z.string(), operation: z.enum(["clean", "structure", "custom"]),
     blocks: z.array(sourceLocatorSchema),
   }),
   z.strictObject({
-    kind: z.literal("bridge"), mode: agentModeSchema, chapterId: z.string(),
+    kind: z.literal("bridge"), mode: proposalOriginModeSchema, chapterId: z.string(),
     anchor: sourceLocatorSchema.nullable(), successor: sourceLocatorSchema.nullable(),
   }),
-  z.strictObject({ kind: z.literal("task"), mode: agentModeSchema, task: generalTaskSchema }),
+  z.strictObject({ kind: z.literal("task"), mode: proposalOriginModeSchema, task: generalTaskSchema }),
 ]);
 
 const proposalRecordSchema = z.object({

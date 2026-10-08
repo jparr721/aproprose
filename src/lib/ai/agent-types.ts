@@ -251,25 +251,27 @@ export type PersistedPendingProposal =
   | Omit<OutlinePendingProposal, "projectRoot">
   | Omit<OverviewPendingProposal, "projectRoot">;
 
+export type ProposalOriginMode = AgentMode | "legacy";
+
 export type ProposalOrigin =
   | { kind: "legacy" }
   | {
       kind: "selected-block-edit";
-      mode: AgentMode;
+      mode: ProposalOriginMode;
       chapterId: string;
       operation: Extract<AgentTask, { kind: "selected-block-edit" }>["operation"];
       blocks: SourceLocator[];
     }
   | {
       kind: "bridge";
-      mode: AgentMode;
+      mode: ProposalOriginMode;
       chapterId: string;
       anchor: SourceLocator | null;
       successor: SourceLocator | null;
     }
   | {
       kind: "task";
-      mode: AgentMode;
+      mode: ProposalOriginMode;
       task: Exclude<AgentTask, { kind: "proposal-follow-up" | "selected-block-edit" | "bridge" }>;
     };
 

@@ -8,7 +8,9 @@ import type {
   AgentMode,
   AgentProposalRecord,
   AgentTask,
+  AgentUIMessage,
   ProposalOrigin,
+  ProposalOriginMode,
   ProposalSource,
   SourceLocator,
 } from "@/lib/ai/agent-types";
@@ -85,7 +87,7 @@ function retainedLocators(record: AgentProposalRecord): SourceLocator[] {
   );
 }
 
-function recoverOriginalOrigin(record: AgentProposalRecord, mode: AgentMode): ProposalOrigin {
+function recoverOriginalOrigin(record: AgentProposalRecord, mode: ProposalOriginMode): ProposalOrigin {
   if (record.source.kind === "legacy") return { kind: "legacy" };
   const task = record.source.task;
   if (task.kind === "proposal-follow-up") return invalidOrigin("The original proposal task is unavailable.");
@@ -124,6 +126,19 @@ interface RetainedOriginInput {
   mode: AgentMode;
   projectRoot: string;
   records: AgentProposalRecord[];
+  messages: AgentUIMessage[];
+}
+
+function originalMode(source: Extract<ProposalSource, { kind: "run" }>, messages: AgentUIMessage[]): ProposalOriginMode {
+  const metadata = messages.flatMap((message) =>
+    message.metadata !== undefined && message.metadata.runId === source.runId ? [message.metadata] : [],
+  );
+  if (metadata.length === 0) return "legacy";
+  const mode = metadata[0].mode;
+  if (metadata.some((item) => item.mode !== mode || !isEqual(item.task, source.task))) {
+    invalidOrigin("The original run metadata disagrees about its mode or task.");
+  }
+  return mode;
 }
 
 function retainedProposalOrigin(args: RetainedOriginInput): ProposalOrigin {
@@ -152,7 +167,11 @@ function retainedProposalOrigin(args: RetainedOriginInput): ProposalOrigin {
       retainedOrigin = source.origin;
     }
     if (source.task.kind !== "proposal-follow-up") {
-      retainedOrigin ??= recoverOriginalOrigin(record, args.mode);
+      const mode = originalMode(source, args.messages);
+      retainedOrigin ??= recoverOriginalOrigin(record, mode);
+      if (retainedOrigin.kind !== "legacy" && mode !== "legacy" && retainedOrigin.mode !== mode) {
+        invalidOrigin("The original run metadata disagrees with its saved mode receipt.");
+      }
       if (retainedOrigin.kind === "legacy" || !isEqual(originalTask(retainedOrigin), source.task)) {
         invalidOrigin("The saved original task does not match its proposal origin.");
       }
@@ -183,24 +202,26 @@ export function resolveProposalOrigin(args: {
   targetChapterId: string | null;
   blocks: Block[];
   records: AgentProposalRecord[];
+  messages: AgentUIMessage[];
 }): ResolvedProposalOrigin {
   if (args.task.kind !== "proposal-follow-up") {
     return { origin: captureProposalOrigin({ task: args.task, mode: args.mode, blocks: args.blocks }), mode: args.mode, task: args.task };
   }
   const retainedOrigin = retainedProposalOrigin({ ...args, proposalId: args.task.proposalId });
   if (retainedOrigin.kind === "legacy") return { origin: retainedOrigin, mode: args.mode, task: args.task };
+  const mode = retainedOrigin.mode === "legacy" ? args.mode : retainedOrigin.mode;
   if (retainedOrigin.kind === "task") {
     const task = retainedOrigin.task;
     if ("chapterId" in task) requireChapter(task.chapterId, args.targetChapterId);
     if (task.kind === "conversation" && task.targetChapterId !== null) requireChapter(task.targetChapterId, args.targetChapterId);
-    return { origin: retainedOrigin, mode: retainedOrigin.mode, task };
+    return { origin: retainedOrigin, mode, task };
   }
   requireChapter(retainedOrigin.chapterId, args.targetChapterId);
   if (retainedOrigin.kind === "selected-block-edit") {
     if (retainedOrigin.blocks.length === 0 || new Set(retainedOrigin.blocks.map((item) => item.sourceId)).size !== retainedOrigin.blocks.length) invalidOrigin("The saved original selection is empty or duplicated.");
     return {
       origin: retainedOrigin,
-      mode: retainedOrigin.mode,
+      mode,
       task: {
         kind: retainedOrigin.kind,
         chapterId: retainedOrigin.chapterId,
@@ -211,7 +232,7 @@ export function resolveProposalOrigin(args: {
   }
   return {
     origin: retainedOrigin,
-    mode: retainedOrigin.mode,
+    mode,
     task: {
       kind: "bridge",
       chapterId: retainedOrigin.chapterId,

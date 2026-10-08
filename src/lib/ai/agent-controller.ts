@@ -1622,6 +1622,7 @@ export function createAgentController(
             mode: capture.mode,
             projectRoot: capture.projectRoot,
             records: capture.proposalRecords,
+            messages: capture.messages,
           })
         : null;
       const frozen = {
@@ -1636,6 +1637,7 @@ export function createAgentController(
         targetChapterId: frozen.chapter === null ? null : frozen.chapter.chapterId,
         blocks: frozen.chapter === null ? [] : frozen.chapter.blocks,
         records: capture.proposalRecords,
+        messages: capture.messages,
       });
       if (origin.task.kind === "bridge") {
         if (frozen.chapter === null) throw new AgentProposalError("wrong-chapter", "The original bridge chapter is unavailable. Start the original action again.");

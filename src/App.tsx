@@ -48,7 +48,8 @@ import { useViewStore } from "@/stores/view-store";
 import { useAgentPersistence } from "@/stores/agent-persistence";
 import { cn } from "@/lib/utils";
 import { saveBeforeExit } from "@/lib/exit-guard";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 
 export function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
@@ -66,6 +67,15 @@ export function Workspace() {
   // the store only on pointer release (the group's onLayoutChanged) so we don't
   // write to the Tauri-backed store on every frame of the drag.
   const liveWidth = useRef(rightPanelWidth);
+  const rightPanel = useRef<PanelImperativeHandle>(null);
+  const previousShowAi = useRef(showAi);
+
+  useLayoutEffect(() => {
+    if (previousShowAi.current === showAi) return;
+    previousShowAi.current = showAi;
+    if (showAi) rightPanel.current?.resize(rightPanelWidth);
+    else rightPanel.current?.collapse();
+  }, [showAi, rightPanelWidth]);
 
   // The editor + PDF stay mounted in the `main` panel across every AI toggle, so
   // collapsing/expanding the right panel never remounts (and resets) the editor.
@@ -93,29 +103,46 @@ export function Workspace() {
       <div className="flex min-h-0 flex-1">
         <ResizablePanelGroup
           orientation="horizontal"
-          className="min-w-0 flex-1"
-          onLayoutChanged={() => setRightPanelWidth(Math.round(liveWidth.current))}
+          className="min-w-0 flex-1 [&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-250 [&>[data-panel]]:ease-in-out motion-reduce:[&>[data-panel]]:transition-none [&:has([data-separator=active])>[data-panel]]:transition-none"
+          onLayoutChanged={() => {
+            if (showAi) setRightPanelWidth(Math.round(liveWidth.current));
+          }}
         >
           <ResizablePanel id="main" minSize={360}>
             {main}
           </ResizablePanel>
-          {showAi ? (
-            <>
-              <ResizableHandle withHandle />
-              <ResizablePanel
-                id="right"
-                defaultSize={rightPanelWidth}
-                minSize={320}
-                maxSize={640}
-                groupResizeBehavior="preserve-pixel-size"
-                onResize={(size) => {
-                  liveWidth.current = size.inPixels;
-                }}
-              >
-                <AgentConsole />
-              </ResizablePanel>
-            </>
-          ) : null}
+          <ResizableHandle
+            withHandle
+            disabled={!showAi}
+            className={cn(!showAi && "invisible w-0")}
+          />
+          <ResizablePanel
+            id="right"
+            panelRef={rightPanel}
+            aria-hidden={!showAi}
+            inert={!showAi}
+            className="overflow-hidden!"
+            defaultSize={showAi ? rightPanelWidth : 0}
+            collapsible
+            minSize={320}
+            maxSize={640}
+            groupResizeBehavior="preserve-pixel-size"
+            onResize={(size, _id, previousSize) => {
+              if (showAi && size.inPixels >= 320) liveWidth.current = size.inPixels;
+              if (
+                showAi &&
+                size.asPercentage === 0 &&
+                previousSize !== undefined &&
+                previousSize.asPercentage > 0
+              ) {
+                useViewStore.getState().setAiOpen(false);
+              }
+            }}
+          >
+            <div className="h-full min-w-80">
+              <AgentConsole />
+            </div>
+          </ResizablePanel>
         </ResizablePanelGroup>
       </div>
     </>

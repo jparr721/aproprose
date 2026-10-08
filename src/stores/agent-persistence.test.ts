@@ -1808,6 +1808,12 @@ describe("agent persistence", () => {
       if (key === agentStateKey("/books/new")) {
         return Promise.resolve(persistedState("New root draft", []));
       }
+      if (
+        key === agentSessionCollectionKey("/books/old") ||
+        key === agentSessionCollectionKey("/books/new")
+      ) {
+        return Promise.resolve(null);
+      }
       throw new Error(`Unexpected persistence key: ${key}`);
     });
     useProjectStore.setState({ project: project("/books/old") });
@@ -1863,7 +1869,12 @@ describe("agent persistence", () => {
         },
       }),
     );
-    expect(tauri.readAppData).not.toHaveBeenCalled();
+    expect(tauri.readAppData).not.toHaveBeenCalledWith(
+      agentStateKey("/books/old"),
+    );
+    expect(tauri.readAppData).toHaveBeenCalledWith(
+      agentSessionCollectionKey("/books/old"),
+    );
 
     tauri.writeAppData.mockClear();
     vi.useFakeTimers();
@@ -2570,6 +2581,154 @@ describe("agent persistence", () => {
       persistenceTransition: null,
       persistenceIssue: null,
     });
+  });
+
+  it("retries an unavailable project read and restores its retained Changes", async () => {
+    const root = "/books/retry-unavailable-project";
+    const recovered: PersistedAgentState = {
+      ...persistedState("Recovered project draft", []),
+      proposalRecords: [{
+        proposal: { ...proposal, projectRoot: root },
+        source: { kind: "legacy" },
+        decisions: {},
+        replacedByProposalId: null,
+      }],
+      currentProposalId: proposal.id,
+    };
+    let projectReads = 0;
+    tauri.readAppData.mockImplementation(async (key: string) => {
+      if (key === agentStateKey(root)) {
+        projectReads += 1;
+        if (projectReads === 1) throw new Error("read temporarily unavailable");
+        return structuredClone(recovered);
+      }
+      if (key === agentSessionCollectionKey(root)) return null;
+      throw new Error(`Unexpected persistence key: ${key}`);
+    });
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+        persistenceIssue: { kind: "load", projectRoot: root },
+      }),
+    );
+
+    await retryAgentSessionPersistence(root, { kind: "project" });
+
+    expect(projectReads).toBe(2);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: root,
+      persistenceTransition: null,
+      persistenceIssue: null,
+      draftText: recovered.draftText,
+      currentProposalId: proposal.id,
+      proposalRecords: recovered.proposalRecords,
+    });
+    expect(selectPendingProposal(useAgentConsoleStore.getState())?.id).toBe(
+      proposal.id,
+    );
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    persistence.unmount();
+  });
+
+  it("rejects Retry when the project snapshot remains corrupt without replacing it", async () => {
+    const root = "/books/retry-corrupt-project";
+    const raw = { ...emptyPersistedAgentState(), draftText: 42 };
+    const disk = new Map<string, unknown>([[agentStateKey(root), raw]]);
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      structuredClone(disk.get(key) ?? null),
+    );
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+        persistenceIssue: { kind: "corrupt", projectRoot: root },
+      }),
+    );
+
+    await expect(
+      retryAgentSessionPersistence(root, { kind: "project" }),
+    ).rejects.toMatchObject({
+      issue: { kind: "corrupt", projectRoot: root },
+    });
+
+    expect(tauri.readAppData.mock.calls.filter(
+      ([key]) => key === agentStateKey(root),
+    )).toHaveLength(2);
+    expect(useAgentConsoleStore.getState()).toMatchObject({
+      requestedProjectRoot: root,
+      activeProjectRoot: root,
+      hydratedProjectRoot: null,
+      persistenceTransition: null,
+      persistenceIssue: { kind: "corrupt", projectRoot: root },
+    });
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    expect(disk.get(agentStateKey(root))).toEqual(raw);
+    expect(() => useAgentConsoleStore.getState().setDraftText("Unsafe edit"))
+      .toThrowError(expect.objectContaining({ name: "AgentConsoleOwnershipError" }));
+    persistence.unmount();
+  });
+
+  it("does not hydrate a late project Retry after switching to another project", async () => {
+    const root = "/books/retry-switch-old";
+    const otherRoot = "/books/retry-switch-new";
+    const lateRead = deferred<PersistedAgentState>();
+    let projectReads = 0;
+    tauri.readAppData.mockImplementation(async (key: string) => {
+      if (key === agentStateKey(root)) {
+        projectReads += 1;
+        if (projectReads === 1) throw new Error("read temporarily unavailable");
+        return lateRead.promise;
+      }
+      if (key === agentStateKey(otherRoot)) {
+        return persistedState("Current project draft", []);
+      }
+      if (
+        key === agentSessionCollectionKey(root) ||
+        key === agentSessionCollectionKey(otherRoot)
+      ) return null;
+      throw new Error(`Unexpected persistence key: ${key}`);
+    });
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        hydratedProjectRoot: null,
+        persistenceTransition: null,
+        persistenceIssue: { kind: "load", projectRoot: root },
+      }),
+    );
+
+    const retrying = capturePromiseError(
+      retryAgentSessionPersistence(root, { kind: "project" }),
+    );
+    await vi.waitFor(() => expect(projectReads).toBe(2));
+    useProjectStore.setState({ project: project(otherRoot) });
+    lateRead.resolve(persistedState("Late old project draft", []));
+    await retrying;
+
+    await vi.waitFor(() =>
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        requestedProjectRoot: otherRoot,
+        activeProjectRoot: otherRoot,
+        hydratedProjectRoot: otherRoot,
+        persistenceTransition: null,
+        persistenceIssue: null,
+        draftText: "Current project draft",
+      }),
+    );
+    expect(useProjectStore.getState().project?.root).toBe(otherRoot);
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    persistence.unmount();
   });
 
   it("leaves corrupt v3 data locked until an explicit safe reset", async () => {

@@ -43,12 +43,16 @@ for (const width of [960, 1440]) {
         const pane = page.locator(`[data-search-surface="${surface}"]`);
         const widget = pane.locator("[data-find-widget]");
         await expect(widget).toBeVisible();
-        const bounds = await pane.boundingBox();
-        const find = await widget.boundingBox();
-        expect(find).not.toBeNull();
-        expect(bounds).not.toBeNull();
-        expect(find!.x).toBeGreaterThanOrEqual(bounds!.x);
-        expect(find!.x + find!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+        await expect.poll(() => pane.evaluate((element) => {
+          const findWidget = element.querySelector("[data-find-widget]");
+          if (findWidget === null) throw new Error("Visible find widget is missing");
+          const bounds = element.getBoundingClientRect();
+          const find = findWidget.getBoundingClientRect();
+          return {
+            leftContained: find.left >= bounds.left,
+            rightContained: find.right <= bounds.right + 1,
+          };
+        })).toEqual({ leftContained: true, rightContained: true });
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     }

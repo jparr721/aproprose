@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/storage", () => ({
@@ -23,8 +23,18 @@ vi.mock("@/components/app/outline/outline-pane", () => ({
   OutlinePane: () => <div>Outline Pane</div>,
 }));
 
+vi.mock("@/components/ui/resizable", async (importOriginal) => {
+  const resizable = await importOriginal<typeof import("@/components/ui/resizable")>();
+  return {
+    ...resizable,
+    ResizablePanel: vi.fn(resizable.ResizablePanel),
+    ResizablePanelGroup: vi.fn(resizable.ResizablePanelGroup),
+  };
+});
+
 import { Workspace } from "@/App";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
@@ -60,6 +70,7 @@ const project: ProjectInfo = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   useViewStore.setState({
     aiOpen: true,
     pdfOpen: true,
@@ -91,6 +102,29 @@ afterEach(() => {
 });
 
 describe("Workspace", () => {
+  it("finishes a collapse drag before hiding the dock", () => {
+    render(<Workspace />);
+    const panel = vi.mocked(ResizablePanel).mock.calls.find(([props]) => props.id === "right")?.[0];
+    const group = vi.mocked(ResizablePanelGroup).mock.calls[0][0];
+    if (!panel?.onResize || !group.onLayoutChanged) {
+      throw new Error("Workspace must register panel resize and layout completion callbacks");
+    }
+
+    act(() => {
+      panel.onResize?.({ asPercentage: 0, inPixels: 0 }, "right", {
+        asPercentage: 30,
+        inPixels: 388,
+      });
+    });
+
+    expect(useViewStore.getState().aiOpen).toBe(true);
+
+    act(() => { group.onLayoutChanged?.({ main: 100, right: 0 }); });
+
+    expect(useViewStore.getState().aiOpen).toBe(false);
+    expect(useViewStore.getState().rightPanelWidth).toBe(388);
+  });
+
   it("co-docks Editor, PDF, and AI Console with AI as the rightmost panel", () => {
     const { container } = render(<Workspace />);
 
@@ -104,7 +138,7 @@ describe("Workspace", () => {
     expect(panels).toHaveLength(2);
     expect(panels[0].textContent).toContain("Editor Pane");
     expect(panels[0].textContent).toContain("PDF Pane");
-    expect(panels[1].textContent).toContain("AI Console");
+    expect(panels[1].contains(screen.getByRole("region", { name: "AI Console" }))).toBe(true);
     expect(container.querySelector("[data-slot=sheet]")).toBeNull();
     expect(container.querySelector("[data-slot=drawer]")).toBeNull();
     expect(container.querySelector("[data-slot=sidebar-provider]")).toBeNull();
@@ -112,15 +146,59 @@ describe("Workspace", () => {
 
   it("keeps Editor and PDF mounted when the AI Console closes", () => {
     render(<Workspace />);
+    const editor = screen.getByText("Editor Pane");
+    const pdf = screen.getByText("PDF Pane");
+    const console = screen.getByRole("region", { name: "AI Console" });
+    const rightPanel = console.closest("[data-panel]");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Close AI Console" }),
-    );
+    act(() => { useViewStore.getState().toggleAi(); });
 
-    expect(screen.getByText("Editor Pane")).toBeTruthy();
-    expect(screen.getByText("PDF Pane")).toBeTruthy();
+    expect(screen.getByText("Editor Pane")).toBe(editor);
+    expect(screen.getByText("PDF Pane")).toBe(pdf);
     expect(screen.queryByRole("region", { name: "AI Console" })).toBeNull();
     expect(useViewStore.getState().aiOpen).toBe(false);
+    expect(console.isConnected).toBe(true);
+    expect(rightPanel?.hasAttribute("inert")).toBe(true);
+    expect(useViewStore.getState().rightPanelWidth).toBe(388);
+
+    act(() => { useViewStore.getState().toggleAi(); });
+
+    expect(screen.getByRole("region", { name: "AI Console" })).toBe(console);
+    expect(rightPanel?.hasAttribute("inert")).toBe(false);
+    expect(screen.getByText("Editor Pane")).toBe(editor);
+    expect(screen.getByText("PDF Pane")).toBe(pdf);
+  });
+
+  it("keeps the same dock through focus mode and rapid toggles", () => {
+    render(<Workspace />);
+    const console = screen.getByRole("region", { name: "AI Console" });
+    const editor = screen.getByText("Editor Pane");
+
+    act(() => { useViewStore.getState().applyLayoutPreset("focus"); });
+    expect(screen.queryByRole("region", { name: "AI Console" })).toBeNull();
+    expect(console.isConnected).toBe(true);
+
+    act(() => { useViewStore.getState().applyLayoutPreset("two"); });
+    act(() => { useViewStore.getState().toggleAi(); });
+    act(() => { useViewStore.getState().toggleAi(); });
+
+    expect(screen.getByRole("region", { name: "AI Console" })).toBe(console);
+    expect(screen.getByText("Editor Pane")).toBe(editor);
+    expect(useViewStore.getState().rightPanelWidth).toBe(388);
+  });
+
+  it("opens an initially hidden dock without remounting it", () => {
+    useViewStore.setState({ aiOpen: false });
+    const { container } = render(<Workspace />);
+    const console = container.querySelector("[data-agent-console]");
+
+    expect(console).not.toBeNull();
+    expect(screen.queryByRole("region", { name: "AI Console" })).toBeNull();
+
+    act(() => { useViewStore.getState().toggleAi(); });
+
+    expect(screen.getByRole("region", { name: "AI Console" })).toBe(console);
+    expect(useViewStore.getState().rightPanelWidth).toBe(388);
   });
 
   it("keeps the editor mounted behind Outline while the AI Console remains open", () => {

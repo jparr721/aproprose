@@ -20,6 +20,16 @@ for (const width of [960, 1440]) {
     await page.setViewportSize({ width, height: 820 });
     await page.goto("/tests/workshop.html");
     const editor = page.locator('[data-search-surface="editor"]');
+    const main = page.locator('[data-slot="resizable-panel"]').filter({ has: editor });
+    const ai = page.getByRole("region", { name: "AI Console" });
+    await expect(ai).toBeVisible();
+    if (width === 960) {
+      await expect(main).toHaveAttribute("inert", "");
+      await expect(main).toHaveAttribute("aria-hidden", "true");
+      await ai.getByRole("button", { name: "Close AI Console" }).click();
+      await expect(ai).toHaveCount(0);
+    }
+    await expect(main).not.toHaveAttribute("inert", "");
     await expect(editor).toBeVisible();
     for (const theme of ["light", "sepia", "dark"] as const) {
       await page.evaluate((value) => window.workshop.setTheme(value), theme);

@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.17.2",
+    "date": "2026-10-07",
+    "summary": "AI conversations are clearer and more reliable, with faster editing and safer relaunches.",
+    "highlights": [
+      "The Writing and Edit modes now live in the composer footer, and switching modes preserves your draft and context.",
+      "AI activity appears immediately, with collapsible tool steps and clear completion, interruption, and error states.",
+      "Follow-up drafts stay intact during active requests, and the conversation follows newly submitted messages.",
+      "AI failures now provide actionable explanations with retry or AI settings actions.",
+      "Press Cmd/Ctrl+L to send selected blocks to the AI and focus the composer.",
+      "Editor typing is more responsive, and the AI dock now opens and closes smoothly without a redundant header.",
+      "Launching Aproprose again focuses the existing window instead of opening a duplicate."
+    ]
+  },
+  {
     "version": "0.17.1",
     "date": "2026-08-23",
     "summary": "Fixed Arch Linux packages so the app launches with its built-in interface.",

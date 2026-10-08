@@ -25,6 +25,7 @@ import {
   characterAgentSessionEntries,
   clearCharacterAgentSessions,
   deleteCharacterAgentSession,
+  selectPendingProposal,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import {
@@ -37,8 +38,10 @@ import {
   hydrateAgentOutlineSession,
   loadAgentState,
   loadAgentSessionCollection,
+  canResetAgentSessionPersistence,
   resetAgentConversation,
   retryAgentPersistence,
+  retryAgentSessionPersistence,
   saveAgentSessionCollection,
   saveAgentState,
   toAgentSnapshot,
@@ -228,6 +231,19 @@ function persistedState(
     ...emptyPersistedAgentState(),
     draftText,
     messages,
+  };
+}
+
+function persistedProposalState(pendingProposal: unknown, proposalId: string): unknown {
+  return {
+    ...emptyPersistedAgentState(),
+    proposalRecords: [{
+      proposal: pendingProposal,
+      source: { kind: "legacy" },
+      decisions: {},
+      replacedByProposalId: null,
+    }],
+    currentProposalId: proposalId,
   };
 }
 
@@ -531,20 +547,17 @@ describe("agent persistence", () => {
     const restored = await fromAgentSnapshot("/books/reopened", snapshot);
 
     expect(restored).toMatchObject({
-      v: 3,
+      v: 4,
       mode: "edit",
       draftText: "Ask about the ending",
       draftContextRefs: expect.arrayContaining([blockRef]),
-      pendingProposal: {
-        ...proposal,
-        projectRoot: "/books/reopened",
-      },
+      proposalRecords: [{ proposal: { ...proposal, projectRoot: "/books/reopened" } }],
     });
     expect(restored.messages).toHaveLength(messages.length);
     expect(restored.messages[0].metadata).toMatchObject({ failure: null });
     expect(restored.messages[1].metadata).toMatchObject({ failure: null });
     expect(restored.messages[2].metadata).toMatchObject({ failure: null });
-    expect(snapshot.pendingProposal).not.toHaveProperty("projectRoot");
+    expect(snapshot.proposalRecords[0].proposal).not.toHaveProperty("projectRoot");
     expect(JSON.stringify(snapshot)).not.toContain("/books/one");
     expect(JSON.stringify(snapshot)).not.toContain("Live source text must not persist");
     expect(snapshot).not.toHaveProperty("draftContextSources");
@@ -599,7 +612,7 @@ describe("agent persistence", () => {
     const snapshot = await toAgentSnapshot();
     const restored = await fromAgentSnapshot("/book", snapshot);
 
-    const restoredProposal = restored.pendingProposal;
+    const restoredProposal = selectPendingProposal(restored, "proposal-editable");
     if (restoredProposal === null || restoredProposal.kind !== "manuscript") {
       throw new Error("Expected a restored manuscript proposal.");
     }
@@ -677,12 +690,9 @@ describe("agent persistence", () => {
       ],
     };
 
-    const restored = await fromAgentSnapshot("/books/reopened", {
-      ...emptyPersistedAgentState(),
-      pendingProposal,
-    });
+    const restored = await fromAgentSnapshot("/books/reopened", persistedProposalState(pendingProposal, pendingProposal.id));
 
-    expect(restored.pendingProposal).toEqual({
+    expect(selectPendingProposal(restored, pendingProposal.id)).toEqual({
       ...pendingProposal,
       projectRoot: "/books/reopened",
     });
@@ -693,10 +703,7 @@ describe("agent persistence", () => {
       ...proposal,
       projectRoot: "/books/forged",
     };
-    const raw = {
-      ...emptyPersistedAgentState(),
-      pendingProposal: unsafeProposal,
-    };
+    const raw = persistedProposalState(unsafeProposal, unsafeProposal.id);
 
     await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
       issue: { kind: "corrupt", projectRoot: "/books/one" },
@@ -704,9 +711,7 @@ describe("agent persistence", () => {
   });
 
   it("rejects a persisted proposal locator without its frozen preview", async () => {
-    const raw = {
-      ...emptyPersistedAgentState(),
-      pendingProposal: {
+    const raw = persistedProposalState({
         id: "proposal-without-preview",
         kind: "manuscript",
         chapterId: "chapter-1",
@@ -730,8 +735,7 @@ describe("agent persistence", () => {
             },
           },
         ],
-      },
-    };
+      }, "proposal-without-preview");
 
     await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
       issue: { kind: "corrupt", projectRoot: "/books/one" },
@@ -806,10 +810,7 @@ describe("agent persistence", () => {
 
     for (const pendingProposal of pendingProposals) {
       await expect(
-        fromAgentSnapshot("/books/one", {
-          ...emptyPersistedAgentState(),
-          pendingProposal,
-        }),
+        fromAgentSnapshot("/books/one", persistedProposalState(pendingProposal, pendingProposal.id)),
       ).rejects.toMatchObject({
         issue: { kind: "corrupt", projectRoot: "/books/one" },
       });
@@ -1532,8 +1533,8 @@ describe("agent persistence", () => {
       () => store.setDraftContextRefs([diskDraftRef]),
       () => store.addDraftContextRefs([removedDuringLoadRef]),
       () => store.removeDraftContextRef(retainedDuringLoadRef),
-      () => store.removePendingChanges(["change-1"]),
-      () => store.clearPendingProposal(),
+      () => store.decideProposalChanges("proposal-1", ["change-1"], { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" }),
+      () => store.restoreProposalChanges("proposal-1", ["change-1"]),
       () =>
         store.appendLocalMessage(
           textMessage("rejected-local", "assistant", "Rejected", "complete"),
@@ -2608,7 +2609,7 @@ describe("agent persistence", () => {
     persistence.unmount();
   });
 
-  it("resets a malformed conversation to empty v3 state after an explicit action", async () => {
+  it("resets a valid conversation while retaining Changes after an explicit action", async () => {
     const root = "/books/corrupt";
     await transitionAgentProject(root);
     const issue = {
@@ -2616,11 +2617,12 @@ describe("agent persistence", () => {
       projectRoot: root,
       message: "Malformed agent conversation",
     };
+    useAgentConsoleStore.getState().stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+    const retainedSnapshot = await toAgentSnapshot();
     useAgentConsoleStore.setState({
       mode: "edit",
       messages: [textMessage("user-corrupt", "user", "Keep me", "complete")],
       draftText: "Unreadable draft",
-      pendingProposal: { ...proposal, projectRoot: root },
       persistenceIssue: issue,
     });
 
@@ -2628,7 +2630,7 @@ describe("agent persistence", () => {
 
     expect(tauri.writeAppData).toHaveBeenCalledWith(
       agentStateKey(root),
-      emptyPersistedAgentState(),
+      { ...emptyPersistedAgentState(), proposalRecords: retainedSnapshot.proposalRecords },
     );
     expect(useAgentConsoleStore.getState()).toMatchObject({
       mode: "writing",
@@ -2638,6 +2640,7 @@ describe("agent persistence", () => {
       persistenceIssue: null,
       hydratedProjectRoot: root,
     });
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
   });
 
   it("restores automatic saves after resetting a malformed conversation", async () => {
@@ -2709,7 +2712,12 @@ describe("agent persistence", () => {
     await vi.waitFor(() =>
       expect(tauri.writeAppData).toHaveBeenCalledWith(
         agentStateKey(root),
-        emptyPersistedAgentState(),
+        expect.objectContaining({
+          messages: [],
+          draftText: "",
+          currentProposalId: null,
+          proposalRecords: [expect.objectContaining({ proposal: expect.objectContaining({ id: proposal.id }) })],
+        }),
       ),
     );
     const ownershipError = {
@@ -2722,8 +2730,8 @@ describe("agent persistence", () => {
       () => store.setDraftContextRefs([retainedDuringLoadRef]),
       () => store.addDraftContextRefs([diskDraftRef]),
       () => store.removeDraftContextRef(removedDuringLoadRef),
-      () => store.removePendingChanges(["change-1"]),
-      () => store.clearPendingProposal(),
+      () => store.decideProposalChanges("proposal-1", ["change-1"], { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" }),
+      () => store.restoreProposalChanges("proposal-1", ["change-1"]),
       () =>
         store.appendLocalMessage(
           textMessage("rejected-reset", "assistant", "Rejected", "complete"),
@@ -2910,7 +2918,8 @@ describe("agent persistence", () => {
         mode: "edit",
         messages: nextMessages,
         draftText: "Next project draft",
-        pendingProposal: persistedNextProposal,
+        proposalRecords: [{ proposal: persistedNextProposal, source: { kind: "legacy" }, decisions: {}, replacedByProposalId: null }],
+        currentProposalId: persistedNextProposal.id,
       });
     await transitionAgentProject(resetRoot);
     expect(useAgentConsoleStore.getState().persistenceIssue).toMatchObject({
@@ -3049,7 +3058,7 @@ describe("agent persistence", () => {
     );
 
     expect(collection.outlines.good.draftText).toBe("Good planner");
-    expect(collection.outlines.bad).toEqual(emptyPersistedAgentState());
+    expect(collection.outlines.bad).toBeUndefined();
     expect(collection.corruptOutlineChapterIds).toEqual(["bad"]);
   });
 
@@ -3441,7 +3450,6 @@ describe("agent persistence", () => {
   });
 });
 
-
 it.each(["load", "corrupt"] as const)("records scoped conversation %s failures", async (kind) => {
   const root = `/books/notification-${kind}`;
   useProjectStore.setState({ project: project(root) });
@@ -3459,4 +3467,237 @@ it("records scoped conversation collection save failures", async () => {
   tauri.writeAppData.mockRejectedValueOnce(new Error("disk full"));
   await expect(saveAgentSessionCollection(root)).rejects.toThrow("disk full");
   expect(useNotificationStore.getState().notifications).toContainEqual(expect.objectContaining({ type: "conversation-save", projectRoot: root }));
+});
+
+describe("retained Changes persistence", () => {
+  it("recovers an unsaved scoped result after a failed flush and project switch", async () => {
+    const root = "/books/scoped-save-recovery";
+    const otherRoot = "/books/scoped-save-recovery-other";
+    const sessionId = { kind: "outline" as const, chapterId: "chapter-1" };
+    const disk = new Map<string, unknown>();
+    let rejectCollectionWrites = true;
+    tauri.readAppData.mockImplementation(async (key: string) => disk.get(key) ?? null);
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+      if (key === agentSessionCollectionKey(root) && rejectCollectionWrites) throw new Error("scoped disk unavailable");
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const outline = agentSessionStore(sessionId);
+    outline.getState().hydrate(root, emptyPersistedAgentState());
+    outline.getState().stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+    await expect(saveAgentSessionCollection(root)).rejects.toThrow("scoped disk unavailable");
+    useProjectStore.setState({ project: project(otherRoot) });
+    await transitionAgentProject(otherRoot);
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const restored = agentSessionStore(sessionId).getState();
+    expect(restored.proposalRecords).toHaveLength(1);
+    expect(restored.pendingProposal?.id).toBe(proposal.id);
+    expect(restored.persistenceIssue).toMatchObject({ kind: "save", projectRoot: root });
+    rejectCollectionWrites = false;
+    await retryAgentSessionPersistence(root, sessionId);
+    expect(agentSessionStore(sessionId).getState().persistenceIssue).toBeNull();
+    const collection = await loadAgentSessionCollection(root, emptyPersistedAgentState());
+    expect(collection.outlines[sessionId.chapterId].proposalRecords).toHaveLength(1);
+    expect(collection.outlines[sessionId.chapterId].currentProposalId).toBe(proposal.id);
+  });
+
+  it("eagerly reloads retained outline results without opening their chapter", async () => {
+    const root = "/books/eager-changes";
+    useAgentConsoleStore.getState().hydrate(root, emptyPersistedAgentState());
+    useAgentConsoleStore.getState().stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+    const outlineSnapshot = await toAgentSnapshot();
+    useAgentConsoleStore.getState().resetProject();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      key === agentStateKey(root)
+        ? emptyPersistedAgentState()
+        : { v: 1, sessions: { "outline:unopened": outlineSnapshot } },
+    );
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const outline = agentSessionStore({ kind: "outline", chapterId: "unopened" }).getState();
+    expect(outline.hydratedProjectRoot).toBe(root);
+    expect(outline.pendingProposal?.id).toBe(proposal.id);
+    expect(outline.proposalRecords).toHaveLength(1);
+  });
+
+  it("saves edits to an older retained record without changing the chat proposal", async () => {
+    const root = "/books/edit-history";
+    const disk = new Map<string, unknown>();
+    tauri.readAppData.mockImplementation(async (key: string) => disk.get(key) ?? null);
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => { disk.set(key, structuredClone(value)); });
+    useProjectStore.setState({ project: project(root) });
+    const persistence = renderHook(() => useAgentPersistence());
+    await vi.waitFor(() => expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe(root));
+    vi.useFakeTimers();
+    const store = useAgentConsoleStore.getState();
+    store.stageProposal({
+      ...proposal,
+      projectRoot: root,
+      changes: [{ ...proposal.changes[0], change: { ...proposal.changes[0].change, kind: "rewrite", newText: "Original result" } }],
+    }, { kind: "legacy" });
+    store.stageProposal({ ...proposal, id: "newer", projectRoot: root }, { kind: "legacy" });
+    store.updatePendingManuscriptText({ proposalId: proposal.id, changeId: "change-1", newText: "Edited retained result" });
+    await vi.advanceTimersByTimeAsync(400);
+    const saved = await fromAgentSnapshot(root, disk.get(agentStateKey(root)));
+    expect(saved.currentProposalId).toBe("newer");
+    expect(saved.proposalRecords[0].proposal).toMatchObject({ changes: [{ change: { newText: "Edited retained result" } }] });
+    expect(useAgentConsoleStore.getState().pendingProposal?.id).toBe("newer");
+    persistence.unmount();
+  });
+
+  it("rebuilds the exact current projection after hydration and preserves records on conversation reset", async () => {
+    const root = "/books/projection";
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const store = useAgentConsoleStore.getState();
+    store.stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+    store.decideProposalChanges(proposal.id, ["change-1"], { status: "dismissed", decidedAt: "2026-10-07T12:01:00.000Z" });
+    store.stageProposal({ ...proposal, id: "current", projectRoot: root }, { kind: "legacy" });
+    const snapshot = await toAgentSnapshot();
+    store.resetProject();
+    store.hydrate(root, await fromAgentSnapshot(root, snapshot));
+    expect(useAgentConsoleStore.getState().pendingProposal?.id).toBe("current");
+    expect(selectPendingProposal(useAgentConsoleStore.getState(), proposal.id)).toBeNull();
+    await resetAgentConversation(root);
+    const reset = useAgentConsoleStore.getState();
+    expect(reset.currentProposalId).toBeNull();
+    expect(reset.pendingProposal).toBeNull();
+    expect(reset.proposalRecords).toHaveLength(2);
+    expect(selectPendingProposal(reset, "current")?.id).toBe("current");
+  });
+
+  it("retains canonical records and their current projection through failed-save recovery", async () => {
+    const root = "/books/record-recovery";
+    const otherRoot = "/books/record-recovery-other";
+    const disk = new Map<string, unknown>();
+    let rejectRootWrites = true;
+    tauri.readAppData.mockImplementation(async (key: string) => disk.get(key) ?? null);
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+      if (key === agentStateKey(root) && rejectRootWrites) throw new Error("disk unavailable");
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const store = useAgentConsoleStore.getState();
+    store.stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+    store.decideProposalChanges(proposal.id, ["change-1"], { status: "applied", decidedAt: "2026-10-07T12:01:00.000Z" });
+    store.stageProposal({ ...proposal, id: "current", projectRoot: root }, { kind: "legacy" });
+    await expect(saveAgentState(root, await toAgentSnapshot())).rejects.toThrow("disk unavailable");
+    useProjectStore.setState({ project: project(otherRoot) });
+    await transitionAgentProject(otherRoot);
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(2);
+    expect(useAgentConsoleStore.getState().pendingProposal?.id).toBe("current");
+    expect(selectPendingProposal(useAgentConsoleStore.getState(), proposal.id)).toBeNull();
+    rejectRootWrites = false;
+    await retryAgentPersistence();
+    const saved = await fromAgentSnapshot(root, disk.get(agentStateKey(root)));
+    expect(saved.currentProposalId).toBe("current");
+    expect(saved.proposalRecords[0].decisions["change-1"].status).toBe("applied");
+  });
+
+  it("migrates a v3 pending proposal and persists its payload only inside records", async () => {
+    const raw = {
+      v: 3,
+      mode: "writing",
+      messages: [],
+      summary: null,
+      draftText: "",
+      draftContextRefs: [],
+      draftSourceLocators: {},
+      pendingProposal: {
+        kind: proposal.kind,
+        id: proposal.id,
+        chapterId: proposal.chapterId,
+        summary: proposal.summary,
+        createdAt: proposal.createdAt,
+        originatingMessageId: proposal.originatingMessageId,
+        changes: proposal.changes,
+      },
+      lastUsage: null,
+      interruptedRun: null,
+    };
+    const restored = await fromAgentSnapshot("/books/reopened", raw);
+    useAgentConsoleStore.getState().hydrate("/books/reopened", restored);
+    const snapshot = await toAgentSnapshot();
+    expect(snapshot.v).toBe(4);
+    expect(snapshot).not.toHaveProperty("pendingProposal");
+    expect(snapshot.proposalRecords).toHaveLength(1);
+    expect(snapshot.proposalRecords[0].proposal).not.toHaveProperty("projectRoot");
+    expect(useAgentConsoleStore.getState().pendingProposal?.id).toBe(proposal.id);
+  });
+
+  it("keeps standalone project state authoritative over a stale collection project", async () => {
+    const root = "/books/authority";
+    const standalone = { ...emptyPersistedAgentState(), draftText: "Newer project" };
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      key === agentStateKey(root)
+        ? standalone
+        : { v: 1, sessions: { project: { ...standalone, draftText: "Stale project" } } },
+    );
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    expect(useAgentConsoleStore.getState().draftText).toBe("Newer project");
+    await saveAgentSessionCollection(root);
+    const write = tauri.writeAppData.mock.calls.find(([key]) => key === agentSessionCollectionKey(root));
+    expect(write?.[1]).not.toHaveProperty("sessions.project");
+  });
+
+  it("keeps corrupt scoped state unavailable and preserves it while a sibling is saved", async () => {
+    const root = "/books/scoped-corruption";
+    const corrupt = { v: 4, draftText: 42 };
+    const collection = { v: 1, sessions: { "outline:bad": corrupt } };
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      key === agentStateKey(root) ? emptyPersistedAgentState() : collection,
+    );
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    await hydrateAgentOutlineSession(root, "bad");
+    const bad = agentSessionStore({ kind: "outline", chapterId: "bad" });
+    expect(bad.getState().hydratedProjectRoot).toBeNull();
+    expect(bad.getState().persistenceIssue?.kind).toBe("corrupt");
+    expect(() => bad.getState().setDraftText("Must not overwrite corruption")).toThrow();
+    const good = agentSessionStore({ kind: "outline", chapterId: "chapter-1" });
+    good.getState().hydrate(root, emptyPersistedAgentState());
+    good.getState().setDraftText("Valid sibling");
+    await saveAgentSessionCollection(root);
+    const write = tauri.writeAppData.mock.calls.find(([key]) => key === agentSessionCollectionKey(root));
+    expect(write?.[1]).toHaveProperty("sessions.outline:bad", corrupt);
+  });
+
+  it("resets only a known corrupt scoped entry and preserves its siblings", async () => {
+    const root = "/books/scoped-reset";
+    const sessionId = { kind: "outline" as const, chapterId: "bad" };
+    const sibling = { ...emptyPersistedAgentState(), draftText: "Keep sibling" };
+    const collection = { v: 1, sessions: { "outline:bad": { v: 4, draftText: 42 }, "outline:good": sibling } };
+    tauri.readAppData.mockImplementation(async (key: string) => key === agentStateKey(root) ? emptyPersistedAgentState() : collection);
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const bad = agentSessionStore(sessionId);
+    await resetAgentConversation(root, sessionId);
+    expect(bad.getState().hydratedProjectRoot).toBe(root);
+    const write = tauri.writeAppData.mock.calls.find(([key]) => key === agentSessionCollectionKey(root));
+    expect(write?.[1]).toHaveProperty("sessions.outline:good", sibling);
+    expect(write?.[1]).toHaveProperty("sessions.outline:bad", emptyPersistedAgentState());
+  });
+
+  it("preserves a malformed collection envelope and only permits retry", async () => {
+    const root = "/books/collection-corrupt";
+    const raw = { v: 1, sessions: "unreadable" };
+    tauri.readAppData.mockImplementation(async (key: string) => key === agentStateKey(root) ? emptyPersistedAgentState() : raw);
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const issue = useAgentConsoleStore.getState().persistenceIssue;
+    if (issue === null) throw new Error("Expected a collection persistence issue.");
+    expect(canResetAgentSessionPersistence(issue)).toBe(false);
+    expect(() => resetAgentConversation(root)).toThrow();
+    const sessionId = { kind: "outline" as const, chapterId: "chapter-1" };
+    await hydrateAgentOutlineSession(root, sessionId.chapterId);
+    await expect(retryAgentSessionPersistence(root, sessionId)).rejects.toThrow();
+    expect(tauri.writeAppData).not.toHaveBeenCalled();
+    expect(raw).toEqual({ v: 1, sessions: "unreadable" });
+  });
 });

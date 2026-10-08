@@ -607,7 +607,10 @@ mod tests {
             let dir = managed_fixture();
             fs::write(dir.path().join(file), [0xff]).unwrap();
             let error = open_managed(dir.path()).unwrap_err();
-            assert!(error.contains(file), "{error}");
+            assert!(
+                error.contains(&file.replace('/', std::path::MAIN_SEPARATOR_STR)),
+                "{error}"
+            );
             assert_eq!(fs::read(dir.path().join(file)).unwrap(), [0xff]);
         }
         let dir = managed_fixture();

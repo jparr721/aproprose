@@ -175,3 +175,79 @@ deck: pending HTML under docs/slides, with surviving copy in the original checko
 - Native proof waits for root's frontend/Rust launch handoff; setup alone is not QA success.
 - Native interaction/capture is held while root merges `e4c323c` and resolves HMR integration. The QA worker resumes only on root's explicit handoff.
 - Native QA launch session `25900` reached Vite on port `1445`; Cargo was waiting on the shared target artifact lock. Tauri CLI reported `tauri v2.12.1` versus `@tauri-apps/api v2.11.0` version mismatch but continued. No dependency change/workaround was applied; root owns its disposition. This launch is pending, not a passing proof.
+
+
+## Superseding pipeline state - 2026-10-08
+
+This section supersedes the earlier pending status blocks, transient integration failures and QA launch notes. Those entries remain as history; they are not current completion claims.
+
+- PR: [Agentic editorial implementation, PR 75](https://github.com/jparr721/aproprose/pull/75), target `main`, dedicated branch `codex/agentic-editorial`.
+- Verification mode: local, explicitly authorized by the user for the entire pipeline. The supervisor owns coordination and this ledger only; root owns integration, verdicts and commits.
+- Review: five complete rounds, minimum three and cap five. Every round used five fresh read-only angles on the whole pushed diff. Final verdict is `FIX-THEN-SHIP`, four findings; no `APPROVE` occurred.
+- Cap disposition: repair the four accepted findings, verify, push and stop. No sixth round and no merge. The last repairs are explicitly unreviewed by a subsequent adversarial round. Simplifier was not reached because its clean-approval prerequisite was not met.
+- Latest reviewed/pushed head: `03f913a9e3a7f566e90a7c20d9277e12e5790761`. Final repaired application head: `4de9c7c1cc81021d45c0a2aeda98144c15e849ba`. Final exact Gate 9 must run after this document commit; final native QA remains pending.
+- Keep the dedicated worktree and ready PR for continuation. Do not archive or claim delivery to `main`.
+
+### First coherent implementation unit
+
+- Instantiated Book/content read boundary with injected loaders, immutable semantic projections, on-demand discovery/search/range reads and the same Book instance behind the tool catalog. Complete dialogue, scene, lore and citation semantics remain accessible.
+- Author declarations and current settings govern specialist instructions; writing, literary editing, chapter planning, cleanup, structure, continuity, character work, preference refinement, compaction and background knowledge use their specific purpose contracts.
+- Plan with AI hydrates existing chapter/cards, begins source-grounded investigation automatically, asks the author focused questions, and stages linked-card or supported manuscript/overview changes through existing review decisions. Tool-only questions persist and render after reopening.
+- The first unit does not deliver generalized whole-book write commands, native command journal, full editorial issue/workspace migration or all future domain/UI migrations. The approved architecture retains those subsequent slices. Canonical fingerprint helper relocation remains deferred rather than duplicated.
+
+### Source integration and release boundary
+
+- The plan was grounded at `c411d43`; implementation began on `28afd5d`. Incoming `e4c323c`/PR 71 persistent Changes behavior was merged and preserved.
+- Incoming `827e65a`/PR 74 resolved Tauri dependency parity; retained upstream API `~2.12.1` and CLI `2.11.2` without additional upgrades. Final local gates retain that base until explicitly changed.
+- Version `0.19.0` is synchronized across the four version files and changelog. Native production proof is `tauri build --no-bundle`; it does not establish signing, installer packaging or a published release.
+
+### Complete review history
+
+| Round | Whole pushed head | Verdict | Accepted findings and disposition |
+|---|---|---|---|
+| 1 | `a25fb0a` | FIX-THEN-SHIP, 4 | Unauthorized bundled overview, hydration transition, uncaptured unsaved active reads and lossy planner semantics. Separate fixes `8ccce16`, `c801809`, `8ec57eb`, `8ca499a`. |
+| 2 | `8ca499a` | FIX-THEN-SHIP, 3 | Mixed end insertion order `09bd043`; stale scoped StoreApi subscription `bbd4195`; successful storage Retry does not auto-start `413734c`. Cheap truthful planner mission correction `1a1fda1`; whitespace-only `c654ec2`. |
+| 3 | `413734c` | FIX-THEN-SHIP, 2 | Rejected Book load cached forever `dac47ef`; empty preflight error prevents planner recovery `8348304`. |
+| 4 | `8348304` | FIX-THEN-SHIP, 2 | Null-anchor bridge displaces non-prose prefix `3f173c4`; follow-up loses original specialist purpose/scope `097d754`, with exact persisted-origin test expectation correction `03f913a`. |
+| 5 | `03f913a` | FIX-THEN-SHIP, 4; cap reached | Same-run supersession `8725df6`; guessed historic mode authority `dfc2fff`; valid non-prose selection rejection `485c034`; duplicate selection identity `4de9c7c`. These repairs have no later review round. |
+
+- Root acted Level/Splinter and issued every formal verdict. Each surviving candidate received exactly one defense; duplicate findings were deduplicated, with no dissent or waived must-fix. No code edits occurred during review.
+- Round 1 reverse outline-add ordering was conceded under existing append-at-approval semantics. Round 3 duplicate-card locator hypothesis was pre-existing without new-diff proof. Round 4 universal mixed move/insert commutativity was conceded because current preview exposes approval-time placement. These were not silently counted as fixed defects.
+- Fresh sessions were preserved despite definitive `agent thread limit reached` dispatch failures. Round 2 used supervisor children; later rounds used a coordination-only specialist dispatcher with unused child capacity. Implementation reuse never counted as fresh review. Resource waves respected four active slots.
+- Exact Round 5 reviewers were `/root/specialist_implementation/r5_spec`, `r5_breaker`, `r5_failure`, `r5_proof`, `r5_shape`, all fresh `fork_turns: none`, no model override, resource waves 2+2+1. FAILURE returned zero findings after 12 focused files/922 tests.
+
+### Round 5 accepted findings and unreviewed repairs
+
+Locations below refer to reviewed head `03f913a`, before repairs.
+
+| Finding | Concrete proof and sole-defense result | Repair and regression receipt |
+|---|---|---|
+| P2 historic mode authority, `src/lib/ai/proposal-origin.ts:155` | Actual SDK old-v4 Writing record followed by Edit pins guessed Edit; JSON reopen then Writing still uses literary-editor. Defense separated old first-turn behavior from newly persisted second-turn authority. | `dfc2fff`: recover known original metadata; persist explicit legacy mode when unknown; reject conflicting metadata before provider. RED 3; GREEN 5 files/298; typecheck/diff exit 0. |
+| P2 same-run supersession, `src/lib/ai/agent-controller.ts:1748` | Actual SDK stages Draft 1, reads pending, stages same-kind Draft 2; JSON reopen leaves both actionable and obsolete Apply stales intended Draft 2. Defense proved this is exposed by the new multi-step run. | `8725df6`: supersede pending same-run/same-kind/same-chapter predecessor through existing lineage; preserve history. RED 5 failed/2 passed; GREEN 4 files/513; typecheck/diff exit 0. Three real SDK proposal kinds cover read/stage/reopen, old Apply refusal and final Apply success. |
+| P2 valid selected types, `src/lib/ai/proposal-origin.ts:66` | Actual controller/SDK base-versus-head initial and JSON/reparse LaTeX Structure/mixed Clean: head refuses pre-provider while public UI/base succeed. | `485c034`: actual selected block type with strict resolved type equality for all six block types; Bridge remains prose-only. RED 2; targeted GREEN 2; compatibility 6 files/342; typecheck/diff exit 0. |
+| P2 duplicate identity, `src/lib/ai/proposal-origin.ts:46` | Real deletion of selected duplicate followed by controller/SDK rewrites the surviving unselected identical block. Defense distinguished live deletion from true regenerated parse IDs. | `4de9c7c`: stable generation across all saves, live mutations and history; renew only on published native chapter parse; refresh strict locator mapping after legitimate parse. Old identityless missing IDs and count-reminted save IDs require restart. RED 4 actual SDK cases plus separate save-count RED 1; GREEN 8 files/513; typecheck/diff exit 0. |
+
+- Repair ownership was cross-reviewed before production edits. Root owned only same-run replacement store/test/flow paths; specialist repaired three origin bugs sequentially and stopped for each standalone root commit. The last identity repair additionally owns only project-store implementation/test beyond the origin files, explicitly approved.
+- No broader generic scope, speculative mixed-operation ordering rule or generalized book-write feature was added to resolve these findings.
+
+### Aggregate verification and CI
+
+| Gate | Exact head | Result |
+|---|---|---|
+| 5 | `413734c` | All 12 lanes exit 0: 2147 frontend, 24 browser, 54 Rust and all type/lint/format/web/native/release/diff lanes. |
+| 6 | `8348304` | All 12 exit 0: 2162 frontend, 24 browser, 54 Rust; clean head before/after. CI run 37739437665 all required green. |
+| 7 | `097d754` | Exit 1: 11 lanes green, frontend 2294 passed/1 failed. Sole failure was exact stopped-project persisted-origin expectation at agent-flow.test.ts:2262. |
+| 8 | `03f913a` | All 12 exit 0: 138 frontend files/2295 tests, 24 Chromium/WebKit, Rust 53 plus separately ignored DNS 1; clean exact head/base before/after. CI run 37743221719 success on verified pushed head. |
+| Final Gate 9 | Pending final document commit | Must run after all repairs and this final ledger update are committed, writers stopped, exact HEAD/base and clean tree verified. No result claimed. |
+
+- Gate 7's standalone test correction `03f913a` added only five expected source.origin lines. Usage, transcript, proposal and ordering assertions were preserved; whole agent-flow 11 tests passed before full Gate 8.
+- Every full runner collects typecheck, full frontend suite, Chromium/WebKit, web build, Rust, separate ignored DNS, Clippy with `-D warnings`, Rust formatting, native production, version validation, release body and whole-branch whitespace check. No focused pass substitutes for the final exact gate.
+- Existing nonfatal Vite chunk-size and STATIC_VCRUNTIME warnings did not fail lanes. No compiler failure was ignored.
+
+### Native QA, private proof and stop state
+
+- Historical pre-cap native QA used a disposable real-project copy, isolated native app/config and actual provider requests. It demonstrated automatic chapter question, real author answer, staged cards, partial Apply, native restart, restored question/proposal/decision and remaining-card Apply. Settings AI help retained long declarations and Cancel left settings unchanged. Original source/meta hashes remained unchanged; only intended copied-card metadata was applied.
+- That historical proof does not validate the final repaired head. Final native QA on the final worktree head is still mandatory and pending: automatic semantic question plus real right-sidebar Writer and Editor flows, distinct specialist behavior and key persisted/review states.
+- Screenshots and deck contain unpublished source and remain local only. Do not commit or push private manuscript identity/path/prose or provider keys.
+- Final self-contained HTML is copied to original checkout `docs/slides/agentic-editorial-2026-10-07.html` and `qa-decks/agentic-editorial/` before owned scratch/config/key cleanup. Common Git excludes protect these local artifact paths.
+- Keep the worktree and open PR after cap-stop. Merge, signed release and final QA completion are not claimed.

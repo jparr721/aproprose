@@ -2585,16 +2585,20 @@ describe("agent persistence", () => {
 
   it("retries an unavailable project read and restores its retained Changes", async () => {
     const root = "/books/retry-unavailable-project";
-    const recovered: PersistedAgentState = {
-      ...persistedState("Recovered project draft", []),
-      proposalRecords: [{
-        proposal: { ...proposal, projectRoot: root },
-        source: { kind: "legacy" },
-        decisions: {},
-        replacedByProposalId: null,
-      }],
-      currentProposalId: proposal.id,
-    };
+    useAgentConsoleStore.getState().hydrate(
+      root,
+      persistedState("Recovered project draft", []),
+    );
+    useAgentConsoleStore.getState().stageProposal(
+      { ...proposal, projectRoot: root },
+      { kind: "legacy" },
+    );
+    const recoveredRecords = structuredClone(
+      useAgentConsoleStore.getState().proposalRecords,
+    );
+    const recovered = await toAgentSnapshot();
+    expect(recovered.proposalRecords[0].proposal).not.toHaveProperty("projectRoot");
+    useAgentConsoleStore.getState().resetProject();
     let projectReads = 0;
     tauri.readAppData.mockImplementation(async (key: string) => {
       if (key === agentStateKey(root)) {
@@ -2626,8 +2630,10 @@ describe("agent persistence", () => {
       persistenceIssue: null,
       draftText: recovered.draftText,
       currentProposalId: proposal.id,
-      proposalRecords: recovered.proposalRecords,
+      proposalRecords: recoveredRecords,
     });
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal.projectRoot)
+      .toBe(root);
     expect(selectPendingProposal(useAgentConsoleStore.getState())?.id).toBe(
       proposal.id,
     );

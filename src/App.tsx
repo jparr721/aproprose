@@ -104,8 +104,10 @@ export function Workspace() {
         <ResizablePanelGroup
           orientation="horizontal"
           className="min-w-0 flex-1 [&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-250 [&>[data-panel]]:ease-in-out motion-reduce:[&>[data-panel]]:transition-none [&:has([data-separator=active])>[data-panel]]:transition-none"
-          onLayoutChanged={() => {
-            if (showAi) setRightPanelWidth(Math.round(liveWidth.current));
+          onLayoutChanged={(layout) => {
+            if (!showAi) return;
+            if (layout.right === 0) useViewStore.getState().setAiOpen(false);
+            else setRightPanelWidth(Math.round(liveWidth.current));
           }}
         >
           <ResizablePanel id="main" minSize={360}>
@@ -127,16 +129,8 @@ export function Workspace() {
             minSize={320}
             maxSize={640}
             groupResizeBehavior="preserve-pixel-size"
-            onResize={(size, _id, previousSize) => {
+            onResize={(size) => {
               if (showAi && size.inPixels >= 320) liveWidth.current = size.inPixels;
-              if (
-                showAi &&
-                size.asPercentage === 0 &&
-                previousSize !== undefined &&
-                previousSize.asPercentage > 0
-              ) {
-                useViewStore.getState().setAiOpen(false);
-              }
             }}
           >
             <div className="h-full min-w-80">

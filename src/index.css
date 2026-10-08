@@ -255,6 +255,27 @@
   --color-sheet: var(--sheet);
   --color-sheet-ink: var(--sheet-ink);
 
+  --animate-sidebar-expand: sidebar-expand 200ms ease-out;
+  --animate-sidebar-collapse: sidebar-collapse 200ms ease-in;
+
+  @keyframes sidebar-expand {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+
+  @keyframes sidebar-collapse {
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+
   /* fonts - serif is reserved for headings and manuscript prose; sans is the default for everything else */
   --font-serif: "Noto Serif Variable", "Source Serif Pro", Georgia, serif;
   --font-heading: "Lora Variable", "Newsreader", Georgia, serif;

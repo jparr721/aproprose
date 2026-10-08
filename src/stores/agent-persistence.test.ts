@@ -2634,7 +2634,7 @@ describe("agent persistence", () => {
     });
     expect(useAgentConsoleStore.getState().proposalRecords[0].proposal.projectRoot)
       .toBe(root);
-    expect(selectPendingProposal(useAgentConsoleStore.getState())?.id).toBe(
+    expect(selectPendingProposal(useAgentConsoleStore.getState(), proposal.id)?.id).toBe(
       proposal.id,
     );
     expect(tauri.writeAppData).not.toHaveBeenCalled();

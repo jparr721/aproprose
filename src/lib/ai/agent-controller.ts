@@ -1,3 +1,4 @@
+import { reportAiError } from "@/lib/notifications";
 import { generateText, type LanguageModel } from "ai";
 import {
   COMPACTION_SYSTEM,
@@ -1614,6 +1615,7 @@ export function createAgentController(
       sessionStore.getState().beginPreflight();
     } catch (error) {
       const refusal = runFailure(error, capture.provider, null);
+      reportAiError(error, capture.provider, "AI console", capture.projectRoot, null);
       await persistAgentFailure(
         dependencies.recordFailure,
         runFailureLogEntry({
@@ -1647,6 +1649,7 @@ export function createAgentController(
       const modelId = capture.modelId;
       if (modelId === null) {
         const failure = modelUnselectedFailure(capture.provider);
+        reportAiError({ failure }, capture.provider, "AI console", capture.projectRoot, null);
         await persistAgentFailure(
           dependencies.recordFailure,
           runFailureLogEntry({
@@ -1851,6 +1854,7 @@ export function createAgentController(
         return { status: "stopped" };
       }
       const failure = runFailure(error, capture.provider, failurePhase);
+      reportAiError(error, capture.provider, "AI console", capture.projectRoot, failurePhase);
       const activeRun = sessionStore.getState().activeRun;
       await persistAgentFailure(
         dependencies.recordFailure,
@@ -2415,6 +2419,8 @@ export function createAgentController(
             }),
           );
         }
+        const project = useProjectStore.getState().project;
+        reportAiError(error, useSettingsStore.getState().aiProvider, "AI console", project === null ? null : project.root, null);
         sessionStore.setState({ runError: failure });
       }
     }

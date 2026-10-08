@@ -3,6 +3,8 @@
 // guards against overlap, and exposes status to the chrome. Per-project prefs
 // (autoSync, interval) persist in the app config dir keyed by a path hash.
 
+import { reportNotification } from "@/lib/notifications";
+import type { AppNotificationType } from "@/lib/notification-model";
 import { create } from "zustand";
 import { clamp, isEqual } from "es-toolkit";
 import type { ChangedFile, RepoStatus, SyncPrefs, SyncStatus } from "@/lib/types";
@@ -154,6 +156,8 @@ export const useSyncStore = create<SyncState>((set, get) => {
           s = await gitRepoStatus(root);
         } catch (e) {
           if (stale()) return;
+          console.error("Backup status failed", { root, error: e });
+          reportNotification({ type: "backup-status", source: "Backup", projectRoot: root, provider: null });
           set({ status: "error", lastError: String(e) });
           return;
         }
@@ -186,6 +190,10 @@ export const useSyncStore = create<SyncState>((set, get) => {
       try {
         const outcome = await syncProject(root, backupMessage(new Date()));
         const status = outcomeToStatus(outcome);
+        if (outcome.kind !== "clean" && outcome.kind !== "synced" && get().root === root) {
+          const types = { conflict: "backup-conflict", pushRejected: "backup-rejected", needsSetup: "backup-setup", authMissing: "backup-auth", offline: "backup-offline" } satisfies Record<typeof outcome.kind, AppNotificationType>;
+          reportNotification({ type: types[outcome.kind], source: "Backup", projectRoot: root, provider: null });
+        }
         set({
           status,
           lastError: outcomeMessage(outcome),
@@ -198,6 +206,8 @@ export const useSyncStore = create<SyncState>((set, get) => {
           armTimer();
         }
       } catch (e) {
+        console.error("Backup sync failed", { root, error: e });
+        if (get().root === root) reportNotification({ type: "backup-sync", source: "Backup", projectRoot: root, provider: null });
         set({ status: "error", lastError: String(e) });
       } finally {
         set({ inFlight: false });

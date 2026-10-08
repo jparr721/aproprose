@@ -47,7 +47,7 @@ function SaveStatus() {
     : saveError
       ? {
           label: "Save failed",
-          tooltip: saveError,
+          tooltip: "Save failed. See Settings > Notifications.",
           icon: <SaveOff className="size-3.5 text-destructive" />,
         }
       : chapterDirty

@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { openNotifications } from "@/lib/notifications";
 import { classifyAiError, failureFromError } from "@/lib/ai/agent-failure";
 import type { AgentFailure } from "@/lib/ai/agent-types";
 import type { AiProvider } from "@/lib/types";
@@ -18,7 +19,7 @@ export function showAiError(
     id: "ai-request-error",
     action:
       target === null
-        ? undefined
+        ? { label: "View notification", onClick: openNotifications }
         : {
             label: "Open AI settings",
             onClick: () =>

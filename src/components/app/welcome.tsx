@@ -1,5 +1,6 @@
 // welcome.tsx — the no-project-open state: open a project or pick a recent.
 
+import { openNotifications } from "@/lib/notifications";
 import { BookOpen as IconBook2, BookUp as IconBookUpload, Clock as IconClock, FolderOpen as IconFolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -87,7 +88,7 @@ export function Welcome() {
 
           {error ? (
             <TypographyMuted className="text-center text-destructive">
-              {error}
+              <Button variant="ghost" onClick={openNotifications}>View notifications</Button>
             </TypographyMuted>
           ) : null}
 

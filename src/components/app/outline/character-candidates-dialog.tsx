@@ -1,3 +1,4 @@
+import { notifyAppError } from "@/lib/notifications";
 import { useState } from "react";
 
 import {
@@ -65,7 +66,8 @@ export function CharacterCandidatesDialog() {
     try {
       await action();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      notifyAppError("candidate-decision", "Characters", useProjectStore.getState().project?.root ?? null, error);
+      setActionError("Character review could not be saved. See Settings > Notifications.");
     } finally {
       setPendingActionId(null);
       setPendingCandidates([]);

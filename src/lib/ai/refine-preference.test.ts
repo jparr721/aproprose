@@ -10,6 +10,7 @@ import {
   type RefinePreferenceOptions,
 } from "@/lib/ai/refine-preference";
 import { PREFERENCE_MAX_CHARS, type AiProvider } from "@/lib/types";
+import { openNotifications } from "@/lib/notifications";
 
 interface GenerationRequest {
   model: LanguageModel;
@@ -178,7 +179,7 @@ describe("refinePreference", () => {
       expect(mocks.warning).not.toHaveBeenCalled();
       expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
         "The AI request could not be completed. Retry the request.",
-        { id: "ai-request-error", action: undefined },
+        { id: "ai-request-error", action: { label: "View notification", onClick: openNotifications } },
       );
     },
   );
@@ -236,7 +237,7 @@ describe("refinePreference", () => {
     );
     expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
       "Your AI provider is temporarily unavailable. Retry shortly.",
-      { id: "ai-request-error", action: undefined },
+      { id: "ai-request-error", action: { label: "View notification", onClick: openNotifications } },
     );
   });
 

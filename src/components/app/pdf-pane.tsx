@@ -1,6 +1,6 @@
+import { notifyAppError, reportNotification } from "@/lib/notifications";
 import { useEffect, useRef, useState } from "react";
 import { clamp } from "es-toolkit";
-import { toast } from "sonner";
 import {
   Check as IconCheck,
   Copy as IconCopy,
@@ -66,6 +66,7 @@ function runPdfSearchOperation(operation: () => void): void {
   try {
     operation();
   } catch (error) {
+    reportNotification({ type: "pdf-search", source: "PDF preview", projectRoot: useProjectStore.getState().project?.root ?? null, provider: null });
     usePdfFindStore.getState().setError(errorMessage(error));
   }
 }
@@ -131,6 +132,7 @@ export function PdfPane() {
       },
       onError: (failure: PdfViewerFailure) => {
         if (cancelled) return;
+        reportNotification({ type: failure.phase === "search" ? "pdf-search" : "pdf-preview", source: "PDF preview", projectRoot: useProjectStore.getState().project?.root ?? null, provider: null });
         if (failure.phase === "search") {
           usePdfFindStore.getState().setError(failure.message);
           return;
@@ -148,7 +150,10 @@ export function PdfPane() {
         setAdapterRevision((revision) => revision + 1);
       })
       .catch((error: unknown) => {
-        if (!cancelled) setViewerError(errorMessage(error));
+        if (!cancelled) {
+          reportNotification({ type: "pdf-preview", source: "PDF preview", projectRoot: project === null ? null : project.root, provider: null });
+          setViewerError(errorMessage(error));
+        }
       });
 
     return () => {
@@ -172,7 +177,10 @@ export function PdfPane() {
       setCurrent(1);
       usePdfFindStore.getState().resetMatches();
       void adapter.clearDocument().catch((error: unknown) => {
-        if (!cancelled) setViewerError(errorMessage(error));
+        if (!cancelled) {
+          reportNotification({ type: "pdf-preview", source: "PDF preview", projectRoot: project === null ? null : project.root, provider: null });
+          setViewerError(errorMessage(error));
+        }
       });
       return () => {
         cancelled = true;
@@ -197,6 +205,7 @@ export function PdfPane() {
         setNumPages(0);
         setCurrent(1);
         usePdfFindStore.getState().resetMatches();
+        reportNotification({ type: "pdf-preview", source: "PDF preview", projectRoot: project === null ? null : project.root, provider: null });
         setViewerError(errorMessage(error));
       }
     })();
@@ -303,7 +312,7 @@ export function PdfPane() {
   const copyPath = async (): Promise<void> => {
     if (!pdfPath) return;
     if (!(await copyText(pdfPath))) {
-      toast.error("Couldn't copy the path to the clipboard");
+      notifyAppError("clipboard", "Clipboard", useProjectStore.getState().project?.root ?? null, new Error("clipboard operation failed"));
       return;
     }
     setCopied(true);

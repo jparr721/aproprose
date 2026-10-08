@@ -1,3 +1,4 @@
+import { reportAiError } from "@/lib/notifications";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Check as IconCheck, Eye as IconEye, EyeOff as IconEyeOff, Trash as IconTrash } from "lucide-react";
 import { toast } from "sonner";
@@ -87,6 +88,7 @@ function ApiKeyField({
     try {
       const outcome = await setAiKey(provider, key);
       if (outcome.status === "failure") {
+        reportAiError(outcome, provider, "AI settings", null, null);
         toast.error(outcome.failure.message);
         return;
       }
@@ -96,7 +98,8 @@ function ApiKeyField({
       setShow(false);
       onConfiguredChange(true);
       toast.success(`${providerLabels[provider]} key saved`);
-    } catch {
+    } catch (error) {
+      reportAiError({ failure: { reason: "settings-unavailable" }, cause: error }, provider, "AI settings", null, null);
       toast.error("AI settings are unavailable. Retry.");
     } finally {
       setSaving(false);
@@ -107,6 +110,7 @@ function ApiKeyField({
     try {
       const outcome = await setAiKey(provider, "");
       if (outcome.status === "failure") {
+        reportAiError(outcome, provider, "AI settings", null, null);
         toast.error(outcome.failure.message);
         return;
       }
@@ -114,7 +118,8 @@ function ApiKeyField({
       resetModelMetadata();
       onConfiguredChange(false);
       toast.success(`${providerLabels[provider]} key removed`);
-    } catch {
+    } catch (error) {
+      reportAiError({ failure: { reason: "settings-unavailable" }, cause: error }, provider, "AI settings", null, null);
       toast.error("AI settings are unavailable. Retry.");
     }
   };
@@ -275,7 +280,10 @@ function AiModelField({
         if (active) setModels(m);
       })
       .catch((e) => {
-        if (active) setError(failureFromError(e, provider, null));
+        if (active) {
+          reportAiError(e, provider, "AI settings", null, null);
+          setError(failureFromError(e, provider, null));
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -415,9 +423,11 @@ export function AiTab() {
   const refreshKeyStatus = (): void => {
     void getAiKeyStatus(aiProvider)
       .then((status) => {
+        if (status.status === "unavailable") reportAiError({ failure: status.failure }, aiProvider, "AI settings", null, null);
         setKeyStatus({ provider: aiProvider, status });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        reportAiError({ failure: settingsUnavailableFailure(), cause: error }, aiProvider, "AI settings", null, null);
         setKeyStatus({
           provider: aiProvider,
           status: {

@@ -11,6 +11,7 @@ export const SETTINGS_TABS = {
   APPEARANCE: "appearance",
   AI: "ai",
   BACKUP: "backup",
+  NOTIFICATIONS: "notifications",
   KEYBOARD: "keyboard",
   STATS: "stats",
   ABOUT: "about",

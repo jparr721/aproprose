@@ -24,7 +24,7 @@ describe("continuation intent", () => {
   it("uses final prose when no prose is selected", () => {
     expect(buildContinuationIntent("ch", blocks, ["note"]).task).toMatchObject({ anchorBlockId: "last" });
   });
-  it.each([[], [blocks[1]]])("allows a chapter without prose", (chapterBlocks) => {
+  it.each([{ chapterBlocks: [] }, { chapterBlocks: [blocks[1]] }])("allows a chapter without prose", ({ chapterBlocks }) => {
     expect(buildContinuationIntent("ch", chapterBlocks, []).task).toEqual({
       kind: "bridge", chapterId: "ch", anchorBlockId: null, successorBlockId: null,
     });

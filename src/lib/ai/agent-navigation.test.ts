@@ -729,6 +729,20 @@ describe("openManuscriptProposalInEditor", () => {
 });
 
 describe("navigateToProposalChange", () => {
+  it("does not navigate another project after the dirty confirmation waits", async () => {
+    useProjectStore.setState({ chapterDirty: true });
+    const navigation = navigateToProposalChange("ch2", appendChange());
+    const currentBlocks = [blockFixture("current", "Current project prose")];
+    useProjectStore.setState({ project: { ...projectFixture(), root: "/other" }, blocks: currentBlocks, selectedId: "current" });
+    vi.mocked(readTextFile).mockResolvedValue("Wrong project read");
+    useViewStore.getState().confirmPending();
+
+    await expect(navigation).resolves.toBe(false);
+    expect(readTextFile).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().blocks).toBe(currentBlocks);
+    expect(useProjectStore.getState().selectedId).toBe("current");
+  });
+
   it("opens a valid sparse empty outline for an add change", async () => {
     useProjectStore.setState((state) => ({
       meta: { ...state.meta, chapters: {} },

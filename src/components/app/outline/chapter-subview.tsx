@@ -25,7 +25,8 @@ import { useProjectStore } from "@/stores/project-store";
 import { AgentSection } from "@/components/app/agent-console/agent-console";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { stopAgentRun } from "@/lib/ai/agent-controller";
-import { hydrateAgentOutlineSession } from "@/stores/agent-persistence";
+import { editorial } from "@/app/editorial";
+import { reportAiError } from "@/lib/notifications";
 import type { ActKind, BeatType } from "@/lib/types";
 
 const NONE = "__none__";
@@ -59,19 +60,21 @@ export function ChapterSubview() {
   const removeCharacterFromCard = useProjectStore((s) => s.removeCharacterFromCard);
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
+  const projectRoot = project === null ? null : project.root;
   useEffect(() => {
     if (
       chapterId === null ||
-      project === null ||
+      projectRoot === null ||
       chapterView !== "planner"
     ) return;
-    void hydrateAgentOutlineSession(project.root, chapterId);
-  }, [chapterId, chapterView, project]);
-  useEffect(() => {
-    if (chapterId === null || chapterView !== "planner") return;
-    const sessionId = { kind: "outline" as const, chapterId };
-    return () => stopAgentRun(sessionId);
-  }, [chapterId, chapterView]);
+    const controller = new AbortController();
+    void editorial.investigateChapter({ projectRoot, chapterId, signal: controller.signal })
+      .catch((error: unknown) => reportAiError(error, null, "Chapter investigation", projectRoot, null));
+    return () => {
+      controller.abort();
+      stopAgentRun({ kind: "outline", chapterId });
+    };
+  }, [chapterId, chapterView, projectRoot]);
   if (!chapterId || !ch || !chapterRef || !project) return null;
 
   const sessionId = { kind: "outline" as const, chapterId };
@@ -118,10 +121,10 @@ export function ChapterSubview() {
             ariaLabel="Outline Planner"
             closeLabel="Close Outline Planner"
             contextLabel={`${project.name} / ${chapterRef.label}. ${chapterRef.title}`}
-            emptyDescription="Describe the story you want for this chapter. The planner can use the surrounding manuscript and stage plot changes for review."
-            emptyTitle="Plan this chapter"
+            emptyDescription="The editor investigates your chapter and existing cards, then asks focused questions to strengthen the plan. Your saved writing preferences guide every recommendation."
+            emptyTitle="Investigate this chapter"
             onClose={showManual}
-            placeholder="Describe this chapter or request more plot points"
+            placeholder="Answer the editor's question or challenge its approach"
             sessionId={sessionId}
             task={{ kind: "outline-sculpt", chapterId }}
             title="Outline Planner"

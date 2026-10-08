@@ -1,16 +1,17 @@
 // @vitest-environment happy-dom
 //
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const agent = vi.hoisted(() => ({
   hydrateAgentOutlineSession: vi.fn(),
   stopAgentRun: vi.fn(),
+  submitAgentRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/ai/agent-controller", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ai/agent-controller")>();
-  return { ...actual, stopAgentRun: agent.stopAgentRun };
+  return { ...actual, stopAgentRun: agent.stopAgentRun, submitAgentRequest: agent.submitAgentRequest };
 });
 
 vi.mock("@/stores/agent-persistence", async (importOriginal) => {
@@ -23,16 +24,25 @@ vi.mock("@/stores/agent-persistence", async (importOriginal) => {
 
 import { ChapterSubview } from "@/components/app/outline/chapter-subview";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
-import { EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
+import { agentConsoleOwnershipStatus, agentSessionStore, clearOutlineAgentSessions, EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
+import { emptyPersistedAgentState } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 
 afterEach(() => cleanup());
 
 beforeEach(() => {
+  clearOutlineAgentSessions();
   agent.hydrateAgentOutlineSession.mockReset();
-  agent.hydrateAgentOutlineSession.mockResolvedValue(undefined);
+  agent.hydrateAgentOutlineSession.mockImplementation(async (root: string, chapterId: string) => {
+    const store = agentSessionStore({ kind: "outline", chapterId });
+    if (agentConsoleOwnershipStatus(store.getState(), root) !== "ready") {
+      store.getState().hydrate(root, emptyPersistedAgentState());
+    }
+  });
   agent.stopAgentRun.mockReset();
+  agent.submitAgentRequest.mockReset();
+  agent.submitAgentRequest.mockResolvedValue({ status: "success" });
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
     messages: [],
@@ -75,13 +85,28 @@ describe("ChapterSubview", () => {
     expect(useProjectStore.getState().meta.chapters.ch1.cards).toHaveLength(1);
   });
 
-  it("opens prompt-led planning inside the chapter view", () => {
+  it("opens planning inside the chapter view", () => {
     render(<ChapterSubview />);
 
     fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
     expect(useOutlineBoardStore.getState().chapterView).toBe("planner");
     expect(screen.getByRole("region", { name: "Outline Planner" })).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Agent mode" })).toBeNull();
+  });
+
+  it("starts a chapter investigation after hydration without requiring a starter prompt", async () => {
+    render(<ChapterSubview />);
+    fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
+
+    await waitFor(() => expect(agent.submitAgentRequest).toHaveBeenCalledTimes(1));
+    expect(agent.submitAgentRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "run",
+        task: { kind: "outline-sculpt", chapterId: "ch1" },
+        refs: [],
+      }),
+      { kind: "outline", chapterId: "ch1" },
+    );
   });
 
   it("aborts only the planner run when returning to manual planning", () => {

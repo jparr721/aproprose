@@ -175,6 +175,49 @@ function assistantWithUntrustedToolTargets(): AgentUIMessage {
 }
 
 describe("sanitizeAgentMessages", () => {
+  it("settles overview staging and persists only its summary", () => {
+    const message: AgentUIMessage = {
+      id: "overview-complete",
+      role: "assistant",
+      metadata,
+      parts: [{
+        type: "tool-stage_overview_proposal",
+        toolCallId: "overview-stage",
+        state: "output-available",
+        input: { summary: "Private summary", overview: "Private overview", reason: "Private reason" },
+        output: { kind: "runtime", summary: toolSummary, value: { proposalId: "Private payload", changeCount: 1 } },
+      }],
+    };
+    expect(settleAgentMessages([message])[0].parts).toHaveLength(1);
+    const persisted = sanitizeAgentMessages([message]);
+    expect(persisted[0].parts[0]).toMatchObject({
+      input: { summary: "", overview: "", reason: "" },
+      output: { kind: "summary", summary: toolSummary },
+    });
+    expect(JSON.stringify(persisted)).not.toContain("Private");
+  });
+
+  it("sanitizes failed overview staging input and diagnostics", () => {
+    const message: AgentUIMessage = {
+      id: "overview-failed",
+      role: "assistant",
+      metadata: { ...metadata, state: "error" },
+      parts: [{
+        type: "tool-stage_overview_proposal",
+        toolCallId: "overview-stage",
+        state: "output-error",
+        input: { summary: "Private summary", overview: "Private overview", reason: "Private reason" },
+        errorText: "Private diagnostic",
+      }],
+    };
+    const persisted = sanitizeAgentMessages([message]);
+    expect(persisted[0].parts[0]).toMatchObject({
+      input: { summary: "", overview: "", reason: "" },
+      errorText: "Tool execution failed.",
+    });
+    expect(JSON.stringify(persisted)).not.toContain("Private");
+  });
+
   it("keeps reasoning in settled live messages", () => {
     const messages: AgentUIMessage[] = [
       {

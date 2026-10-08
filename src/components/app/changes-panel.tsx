@@ -381,7 +381,10 @@ export function ChangesPanel() {
   };
   return (
     <section aria-label="Changes" data-changes-panel className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      {persistence.filter((entry) => entry.sessionId.kind !== "character" && entry.issue !== null).map((entry) => entry.issue === null ? null : <AgentPersistenceBanner key={entry.sessionKey} issue={entry.issue} sessionId={entry.sessionId} subject="Changes" />)}
+      {persistence.map((entry) => {
+        if (entry.sessionId.kind === "character" || entry.issue === null) return null;
+        return <AgentPersistenceBanner key={entry.sessionKey} issue={entry.issue} sessionId={entry.sessionId} subject="Changes" />;
+      })}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-6 p-5">
           <div className="flex flex-col gap-3">

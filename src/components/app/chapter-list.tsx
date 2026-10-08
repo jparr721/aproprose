@@ -234,7 +234,7 @@ export function ChapterList() {
           </CollapsibleTrigger>
         </SidebarGroupLabel>
         <AddChapterDialog />
-        <CollapsibleContent>
+        <CollapsibleContent className="overflow-hidden motion-safe:data-[state=open]:animate-sidebar-expand motion-safe:data-[state=closed]:animate-sidebar-collapse">
           <SidebarGroupContent>
             {chapters.length === 0 ? (
               <p className="px-2 py-1 text-xs text-faint">No chapters yet — add one.</p>

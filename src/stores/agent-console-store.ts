@@ -25,6 +25,7 @@ import type {
   PersistedPendingProposal,
   PersistedUsage,
   ProposalChangeDecision,
+  ProposalReviewPreconditions,
   ProposalSource,
   SubmittedAgentDraft,
 } from "@/lib/ai/agent-types";
@@ -158,6 +159,7 @@ export interface AgentConsoleState extends AgentConsoleData {
     proposalId: string,
     changeIds: string[],
     decision: ProposalChangeDecision,
+    reviewPreconditions?: ProposalReviewPreconditions,
   ) => void;
   restoreProposalChanges: (proposalId: string, changeIds: string[]) => void;
   updatePendingManuscriptText: (edit: PendingManuscriptTextEdit) => void;
@@ -399,6 +401,23 @@ export function pendingProposalChangeIds(record: AgentProposalRecord): string[] 
   );
 }
 
+export function proposalWithReviewPreconditions(record: AgentProposalRecord): PendingProposal {
+  const proposal = record.proposal;
+  const review = record.reviewPreconditions;
+  if (review === undefined) return proposal;
+  if (proposal.kind === "manuscript" && review.kind === "manuscript") {
+    return { ...proposal, changes: proposal.changes.map((item) => ({
+      ...item, precondition: review.changes[item.id] ?? item.precondition,
+    })) };
+  }
+  if (proposal.kind === "outline" && review.kind === "outline") {
+    return { ...proposal, changes: proposal.changes.map((item) => ({
+      ...item, precondition: review.changes[item.id] ?? item.precondition,
+    })) };
+  }
+  throw new AgentProposalRecordError(`Review preconditions do not match proposal ${proposal.id}.`);
+}
+
 export function selectPendingProposal(
   state: Pick<AgentConsoleData, "proposalRecords">,
   proposalId: string,
@@ -409,7 +428,7 @@ export function selectPendingProposal(
   if (record === undefined) return null;
   const pendingIds = new Set(pendingProposalChangeIds(record));
   if (pendingIds.size === 0) return null;
-  const proposal = record.proposal;
+  const proposal = proposalWithReviewPreconditions(record);
   if (pendingIds.size === proposalChangeIds(proposal).length) return proposal;
   if (proposal.kind === "overview") return proposal;
   const overviewChange =
@@ -998,7 +1017,7 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
       );
       return proposalProjection([...proposalRecords, replacement], proposal.id);
     }),
-  decideProposalChanges: (proposalId, changeIds, decision) =>
+  decideProposalChanges: (proposalId, changeIds, decision, reviewPreconditions) =>
     set((state) => {
       const target = requireProposalRecord(state, proposalId);
       requireDecisionIds(target, changeIds);
@@ -1010,8 +1029,27 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
       }
       const decisions = { ...target.decisions };
       for (const id of changeIds) decisions[id] = { ...decision };
+      let review = target.reviewPreconditions;
+      if (reviewPreconditions !== undefined) {
+        if (decision.status !== "applied" || reviewPreconditions.kind !== target.proposal.kind) {
+          throw new AgentProposalRecordError(`Only an applied ${target.proposal.kind} decision may advance review preconditions for ${proposalId}.`);
+        }
+        for (const [id, precondition] of Object.entries(reviewPreconditions.changes)) {
+          const item = target.proposal.changes.find((change) => change.id === id);
+          if (item === undefined || precondition === undefined || item.precondition.kind !== precondition.kind) {
+            throw new AgentProposalRecordError(`Review precondition does not match proposal change ${proposalId}/${id}.`);
+          }
+        }
+        if (reviewPreconditions.kind === "manuscript" && (review === undefined || review.kind === "manuscript")) {
+          review = { kind: "manuscript", changes: { ...review?.changes, ...reviewPreconditions.changes } };
+        } else if (reviewPreconditions.kind === "outline" && (review === undefined || review.kind === "outline")) {
+          review = { kind: "outline", changes: { ...review?.changes, ...reviewPreconditions.changes } };
+        } else {
+          throw new AgentProposalRecordError(`Review preconditions do not match proposal ${proposalId}.`);
+        }
+      }
       const proposalRecords = state.proposalRecords.map((record) =>
-        record.proposal.id === proposalId ? { ...record, decisions } : record,
+        record.proposal.id === proposalId ? { ...record, decisions, ...(review === undefined ? {} : { reviewPreconditions: review }) } : record,
       );
       return proposalProjection(proposalRecords, state.currentProposalId);
     }),

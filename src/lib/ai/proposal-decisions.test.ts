@@ -186,6 +186,26 @@ const outlineRewrite = (): SculptChange => ({
   reason: "Raise the stakes",
 });
 
+const outlineAdd = (title: string): SculptChange => ({
+  kind: "add",
+  cardId: null,
+  title,
+  intention: "Advance the story",
+  toIndex: null,
+  reason: "Develop the outline",
+});
+
+const manuscriptInsert = (afterId: string | null, newText: string): BlockChange => ({
+  kind: "insert",
+  blockId: null,
+  afterId,
+  type: "narration",
+  speaker: null,
+  newText,
+  toIndex: null,
+  reason: "Develop the scene",
+});
+
 const initialBlocks = (): Block[] => [
   blockFixture("block-1", "The rain fell."),
   blockFixture("block-2", "The door opened."),
@@ -252,6 +272,272 @@ afterEach(() => {
 });
 
 describe("proposal decisions", () => {
+  it("keeps sibling outline additions reviewable after accepting one", () => {
+    const proposal = outlineProposal(initialCards(), [
+      outlineAdd("First beat"), outlineAdd("Second beat"), outlineAdd("Third beat"),
+    ]);
+    setPending(proposal);
+
+    acceptProposalChange(proposal, "change-0");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected remaining outline additions");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+
+    acceptProposalChange(pending, "change-1");
+    acceptProposalChange(proposal, "change-2");
+
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Arrival", "First beat", "Second beat", "Third beat"]);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+  });
+
+  it("does not refresh an outline order already changed by the author", () => {
+    const proposal = outlineProposal(initialCards(), [outlineRewrite(), outlineAdd("Draft beat")]);
+    setPending(proposal);
+    const authorCardId = useProjectStore.getState().addCard("ch1");
+    useProjectStore.getState().editCard("ch1", authorCardId, { title: "Author beat", intention: "Manual change" });
+
+    acceptProposalChange(proposal, "change-0");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale outline addition");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-1"]));
+    acceptProposalChange(pending, "change-1");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Hard arrival", "Author beat"]);
+  });
+
+  it("keeps later author outline edits stale after accepting a sibling", () => {
+    const proposal = outlineProposal(initialCards(), [outlineAdd("First beat"), outlineAdd("Second beat")]);
+    setPending(proposal);
+    acceptProposalChange(proposal, "change-0");
+    const authorCardId = useProjectStore.getState().addCard("ch1");
+    useProjectStore.getState().editCard("ch1", authorCardId, { title: "Author beat", intention: "Manual change" });
+
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale outline addition");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-1"]));
+    acceptProposalChange(pending, "change-1");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Arrival", "First beat", "Author beat"]);
+  });
+
+  it("keeps sibling manuscript insertions in proposal reading order", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      manuscriptInsert("block-1", "First passage"), manuscriptInsert("block-1", "Second passage"),
+    ]);
+    setPending(proposal);
+
+    acceptProposalChange(proposal, "change-0");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected remaining manuscript insertion");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+    acceptProposalChange(pending, "change-1");
+
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["The rain fell.", "First passage", "Second passage", "The door opened."]);
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+  });
+
+  it("does not refresh a manuscript successor changed by the author", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "Revised anchor", "Revise"), manuscriptInsert("block-1", "Draft passage"),
+    ]);
+    setPending(proposal);
+    useProjectStore.getState().insertAfter("block-1", { text: "Author passage" });
+
+    acceptProposalChange(proposal, "change-0");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale manuscript insertion");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-1"]));
+    acceptProposalChange(pending, "change-1");
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["Revised anchor", "Author passage", "The door opened."]);
+  });
+
+  it.each(["rewrite", "move", "remove"] satisfies SculptChange["kind"][])(
+    "advances fresh outline order guards after its own %s", (kind) => {
+      const cards = [cardFixture("card-1", "Arrival"), cardFixture("card-2", "Reversal")];
+      useProjectStore.setState((state) => ({ meta: { ...state.meta, chapters: { ch1: { ...state.meta.chapters.ch1, cards } } } }));
+      const first: SculptChange = { ...outlineRewrite(), kind, toIndex: kind === "move" ? 1 : null };
+      const proposal = outlineProposal(cards, [first, outlineAdd("New turn")]);
+      setPending(proposal);
+
+      acceptProposalChange(proposal, "change-0");
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null) throw new Error("Expected pending outline addition");
+      expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+      acceptAllProposalChanges(pending);
+      expect(useProjectStore.getState().meta.chapters.ch1.cards.at(-1)?.title).toBe("New turn");
+    },
+  );
+
+  it.each(["rewrite", "insert", "remove"] satisfies BlockChange["kind"][])(
+    "advances fresh manuscript move guards after its own %s", (kind) => {
+      const first: BlockChange = kind === "insert"
+        ? manuscriptInsert("block-1", "Middle passage")
+        : { ...rewrite("block-1", "Revised opening", "Revise"), kind };
+      const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+        first, { ...rewrite("block-2", "", "Move"), kind: "move", newText: null, toIndex: 0 },
+      ]);
+      setPending(proposal);
+
+      acceptProposalChange(proposal, "change-0");
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null) throw new Error("Expected pending manuscript move");
+      expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+      acceptAllProposalChanges(pending);
+      expect(useProjectStore.getState().blocks[0].text).toBe("The door opened.");
+    },
+  );
+
+  it.each([
+    { order: [2, 1, 0], remainingBatch: false },
+    { order: [1], remainingBatch: true },
+    { order: [1, 0, 2], remainingBatch: false },
+  ])("preserves insertion reading order for approvals $order", ({ order, remainingBatch }) => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      manuscriptInsert("block-1", "First passage"), manuscriptInsert("block-1", "Second passage"),
+      manuscriptInsert("block-1", "Third passage"),
+    ]);
+    setPending(proposal);
+    for (const index of order) acceptProposalChange(proposal, `change-${index}`);
+    if (remainingBatch) {
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null) throw new Error("Expected remaining manuscript insertions");
+      acceptAllProposalChanges(pending);
+    }
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["The rain fell.", "First passage", "Second passage", "Third passage", "The door opened."]);
+  });
+
+  it("keeps dismissed sibling additions reviewable when restored after an approval", () => {
+    const proposal = outlineProposal(initialCards(), [outlineAdd("First beat"), outlineAdd("Second beat")]);
+    setPending(proposal);
+    rejectProposalChange(proposal, "change-1");
+    acceptProposalChange(proposal, "change-0");
+    useAgentConsoleStore.getState().restoreProposalChanges(proposal.id, ["change-1"]);
+    const restored = useAgentConsoleStore.getState().pendingProposal;
+    if (restored === null) throw new Error("Expected restored outline addition");
+    expect(proposalStaleChangeIds(restored)).toEqual(new Set());
+    acceptAllProposalChanges(restored);
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Arrival", "First beat", "Second beat"]);
+  });
+
+  it("does not advance another retained proposal after accepting its sibling draft", () => {
+    const older = outlineProposal(initialCards(), [outlineAdd("Older beat")]);
+    const newer = { ...outlineProposal(initialCards(), [outlineAdd("Newer beat"), outlineAdd("Last beat")]), id: "newer" };
+    setPending(older);
+    useAgentConsoleStore.getState().stageProposal(newer, { kind: "legacy" });
+    acceptProposalChange(newer, "change-0");
+    expect(proposalStaleChangeIds(older)).toEqual(new Set(["change-0"]));
+    acceptAllProposalChanges(older);
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Arrival", "Newer beat"]);
+  });
+
+  it("does not accept an advanced manuscript guard after undoing its applied sibling", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      manuscriptInsert("block-1", "First passage"), manuscriptInsert("block-1", "Second passage"),
+    ]);
+    setPending(proposal);
+    acceptProposalChange(proposal, "change-0");
+    useProjectStore.getState().undo();
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected pending manuscript insertion");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-1"]));
+    acceptProposalChange(pending, "change-1");
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["The rain fell.", "The door opened."]);
+  });
+
+  it("keeps duplicate insertion receipts associated with their original anchors", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      manuscriptInsert("block-2", "Same passage"), manuscriptInsert("block-1", "Same passage"),
+      manuscriptInsert("block-2", "Second anchor tail"), manuscriptInsert("block-1", "First anchor tail"),
+    ]);
+    setPending(proposal);
+    acceptAllProposalChanges({ ...proposal, changes: proposal.changes.slice(0, 2) });
+    acceptProposalChange(proposal, "change-3");
+    acceptProposalChange(proposal, "change-2");
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "The rain fell.", "Same passage", "First anchor tail",
+      "The door opened.", "Same passage", "Second anchor tail",
+    ]);
+  });
+
+  it.each([0, 1, 2])("preserves unanchored insertion order in an empty chapter after approving $0 first", (first) => {
+    useProjectStore.setState({ blocks: [] });
+    const proposal = manuscriptProposal([], [
+      manuscriptInsert(null, "First passage"), manuscriptInsert(null, "Second passage"), manuscriptInsert(null, "Third passage"),
+    ]);
+    setPending(proposal);
+    acceptProposalChange(proposal, `change-${first}`);
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected remaining opening passages");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+    acceptAllProposalChanges(pending);
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["First passage", "Second passage", "Third passage"]);
+  });
+
+  it("restores an earlier dismissed insertion before its applied sibling", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      manuscriptInsert("block-1", "First passage"), manuscriptInsert("block-1", "Second passage"),
+    ]);
+    setPending(proposal);
+    rejectProposalChange(proposal, "change-0");
+    acceptProposalChange(proposal, "change-1");
+    useAgentConsoleStore.getState().restoreProposalChanges(proposal.id, ["change-0"]);
+    const restored = useAgentConsoleStore.getState().pendingProposal;
+    if (restored === null) throw new Error("Expected restored earlier insertion");
+    expect(proposalStaleChangeIds(restored)).toEqual(new Set());
+    acceptAllProposalChanges(restored);
+    expect(useProjectStore.getState().blocks.map((block) => block.text))
+      .toEqual(["The rain fell.", "First passage", "Second passage", "The door opened."]);
+  });
+
+  it("keeps a subscriber edit stale instead of capturing it as an applied proposal change", () => {
+    const proposal = outlineProposal(initialCards(), [outlineAdd("First beat"), outlineAdd("Second beat")]);
+    setPending(proposal);
+    let edited = false;
+    const unsubscribe = useProjectStore.subscribe((state) => {
+      if (!edited && state.meta.chapters.ch1.cards.length === 2) {
+        edited = true;
+        state.editCard("ch1", "card-1", { title: "Author revision" });
+      }
+    });
+    try {
+      acceptProposalChange(proposal, "change-0");
+    } finally {
+      unsubscribe();
+    }
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale outline addition");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-1"]));
+    acceptProposalChange(pending, "change-1");
+    expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title))
+      .toEqual(["Author revision", "First beat"]);
+  });
+
+  it("does not retarget an insertion to identical text after removing its source boundary", () => {
+    const blocks = ["first", "second", "third", "fourth"].map((id) => blockFixture(id, "Same text"));
+    useProjectStore.setState({ blocks });
+    const proposal = manuscriptProposal(blocks, [
+      { ...rewrite("first", "", "Remove"), kind: "remove", newText: null },
+      { ...rewrite("second", "", "Remove"), kind: "remove", newText: null },
+      manuscriptInsert("first", "Draft passage"),
+    ]);
+    setPending(proposal);
+    acceptAllProposalChanges({ ...proposal, changes: proposal.changes.slice(0, 2) });
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale insertion after source removal");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-2"]));
+    acceptProposalChange(pending, "change-2");
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual(["third", "fourth"]);
+  });
+
   it("does not expand a captured batch when another change is restored", () => {
     const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
       rewrite("block-1", "First draft", "Revise"), rewrite("block-2", "Second draft", "Revise"),

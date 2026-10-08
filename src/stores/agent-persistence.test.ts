@@ -7,12 +7,14 @@ import { Book } from "@/book";
 import type {
   AgentMessageMetadata,
   AgentPersistenceIssue,
+  AgentProposalRecord,
   AgentUIMessage,
   AgentUiTools,
   DraftContextRef,
   PendingProposal,
   PersistedAgentState,
   PersistedUsage,
+  ProposalReviewPreconditions,
 } from "@/lib/ai/agent-types";
 import {
   dispatchAgentIntent,
@@ -891,6 +893,251 @@ describe("agent persistence", () => {
       "The rain softened against the glass.",
     );
     expect(restoredProposal.projectRoot).toBe("/book");
+  });
+
+  describe("proposal review preconditions", () => {
+    const reviewProposals: PendingProposal[] = [
+      {
+        ...proposal,
+        changes: [
+          proposal.changes[0],
+          { ...proposal.changes[0], id: "change-2" },
+        ],
+      },
+      {
+        ...proposal,
+        kind: "outline",
+        changes: [
+          {
+            id: "change-1",
+            change: {
+              kind: "rewrite",
+              cardId: "card-1",
+              title: "Revised arrival",
+              intention: null,
+              toIndex: null,
+              reason: "Clarify the arrival",
+            },
+            precondition: {
+              kind: "card",
+              target: {
+                sourceId: "card-1",
+                order: 0,
+                fingerprint: "card-fingerprint",
+                sourceType: "outline-card",
+                label: "Arrival",
+                exactText: "Arrival",
+                previewText: "Arrival",
+              },
+            },
+          },
+          {
+            id: "change-2",
+            change: {
+              kind: "add",
+              cardId: null,
+              title: "Departure",
+              intention: "Leave the city",
+              toIndex: null,
+              reason: "Complete the journey",
+            },
+            precondition: {
+              kind: "outline-order",
+              orderFingerprint: "original-outline-order",
+            },
+          },
+        ],
+      },
+    ];
+    const manuscriptReview: ProposalReviewPreconditions = {
+      kind: "manuscript",
+      changes: {
+        "change-2": {
+          kind: "target",
+          target: {
+            sourceId: "block-1",
+            order: 2,
+            fingerprint: "advanced-fingerprint",
+            sourceType: "narration",
+            label: "Narration block",
+            exactText: "The advanced source.",
+            previewText: "The advanced source.",
+          },
+        },
+      },
+    };
+    const outlineReview: ProposalReviewPreconditions = {
+      kind: "outline",
+      changes: {
+        "change-2": {
+          kind: "outline-order",
+          orderFingerprint: "advanced-outline-order",
+        },
+      },
+    };
+    const appliedDecisions: AgentProposalRecord["decisions"] = {
+      "change-1": { status: "applied", decidedAt: "2026-10-07T12:00:00.000Z" },
+    };
+
+    function persistedReviewState(args: {
+      reviewProposal: PendingProposal;
+      reviewPreconditions: unknown;
+      decisions: AgentProposalRecord["decisions"];
+    }): unknown {
+      const { projectRoot: _projectRoot, ...persistedProposal } = args.reviewProposal;
+      return {
+        ...emptyPersistedAgentState(),
+        proposalRecords: [{
+          proposal: persistedProposal,
+          source: { kind: "legacy" },
+          decisions: args.decisions,
+          replacedByProposalId: null,
+          reviewPreconditions: args.reviewPreconditions,
+        }],
+        currentProposalId: persistedProposal.id,
+      };
+    }
+
+    it.each(reviewProposals)("round-trips $kind review preconditions and the original draft", async (reviewProposal) => {
+      const reviewPreconditions = reviewProposal.kind === "manuscript"
+        ? manuscriptReview
+        : outlineReview;
+      const record: AgentProposalRecord = {
+        proposal: reviewProposal,
+        source: { kind: "legacy" },
+        decisions: appliedDecisions,
+        replacedByProposalId: null,
+        reviewPreconditions,
+      };
+      useAgentConsoleStore.getState().hydrate("/books/one", {
+        ...emptyPersistedAgentState(),
+        proposalRecords: [record],
+        currentProposalId: reviewProposal.id,
+      });
+
+      const snapshot = await toAgentSnapshot();
+      const restored = await fromAgentSnapshot("/books/reopened", snapshot);
+
+      expect(snapshot.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+      expect(restored.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+      expect(restored.proposalRecords[0].proposal).toEqual({
+        ...reviewProposal,
+        projectRoot: "/books/reopened",
+      });
+      expect(restored.proposalRecords[0].decisions).toEqual(record.decisions);
+    });
+
+    it.each(reviewProposals)("loads empty $kind review preconditions without an applied decision", async (reviewProposal) => {
+      const reviewPreconditions = { kind: reviewProposal.kind, changes: {} };
+
+      const restored = await fromAgentSnapshot("/books/one", persistedReviewState({
+        reviewProposal,
+        reviewPreconditions,
+        decisions: {},
+      }));
+
+      expect(restored.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+    });
+
+    it("preserves removed-source review guards through hydration", async () => {
+      if (manuscriptReview.kind !== "manuscript") throw new Error("Expected manuscript guards");
+      const change = manuscriptReview.changes["change-2"];
+      if (change === undefined || change.kind !== "target") throw new Error("Expected target guard");
+      const reviewPreconditions: ProposalReviewPreconditions = {
+        kind: "manuscript",
+        changes: { "change-2": { ...change, target: { ...change.target, removed: true } } },
+      };
+      const restored = await fromAgentSnapshot("/books/one", persistedReviewState({
+        reviewProposal: reviewProposals[0], reviewPreconditions, decisions: appliedDecisions,
+      }));
+      useAgentConsoleStore.getState().hydrate("/books/one", restored);
+      expect(selectPendingProposal(useAgentConsoleStore.getState(), proposal.id)).toMatchObject({
+        changes: [{ id: "change-2", precondition: { target: { removed: true } } }],
+      });
+      expect((await toAgentSnapshot()).proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+    });
+
+    it("loads old v4 proposal records without review preconditions", async () => {
+      const { projectRoot: _projectRoot, ...persistedProposal } = proposal;
+
+      const restored = await fromAgentSnapshot(
+        "/books/one",
+        persistedProposalState(persistedProposal, proposal.id),
+      );
+
+      expect(restored.proposalRecords[0]).not.toHaveProperty("reviewPreconditions");
+      expect(restored.proposalRecords[0].proposal).toEqual(proposal);
+    });
+
+    it.each([
+      {
+        name: "unknown change IDs",
+        reviewPreconditions: {
+          kind: "manuscript",
+          changes: { unknown: manuscriptReview.changes["change-2"] },
+        },
+      },
+      { name: "a proposal kind mismatch", reviewPreconditions: outlineReview },
+      {
+        name: "an empty proposal kind mismatch",
+        reviewPreconditions: { kind: "outline", changes: {} },
+      },
+      {
+        name: "a manuscript change correlation mismatch",
+        reviewPreconditions: {
+          kind: "manuscript",
+          changes: {
+            "change-2": {
+              kind: "insert",
+              boundary: "immediate",
+              anchor: null,
+              expectedNext: null,
+            },
+          },
+        },
+      },
+    ])("rejects review preconditions with $name", async ({ reviewPreconditions }) => {
+      const raw = persistedReviewState({
+        reviewProposal: reviewProposals[0],
+        reviewPreconditions,
+        decisions: appliedDecisions,
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
+
+    it("rejects an outline review precondition correlation mismatch", async () => {
+      const reviewProposal = reviewProposals[1];
+      if (reviewProposal.kind !== "outline") throw new Error("Expected an outline proposal fixture.");
+      const raw = persistedReviewState({
+        reviewProposal,
+        reviewPreconditions: {
+          kind: "outline",
+          changes: { "change-2": reviewProposal.changes[0].precondition },
+        },
+        decisions: appliedDecisions,
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
+
+    it.each(["undecided", "dismissed"])("rejects nonempty review preconditions when earlier changes are %s", async (status) => {
+      const raw = persistedReviewState({
+        reviewProposal: reviewProposals[0],
+        reviewPreconditions: manuscriptReview,
+        decisions: status === "dismissed"
+          ? { "change-1": { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" } }
+          : {},
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
   });
 
   it("round-trips explicit immediate and next-prose insert boundaries", async () => {

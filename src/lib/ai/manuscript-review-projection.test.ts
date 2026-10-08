@@ -8,10 +8,12 @@ import type {
   ManuscriptPendingProposal,
   SourceLocator,
 } from "@/lib/ai/agent-types";
+import { materializeManuscriptChanges } from "@/lib/ai/agent-proposals";
 import {
   projectManuscriptReview,
   type ManuscriptReviewProjection,
 } from "@/lib/ai/manuscript-review-projection";
+import { applyProposal } from "@/lib/blocks/proposal";
 import type { Block, BlockChange } from "@/lib/types";
 
 function block(id: string, text: string): Block {
@@ -367,6 +369,42 @@ describe("projectManuscriptReview stale changes", () => {
 });
 
 describe("projectManuscriptReview ordering", () => {
+  it.each([1, 2])("places %i earlier null-anchor insertions before their accepted later sibling", (count) => {
+    const live = [block("accepted-later", "Third passage.")];
+    const changes: ManuscriptPendingChange[] = [
+      insertChange("insert-1", [], null, "First passage."),
+      insertChange("insert-2", [], null, "Second passage."),
+    ].slice(0, count).map((change) => ({
+      ...change,
+      precondition: {
+        kind: "insert",
+        boundary: "immediate",
+        anchor: null,
+        expectedNext: locator(live, 0),
+      },
+    }));
+    const pending = proposal(changes);
+
+    const projection = projectManuscriptReview(live, pending);
+    const applied = applyProposal(
+      live,
+      materializeManuscriptChanges(pending, changes.map((change) => change.id), live),
+      () => undefined,
+    );
+
+    expect(rowKindsAndKeys(projection)).toEqual([
+      ...changes.map((change) => ["insert", `review:change:${change.id}:insert`]),
+      ["unchanged", "review:block:accepted-later"],
+    ]);
+    expect(projection.navigationChangeIds).toEqual(changes.map((change) => change.id));
+    expect(projection.staleChangeIds).toEqual(new Set());
+    expect(projection.rows.map((row) => {
+      if (row.kind === "unchanged") return row.block.text;
+      if (row.kind === "insert") return row.change.change.newText;
+      throw new Error(`Unexpected review row: ${row.kind}`);
+    })).toEqual(applied.blocks.map((source) => source.text));
+  });
+
   it("keeps same-anchor inserts in proposal reading order", () => {
     const first = insertChange("insert-1", threeBlocks, 0, "First.");
     const second = insertChange("insert-2", threeBlocks, 0, "Second.");

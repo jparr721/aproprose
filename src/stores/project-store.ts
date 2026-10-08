@@ -77,6 +77,8 @@ import {
   conflictingTargetChangeIds,
   invalidProposalCorrelationIds,
   materializeManuscriptChanges,
+  rebaseManuscriptReviewPreconditions,
+  rebaseOutlineReviewPreconditions,
   validateManuscriptChanges,
   validateOutlineChanges,
 } from "@/lib/ai/agent-proposals";
@@ -1218,6 +1220,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "apply-failed",
         };
       }
+      const reviewPreconditions = changes.length === 0 ? undefined : rebaseManuscriptReviewPreconditions(
+        proposal, state.blocks, outcome.blocks, changeIds, outcome.insertedBlockIds,
+      );
       if (changes.length > 0) {
         const meta = appliesOverview
           ? {
@@ -1241,7 +1246,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         persistMeta(meta);
         set({ meta });
       }
-      return { status: "applied", appliedChangeIds: changeIds };
+      return { status: "applied", appliedChangeIds: changeIds, ...(reviewPreconditions === undefined ? {} : { reviewPreconditions }) };
     },
 
     updateBlock: (id, patch) =>
@@ -2236,6 +2241,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           reason: "apply-failed",
         };
       }
+      const reviewPreconditions = selectedProposal.changes.length === 0 ? undefined : rebaseOutlineReviewPreconditions(
+        proposal, cards, getChapterOutline(chapters, proposal.chapterId).cards, changeIds,
+      );
       const meta = {
         ...before,
         chapters,
@@ -2260,6 +2268,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         status: "applied",
         appliedChangeIds: changeIds,
         undoToken,
+        ...(reviewPreconditions === undefined ? {} : { reviewPreconditions }),
       };
     },
 

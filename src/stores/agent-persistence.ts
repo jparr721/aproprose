@@ -155,6 +155,7 @@ const sourceLocatorSchema = z
     label: z.string(),
     exactText: z.string(),
     previewText: z.string(),
+    removed: z.literal(true).optional(),
   })
   .strict();
 
@@ -333,6 +334,16 @@ const proposalRecordSchema = z.object({
     decidedAt: z.string(),
   }).strict()),
   replacedByProposalId: z.string().nullable(),
+  reviewPreconditions: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("manuscript"),
+      changes: z.record(z.string(), manuscriptPreconditionSchema),
+    }).strict(),
+    z.object({
+      kind: z.literal("outline"),
+      changes: z.record(z.string(), outlinePreconditionSchema),
+    }).strict(),
+  ]).optional(),
 }).strict().superRefine((record, context) => {
   const ids = proposalChangeIds(record.proposal);
   if (new Set(ids).size !== ids.length) {
@@ -342,6 +353,64 @@ const proposalRecordSchema = z.object({
     if (!ids.includes(id)) {
       context.addIssue({ code: "custom", message: `Decision refers to unknown proposal change: ${id}` });
     }
+  }
+  const review = record.reviewPreconditions;
+  if (review === undefined) return;
+  if (review.kind !== record.proposal.kind) {
+    context.addIssue({
+      code: "custom",
+      message: "Review preconditions must match the proposal kind.",
+      path: ["reviewPreconditions", "kind"],
+    });
+    return;
+  }
+  const reviewIds = Object.keys(review.changes);
+  const sourceIds = new Set(record.proposal.changes.map((change) => change.id));
+  for (const id of reviewIds) {
+    if (!sourceIds.has(id)) {
+      context.addIssue({
+        code: "custom",
+        message: `Review precondition refers to unknown proposal change: ${id}`,
+        path: ["reviewPreconditions", "changes", id],
+      });
+    }
+  }
+  if (
+    reviewIds.length > 0 &&
+    !Object.values(record.decisions).some((decision) => decision.status === "applied")
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Advanced review preconditions require an applied proposal change.",
+      path: ["reviewPreconditions"],
+    });
+  }
+  let invalidIds: string[];
+  if (record.proposal.kind === "manuscript" && review.kind === "manuscript") {
+    invalidIds = invalidProposalCorrelationIds({
+      kind: "manuscript",
+      changes: record.proposal.changes.map((change) => ({
+        ...change,
+        precondition: review.changes[change.id] ?? change.precondition,
+      })),
+    });
+  } else if (record.proposal.kind === "outline" && review.kind === "outline") {
+    invalidIds = invalidProposalCorrelationIds({
+      kind: "outline",
+      changes: record.proposal.changes.map((change) => ({
+        ...change,
+        precondition: review.changes[change.id] ?? change.precondition,
+      })),
+    });
+  } else {
+    return;
+  }
+  for (const id of invalidIds) {
+    context.addIssue({
+      code: "custom",
+      message: "Proposal change and review precondition kinds do not match.",
+      path: ["reviewPreconditions", "changes", id],
+    });
   }
 });
 

@@ -453,7 +453,7 @@ export function projectManuscriptReview(
   );
   let virtualContent = initialContent;
   let layout: LayoutNode[] = [...initialContent];
-  const lastInsertFor = new Map<string, InsertContentNode>();
+  const lastInsertFor = new Map<string | null, InsertContentNode>();
 
   for (const { pending, materialized } of materializedPairs(
     proposal,
@@ -489,20 +489,23 @@ export function projectManuscriptReview(
           afterId: materialized.afterId,
           change: pending,
         };
-        const priorInsert =
+        const priorInsert = lastInsertFor.get(materialized.afterId);
+        const anchor = priorInsert ?? (
           materialized.afterId === null
             ? undefined
-            : lastInsertFor.get(materialized.afterId);
-        const anchor =
-          materialized.afterId === null
-            ? undefined
-            : priorInsert ??
-              virtualContent.find(
+            : virtualContent.find(
                 (item) => persistedBlockId(item) === materialized.afterId,
-              );
-        if (materialized.afterId === null || anchor === undefined) {
-          virtualContent = [...virtualContent, node];
-          layout = [...layout, node];
+              )
+        );
+        if (anchor === undefined) {
+          const index = materialized.afterId === null && materialized.toIndex !== null
+            ? Math.max(0, Math.min(materialized.toIndex, virtualContent.length))
+            : virtualContent.length;
+          const target = virtualContent[index];
+          virtualContent = insertAt(virtualContent, index, node);
+          layout = target === undefined
+            ? [...layout, node]
+            : insertAt(layout, layoutNodeIndex(layout, target), node);
         } else {
           virtualContent = insertAt(
             virtualContent,
@@ -511,9 +514,7 @@ export function projectManuscriptReview(
           );
           layout = insertAt(layout, layoutNodeIndex(layout, anchor) + 1, node);
         }
-        if (materialized.afterId !== null) {
-          lastInsertFor.set(materialized.afterId, node);
-        }
+        lastInsertFor.set(materialized.afterId, node);
         break;
       }
       case "remove": {

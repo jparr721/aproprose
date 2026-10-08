@@ -11,6 +11,7 @@ import type {
   OutlineUndoToken,
   PendingProposal,
   ProposalEventData,
+  ProposalReviewPreconditions,
 } from "@/lib/ai/agent-types";
 import { getChapterOutline } from "@/lib/outline/model";
 import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
@@ -19,6 +20,7 @@ import {
   agentSessionStore,
   selectPendingProposal,
   proposalChangeIds,
+  proposalWithReviewPreconditions,
   requireAgentSessionProject,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -34,6 +36,8 @@ type ProposalApplyFailure = Exclude<
   AgentProposalApplyResult | AgentOutlineApplyResult,
   { status: "applied" }
 >;
+
+type ProposalApplySuccess = Extract<AgentProposalApplyResult | AgentOutlineApplyResult, { status: "applied" }>;
 
 export class ProposalDecisionCorrelationError extends Error {
   constructor(proposal: PendingProposal, current: PendingProposal | null) {
@@ -164,38 +168,45 @@ function closeExhaustedManuscriptReview(proposal: PendingProposal): void {
 function applyProposalChanges(
   proposal: PendingProposal,
   changeIds: string[],
-): boolean {
+  sessionId: AgentSessionId,
+): ProposalApplySuccess | null {
   const projectState = useProjectStore.getState();
   if (proposalRequiresSourceNavigation(proposal) && proposal.changes.some((change) => changeIds.includes(change.id))) {
     toast.error("Open the source chapter before applying this draft");
-    return false;
+    return null;
   }
+  const record = agentSessionStore(sessionId).getState().proposalRecords.find((item) => item.proposal.id === proposal.id);
+  if (record === undefined) throw new ProposalDecisionCorrelationError(proposal, null);
+  const review = proposalWithReviewPreconditions(record);
+  const overviewChange = review.overviewChange && record.decisions[review.overviewChange.id]?.status !== "applied" ? review.overviewChange : null;
   switch (proposal.kind) {
     case "manuscript": {
+      if (review.kind !== "manuscript") throw new ProposalDecisionCorrelationError(proposal, review);
       const result = projectState.applyAgentManuscriptProposal(
-        proposal,
+        { ...review, changes: review.changes.filter((item) => record.decisions[item.id]?.status !== "applied"), overviewChange },
         changeIds,
       );
       if (result.status !== "applied") {
         showProposalApplyFailure(result);
-        return false;
+        return null;
       }
-      return true;
+      return result;
     }
     case "outline": {
+      if (review.kind !== "outline") throw new ProposalDecisionCorrelationError(proposal, review);
       const result = projectState.applyAgentOutlineProposal(
-        proposal,
+        { ...review, changes: review.changes.filter((item) => record.decisions[item.id]?.status !== "applied"), overviewChange },
         changeIds,
       );
       if (result.status !== "applied") {
         showProposalApplyFailure(result);
-        return false;
+        return null;
       }
       showOutlineUndo(result.undoToken);
-      return true;
+      return result;
     }
     case "overview":
-      return true;
+      return { status: "applied", appliedChangeIds: changeIds };
     default:
       return assertProposalKindExhausted(proposal);
   }
@@ -276,12 +287,15 @@ export function acceptProposalChange(
   const current = currentProposalForDecision(proposal, sessionId);
   if (current.overviewChange?.id === changeId) {
     if (proposalStaleChangeIds(current).has(changeId)) return;
+    let reviewPreconditions: ProposalReviewPreconditions | undefined;
     if (current.kind === "overview") {
       useProjectStore.getState().setOverview(current.overviewChange.after);
-    } else if (!applyProposalChanges(current, [changeId])) {
-      return;
+    } else {
+      const result = applyProposalChanges(current, [changeId], sessionId);
+      if (result === null) return;
+      reviewPreconditions = result.reviewPreconditions;
     }
-    agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() });
+    agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() }, reviewPreconditions);
     recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
     return;
   }
@@ -289,8 +303,9 @@ export function acceptProposalChange(
   if (change === undefined) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
-  if (!applyProposalChanges(current, [changeId])) return;
-  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() });
+  const result = applyProposalChanges(current, [changeId], sessionId);
+  if (result === null) return;
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() }, result.reviewPreconditions);
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
 }
@@ -307,11 +322,16 @@ export function acceptAllProposalChanges(
     ...(current.overviewChange ? [current.overviewChange.id] : []),
   ];
   if (proposalStaleChangeIds(current).size > 0) return;
-  if (current.kind !== "overview" && !applyProposalChanges(current, changeIds)) return;
+  let reviewPreconditions: ProposalReviewPreconditions | undefined;
+  if (current.kind !== "overview") {
+    const result = applyProposalChanges(current, changeIds, sessionId);
+    if (result === null) return;
+    reviewPreconditions = result.reviewPreconditions;
+  }
   if (current.kind === "overview") {
     useProjectStore.getState().setOverview(current.overviewChange.after);
   }
-  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, changeIds, { status: "applied", decidedAt: new Date().toISOString() });
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, changeIds, { status: "applied", decidedAt: new Date().toISOString() }, reviewPreconditions);
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(
     proposalEvent(

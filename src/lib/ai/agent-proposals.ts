@@ -8,6 +8,7 @@ import type {
   OverviewPendingProposal,
   PendingProposal,
   PendingProposalToolValue,
+  ProposalReviewPreconditions,
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import {
@@ -565,6 +566,7 @@ function resolveBlockLocator(
   locator: SourceLocator,
   blocks: Block[],
 ): Block | null {
+  if (locator.removed === true) return null;
   const byId = blocks.find((block) => block.id === locator.sourceId);
   if (byId !== undefined) {
     return blockFingerprint(byId) === locator.fingerprint ? byId : null;
@@ -580,6 +582,7 @@ function resolveCardLocator(
   locator: SourceLocator,
   cards: Card[],
 ): Card | null {
+  if (locator.removed === true) return null;
   const byId = cards.find((card) => card.id === locator.sourceId);
   if (byId !== undefined && cardFingerprint(byId) === locator.fingerprint) {
     return byId;
@@ -618,7 +621,8 @@ function validateManuscriptChange(
   if (precondition.anchor !== null && anchor === null) return "anchor-changed";
   const anchorOrder =
     anchor === null
-      ? precondition.boundary === "next-prose" ? -1 : blocks.length - 1
+      // A retained successor marks the beginning after an empty-chapter sibling was applied.
+      ? precondition.boundary === "next-prose" || precondition.expectedNext !== null ? -1 : blocks.length - 1
       : blocks.findIndex((block) => block.id === anchor.id);
   const next =
     precondition.boundary === "next-prose"
@@ -669,6 +673,98 @@ export function validateOutlineChanges(
   });
 }
 
+export function rebaseOutlineReviewPreconditions(
+  proposal: OutlinePendingProposal,
+  before: Card[],
+  after: Card[],
+  appliedChangeIds: string[],
+): ProposalReviewPreconditions | undefined {
+  const unavailable = new Set([
+    ...appliedChangeIds,
+    ...validateOutlineChanges(proposal, before).map((change) => change.changeId),
+  ]);
+  const changes: Partial<Record<string, OutlinePendingChange["precondition"]>> = {};
+  for (const item of proposal.changes) {
+    if (unavailable.has(item.id)) continue;
+    const precondition = item.precondition;
+    if (precondition.kind === "outline-order") {
+      changes[item.id] = { ...precondition, orderFingerprint: outlineOrderFingerprint(after) };
+      continue;
+    }
+    const source = resolveCardLocator(precondition.target, before);
+    if (source === null) continue;
+    if (!after.some((card) => card.id === source.id)) {
+      changes[item.id] = { ...precondition, target: { ...precondition.target, removed: true } };
+      continue;
+    }
+    const target = cardLocator(after, source.id);
+    changes[item.id] = precondition.kind === "card"
+      ? { kind: "card", target }
+      : { kind: "outline-move", target, orderFingerprint: outlineOrderFingerprint(after) };
+  }
+  return Object.keys(changes).length === 0 ? undefined : { kind: "outline", changes };
+}
+
+export function rebaseManuscriptReviewPreconditions(
+  proposal: ManuscriptPendingProposal,
+  before: Block[],
+  after: Block[],
+  appliedChangeIds: string[],
+  insertedBlockIds: string[],
+): ProposalReviewPreconditions | undefined {
+  const selected = new Set(appliedChangeIds);
+  const insertedChanges = proposal.changes.filter((item) => selected.has(item.id) && item.change.kind === "insert");
+  if (insertedChanges.length !== insertedBlockIds.length) {
+    throw new AgentProposalError("invalid-proposal", "Applied insertion identities do not match the selected manuscript changes.");
+  }
+  const insertedIds = new Map(insertedChanges.map((item, index) => [item.id, insertedBlockIds[index]]));
+  const changes: Partial<Record<string, ManuscriptPendingChange["precondition"]>> = {};
+  for (const [index, item] of proposal.changes.entries()) {
+    if (selected.has(item.id) || validateManuscriptChange(item, before) !== null) continue;
+    const precondition = item.precondition;
+    if (precondition.kind !== "insert") {
+      const source = resolveBlockLocator(precondition.target, before);
+      if (source === null) continue;
+      if (!after.some((block) => block.id === source.id)) {
+        changes[item.id] = { ...precondition, target: { ...precondition.target, removed: true } };
+        continue;
+      }
+      const target = blockLocator(after, source.id);
+      changes[item.id] = precondition.kind === "target"
+        ? { kind: "target", target }
+        : { kind: "move", target, orderFingerprint: blockOrderFingerprint(after) };
+      continue;
+    }
+    const source = precondition.anchor === null ? null : resolveBlockLocator(precondition.anchor, before);
+    if (precondition.anchor !== null && source !== null && !after.some((block) => block.id === source.id)) {
+      changes[item.id] = { ...precondition, anchor: { ...precondition.anchor, removed: true } };
+      continue;
+    }
+    let anchorId = source === null
+      ? precondition.boundary === "immediate" && precondition.expectedNext === null ? before.at(-1)?.id ?? null : null
+      : source.id;
+    if (anchorId !== null && !after.some((block) => block.id === anchorId)) continue;
+    for (const preceding of proposal.changes.slice(0, index)) {
+      if (preceding.change.kind !== "insert" || preceding.change.afterId !== item.change.afterId) continue;
+      const insertedId = insertedIds.get(preceding.id);
+      if (insertedId === undefined) continue;
+      if (anchorId === null || after.findIndex((block) => block.id === insertedId) > after.findIndex((block) => block.id === anchorId)) {
+        anchorId = insertedId;
+      }
+    }
+    const anchorOrder = anchorId === null ? -1 : after.findIndex((block) => block.id === anchorId);
+    const next = precondition.boundary === "next-prose"
+      ? after.slice(anchorOrder + 1).find((block) => block.type === "narration" || block.type === "dialogue")
+      : after[anchorOrder + 1];
+    changes[item.id] = {
+      ...precondition,
+      anchor: anchorId === null ? null : blockLocator(after, anchorId),
+      expectedNext: next === undefined ? null : blockLocator(after, next.id),
+    };
+  }
+  return Object.keys(changes).length === 0 ? undefined : { kind: "manuscript", changes };
+}
+
 export function materializeManuscriptChanges(
   proposal: ManuscriptPendingProposal,
   changeIds: string[],
@@ -694,7 +790,11 @@ export function materializeManuscriptChanges(
           precondition.kind === "insert" && precondition.anchor !== null
             ? resolveBlockLocator(precondition.anchor, blocks)
             : null;
-        return { ...item.change, afterId: anchor?.id ?? null };
+        return {
+          ...item.change,
+          afterId: anchor?.id ?? null,
+          toIndex: precondition.kind === "insert" && precondition.anchor === null && precondition.expectedNext !== null ? 0 : null,
+        };
       }
       const locator =
         precondition.kind === "target" || precondition.kind === "move"

@@ -12,6 +12,7 @@ export interface ApplyProposalOutcome {
   blocks: Block[];
   applied: number;
   skipped: number;
+  insertedBlockIds: string[];
 }
 
 /** Pure fold of kept changes over a block list, in change order. Skips (and
@@ -29,9 +30,10 @@ export function applyProposal(
   let cur = blocks;
   let applied = 0;
   let skipped = 0;
+  const insertedBlockIds: string[] = [];
   // Original afterId -> id of the block most recently inserted after it. Keeps
   // consecutive same-anchor inserts in reading order instead of reversed.
-  const lastInsertFor = new Map<string, string>();
+  const lastInsertFor = new Map<string | null, string>();
 
   for (const c of changes) {
     switch (c.kind) {
@@ -70,13 +72,16 @@ export function applyProposal(
         // the second insert follows the first instead of displacing it. A
         // vanished afterId still inserts at the chapter end: the author kept
         // this change for its content, so landing it somewhere beats dropping it.
-        const anchorId = c.afterId === null ? null : lastInsertFor.get(c.afterId) ?? c.afterId;
+        const anchorId = lastInsertFor.get(c.afterId) ?? c.afterId;
         const anchor = anchorId === null ? -1 : cur.findIndex((b) => b.id === anchorId);
-        const at = anchorId !== null && anchor >= 0 ? anchor + 1 : cur.length;
-        if (c.afterId !== null) lastInsertFor.set(c.afterId, block.id);
+        const at = anchorId !== null && anchor >= 0 ? anchor + 1
+          : c.afterId === null && c.toIndex !== null ? Math.max(0, Math.min(c.toIndex, cur.length))
+          : cur.length;
+        lastInsertFor.set(c.afterId, block.id);
         const next = [...cur];
         next.splice(at, 0, block);
         cur = next;
+        insertedBlockIds.push(block.id);
         applied += 1;
         break;
       }
@@ -107,5 +112,5 @@ export function applyProposal(
     }
   }
 
-  return { blocks: cur, applied, skipped };
+  return { blocks: cur, applied, skipped, insertedBlockIds };
 }

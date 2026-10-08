@@ -166,6 +166,7 @@ export interface SourceLocator {
   label: string;
   exactText: string;
   previewText: string;
+  removed?: true;
 }
 
 export type ManuscriptPrecondition =
@@ -259,11 +260,16 @@ export interface ProposalChangeDecision {
   decidedAt: string;
 }
 
+export type ProposalReviewPreconditions =
+  | { kind: "manuscript"; changes: Partial<Record<string, ManuscriptPrecondition>> }
+  | { kind: "outline"; changes: Partial<Record<string, OutlinePrecondition>> };
+
 export interface AgentProposalRecord {
   proposal: PendingProposal;
   source: ProposalSource;
   decisions: Record<string, ProposalChangeDecision>;
   replacedByProposalId: string | null;
+  reviewPreconditions?: ProposalReviewPreconditions;
 }
 
 export interface PersistedAgentProposalRecord
@@ -272,7 +278,7 @@ export interface PersistedAgentProposalRecord
 }
 
 export type AgentProposalApplyResult =
-  | { status: "applied"; appliedChangeIds: string[] }
+  | { status: "applied"; appliedChangeIds: string[]; reviewPreconditions?: ProposalReviewPreconditions }
   | { status: "stale"; staleChangeIds: string[] }
   | {
       status: "invalid";
@@ -298,6 +304,7 @@ export type AgentOutlineApplyResult =
       status: "applied";
       appliedChangeIds: string[];
       undoToken: OutlineUndoToken;
+      reviewPreconditions?: ProposalReviewPreconditions;
     }
   | { status: "stale"; staleChangeIds: string[] }
   | {

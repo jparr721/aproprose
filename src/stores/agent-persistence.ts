@@ -280,16 +280,24 @@ const pendingProposalSchema = z
 
 const proposalOriginModeSchema = z.enum(["writing", "edit", "legacy"]);
 
+const proposalOriginIdentitySchema = z.strictObject({
+  generation: z.string().min(1),
+  blockIds: z.array(z.string()),
+  locators: z.record(z.string(), sourceLocatorSchema),
+});
+
 const proposalOriginSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("legacy") }),
   z.strictObject({
     kind: z.literal("selected-block-edit"), mode: proposalOriginModeSchema,
     chapterId: z.string(), operation: z.enum(["clean", "structure", "custom"]),
     blocks: z.array(sourceLocatorSchema),
+    identity: proposalOriginIdentitySchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("bridge"), mode: proposalOriginModeSchema, chapterId: z.string(),
     anchor: sourceLocatorSchema.nullable(), successor: sourceLocatorSchema.nullable(),
+    identity: proposalOriginIdentitySchema.optional(),
   }),
   z.strictObject({ kind: z.literal("task"), mode: proposalOriginModeSchema, task: generalTaskSchema }),
 ]);

@@ -3598,9 +3598,10 @@ describe("specialist proposal follow-up origin", () => {
         useAgentConsoleStore.getState().hydrate("/book", restored);
         const previous = useAgentConsoleStore.getState().pendingProposal;
         if (previous === null) throw new Error("Expected pending specialist proposal");
-        const renewed = parseChapter(source);
+        mocks.readTextFile.mockResolvedValue(source);
+        await useProjectStore.getState().selectChapter("ch1");
+        const renewed = useProjectStore.getState().blocks;
         expect(renewed[1].id).not.toBe(blocks[1].id);
-        useProjectStore.setState({ blocks: renewed });
         useSettingsStore.setState({ styleGuide: `Latest author voice ${turn}`, editingRules: `Latest author rule ${turn}` });
         expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: previous.id } })).toEqual({ status: "success" });
         const input = dependencies.stream.mock.calls.at(-1)?.[0];
@@ -3673,7 +3674,7 @@ describe("specialist follow-up completion and stale boundaries", () => {
       raw: { chapterId: "ch1", summary: "Original selection", changes: [{ kind: "rewrite", blockId: "b2", afterId: null, type: "narration", speaker: null, newText: "Original cleaned text.", toIndex: null, reason: "Clean" }] },
       blocks: activeBlocks, currentPending: null, originatingMessageId: "original-assistant", makeId: () => `original-${++id}`, now: "now", currentOverview: "",
     });
-    useAgentConsoleStore.getState().stageProposal(proposal, { kind: "run", runId: "original", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks: activeBlocks }) });
+    useAgentConsoleStore.getState().stageProposal(proposal, { kind: "run", runId: "original", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks: activeBlocks, sourceGeneration: useProjectStore.getState().chapterSourceGeneration }) });
     return proposal;
   }
 
@@ -3790,12 +3791,118 @@ describe("existing non-prose selected actions", () => {
     if (original === null) throw new Error("Expected selected proposal");
     expect(original.changes).toHaveLength(2);
     useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
-    useProjectStore.setState({ blocks: parseChapter(source) });
+    mocks.readTextFile.mockResolvedValue(source);
+    await useProjectStore.getState().selectChapter("ch1");
     expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same operation", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
     const latest = useAgentConsoleStore.getState().proposalRecords.at(-1);
     if (latest?.source.kind !== "run") throw new Error("Expected selected replacement");
     expect(latest.source.origin).toMatchObject({ kind: "selected-block-edit", operation });
     expect(dependencies.stream.mock.calls.at(-1)?.[0].environment.policy.action).toBe(operation === "clean" ? "copyeditor" : "block-structurer");
     expect(latest.proposal.changes).toHaveLength(2);
+  });
+});
+
+describe("proposal origin source generation", () => {
+  const duplicateSource = "Identical paragraph.\n\nIdentical paragraph.\n\nIdentical paragraph.\n";
+
+  function dependenciesFor(operation: "clean" | "bridge") {
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = vi.fn(async () => new MockLanguageModelV3({ doStream: async () => {
+      const selected = useProjectStore.getState().blocks[1];
+      const change: BlockChange = operation === "bridge"
+        ? { kind: "insert", blockId: null, afterId: selected.id, type: "narration", speaker: null, newText: "New continuation.", toIndex: null, reason: "Continue here" }
+        : { kind: "rewrite", blockId: selected.id, afterId: null, type: "narration", speaker: null, newText: "Precise revision.", toIndex: null, reason: "Clean this source" };
+      return providerOriginStream([
+        { type: "tool-call", toolCallId: "stage", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Revise the captured source", changes: [change] }) },
+        { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } },
+      ]);
+    } }));
+    return dependencies;
+  }
+
+  async function begin(operation: "clean" | "bridge") {
+    mocks.readTextFile.mockResolvedValue(duplicateSource);
+    await useProjectStore.getState().selectChapter("ch1");
+    const selected = useProjectStore.getState().blocks[1];
+    const task: AgentTask = operation === "bridge"
+      ? { kind: "bridge", chapterId: "ch1", anchorBlockId: selected.id, successorBlockId: null }
+      : { kind: "selected-block-edit", chapterId: "ch1", blockIds: [selected.id], operation };
+    const dependencies = dependenciesFor(operation);
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Perform the selected action", refs: [], task })).toEqual({ status: "success" });
+    const proposal = useAgentConsoleStore.getState().pendingProposal;
+    if (proposal === null) throw new Error("Expected original proposal");
+    return { controller, dependencies, proposal, selected };
+  }
+
+  it.each(["clean", "bridge"] as const)("refuses a deleted %s source instead of the surviving duplicate", async (operation) => {
+    const { controller, dependencies, proposal, selected } = await begin(operation);
+    useProjectStore.getState().deleteBlock(selected.id);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("Start the original action again") } });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
+  });
+
+  it("refuses deletion and identical recreation of every live source ID", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+    let afterId: string | null = null;
+    for (let index = 0; index < 3; index += 1) afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: "Identical paragraph." });
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+  });
+
+  it("refuses delete/recreate-all even after a save remints every ID by changing block count", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+    let afterId: string | null = null;
+    for (let index = 0; index < 3; index += 1) {
+      afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: index === 2 ? "Identical paragraph.\n\nIdentical paragraph." : "Identical paragraph." });
+    }
+    await useProjectStore.getState().saveChapter();
+    expect(useProjectStore.getState().blocks).toHaveLength(4);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+  });
+
+  it.each(["selected", "all"] as const)("accepts genuine JSON/reparse renewal but then refuses %s deletion in the new live generation", async (removed) => {
+    const { controller, dependencies, proposal, selected } = await begin("clean");
+    const snapshot = await toAgentSnapshot();
+    snapshot.messages = [];
+    snapshot.summary = null;
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot))));
+    await useProjectStore.getState().selectChapter("ch1");
+    const renewed = useProjectStore.getState().blocks[1];
+    expect(renewed.id).not.toBe(selected.id);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toEqual({ status: "success" });
+    const replacement = useAgentConsoleStore.getState().pendingProposal;
+    if (replacement === null) throw new Error("Expected replacement proposal");
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    if (removed === "selected") useProjectStore.getState().deleteBlock(renewed.id);
+    else {
+      useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+      let afterId: string | null = null;
+      for (let index = 0; index < 3; index += 1) afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: "Identical paragraph." });
+    }
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try once more", refs: [], task: { kind: "proposal-follow-up", proposalId: replacement.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(2);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(replacement);
+  });
+
+  it("requires an explicit restart for an old identityless receipt after a real reload", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    const snapshot = await toAgentSnapshot();
+    for (const item of snapshot.proposalRecords) {
+      if (item.source.kind === "run" && item.source.origin?.kind === "selected-block-edit") delete item.source.origin.identity;
+    }
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot))));
+    await useProjectStore.getState().selectChapter("ch1");
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("old receipt cannot prove a reload") } });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
   });
 });

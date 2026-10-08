@@ -253,6 +253,13 @@ export type PersistedPendingProposal =
 
 export type ProposalOriginMode = AgentMode | "legacy";
 
+// Older v4 scope receipts without this evidence require surviving source IDs.
+export interface ProposalOriginIdentity {
+  generation: string;
+  blockIds: string[];
+  locators: Record<string, SourceLocator>;
+}
+
 export type ProposalOrigin =
   | { kind: "legacy" }
   | {
@@ -261,6 +268,7 @@ export type ProposalOrigin =
       chapterId: string;
       operation: Extract<AgentTask, { kind: "selected-block-edit" }>["operation"];
       blocks: SourceLocator[];
+      identity?: ProposalOriginIdentity;
     }
   | {
       kind: "bridge";
@@ -268,6 +276,7 @@ export type ProposalOrigin =
       chapterId: string;
       anchor: SourceLocator | null;
       successor: SourceLocator | null;
+      identity?: ProposalOriginIdentity;
     }
   | {
       kind: "task";

@@ -144,6 +144,7 @@ interface LoadedChapterBlock extends Block {
 interface LoadedChapter {
   chapterId: string;
   title: string;
+  sourceGeneration: string;
   blocks: LoadedChapterBlock[];
 }
 
@@ -267,10 +268,12 @@ function loadedChapter(
   chapterId: string,
   title: string,
   blocks: Block[],
+  sourceGeneration: string,
 ): LoadedChapter {
   return {
     chapterId,
     title,
+    sourceGeneration,
     blocks: blocks.map((block, order) => {
       const cloned = cloneBlock(block);
       return {
@@ -286,6 +289,7 @@ function captureActiveChapter(
   project: ProjectInfo,
   activeChapterId: string | null,
   blocks: Block[],
+  sourceGeneration: string,
 ): LoadedChapter | null {
   if (activeChapterId === null) return null;
   const chapter = project.chapters.find(
@@ -296,7 +300,7 @@ function captureActiveChapter(
       `Active chapter does not belong to the frozen project: ${activeChapterId}`,
     );
   }
-  return loadedChapter(chapter.id, chapter.title, blocks);
+  return loadedChapter(chapter.id, chapter.title, blocks, sourceGeneration);
 }
 
 async function loadChapterSnapshot(
@@ -312,7 +316,7 @@ async function loadChapterSnapshot(
   if (activeChapter?.chapterId === chapterId) return activeChapter;
   const source = await readTextFile(project.root, chapter.file);
   currentProjectAtRoot(project.root);
-  return loadedChapter(chapterId, chapter.title, parseChapter(source));
+  return loadedChapter(chapterId, chapter.title, parseChapter(source), uid());
 }
 
 function unavailableSource(
@@ -1636,6 +1640,7 @@ export function createAgentController(
         projectRoot: capture.projectRoot,
         targetChapterId: frozen.chapter === null ? null : frozen.chapter.chapterId,
         blocks: frozen.chapter === null ? [] : frozen.chapter.blocks,
+        sourceGeneration: frozen.chapter === null ? null : frozen.chapter.sourceGeneration,
         records: capture.proposalRecords,
         messages: capture.messages,
       });
@@ -1959,6 +1964,7 @@ export function createAgentController(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     return {
       projectRoot: project.root,
@@ -2024,6 +2030,7 @@ export function createAgentController(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     const taskTarget = captureTaskAndTarget({
       project: frozenProject,
@@ -2294,6 +2301,7 @@ export function createAgentController(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     const contextCapture = captureDraftContext({
       project: frozenProject,
@@ -2472,6 +2480,7 @@ async function refreshAttachedDraftSources(): Promise<void> {
     frozenProject,
     projectState.activeChapterId,
     projectState.blocks,
+    projectState.chapterSourceGeneration,
   );
   const contextCapture = captureDraftContext({
     project: frozenProject,

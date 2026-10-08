@@ -280,6 +280,8 @@ interface ProjectState {
    */
   editCaret: "start" | "end" | number | null;
   chapterDirty: boolean;
+  // Only an explicit source load authorizes old proposal IDs to relocate.
+  chapterSourceGeneration: string;
   saving: boolean;
 
   compile: CompileState;
@@ -731,6 +733,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     editing: false,
     editCaret: null,
     chapterDirty: false,
+    chapterSourceGeneration: uid(),
     saving: false,
     compile: EMPTY_COMPILE,
     error: null,
@@ -836,6 +839,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({
           activeChapterId: id,
           blocks,
+          chapterSourceGeneration: uid(),
           // Highlight the last block in nav mode — no caret/autofocus on load.
           selectedId: blocks.length ? blocks[blocks.length - 1].id : null,
           selectedIds: [],

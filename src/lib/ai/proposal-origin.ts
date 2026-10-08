@@ -10,6 +10,7 @@ import type {
   AgentTask,
   AgentUIMessage,
   ProposalOrigin,
+  ProposalOriginIdentity,
   ProposalOriginMode,
   ProposalSource,
   SourceLocator,
@@ -24,6 +25,7 @@ export class ProposalOriginError extends AgentProposalError {
 }
 
 type OriginalTask = Exclude<AgentTask, { kind: "proposal-follow-up" }>;
+type ScopedOrigin = Extract<ProposalOrigin, { kind: "selected-block-edit" | "bridge" }>;
 
 export interface ResolvedProposalOrigin {
   origin: ProposalOrigin;
@@ -45,24 +47,57 @@ function requireProse(locator: SourceLocator): void {
   }
 }
 
+function scopeLocators(origin: ScopedOrigin): SourceLocator[] {
+  return origin.kind === "selected-block-edit" ? origin.blocks
+    : [origin.anchor, origin.successor].filter((locator): locator is SourceLocator => locator !== null);
+}
+
+function originCore(origin: ProposalOrigin): ProposalOrigin {
+  if (origin.kind === "legacy" || origin.kind === "task") return origin;
+  const { identity: _identity, ...core } = origin;
+  return core;
+}
+
+function validateIdentity(origin: ProposalOrigin): void {
+  if (origin.kind === "legacy" || origin.kind === "task" || origin.identity === undefined) return;
+  const { generation, blockIds, locators } = origin.identity;
+  const original = scopeLocators(origin);
+  const keys = new Set(original.map((locator) => locator.sourceId));
+  if (generation === "" || blockIds.some((id) => id === "") || new Set(blockIds).size !== blockIds.length
+    || Object.keys(locators).length !== keys.size || Object.keys(locators).some((key) => !keys.has(key))) {
+    invalidOrigin("The saved source generation receipt is inconsistent.");
+  }
+  for (const source of original) {
+    const latest = locators[source.sourceId];
+    if (latest === undefined || !blockIds.includes(latest.sourceId) || latest.removed === true
+      || source.removed === true || latest.fingerprint !== source.fingerprint
+      || latest.sourceType !== source.sourceType || latest.exactText !== source.exactText) {
+      invalidOrigin(`The saved source identity does not match its original boundary: ${source.sourceId}.`);
+    }
+  }
+  const latestIds = Object.values(locators).map((locator) => locator.sourceId);
+  if (new Set(latestIds).size !== latestIds.length) invalidOrigin("The saved source identities are duplicated.");
+}
+
+function captureIdentity(generation: string | null, blocks: Block[], locators: Record<string, SourceLocator>): ProposalOriginIdentity {
+  if (generation === null || generation === "") invalidOrigin("The current chapter source generation is unavailable.");
+  return { generation, blockIds: blocks.map((block) => block.id), locators };
+}
+
 function resolveBoundary(locator: SourceLocator, blocks: Block[]): string {
   const block = resolveBlockLocator(locator, blocks);
   if (block === null) {
-    throw new ProposalOriginError("source-missing", `The original selected source is missing or changed: ${locator.sourceId}. Start the original action again to select the current prose.`);
+    throw new ProposalOriginError("source-missing", `The original selected source is missing or changed: ${locator.sourceId}. Start the original action again to select the current source.`);
   }
   if (block.type !== locator.sourceType) invalidOrigin(`The original selected source type changed: ${locator.sourceId}.`);
   return block.id;
-}
-
-function resolveBridgeBoundary(locator: SourceLocator, blocks: Block[]): string {
-  requireProse(locator);
-  return resolveBoundary(locator, blocks);
 }
 
 export function captureProposalOrigin(args: {
   task: OriginalTask;
   mode: AgentMode;
   blocks: Block[];
+  sourceGeneration: string | null;
 }): ProposalOrigin {
   const { task, mode, blocks } = args;
   if (task.kind === "selected-block-edit") {
@@ -70,14 +105,17 @@ export function captureProposalOrigin(args: {
       invalidOrigin("The original selection must contain distinct source blocks.");
     }
     const locators = task.blockIds.map((id) => blockLocator(blocks, id));
-    return { kind: task.kind, mode, chapterId: task.chapterId, operation: task.operation, blocks: locators };
+    return { kind: task.kind, mode, chapterId: task.chapterId, operation: task.operation, blocks: locators,
+      identity: captureIdentity(args.sourceGeneration, blocks, Object.fromEntries(locators.map((locator) => [locator.sourceId, locator]))) };
   }
   if (task.kind === "bridge") {
     const anchor = task.anchorBlockId === null ? null : blockLocator(blocks, task.anchorBlockId);
     const successor = task.successorBlockId === null ? null : blockLocator(blocks, task.successorBlockId);
     if (anchor !== null) requireProse(anchor);
     if (successor !== null) requireProse(successor);
-    return { kind: task.kind, mode, chapterId: task.chapterId, anchor, successor };
+    const locators = [anchor, successor].filter((locator): locator is SourceLocator => locator !== null);
+    return { kind: task.kind, mode, chapterId: task.chapterId, anchor, successor,
+      identity: captureIdentity(args.sourceGeneration, blocks, Object.fromEntries(locators.map((locator) => [locator.sourceId, locator]))) };
   }
   return { kind: "task", mode, task };
 }
@@ -167,8 +205,18 @@ function retainedProposalOrigin(args: RetainedOriginInput): ProposalOrigin {
       break;
     }
     if (source.origin !== undefined) {
-      if (retainedOrigin !== undefined && !isEqual(retainedOrigin, source.origin)) invalidOrigin("The retained proposal origins disagree.");
-      retainedOrigin = source.origin;
+      validateIdentity(source.origin);
+      if (retainedOrigin !== undefined && !isEqual(originCore(retainedOrigin), originCore(source.origin))) invalidOrigin("The retained proposal origins disagree.");
+      if (retainedOrigin !== undefined && "identity" in retainedOrigin && "identity" in source.origin
+        && retainedOrigin.identity !== undefined && source.origin.identity !== undefined
+        && retainedOrigin.identity.generation === source.origin.identity.generation) {
+        for (const [id, locator] of Object.entries(source.origin.identity.locators)) {
+          if (retainedOrigin.identity.locators[id].sourceId !== locator.sourceId) {
+            invalidOrigin("The retained source identity changed within the same live generation.");
+          }
+        }
+      }
+      retainedOrigin ??= source.origin;
     }
     if (source.task.kind !== "proposal-follow-up") {
       const mode = originalMode(source, args.messages);
@@ -205,11 +253,12 @@ export function resolveProposalOrigin(args: {
   projectRoot: string;
   targetChapterId: string | null;
   blocks: Block[];
+  sourceGeneration: string | null;
   records: AgentProposalRecord[];
   messages: AgentUIMessage[];
 }): ResolvedProposalOrigin {
   if (args.task.kind !== "proposal-follow-up") {
-    return { origin: captureProposalOrigin({ task: args.task, mode: args.mode, blocks: args.blocks }), mode: args.mode, task: args.task };
+    return { origin: captureProposalOrigin({ task: args.task, mode: args.mode, blocks: args.blocks, sourceGeneration: args.sourceGeneration }), mode: args.mode, task: args.task };
   }
   const retainedOrigin = retainedProposalOrigin({ ...args, proposalId: args.task.proposalId });
   if (retainedOrigin.kind === "legacy") return { origin: retainedOrigin, mode: args.mode, task: args.task };
@@ -221,27 +270,42 @@ export function resolveProposalOrigin(args: {
     return { origin: retainedOrigin, mode, task };
   }
   requireChapter(retainedOrigin.chapterId, args.targetChapterId);
+  const identity = retainedOrigin.identity;
+  const canRelocate = identity !== undefined && args.sourceGeneration !== null
+    && identity.generation !== args.sourceGeneration
+    && !args.blocks.some((block) => identity.blockIds.includes(block.id));
+  const resolvedLocators: Record<string, SourceLocator> = {};
+  for (const original of scopeLocators(retainedOrigin)) {
+    if (retainedOrigin.kind === "bridge") requireProse(original);
+    const latest = identity === undefined ? original : identity.locators[original.sourceId];
+    if (!canRelocate && !args.blocks.some((block) => block.id === latest.sourceId)) {
+      throw new ProposalOriginError("source-missing", `The original selected source was removed, or its old receipt cannot prove a reload: ${latest.sourceId}. Start the original action again to select the current source.`);
+    }
+    const id = resolveBoundary(latest, args.blocks);
+    resolvedLocators[original.sourceId] = blockLocator(args.blocks, id);
+  }
+  const origin = { ...retainedOrigin, identity: captureIdentity(args.sourceGeneration, args.blocks, resolvedLocators) };
   if (retainedOrigin.kind === "selected-block-edit") {
     if (retainedOrigin.blocks.length === 0 || new Set(retainedOrigin.blocks.map((item) => item.sourceId)).size !== retainedOrigin.blocks.length) invalidOrigin("The saved original selection is empty or duplicated.");
     return {
-      origin: retainedOrigin,
+      origin,
       mode,
       task: {
         kind: retainedOrigin.kind,
         chapterId: retainedOrigin.chapterId,
         operation: retainedOrigin.operation,
-        blockIds: retainedOrigin.blocks.map((locator) => resolveBoundary(locator, args.blocks)),
+        blockIds: retainedOrigin.blocks.map((locator) => resolvedLocators[locator.sourceId].sourceId),
       },
     };
   }
   return {
-    origin: retainedOrigin,
+    origin,
     mode,
     task: {
       kind: "bridge",
       chapterId: retainedOrigin.chapterId,
-      anchorBlockId: retainedOrigin.anchor === null ? null : resolveBridgeBoundary(retainedOrigin.anchor, args.blocks),
-      successorBlockId: retainedOrigin.successor === null ? null : resolveBridgeBoundary(retainedOrigin.successor, args.blocks),
+      anchorBlockId: retainedOrigin.anchor === null ? null : resolvedLocators[retainedOrigin.anchor.sourceId].sourceId,
+      successorBlockId: retainedOrigin.successor === null ? null : resolvedLocators[retainedOrigin.successor.sourceId].sourceId,
     },
   };
 }

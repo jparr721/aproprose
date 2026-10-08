@@ -4497,7 +4497,9 @@ describe("persisted proposal origin receipts", () => {
 
   it.each(["edit", "legacy"] as const)("round-trips the %s original mode and selection in optional v4 receipts", async (mode) => {
     if (proposal.kind !== "manuscript" || proposal.changes[0].precondition.kind !== "target") throw new Error("Expected original source receipt");
-    const origin: ProposalOrigin = { kind: "selected-block-edit", mode, chapterId: "chapter-1", operation: "clean", blocks: [proposal.changes[0].precondition.target] };
+    const locator = proposal.changes[0].precondition.target;
+    const origin: ProposalOrigin = { kind: "selected-block-edit", mode, chapterId: "chapter-1", operation: "clean", blocks: [locator],
+      identity: { generation: "parsed-chapter", blockIds: [locator.sourceId], locators: { [locator.sourceId]: locator } } };
     const record: AgentProposalRecord = { proposal, source: { kind: "run", runId: "original-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null };
     useAgentConsoleStore.setState({ proposalRecords: [record], currentProposalId: proposal.id });
     const snapshot = await toAgentSnapshot();
@@ -4518,6 +4520,8 @@ describe("persisted proposal origin receipts", () => {
     { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "invented", blocks: [] },
     { kind: "task", mode: "edit", task: { kind: "proposal-follow-up", proposalId: "itself" } },
     { kind: "bridge", mode: "edit", chapterId: "chapter-1", anchor: { sourceId: "missing-receipt" }, successor: null },
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "clean", blocks: [], identity: { generation: "", blockIds: [], locators: {} } },
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "clean", blocks: [], identity: { generation: "chapter", blockIds: [], locators: [], invented: true } },
   ])("rejects malformed $kind receipts at the persistence boundary", async (origin) => {
     const { projectRoot: _projectRoot, ...persistedProposal } = proposal;
     const snapshot = { ...emptyPersistedAgentState(), proposalRecords: [{ proposal: persistedProposal, source: { kind: "run", runId: "bad-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null }], currentProposalId: proposal.id };

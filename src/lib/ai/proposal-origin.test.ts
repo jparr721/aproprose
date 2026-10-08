@@ -19,20 +19,20 @@ function record(): AgentProposalRecord {
       raw: { chapterId: "ch1", summary: "Clean the selection", changes: [{ kind: "rewrite", blockId: blocks[1].id, afterId: null, type: "narration", speaker: null, newText: "Precise prose.", toIndex: null, reason: "Clean" }] },
       blocks, currentPending: null, originatingMessageId: "assistant", now: "now", makeId: () => `proposal-${++nextId}`, currentOverview: "",
     }),
-    source: { kind: "run", runId: "original-run", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks }) },
+    source: { kind: "run", runId: "original-run", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks, sourceGeneration: "initial" }) },
     decisions: {}, replacedByProposalId: null,
   };
 }
 
 function resolve(records: AgentProposalRecord[], liveBlocks: Block[], proposalId: string) {
-  return resolveProposalOrigin({ task: { kind: "proposal-follow-up", proposalId }, mode: "writing", projectRoot: "/book", targetChapterId: "ch1", blocks: liveBlocks, records, messages: [] });
+  return resolveProposalOrigin({ task: { kind: "proposal-follow-up", proposalId }, mode: "writing", projectRoot: "/book", targetChapterId: "ch1", blocks: liveBlocks, records, messages: [], sourceGeneration: "reopened" });
 }
 
 describe("proposal origin receipts", () => {
   it("captures the entire selection even when a proposal changes only one selected block", () => {
     const original = record();
     const wholeTask = { ...task, blockIds: [blocks[0].id, blocks[1].id] };
-    original.source = { kind: "run", runId: "original-run", task: wholeTask, text: "Clean both", origin: captureProposalOrigin({ task: wholeTask, mode: "edit", blocks }) };
+    original.source = { kind: "run", runId: "original-run", task: wholeTask, text: "Clean both", origin: captureProposalOrigin({ task: wholeTask, mode: "edit", blocks, sourceGeneration: "initial" }) };
     const renewed = parseChapter(source);
     expect(resolve([original], renewed, original.proposal.id)).toMatchObject({ mode: "edit", task: { blockIds: [renewed[0].id, renewed[1].id] } });
   });
@@ -41,7 +41,8 @@ describe("proposal origin receipts", () => {
     const original = record();
     original.source = { kind: "run", runId: "original-run", task, text: "Clean" };
     const renewed = parseChapter(source);
-    expect(resolve([original], renewed, original.proposal.id)).toMatchObject({ task: { operation: "clean", blockIds: [renewed[1].id] } });
+    expect(resolve([original], blocks, original.proposal.id)).toMatchObject({ task: { operation: "clean", blockIds: [blocks[1].id] } });
+    expect(() => resolve([original], renewed, original.proposal.id)).toThrow("old receipt cannot prove a reload");
   });
 
   it("rejects missing receipts for unchanged members of an old selection", () => {
@@ -66,13 +67,13 @@ describe("proposal origin receipts", () => {
     const liveBlocks = kind === "missing" ? blocks.filter((item) => item.id !== blocks[1].id)
       : blocks.map((item, index) => index === 1 ? { ...item, text: "Author's changed prose." }
         : kind === "changed-identical-neighbor" && index === 0 ? { ...blocks[1], id: item.id } : item);
-    expect(() => resolve([original], liveBlocks, original.proposal.id)).toThrow("original selected source is missing or changed");
+    expect(() => resolve([original], liveBlocks, original.proposal.id)).toThrow(/original selected source (is missing or changed|was removed)/);
   });
 
   it("rejects stale ordinal receipts after renewed IDs and changed order", () => {
     const original = record();
     const renewed = parseChapter("Selected paragraph.\n\nFirst paragraph.\n\nLast paragraph.\n");
-    expect(() => resolve([original], renewed, original.proposal.id)).toThrow("original selected source is missing or changed");
+    expect(() => resolve([original], renewed, original.proposal.id)).toThrow(/original selected source (is missing or changed|was removed)/);
   });
 
   it.each(["missing", "mismatched", "root", "chapter", "kind", "origin"] as const)("rejects a %s predecessor chain", (kind) => {
@@ -103,7 +104,7 @@ describe("proposal origin receipts", () => {
   it.each(["operation", "chapter", "source-kind", "selection"] as const)("rejects a mismatched original %s", (kind) => {
     const original = record();
     if (original.source.kind !== "run") throw new Error("Expected run source");
-    const origin = captureProposalOrigin({ task, mode: "edit", blocks });
+    const origin = captureProposalOrigin({ task, mode: "edit", blocks, sourceGeneration: "initial" });
     if (origin.kind !== "selected-block-edit") throw new Error("Expected selected origin");
     if (kind === "operation") origin.operation = "structure";
     if (kind === "chapter") origin.chapterId = "ch2";
@@ -129,7 +130,8 @@ describe("proposal origin receipts", () => {
     if (original.proposal.kind !== "manuscript") throw new Error("Expected manuscript");
     original.proposal.changes[0] = { ...original.proposal.changes[0], precondition: { kind: "insert", boundary: "next-prose", anchor, expectedNext: successor } };
     const renewed = parseChapter(source);
-    expect(resolve([original], renewed, original.proposal.id).task).toEqual({ ...bridgeTask, anchorBlockId: renewed[1].id, successorBlockId: renewed[2].id });
+    expect(resolve([original], blocks, original.proposal.id).task).toEqual(bridgeTask);
+    expect(() => resolve([original], renewed, original.proposal.id)).toThrow("old receipt cannot prove a reload");
   });
 
   it("freezes the original writing mode for a general writer follow-up", () => {
@@ -147,13 +149,79 @@ describe("selection source types", () => {
     const currentBlock: Block = { ...originalBlock, id: "reopened" };
     const selection = { ...task, blockIds: [originalBlock.id] };
     const original = record();
-    original.source = { kind: "run", runId: "selection", task: selection, text: "Clean", origin: captureProposalOrigin({ task: selection, mode: "edit", blocks: [originalBlock] }) };
+    original.source = { kind: "run", runId: "selection", task: selection, text: "Clean", origin: captureProposalOrigin({ task: selection, mode: "edit", blocks: [originalBlock], sourceGeneration: "initial" }) };
     expect(resolve([original], [currentBlock], original.proposal.id).task).toMatchObject({ blockIds: [currentBlock.id] });
   });
 
   it.each(["anchor", "successor"] as const)("rejects a non-prose bridge %s", (boundary) => {
     const sourceBlocks = [blocks[0], { ...blocks[1], type: "scratchpad" } satisfies Block];
     const bridgeTask = { kind: "bridge", chapterId: "ch1", anchorBlockId: sourceBlocks[boundary === "anchor" ? 1 : 0].id, successorBlockId: boundary === "anchor" ? null : sourceBlocks[1].id } satisfies AgentTask;
-    expect(() => captureProposalOrigin({ task: bridgeTask, mode: "writing", blocks: sourceBlocks })).toThrow("boundary is not prose");
+    expect(() => captureProposalOrigin({ task: bridgeTask, mode: "writing", blocks: sourceBlocks, sourceGeneration: "initial" })).toThrow("boundary is not prose");
+  });
+});
+
+describe("source identity receipts", () => {
+  it.each(["keys", "membership", "generation", "duplicate-ids", "fingerprint", "type", "text", "removed"] as const)("rejects inconsistent %s identity evidence", (fault) => {
+    const original = record();
+    if (original.source.kind !== "run" || original.source.origin?.kind !== "selected-block-edit") throw new Error("Expected selected origin");
+    const identity = original.source.origin.identity;
+    if (identity === undefined) throw new Error("Expected identity receipt");
+    const locator = identity.locators[blocks[1].id];
+    if (fault === "keys") identity.locators = { invented: locator };
+    if (fault === "membership") identity.blockIds = [blocks[0].id];
+    if (fault === "generation") identity.generation = "";
+    if (fault === "duplicate-ids") identity.blockIds.push(identity.blockIds[0]);
+    if (fault === "fingerprint") identity.locators[blocks[1].id] = { ...locator, fingerprint: "changed" };
+    if (fault === "type") identity.locators[blocks[1].id] = { ...locator, sourceType: "scratchpad" };
+    if (fault === "text") identity.locators[blocks[1].id] = { ...locator, exactText: "Changed source" };
+    if (fault === "removed") identity.locators[blocks[1].id] = { ...locator, removed: true };
+    expect(() => resolve([original], blocks, original.proposal.id)).toThrowError(expect.objectContaining({ name: "ProposalOriginError", code: "proposal-mismatch" }));
+  });
+
+  it("accepts exact old receipt IDs but refuses renewal without generation evidence", () => {
+    const original = record();
+    if (original.source.kind !== "run" || original.source.origin?.kind !== "selected-block-edit") throw new Error("Expected selected origin");
+    delete original.source.origin.identity;
+    expect(resolve([original], blocks, original.proposal.id).task).toMatchObject({ blockIds: [blocks[1].id] });
+    expect(() => resolve([original], parseChapter(source), original.proposal.id)).toThrow("old receipt cannot prove a reload");
+  });
+
+  it("refuses ordinal relocation when any receipt-generation ID survives", () => {
+    const original = record();
+    const renewed = parseChapter(source);
+    renewed[0] = blocks[0];
+    expect(() => resolve([original], renewed, original.proposal.id)).toThrow("old receipt cannot prove a reload");
+  });
+
+  it("validates older identity evidence even when the newest replacement has a valid receipt", () => {
+    const original = record();
+    const renewed = parseChapter(source);
+    const resolved = resolve([original], renewed, original.proposal.id);
+    const replacement: AgentProposalRecord = {
+      ...record(), proposal: { ...record().proposal, id: "replacement" },
+      source: { kind: "run", runId: "replacement-run", task: { kind: "proposal-follow-up", proposalId: original.proposal.id }, text: "Improve", origin: resolved.origin },
+    };
+    original.replacedByProposalId = replacement.proposal.id;
+    expect(resolve([original, replacement], renewed, replacement.proposal.id).task).toMatchObject({ blockIds: [renewed[1].id] });
+    if (original.source.kind !== "run" || original.source.origin?.kind !== "selected-block-edit" || original.source.origin.identity === undefined) throw new Error("Expected selected identity");
+    original.source.origin.identity.blockIds = [];
+    expect(() => resolve([original, replacement], renewed, replacement.proposal.id)).toThrow("saved source identity");
+  });
+
+  it("rejects a replacement chain that changes source identity within one live generation", () => {
+    const duplicate = { ...blocks[1], id: "duplicate" };
+    const current = [...blocks, duplicate];
+    const original = record();
+    const origin = captureProposalOrigin({ task, mode: "edit", blocks: current, sourceGeneration: "live" });
+    original.source = { kind: "run", runId: "original-run", task, text: "Clean", origin };
+    const changed = structuredClone(origin);
+    if (changed.kind !== "selected-block-edit" || changed.identity === undefined) throw new Error("Expected selected identity");
+    changed.identity.locators[blocks[1].id] = blockLocator(current, duplicate.id);
+    const replacement: AgentProposalRecord = {
+      ...record(), proposal: { ...record().proposal, id: "replacement" },
+      source: { kind: "run", runId: "replacement-run", task: { kind: "proposal-follow-up", proposalId: original.proposal.id }, text: "Improve", origin: changed },
+    };
+    original.replacedByProposalId = replacement.proposal.id;
+    expect(() => resolve([original, replacement], current, replacement.proposal.id)).toThrow("identity changed within the same live generation");
   });
 });

@@ -1700,7 +1700,8 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         // Re-parse what we wrote so spans reset and the chapter is clean again.
         const reparsed = parseChapter(source);
         const wordCount = countWords(reparsed);
-        set((s) => {
+        // Normalizing this durable snapshot is not a new author edit.
+        rawSet((s) => {
           // parseChapter re-mints every block id. When the reparse preserved the
           // block count, adopt the OLD ids positionally so a plain save keeps ids
           // stable - pending proposals, finding anchors, and the selection all

@@ -29,6 +29,8 @@ import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
+import { saveBeforeExit } from "@/lib/exit-guard";
+import { runUpdateFlow } from "@/lib/updater";
 import { noteProjectRemoteChanges, queueProjectOperation } from "@/lib/project-operations";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import {
@@ -390,14 +392,79 @@ describe("owned project persistence", () => {
     vi.mocked(writeTextFile).mockReset();
     vi.mocked(readTextFile).mockReset().mockResolvedValue("Remote chapter");
     vi.mocked(openProject).mockReset();
-    vi.mocked(writeSkeleton).mockReset();
-    vi.mocked(syncProject).mockReset();
-    vi.mocked(deleteChapterCmd).mockReset();
-    useViewStore.getState().cancelPending();
     vi.mocked(readProjectMeta).mockReset().mockResolvedValue(null);
     vi.mocked(readAppData).mockResolvedValue(null);
+    vi.mocked(writeSkeleton).mockReset();
+    vi.mocked(deleteChapterCmd).mockReset();
+    vi.mocked(syncProject).mockReset();
+    useViewStore.getState().cancelPending();
     vi.spyOn(useSyncStore.getState(), "init").mockResolvedValue(undefined);
     vi.spyOn(useSyncStore.getState(), "refreshStatus").mockResolvedValue(undefined);
+  });
+
+  it.each(["close", "update"])("allows %s after the real save normalizes its own blocks", async (action) => {
+    const block = mkBlock({ id: "exit-save", text: "Saved draft", dirty: true });
+    useProjectStore.setState({ blocks: [block], chapterDirty: true });
+    const owner = useProjectStore.getState();
+    const prepareToExit = () => saveBeforeExit({
+      hasUnsavedChanges: () => useProjectStore.getState().chapterDirty || useProjectStore.getState().remoteDivergence !== null,
+      saveChanges: () => useProjectStore.getState().saveChapter(),
+      isCurrent: () => {
+        const current = useProjectStore.getState();
+        return current.lifecycleGeneration === owner.lifecycleGeneration && current.activeChapterId === owner.activeChapterId && current.editRevision === owner.editRevision;
+      },
+    });
+    if (action === "close") {
+      await expect(prepareToExit()).resolves.toBe(true);
+    } else {
+      const install = vi.fn(async () => undefined);
+      const notifyError = vi.fn();
+      await runUpdateFlow("auto", {
+        isDev: false,
+        check: async () => ({ currentVersion: "0.1.0", version: "0.2.0", body: "" }),
+        install,
+        promptToInstall: async () => true,
+        prepareToExit,
+        notifyChecking: vi.fn(),
+        notifyUpToDate: vi.fn(),
+        notifyError,
+      });
+      expect(install).toHaveBeenCalledOnce();
+      expect(notifyError).not.toHaveBeenCalled();
+    }
+    expect(writeTextFile).toHaveBeenCalledWith("/owned", "chapter-one.tex", expect.stringContaining("Saved draft"));
+    expect(useProjectStore.getState().blocks).not.toBe(owner.blocks);
+    expect(useProjectStore.getState().chapterDirty).toBe(false);
+  });
+
+  it.each(["typing", "undo", "chapter", "lifecycle"])("blocks exit when %s changes ownership during a real save", async (change) => {
+    const write = deferred<void>();
+    vi.mocked(writeTextFile).mockReturnValueOnce(write.promise);
+    const block = mkBlock({ id: "exit-race", text: "Captured draft", dirty: true });
+    const project = projectFixture("/owned");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    useProjectStore.setState({ project, blocks: [block], chapterDirty: true });
+    const owner = useProjectStore.getState();
+    const exiting = saveBeforeExit({
+      hasUnsavedChanges: () => useProjectStore.getState().chapterDirty || useProjectStore.getState().remoteDivergence !== null,
+      saveChanges: () => useProjectStore.getState().saveChapter(),
+      isCurrent: () => {
+        const current = useProjectStore.getState();
+        return current.lifecycleGeneration === owner.lifecycleGeneration && current.activeChapterId === owner.activeChapterId && current.editRevision === owner.editRevision;
+      },
+    });
+    await flushPromises();
+    if (change === "typing" || change === "undo") {
+      useProjectStore.getState().updateBlockText(block.id, "Newer edit");
+      if (change === "undo") useProjectStore.getState().undo();
+    } else if (change === "chapter") {
+      await useProjectStore.getState().selectChapter("ch2");
+    } else {
+      useProjectStore.getState().closeProject();
+      useProjectStore.setState({ project: projectFixture("/owned"), activeChapterId: "ch1" });
+    }
+    write.resolve();
+    await expect(exiting).resolves.toBe(false);
   });
 
   it.each(["typing", "navigation"])("preserves %s while add chapter is writing the skeleton", async (change) => {

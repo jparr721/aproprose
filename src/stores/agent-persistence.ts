@@ -529,7 +529,7 @@ const persistedToolOutputSchema = z
   })
   .strict();
 
-const persistablePartTypes = new Set<string>([
+const persistableNonToolPartTypes = new Set<string>([
   "text",
   "source-url",
   "source-document",
@@ -539,18 +539,6 @@ const persistablePartTypes = new Set<string>([
   "data-proposal-event",
   "data-compaction",
   "data-findings",
-  "dynamic-tool",
-  "tool-read_chapter",
-  "tool-read_outline",
-  "tool-read_lore",
-  "tool-run_critique",
-  "tool-run_continuity",
-  "tool-read_conversation_context",
-  "tool-read_pending_proposal",
-  "tool-stage_manuscript_proposal",
-  "tool-stage_outline_proposal",
-  "tool-stage_overview_proposal",
-  "tool-update_character_profile",
 ]);
 
 const messageEnvelopeSchema = z
@@ -747,7 +735,11 @@ function validatePersistedParts(messages: Array<{ parts: unknown[] }>): void {
         part === null ||
         !("type" in part) ||
         typeof part.type !== "string" ||
-        !persistablePartTypes.has(part.type)
+        !(
+          persistableNonToolPartTypes.has(part.type) ||
+          part.type === "dynamic-tool" ||
+          part.type.startsWith("tool-")
+        )
       ) {
         throw new Error("Unknown agent message part cannot be persisted.");
       }

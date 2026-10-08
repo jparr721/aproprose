@@ -1,12 +1,20 @@
 [
   {
+    "version": "0.17.5",
+    "date": "2026-10-07",
+    "summary": "The AI dock reopens reliably after resizing.",
+    "highlights": [
+      "Dragging the dock closed no longer breaks the first reopen."
+    ]
+  },
+  {
     "version": "0.17.4",
     "date": "2026-10-07",
-    "summary": "The AI dock opens, closes, and reopens smoothly.",
+    "summary": "A quieter AI console keeps writing and editing controls close to your draft.",
     "highlights": [
-      "Removed the redundant AI Console header.",
-      "Opening and closing the AI dock is animated and respects reduced motion.",
-      "Dragging the dock closed no longer breaks the first reopen."
+      "Choose Writing or Edit from the composer footer, with descriptions and prompts that clarify each mode.",
+      "Switching modes preserves your draft and attached context.",
+      "The AI panel opens and closes smoothly, with its redundant header removed."
     ]
   },
   {

@@ -434,8 +434,8 @@ describe("AgentConsole shell", () => {
       "Preserve this next turn",
     );
     expect(
-      screen.getByRole("button", { name: "Edit" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+      screen.getByRole("combobox", { name: "Agent mode" }).textContent,
+    ).toBe("Edit");
     expect(screen.getByText("Tighten the crossing")).toBeTruthy();
   });
 

@@ -38,7 +38,8 @@ interface ChangePreview {
   beforeLabel: string;
   afterLabel: string;
   reason: string;
-  editable: boolean;
+  editableText: string | null;
+  tailText: string | null;
   source: ManuscriptPendingChange | OutlinePendingChange | null;
 }
 
@@ -52,17 +53,21 @@ function manuscriptPreview(item: ManuscriptPendingChange): ChangePreview {
     after = `Move to position ${change.toIndex + 1}`;
   } else after = change.kind === "remove" ? "" : change.newText;
   if (after === null) throw new Error(`Proposal text is missing: ${item.id}`);
+  const tailText = change.kind === "insert" && change.type === "dialogue" && change.segments !== undefined && change.segments.length > 0
+    ? change.segments.map((segment) => segment.text).join("\n")
+    : null;
   return {
     id: item.id,
     before,
     sourceText: insert ? "" : precondition.target.previewText,
-    after,
+    after: tailText === null ? after : `${after}\n${tailText}`,
     context: insert && precondition.anchor !== null ? precondition.anchor.previewText : null,
     nextContext: insert && precondition.expectedNext !== null ? precondition.expectedNext.previewText : null,
     beforeLabel: insert ? precondition.anchor === null ? "Opening" : "After" : "Before",
     afterLabel: change.kind === "insert" ? "Continuation" : "After",
     reason: change.reason,
-    editable: (change.kind === "insert" || change.kind === "rewrite") && change.newText !== null,
+    editableText: change.kind === "insert" || change.kind === "rewrite" ? change.newText : null,
+    tailText,
     source: item,
   };
 }
@@ -99,7 +104,8 @@ function outlinePreview(item: OutlinePendingChange): ChangePreview {
     beforeLabel: change.kind === "add" ? "End of outline" : "Before",
     afterLabel: change.kind === "add" ? "New outline card" : "After",
     reason: change.reason,
-    editable: false,
+    editableText: null,
+    tailText: null,
     source: item,
   };
 }
@@ -122,7 +128,8 @@ function proposalPreviews(proposal: PendingProposal): ChangePreview[] {
       beforeLabel: "Story overview - before",
       afterLabel: "Story overview - after",
       reason: overview.reason,
-      editable: false,
+      editableText: null,
+      tailText: null,
       source: null,
     });
   }
@@ -163,9 +170,10 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
   onError: (message: string) => void;
 }) {
   const [text, setText] = useState(preview.after);
+  const editableText = preview.editableText;
   const status = recordStatus(entry.record, preview.id);
   const pending = status === "Pending";
-  const editAllowed = pending && preview.editable && !disabled;
+  const editAllowed = pending && editableText !== null && !disabled;
   const runAction = (action: () => void): void => {
     try {
       action();
@@ -226,7 +234,7 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
                     acceptProposalChange(entry.pendingProposal, preview.id, entry.sessionId);
                   })}><IconCheck />Apply change</DropdownMenuItem>
                   <DropdownMenuItem disabled={disabled || editing} variant="destructive" onSelect={() => onDismiss([preview.id])}><IconTrash />Dismiss change</DropdownMenuItem>
-                  {preview.editable ? <DropdownMenuItem disabled={!editAllowed} onSelect={() => { setText(preview.after); onEditingChange(preview.id); }}><IconPencil />Edit draft</DropdownMenuItem> : null}
+                  {editableText === null ? null : <DropdownMenuItem disabled={!editAllowed} onSelect={() => { setText(editableText); onEditingChange(preview.id); }}><IconPencil />Edit draft</DropdownMenuItem>}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -234,13 +242,16 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
         </CardHeader>
         <CardContent>
           {editing && editAllowed ? (
-            <InputGroup>
-              <InputGroupTextarea autoFocus aria-label="Edit proposed text" value={text} onChange={(event) => setText(event.target.value)} className="min-h-36" />
-              <InputGroupAddon align="block-end">
-                <InputGroupButton onClick={() => onEditingChange(null)} size="sm">Cancel</InputGroupButton>
-                <InputGroupButton onClick={save} size="sm" variant="default" className="ml-auto">Save draft</InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
+            <div className="flex flex-col gap-3">
+              <InputGroup>
+                <InputGroupTextarea autoFocus aria-label="Edit proposed text" value={text} onChange={(event) => setText(event.target.value)} className="min-h-36" />
+                <InputGroupAddon align="block-end">
+                  <InputGroupButton onClick={() => onEditingChange(null)} size="sm">Cancel</InputGroupButton>
+                  <InputGroupButton onClick={save} size="sm" variant="default" className="ml-auto">Save draft</InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+              {preview.tailText === null ? null : <TypographyP className={cn(PROSE, "whitespace-pre-wrap [&:not(:first-child)]:mt-0")}>{preview.tailText}</TypographyP>}
+            </div>
           ) : format === "diff" && preview.before && (preview.source === null || preview.source.change.kind !== "move") ? (
             <AgentDiffPreview before={preview.before} after={preview.after} className={PROSE} />
           ) : preview.after ? (

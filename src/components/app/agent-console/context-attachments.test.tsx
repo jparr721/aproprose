@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  getDefaultNormalizer,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -196,6 +203,41 @@ describe("DraftContextAttachments", () => {
 });
 
 describe("SentContextAttachments", () => {
+  it.each([
+    ["long prose", "The rain crossed the window. ".repeat(80)],
+    ["multiple paragraphs", "The rain crossed the window.\n".repeat(80)],
+    ["an unbroken word", "rain".repeat(200)],
+  ])("bounds the hover preview for %s without changing saved text", async (_, exactText) => {
+    const snapshot: ContextSnapshot = { ...sentSnapshot, exactText };
+    const onNavigate = vi.fn().mockResolvedValue(false);
+    render(
+      <SentContextAttachments snapshots={[snapshot]} onNavigate={onNavigate} />,
+    );
+    const attachment = screen.getByRole("button", {
+      name: "Open Narration block context",
+    });
+    fireEvent.pointerEnter(attachment);
+
+    const preview = await screen.findByText(exactText, {
+      normalizer: getDefaultNormalizer({ trim: false, collapseWhitespace: false }),
+    });
+    const hoverCard = preview.closest('[data-slot="hover-card-content"]');
+    if (!(hoverCard instanceof HTMLElement)) {
+      throw new Error("Expected the saved text inside an attachment hover card");
+    }
+    expect(hoverCard.classList.contains("w-72")).toBe(true);
+    expect(
+      hoverCard.classList.contains("max-w-(--radix-hover-card-content-available-width)"),
+    ).toBe(true);
+    expect(preview.classList.contains("line-clamp-4")).toBe(true);
+    expect(preview.classList.contains("wrap-anywhere")).toBe(true);
+
+    fireEvent.click(attachment);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain(exactText);
+    expect(onNavigate).toHaveBeenCalledWith(snapshot);
+  });
+
   it("previews the frozen sent text after the live source changes", async () => {
     let liveText = sentSnapshot.exactText;
     const frozenSnapshot = { ...sentSnapshot, exactText: liveText };

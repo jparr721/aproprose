@@ -143,7 +143,7 @@ export function SentContextAttachments({
               </Attachment>
             </AttachmentHoverCardTrigger>
             <AttachmentHoverCardContent>
-              <TypographyP className="whitespace-pre-wrap">
+              <TypographyP className="line-clamp-4 whitespace-pre-wrap wrap-anywhere">
                 {snapshot.exactText}
               </TypographyP>
             </AttachmentHoverCardContent>

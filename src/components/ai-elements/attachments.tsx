@@ -398,7 +398,7 @@ export const AttachmentHoverCardContent = ({
 }: AttachmentHoverCardContentProps) => (
   <HoverCardContent
     align={align}
-    className={cn("w-auto p-2", className)}
+    className={cn("max-w-(--radix-hover-card-content-available-width) p-2", className)}
     {...props}
   />
 );

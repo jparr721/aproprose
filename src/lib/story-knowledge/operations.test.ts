@@ -142,7 +142,11 @@ function chapterKnowledge(): ChapterKnowledge {
   };
 }
 
-beforeEach(() => vi.mocked(generateText).mockReset());
+beforeEach(() => {
+  vi.mocked(generateText).mockReset();
+  vi.mocked(toast.warning).mockReset();
+  vi.mocked(toast.error).mockReset();
+});
 
 describe("story chunk analysis", () => {
   it("drops map observations that cite unknown characters or unoffered evidence", async () => {
@@ -353,17 +357,31 @@ describe("story chunk analysis", () => {
     expect(second.profile.mannerisms).toBe("Mara checks every lock twice.");
   });
 
-  it("forwards abort and retries one transient network failure", async () => {
+  it.each([
+    {
+      name: "provider",
+      failure: Object.assign(new Error("provider temporarily unavailable"), { statusCode: 503 }),
+      warning: "Your AI provider is temporarily unavailable. Retry shortly.",
+    },
+    {
+      name: "network",
+      failure: new TypeError("fetch failed"),
+      warning: "The AI request could not be completed. Check your connection and retry.",
+    },
+  ] satisfies Array<{ name: string; failure: Error; warning: string }>)("forwards abort and retries one $name failure", async ({ failure, warning }) => {
     const abort = new AbortController();
     vi.mocked(generateText)
-      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockRejectedValueOnce(failure)
       .mockResolvedValueOnce({ output: emptyMapOutput() } as never);
 
     await analyzeStoryChunk(mapInputFixture(), aiOptions(abort.signal));
 
     expect(generateText).toHaveBeenCalledTimes(2);
     expect(vi.mocked(generateText).mock.calls[1][0].abortSignal).toBe(abort.signal);
-    expect(toast.warning).toHaveBeenCalledOnce();
+    expect(toast.warning).toHaveBeenCalledExactlyOnceWith(
+      warning,
+      { id: "ai-request-retry", description: "Retrying once." },
+    );
     expect(toast.error).not.toHaveBeenCalled();
   });
 

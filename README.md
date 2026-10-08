@@ -122,22 +122,38 @@ See `CLAUDE.md` for the full project guide and conventions.
 
 ## Releasing
 
-A release is one command, cut from `main`:
+Every PR must increase the version and add a new first entry to `changelog.json`,
+including documentation and CI changes. Keep `package.json`, `src-tauri/Cargo.toml`,
+`src-tauri/tauri.conf.json`, and the `aproprose` package in `src-tauri/Cargo.lock`
+synchronized. The changelog entry requires a valid `YYYY-MM-DD` date, a nonempty
+summary, and nonempty highlights. Prepare these on your work branch with
+`bun run scripts/set-version.ts X.Y.Z`, then add the changelog entry.
+
+The `version + changelog` CI check compares against the current target branch.
+PR branches must be up to date and pass that check, `typecheck + tests`,
+`Chromium + WebKit regression`, and `cargo test + clippy` before merging.
+Each passing push to `main` builds a release
+from that exact commit, creates its version tag, and uses its changelog as release
+notes. Pushing a tag alone does not start a release.
+
+To prepare a separate release PR from `main`:
 
 ```bash
-just version 0.2.0
+just version 0.18.1
 ```
 
 `just version` will only run from a **clean, up-to-date `main`** (it aborts otherwise
-and fast-forwards to `origin/main`). It then runs the full gate (typecheck, frontend
-tests, `cargo test`, `clippy -D warnings`), bumps the version across `package.json`,
-`src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.lock` (a
-non-increasing version is rejected), and - after a `y/N` confirmation - commits, tags
-`v0.2.0`, and pushes `main` + the tag. Declining the prompt reverts the bump and
-changes nothing.
+and fast-forwards to `origin/main`). It runs the full gate, creates
+`codex/release-0.18.1`, bumps all four versions, generates a changelog for review,
+and validates the release policy. After confirmation it commits, pushes the work
+branch, and opens a PR through the GitHub CLI. Declining restores `main` and the
+original files. `just version-auto` accepts the changelog draft and opens the PR
+without the interactive prompts. Both require authenticated `gh` and the changelog
+generator's AI CLI.
 
-Pushing the tag triggers `.github/workflows/release.yml`: a guard re-verifies the tag
-matches `tauri.conf.json`, is newly created (not an overwrite), and is the newest
-version, then macOS, Linux, and Windows installers build and attach to a **draft**
-GitHub Release. The workflow verifies `latest.json` covers every shipped updater
-platform and then publishes the release.
+After successful main CI, `.github/workflows/release.yml` builds signed macOS,
+Linux, and Windows installers plus the Arch Linux package into a **draft** GitHub
+Release. Platform uploads run serially to preserve the shared updater manifest.
+The workflow verifies all signed updater platforms, version-pinned URLs, and exact
+changelog notes before publishing. An interrupted draft can resume only for the
+same version and commit; published releases cannot be overwritten.

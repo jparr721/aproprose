@@ -2,27 +2,53 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  merge_group:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  version:
+  release-policy:
     name: version + changelog
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      base_sha: ${{ steps.check.outputs.base_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - name: Check version bump and changelog
+      - name: Require a version bump and matching new changelog entry
+        id: check
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: bun run scripts/check-release.ts "$BASE_SHA"
+          TARGET_BRANCH: ${{ github.base_ref || github.event.merge_group.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ -z "$BEFORE_SHA" ] || [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+              echo "::error::main pushes must have an existing base commit for the version check"
+              exit 1
+            fi
+            git fetch --no-tags origin "$BEFORE_SHA"
+            base="$BEFORE_SHA"
+          else
+            git fetch --no-tags --depth=1 origin "$TARGET_BRANCH"
+            base="$(git rev-parse FETCH_HEAD)"
+          fi
+          version="$(bun run scripts/check-release.ts "$base")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+          echo "Version and changelog validated: $version"
 
   frontend:
     name: typecheck + tests
@@ -81,3 +107,16 @@ jobs:
       - name: Tests
         working-directory: src-tauri
         run: cargo test
+
+  release:
+    name: release main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [release-policy, frontend, browser, rust]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      commit_sha: ${{ github.sha }}
+      base_sha: ${{ needs.release-policy.outputs.base_sha }}
+      version: ${{ needs.release-policy.outputs.version }}
+    secrets: inherit

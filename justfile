@@ -36,11 +36,11 @@ arch-package:
     bun run tauri build --no-bundle
     ./scripts/create-arch-package.sh
 
-# Cut a release from main: full gate, bump versions, changelog (reviewed in $EDITOR), confirm, tag, push (X.Y.Z, must increase).
+# Open a release PR from main: full gate, bump versions, review the changelog, confirm, push the release branch.
 version VERSION:
     @just _release "{{VERSION}}" interactive
 
-# Cut a release non-interactively (CI/agents): auto-accept the AI changelog and skip the confirm prompt.
+# Open a release PR non-interactively: auto-accept the AI changelog and skip the confirm prompt.
 version-auto VERSION:
     @just _release "{{VERSION}}" auto
 
@@ -65,21 +65,36 @@ _release VERSION MODE:
         echo "error: local main has diverged from origin/main - reconcile before releasing" >&2
         exit 1
     fi
-    # Full gate - the same checks ci.yml enforces - before anything is tagged.
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        echo "error: local main must match origin/main before preparing a release PR" >&2
+        exit 1
+    fi
+    if ! command -v gh >/dev/null; then
+        echo "error: GitHub CLI (gh) is required to open the release PR" >&2
+        exit 1
+    fi
+    gh auth status
+    # Full gate - the same checks ci.yml enforces - before release preparation.
     echo "==> typecheck"
     bun x tsc --noEmit
     echo "==> frontend tests"
     bun x vitest run
+    echo "==> browser tests"
+    just test-browser
     echo "==> build frontend (required for cargo generate_context!)"
     bun run build
     echo "==> rust tests"
     ( cd src-tauri && cargo test )
     echo "==> clippy"
     ( cd src-tauri && cargo clippy --all-targets -- -D warnings )
+    release_branch="codex/release-$ver"
+    git switch -c "$release_branch"
     # Revert every file this recipe mutates if anything below fails or is interrupted, so an
     # aborted release never leaves a dirty tree (a git checkout of unchanged files is a no-op).
     revert() {
         git checkout -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock changelog.json 2>/dev/null || true
+        git switch main
+        git branch -d "$release_branch"
     }
     trap revert ERR INT
     # Bump all version files first - set-version.ts rejects a non-increasing version, so this
@@ -95,11 +110,14 @@ _release VERSION MODE:
     else
         bun run scripts/generate-changelog.ts "$ver" "$(date +%F)"
     fi
-    # Confirm before the irreversible push that triggers the release (skipped in auto mode).
+    echo "==> version and changelog gate"
+    bun run scripts/check-release.ts origin/main
+    # Confirm before pushing the branch and opening its PR (skipped in auto mode).
     if [ "$mode" != "auto" ]; then
         echo
-        echo "Release v$ver to origin/main:"
-        echo "  commit the version bump, tag v$ver, push main + tag (triggers the release build)"
+        echo "Open a release PR for v$ver:"
+        echo "  commit the version bump and changelog, push $release_branch, and open a PR to main"
+        echo "  merging after required CI passes triggers the signed release builds"
         reply=""
         read -r -p "Proceed? [y/N] " reply || true
         if [ "$reply" != "y" ] && [ "$reply" != "Y" ]; then
@@ -111,9 +129,16 @@ _release VERSION MODE:
     trap - ERR INT
     git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock changelog.json
     git commit -m "release $ver"
-    git tag "v$ver"
-    git push origin main "v$ver"
-    echo "released v$ver - watch the release workflow on GitHub"
+    git push -u origin "$release_branch"
+    body_file="$(mktemp)"
+    trap 'rm -f "$body_file"' EXIT
+    {
+        bun run scripts/release-body.ts "$ver"
+        printf '\n\nValidation: typecheck, frontend and browser tests, frontend build, Rust tests, Clippy, and version/changelog gate passed locally.\n'
+        printf '\nMerge after required GitHub checks pass. The main push builds and publishes the signed desktop release.\n'
+    } > "$body_file"
+    gh pr create --base main --head "$release_branch" --title "Release v$ver" --body-file "$body_file"
+    echo "opened release PR for v$ver - merge after required CI passes"
 
 # Type-check the frontend without emitting.
 typecheck:

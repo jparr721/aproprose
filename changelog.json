@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.18.1",
+    "version": "0.18.2",
     "date": "2026-10-07",
     "summary": "Review AI drafts in a persistent Changes panel before applying them.",
     "highlights": [
@@ -8,6 +8,14 @@
       "Keep drafts across panel closing, chapter and project changes, and app reloads.",
       "Preview and edit proposed text, apply or dismiss individual changes, and restore dismissed changes from history.",
       "Check the original source before applying a draft so later manuscript edits are protected."
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-07",
+    "summary": "Keep macOS window buttons aligned with the toolbar icons.",
+    "highlights": [
+      "Window buttons retain their custom position after title changes and leaving fullscreen."
     ]
   },
   {

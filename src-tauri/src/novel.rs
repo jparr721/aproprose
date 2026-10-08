@@ -193,8 +193,8 @@ pub fn open_managed(root: &Path) -> Result<ProjectInfo, String> {
     let meta_src = read_required(&root, "metadata.tex")?;
     let metadata = read_managed_metadata(&meta_src)?;
     let chapters_src = read_required(&root, "chapters.tex")?;
-    project::validate_managed_chapters(&chapters_src)?;
-    let chapters = project::parse_chapters(&chapters_src, &root)?;
+    let pairs = project::managed_chapter_pairs(&chapters_src)?;
+    let chapters = project::chapters_from_pairs(pairs, &root)?;
 
     let title = (!metadata.title.is_empty()).then(|| metadata.title.clone());
     let author = (!metadata.author.is_empty()).then(|| metadata.author.clone());
@@ -269,8 +269,7 @@ fn regenerate(root: &Path, model: &SkeletonModel) -> Result<Vec<String>, String>
     let old_metadata = read_required(root, "metadata.tex")?;
     read_managed_metadata(&old_metadata)?;
     let old_chapters = read_required(root, "chapters.tex")?;
-    project::validate_managed_chapters(&old_chapters)?;
-    let old_pairs = project::chapter_pairs(&old_chapters);
+    let old_pairs = project::managed_chapter_pairs(&old_chapters)?;
     let content_dir = root.join("content");
     fs::create_dir_all(&content_dir)
         .map_err(|error| format!("cannot create {}: {error}", content_dir.display()))?;
@@ -672,6 +671,119 @@ mod tests {
         assert_eq!(project.chapters.len(), 1);
         assert_eq!(project.chapters[0].title, "Valid");
         assert_eq!(project.chapters[0].file, "content/chapter-001.tex");
+    }
+
+    const MANAGED_MARKER_CASES: [(&str, &str); 8] = [
+        ("First", "% ordinary heading"),
+        ("First", "% \\mainmatter"),
+        ("First", "% \\begin{document}"),
+        ("First", "% mention \\mainmatter in a comment"),
+        ("First", "% mention \\begin{document} in a comment"),
+        ("First \\texttt{\\string\\mainmatter}", "% heading"),
+        ("First \\texttt{\\string\\begin{document}}", "% heading"),
+        ("First", "% \\mainmatter and \\begin{document}"),
+    ];
+
+    fn managed_marker_fixture(title: &str, comment: &str) -> tempfile::TempDir {
+        let dir = managed_fixture();
+        fs::write(dir.path().join("content/chapter-002.tex"), "Second body.\n").unwrap();
+        fs::write(
+            dir.path().join("chapters.tex"),
+            format!(
+                "{}\n\\chapter{{{title}}} {comment}\n\\input{{content/chapter-001.tex}} {comment}\n{comment}\n\\chapter{{Second}}\n\\input{{content/chapter-002.tex}}\n",
+                tex_text::DEFINITION
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn managed_markers_preserve_every_chapter_through_skeleton_mutation() {
+        for (title, comment) in MANAGED_MARKER_CASES {
+            let dir = managed_marker_fixture(title, comment);
+            let source = fs::read(dir.path().join("chapters.tex")).unwrap();
+            let opened = open_managed(dir.path()).unwrap();
+            assert_eq!(opened.chapters.len(), 2, "{title} / {comment}");
+            assert_eq!(opened.chapters[0].file, "content/chapter-001.tex");
+            assert_eq!(opened.chapters[1].file, "content/chapter-002.tex");
+            assert_eq!(fs::read(dir.path().join("chapters.tex")).unwrap(), source);
+            let model = SkeletonModel {
+                metadata: opened.metadata,
+                chapters: opened
+                    .chapters
+                    .into_iter()
+                    .map(|chapter| SkeletonChapter {
+                        title: chapter.title,
+                        file: Some(chapter.file),
+                    })
+                    .collect(),
+            };
+            let saved = write_skeleton(dir.path(), &model).unwrap();
+            assert_eq!(saved.chapters.len(), 2);
+            let rewritten = fs::read_to_string(dir.path().join("chapters.tex")).unwrap();
+            assert!(rewritten.contains(&format!("\\chapter{{{title}}}")));
+            assert!(rewritten.contains("\\input{content/chapter-001.tex}"));
+            assert!(rewritten.contains("\\input{content/chapter-002.tex}"));
+            assert_eq!(
+                fs::read_to_string(dir.path().join("content/chapter-001.tex")).unwrap(),
+                "Hello world.\n"
+            );
+            assert_eq!(
+                fs::read_to_string(dir.path().join("content/chapter-002.tex")).unwrap(),
+                "Second body.\n"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_markers_cannot_hide_missing_or_unreadable_chapter_bodies() {
+        for (title, comment) in MANAGED_MARKER_CASES {
+            for unreadable in [false, true] {
+                let dir = managed_marker_fixture(title, comment);
+                let source = fs::read(dir.path().join("chapters.tex")).unwrap();
+                let body = dir.path().join("content/chapter-001.tex");
+                if unreadable {
+                    fs::write(&body, [0xff]).unwrap();
+                } else {
+                    fs::remove_file(&body).unwrap();
+                }
+                let error = open_managed(dir.path()).unwrap_err();
+                assert!(error.contains("chapter-001.tex"), "{error}");
+                assert_eq!(fs::read(dir.path().join("chapters.tex")).unwrap(), source);
+                if unreadable {
+                    assert_eq!(fs::read(&body).unwrap(), [0xff]);
+                } else {
+                    assert!(!body.exists());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn managed_markers_preserve_legacy_raw_titles_during_regeneration() {
+        for (title, comment) in MANAGED_MARKER_CASES {
+            let dir = managed_marker_fixture(title, comment);
+            let model = SkeletonModel {
+                metadata: meta(),
+                chapters: vec![
+                    SkeletonChapter {
+                        title: project::chapter_display_title(title),
+                        file: Some("content/chapter-001.tex".into()),
+                    },
+                    SkeletonChapter {
+                        title: "Second".into(),
+                        file: Some("content/chapter-002.tex".into()),
+                    },
+                ],
+            };
+            write_skeleton(dir.path(), &model).unwrap();
+            let source = fs::read_to_string(dir.path().join("chapters.tex")).unwrap();
+            assert!(
+                source.contains(&format!("\\chapter{{{title}}}")),
+                "{source}"
+            );
+        }
     }
 
     #[test]

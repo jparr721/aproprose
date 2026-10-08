@@ -231,12 +231,7 @@ pub(crate) fn chapter_pairs(source: &str) -> Vec<(String, String)> {
             .find(|line| !line.is_empty() && !line.starts_with('%'))
             .and_then(|line| inline_command_arg(line, "input"))
             .unwrap_or_default();
-        let file = if file.is_empty() || Path::new(&file).extension().is_some() {
-            file
-        } else {
-            format!("{file}.tex")
-        };
-        pairs.push((title, file));
+        pairs.push((title, chapter_file(file)));
     }
     pairs
 }
@@ -245,7 +240,7 @@ pub(crate) fn chapter_display_title(source: &str) -> String {
     tex_text::decode(source).unwrap_or_else(|| strip_inline(source))
 }
 
-pub(crate) fn validate_managed_chapters(source: &str) -> Result<(), String> {
+pub(crate) fn managed_chapter_pairs(source: &str) -> Result<Vec<(String, String)>, String> {
     let lines: Vec<(usize, &str)> = source
         .lines()
         .enumerate()
@@ -253,6 +248,7 @@ pub(crate) fn validate_managed_chapters(source: &str) -> Result<(), String> {
         .filter(|(_, line)| !line.is_empty() && !line.starts_with('%'))
         .collect();
     let mut cursor = 0;
+    let mut pairs = Vec::new();
     while let Some(&(line_number, line)) = lines.get(cursor) {
         if tex_text::DEFINITION
             .lines()
@@ -272,14 +268,23 @@ pub(crate) fn validate_managed_chapters(source: &str) -> Result<(), String> {
         let input = lines
             .get(cursor + 1)
             .and_then(|(_, line)| managed_command_arg(line, "input"));
-        if input.as_ref().is_none_or(|file| file.is_empty()) {
-            return Err(format!(
+        let file = input.filter(|file| !file.is_empty()).ok_or_else(|| {
+            format!(
                 "invalid chapters.tex: chapter on line {line_number} has a missing or malformed body file"
-            ));
-        }
+            )
+        })?;
+        pairs.push((title, chapter_file(file)));
         cursor += 2;
     }
-    Ok(())
+    Ok(pairs)
+}
+
+fn chapter_file(file: String) -> String {
+    if file.is_empty() || Path::new(&file).extension().is_some() {
+        file
+    } else {
+        format!("{file}.tex")
+    }
 }
 
 fn managed_command_arg(line: &str, command: &str) -> Option<String> {
@@ -295,7 +300,14 @@ fn managed_command_arg(line: &str, command: &str) -> Option<String> {
 }
 
 pub(crate) fn parse_chapters(source: &str, root: &Path) -> Result<Vec<ChapterRef>, String> {
-    chapter_pairs(source)
+    chapters_from_pairs(chapter_pairs(source), root)
+}
+
+pub(crate) fn chapters_from_pairs(
+    pairs: Vec<(String, String)>,
+    root: &Path,
+) -> Result<Vec<ChapterRef>, String> {
+    pairs
         .into_iter()
         .enumerate()
         .map(|(index, (title, file))| {

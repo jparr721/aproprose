@@ -27,7 +27,7 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("bridge"),
     chapterId: z.string(),
-    anchorBlockId: z.string(),
+    anchorBlockId: z.string().nullable(),
     successorBlockId: z.string().nullable(),
   }),
   z.object({
@@ -286,6 +286,8 @@ function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "stage_overview_proposal":
+      return { summary: "", overview: "", reason: "" };
     case "update_character_profile":
       return {
         characterId: safeTarget(
@@ -325,6 +327,8 @@ function genericFailedToolInput(name: AgentToolName): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "stage_overview_proposal":
+      return { summary: "", overview: "", reason: "" };
     case "update_character_profile":
       return {
         characterId: descriptor.targetFallback,
@@ -549,6 +553,7 @@ export function settleAgentMessages(
           part.type !== "tool-read_pending_proposal" &&
           part.type !== "tool-stage_manuscript_proposal" &&
           part.type !== "tool-stage_outline_proposal" &&
+          part.type !== "tool-stage_overview_proposal" &&
           part.type !== "tool-update_character_profile"
         ) {
           throw new Error("Unknown agent message part cannot be persisted.");

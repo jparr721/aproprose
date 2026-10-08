@@ -4,6 +4,8 @@ import type { StateCreator } from "zustand";
 import { draftContextRefKey } from "@/lib/ai/agent-context";
 import type {
   AgentMode,
+  AgentHydrationState,
+  AgentProposalRecord,
   AgentSessionId,
   AgentMessageMetadata,
   AgentPersistenceIssue,
@@ -20,8 +22,10 @@ import type {
   ManuscriptPendingChange,
   ManuscriptPendingProposal,
   PendingProposal,
-  PersistedAgentState,
+  PersistedPendingProposal,
   PersistedUsage,
+  ProposalChangeDecision,
+  ProposalSource,
   SubmittedAgentDraft,
 } from "@/lib/ai/agent-types";
 
@@ -81,6 +85,8 @@ export interface AgentConsoleData {
   draftContextSources: Record<string, DraftContextSource>;
   draftSourceLocators: Record<string, DraftSourceLocator>;
   pendingProposal: PendingProposal | null;
+  proposalRecords: AgentProposalRecord[];
+  currentProposalId: string | null;
   lastUsage: PersistedUsage | null;
   interruptedRun: InterruptedRun | null;
   activeRun: AgentRun | null;
@@ -98,7 +104,7 @@ export interface AgentConsoleData {
 }
 
 export interface AgentConsoleState extends AgentConsoleData {
-  hydrate: (projectRoot: string, state: PersistedAgentState) => void;
+  hydrate: (projectRoot: string, state: AgentHydrationState) => void;
   beginPersistenceTransition: (
     projectRoot: string | null,
     kind: AgentPersistenceTransitionKind,
@@ -108,7 +114,7 @@ export interface AgentConsoleState extends AgentConsoleData {
   ) => boolean;
   completePersistenceTransition: (
     capture: AgentPersistenceTransitionCapture,
-    state: PersistedAgentState,
+    state: AgentHydrationState,
   ) => AgentPersistenceTransitionCompletion;
   finishPersistenceTransition: (
     capture: AgentPersistenceTransitionCapture,
@@ -142,9 +148,19 @@ export interface AgentConsoleState extends AgentConsoleData {
   interruptRun: (interrupted: InterruptedRun) => void;
   failRun: (message: AgentUIMessage, failure: AgentFailure) => void;
   replacePendingProposal: (proposal: PendingProposal) => void;
+  stageProposal: (proposal: PendingProposal, source: ProposalSource) => void;
+  commitProposalReplacement: (
+    targetId: string,
+    proposal: PendingProposal,
+    source: ProposalSource,
+  ) => void;
+  decideProposalChanges: (
+    proposalId: string,
+    changeIds: string[],
+    decision: ProposalChangeDecision,
+  ) => void;
+  restoreProposalChanges: (proposalId: string, changeIds: string[]) => void;
   updatePendingManuscriptText: (edit: PendingManuscriptTextEdit) => void;
-  removePendingChanges: (changeIds: string[]) => void;
-  clearPendingProposal: () => void;
   appendLocalMessage: (message: AgentUIMessage) => void;
   setSummary: (summary: ConversationSummary) => void;
   setPersistenceIssue: (issue: AgentPersistenceIssue | null) => void;
@@ -159,6 +175,8 @@ export const EMPTY_AGENT_STATE: AgentConsoleData = {
   draftContextSources: {},
   draftSourceLocators: {},
   pendingProposal: null,
+  proposalRecords: [],
+  currentProposalId: null,
   lastUsage: null,
   interruptedRun: null,
   activeRun: null,
@@ -226,7 +244,7 @@ function dedupeDraftContextRefs(refs: DraftContextRef[]): DraftContextRef[] {
 }
 
 function hydratedDraftState(
-  persisted: PersistedAgentState,
+  persisted: AgentHydrationState,
   currentRevision: number,
 ): HydratedDraftState {
   let draftRevision = currentRevision;
@@ -365,6 +383,140 @@ export function requireAgentSessionProject(
   }
 }
 
+export function proposalChangeIds(
+  proposal: PendingProposal | PersistedPendingProposal,
+): string[] {
+  return [
+    ...proposal.changes.map((change) => change.id),
+    ...(proposal.overviewChange ? [proposal.overviewChange.id] : []),
+  ];
+}
+
+export function pendingProposalChangeIds(record: AgentProposalRecord): string[] {
+  if (record.replacedByProposalId !== null) return [];
+  return proposalChangeIds(record.proposal).filter(
+    (id) => record.decisions[id] === undefined,
+  );
+}
+
+export function selectPendingProposal(
+  state: Pick<AgentConsoleData, "proposalRecords">,
+  proposalId: string,
+): PendingProposal | null {
+  const record = state.proposalRecords.find(
+    (candidate) => candidate.proposal.id === proposalId,
+  );
+  if (record === undefined) return null;
+  const pendingIds = new Set(pendingProposalChangeIds(record));
+  if (pendingIds.size === 0) return null;
+  const proposal = record.proposal;
+  if (pendingIds.size === proposalChangeIds(proposal).length) return proposal;
+  if (proposal.kind === "overview") return proposal;
+  const overviewChange =
+    proposal.overviewChange && pendingIds.has(proposal.overviewChange.id)
+      ? proposal.overviewChange
+      : null;
+  if (proposal.kind === "manuscript") {
+    return {
+      ...proposal,
+      changes: proposal.changes.filter((change) => pendingIds.has(change.id)),
+      overviewChange,
+    };
+  }
+  return {
+    ...proposal,
+    changes: proposal.changes.filter((change) => pendingIds.has(change.id)),
+    overviewChange,
+  };
+}
+
+function proposalProjection(
+  proposalRecords: AgentProposalRecord[],
+  currentProposalId: string | null,
+): Pick<AgentConsoleData, "proposalRecords" | "currentProposalId" | "pendingProposal"> {
+  return {
+    proposalRecords,
+    currentProposalId,
+    pendingProposal:
+      currentProposalId === null
+        ? null
+        : selectPendingProposal({ proposalRecords }, currentProposalId),
+  };
+}
+
+function hydratedProposalState(
+  state: AgentHydrationState,
+): Pick<AgentConsoleData, "proposalRecords" | "currentProposalId" | "pendingProposal"> {
+  if (state.v === 4) {
+    return proposalProjection(state.proposalRecords, state.currentProposalId);
+  }
+  const proposal = state.pendingProposal;
+  return proposalProjection(
+    proposal === null
+      ? []
+      : [{ proposal, source: { kind: "legacy" }, decisions: {}, replacedByProposalId: null }],
+    proposal === null ? null : proposal.id,
+  );
+}
+
+export class AgentProposalRecordError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentProposalRecordError";
+  }
+}
+
+function requireProposalRecord(
+  state: AgentConsoleState,
+  proposalId: string,
+): AgentProposalRecord {
+  requireDraftMutationOwnership(state);
+  const record = state.proposalRecords.find(
+    (candidate) => candidate.proposal.id === proposalId,
+  );
+  if (record === undefined) {
+    throw new AgentProposalRecordError(`Retained proposal not found: ${proposalId}`);
+  }
+  if (record.proposal.projectRoot !== state.activeProjectRoot) {
+    throw new AgentProposalRecordError(`Proposal ${proposalId} belongs to another project.`);
+  }
+  return record;
+}
+
+function requireDecisionIds(
+  record: AgentProposalRecord,
+  changeIds: string[],
+): void {
+  const known = new Set(proposalChangeIds(record.proposal));
+  if (changeIds.length === 0 || new Set(changeIds).size !== changeIds.length) {
+    throw new AgentProposalRecordError(`Proposal ${record.proposal.id} requires unique change IDs.`);
+  }
+  for (const id of changeIds) {
+    if (!known.has(id)) {
+      throw new AgentProposalRecordError(`Proposal ${record.proposal.id} has no change ${id}.`);
+    }
+  }
+}
+
+function stagedProposalRecord(
+  state: AgentConsoleState,
+  proposal: PendingProposal,
+  source: ProposalSource,
+): AgentProposalRecord {
+  requireDraftMutationOwnership(state);
+  if (proposal.projectRoot !== state.activeProjectRoot) {
+    throw new AgentProposalRecordError(`Cannot stage proposal ${proposal.id} for another project.`);
+  }
+  if (state.proposalRecords.some((record) => record.proposal.id === proposal.id)) {
+    throw new AgentProposalRecordError(`Proposal already exists: ${proposal.id}`);
+  }
+  const ids = proposalChangeIds(proposal);
+  if (new Set(ids).size !== ids.length) {
+    throw new AgentProposalRecordError(`Proposal ${proposal.id} has duplicate change IDs.`);
+  }
+  return { proposal, source, decisions: {}, replacedByProposalId: null };
+}
+
 const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => ({
   ...EMPTY_AGENT_STATE,
   hydrate: (projectRoot, state) =>
@@ -372,9 +524,9 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
       const draft = hydratedDraftState(state, current.draftRevision);
       return {
         ...draft,
+        ...hydratedProposalState(state),
         messages: [...state.messages],
         summary: state.summary,
-        pendingProposal: state.pendingProposal,
         lastUsage: state.lastUsage,
         interruptedRun: state.interruptedRun,
         activeRun: null,
@@ -429,9 +581,9 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
       const draft = hydratedDraftState(state, current.draftRevision);
       return {
         ...draft,
+        ...hydratedProposalState(state),
         messages: [...state.messages],
         summary: state.summary,
-        pendingProposal: state.pendingProposal,
         lastUsage: state.lastUsage,
         interruptedRun: state.interruptedRun,
         activeRun: null,
@@ -459,14 +611,15 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
   resetProject: () =>
     set((state) => {
       const empty = {
-        v: 3 as const,
+        v: 4 as const,
         mode: "writing" as const,
         messages: [],
         summary: null,
         draftText: "",
         draftContextRefs: [],
         draftSourceLocators: {},
-        pendingProposal: null,
+        proposalRecords: [],
+        currentProposalId: null,
         lastUsage: null,
         interruptedRun: null,
       };
@@ -815,99 +968,109 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
         runError: failure,
       };
     }),
-  replacePendingProposal: (pendingProposal) =>
-    set(() => ({ pendingProposal })),
+  replacePendingProposal: (proposal) => {
+    get().stageProposal(proposal, { kind: "legacy" });
+  },
+  stageProposal: (proposal, source) =>
+    set((state) => {
+      if (source.kind === "run" && source.task.kind === "proposal-follow-up") {
+        throw new AgentProposalRecordError("Follow-up proposals must commit through the replacement action.");
+      }
+      const record = stagedProposalRecord(state, proposal, source);
+      return proposalProjection([...state.proposalRecords, record], proposal.id);
+    }),
+  commitProposalReplacement: (targetId, proposal, source) =>
+    set((state) => {
+      const target = requireProposalRecord(state, targetId);
+      if (
+        source.kind !== "run" ||
+        source.task.kind !== "proposal-follow-up" ||
+        source.task.proposalId !== targetId ||
+        pendingProposalChangeIds(target).length === 0
+      ) {
+        throw new AgentProposalRecordError(`Proposal replacement does not match pending target ${targetId}.`);
+      }
+      const replacement = stagedProposalRecord(state, proposal, source);
+      const proposalRecords = state.proposalRecords.map((record) =>
+        record.proposal.id === targetId
+          ? { ...record, replacedByProposalId: proposal.id }
+          : record,
+      );
+      return proposalProjection([...proposalRecords, replacement], proposal.id);
+    }),
+  decideProposalChanges: (proposalId, changeIds, decision) =>
+    set((state) => {
+      const target = requireProposalRecord(state, proposalId);
+      requireDecisionIds(target, changeIds);
+      const pendingIds = new Set(pendingProposalChangeIds(target));
+      for (const id of changeIds) {
+        if (!pendingIds.has(id)) {
+          throw new AgentProposalRecordError(`Proposal ${proposalId} change ${id} is already decided or replaced.`);
+        }
+      }
+      const decisions = { ...target.decisions };
+      for (const id of changeIds) decisions[id] = { ...decision };
+      const proposalRecords = state.proposalRecords.map((record) =>
+        record.proposal.id === proposalId ? { ...record, decisions } : record,
+      );
+      return proposalProjection(proposalRecords, state.currentProposalId);
+    }),
+  restoreProposalChanges: (proposalId, changeIds) =>
+    set((state) => {
+      const target = requireProposalRecord(state, proposalId);
+      requireDecisionIds(target, changeIds);
+      if (target.replacedByProposalId !== null) {
+        throw new AgentProposalRecordError(`Replaced proposal ${proposalId} cannot be restored.`);
+      }
+      for (const id of changeIds) {
+        if (target.decisions[id]?.status !== "dismissed") {
+          throw new AgentProposalRecordError(`Only dismissed changes can be restored: ${proposalId}/${id}`);
+        }
+      }
+      const restoredIds = new Set(changeIds);
+      const decisions = Object.fromEntries(
+        Object.entries(target.decisions).filter(([id]) => !restoredIds.has(id)),
+      );
+      const proposalRecords = state.proposalRecords.map((record) =>
+        record.proposal.id === proposalId ? { ...record, decisions } : record,
+      );
+      return proposalProjection(proposalRecords, state.currentProposalId);
+    }),
   updatePendingManuscriptText: (edit) =>
     set((state) => {
       requireDraftMutationOwnership(state);
-      const proposal = state.pendingProposal;
-      if (proposal === null || proposal.id !== edit.proposalId) {
+      const proposal = selectPendingProposal(state, edit.proposalId);
+      if (proposal === null) {
         throw new PendingProposalEditError(
           "proposal-mismatch",
-          `Cannot edit pending proposal ${edit.proposalId}: it is not the staged proposal.`,
+          `Cannot edit pending proposal ${edit.proposalId}: it has no pending changes.`,
         );
       }
-      if (proposal.kind !== "manuscript") {
+      const record = requireProposalRecord(state, edit.proposalId);
+      if (proposal.kind !== "manuscript" || record.proposal.kind !== "manuscript") {
         throw new PendingProposalEditError(
           "wrong-kind",
           `Cannot edit pending proposal ${edit.proposalId}: only manuscript text is editable.`,
         );
       }
-      const matchingChanges = proposal.changes.filter(
-        (item) => item.id === edit.changeId,
-      );
-      if (matchingChanges.length !== 1) {
+      if (!proposal.changes.some((item) => item.id === edit.changeId)) {
         throw new PendingProposalEditError(
           "change-missing",
-          `Cannot edit pending proposal ${edit.proposalId}: change ${edit.changeId} was not found exactly once.`,
+          `Cannot edit pending proposal ${edit.proposalId}: change ${edit.changeId} is not pending.`,
         );
       }
       const updatedProposal: ManuscriptPendingProposal = {
-        id: proposal.id,
-        kind: proposal.kind,
-        projectRoot: proposal.projectRoot,
-        chapterId: proposal.chapterId,
-        summary: proposal.summary,
-        createdAt: proposal.createdAt,
-        originatingMessageId: proposal.originatingMessageId,
-        changes: proposal.changes.map((item) =>
+        ...record.proposal,
+        changes: record.proposal.changes.map((item) =>
           editPendingManuscriptChange(item, edit),
         ),
-        overviewChange: proposal.overviewChange,
       };
-      return { pendingProposal: updatedProposal };
-    }),
-  removePendingChanges: (changeIds) =>
-    set((state) => {
-      requireDraftMutationOwnership(state);
-      if (state.pendingProposal === null) {
-        return { pendingProposal: null };
-      }
-      const removedIds = new Set(changeIds);
-      if (state.pendingProposal.kind === "overview") {
-        return {
-          pendingProposal: removedIds.has(state.pendingProposal.overviewChange.id)
-            ? null
-            : state.pendingProposal,
-        };
-      }
-      if (state.pendingProposal.kind === "manuscript") {
-        const changes = state.pendingProposal.changes.filter(
-          (change) => !removedIds.has(change.id),
-        );
-        const overviewChange =
-          state.pendingProposal.overviewChange !== null &&
-          state.pendingProposal.overviewChange !== undefined &&
-          removedIds.has(state.pendingProposal.overviewChange.id)
-            ? null
-            : state.pendingProposal.overviewChange;
-        return {
-          pendingProposal:
-            changes.length === 0 && !overviewChange
-              ? null
-              : { ...state.pendingProposal, changes, overviewChange },
-        };
-      }
-      const changes = state.pendingProposal.changes.filter(
-        (change) => !removedIds.has(change.id),
+      const proposalRecords = state.proposalRecords.map((current) =>
+        current.proposal.id === edit.proposalId
+          ? { ...current, proposal: updatedProposal }
+          : current,
       );
-      const overviewChange =
-        state.pendingProposal.overviewChange !== null &&
-        state.pendingProposal.overviewChange !== undefined &&
-        removedIds.has(state.pendingProposal.overviewChange.id)
-          ? null
-          : state.pendingProposal.overviewChange;
-      return {
-        pendingProposal:
-          changes.length === 0 && !overviewChange
-            ? null
-            : { ...state.pendingProposal, changes, overviewChange },
-      };
-    }),
-  clearPendingProposal: () =>
-    set((state) => {
-      requireDraftMutationOwnership(state);
-      return { pendingProposal: null };
+      return proposalProjection(proposalRecords, state.currentProposalId);
     }),
   appendLocalMessage: (message) =>
     set((state) => {
@@ -959,6 +1122,8 @@ export function outlineAgentSessionEntries(): Array<[
 }
 
 export function deleteOutlineAgentSession(chapterId: string): void {
+  const current = outlineAgentStores.get(chapterId);
+  if (current !== undefined && current.getState().proposalRecords.length > 0) return;
   if (outlineAgentStores.delete(chapterId)) {
     agentSessionRegistryListeners.forEach((listener) => listener());
   }

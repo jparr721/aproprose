@@ -303,7 +303,7 @@ function metaFixture(): ProjectMeta {
 }
 
 function renderProposal(current: ManuscriptPendingProposal) {
-  useAgentConsoleStore.setState({ pendingProposal: current });
+  useAgentConsoleStore.getState().stageProposal(current, { kind: "legacy" });
   useViewStore.getState().openManuscriptReview(current.id);
   return render(<ManuscriptReviewSurface proposal={current} />);
 }
@@ -1190,7 +1190,7 @@ describe("ManuscriptReviewSurface decisions and lifecycle", () => {
       ),
     ]);
     act(() => {
-      useAgentConsoleStore.setState({ pendingProposal: replacement });
+      useAgentConsoleStore.getState().stageProposal(replacement, { kind: "legacy" });
       useViewStore.getState().openManuscriptReview(replacement.id);
     });
     rerender(<ManuscriptReviewSurface proposal={replacement} />);

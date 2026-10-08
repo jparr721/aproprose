@@ -595,6 +595,7 @@ function notifyBuildFailed(errorCount: number, projectRoot: string): void {
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => {
+  let chapterLoadSequence = 0;
   // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
@@ -824,8 +825,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       if (!project) return;
       const chapter = project.chapters.find((c) => c.id === id);
       if (!chapter) return;
+      const request = ++chapterLoadSequence;
+      const ownsRequest = (): boolean => get().project === project && request === chapterLoadSequence;
       try {
         const source = await readTextFile(project.root, chapter.file);
+        if (!ownsRequest()) return;
         const blocks = parseChapter(source);
         set({
           activeChapterId: id,
@@ -848,6 +852,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           if (import.meta.env.DEV) console.warn("Couldn't persist last chapter:", e);
         });
       } catch (e) {
+        if (!ownsRequest()) return;
         notifyAppError("chapter-open", "Project", project.root, e);
         set({ error: String(e) });
       }

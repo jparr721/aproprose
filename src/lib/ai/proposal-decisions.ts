@@ -17,6 +17,8 @@ import { storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import { PROJECT_AGENT_SESSION, type AgentSessionId } from "@/lib/ai/agent-types";
 import {
   agentSessionStore,
+  selectPendingProposal,
+  proposalChangeIds,
   requireAgentSessionProject,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -48,19 +50,36 @@ function currentProposalForDecision(
   proposal: PendingProposal,
   sessionId: AgentSessionId,
 ): PendingProposal {
-  const current = agentSessionStore(sessionId).getState().pendingProposal;
+  const state = agentSessionStore(sessionId).getState();
+  const current = selectPendingProposal(state, proposal.id);
   if (
     current === null ||
     current.id !== proposal.id ||
     current.kind !== proposal.kind
   ) {
-    throw new ProposalDecisionCorrelationError(proposal, current);
+    throw new ProposalDecisionCorrelationError(proposal, state.pendingProposal);
   }
   return current;
 }
 
 function assertProposalKindExhausted(proposal: never): never {
   throw new Error(`Unsupported proposal kind: ${JSON.stringify(proposal)}`);
+}
+
+function capturedProposalForDecision(proposal: PendingProposal, sessionId: AgentSessionId): PendingProposal {
+  const current = currentProposalForDecision(proposal, sessionId);
+  const requested = proposalChangeIds(proposal);
+  const pending = new Set(proposalChangeIds(current));
+  if (requested.length === 0 || new Set(requested).size !== requested.length) {
+    throw new Error("Select at least one distinct pending change before deciding this draft.");
+  }
+  for (const changeId of requested) {
+    if (!pending.has(changeId)) throw new Error(`Pending proposal change not found: ${changeId}`);
+  }
+  if (current.kind === "overview") return current;
+  const overviewChange = current.overviewChange && requested.includes(current.overviewChange.id) ? current.overviewChange : null;
+  if (current.kind === "manuscript") return { ...current, changes: current.changes.filter((change) => requested.includes(change.id)), overviewChange };
+  return { ...current, changes: current.changes.filter((change) => requested.includes(change.id)), overviewChange };
 }
 
 function eventText(
@@ -147,6 +166,10 @@ function applyProposalChanges(
   changeIds: string[],
 ): boolean {
   const projectState = useProjectStore.getState();
+  if (proposalRequiresSourceNavigation(proposal) && proposal.changes.some((change) => changeIds.includes(change.id))) {
+    toast.error("Open the source chapter before applying this draft");
+    return false;
+  }
   switch (proposal.kind) {
     case "manuscript": {
       const result = projectState.applyAgentManuscriptProposal(
@@ -178,6 +201,11 @@ function applyProposalChanges(
   }
 }
 
+export function proposalRequiresSourceNavigation(proposal: PendingProposal): boolean {
+  return proposal.kind === "manuscript" && proposal.changes.length > 0 &&
+    useProjectStore.getState().activeChapterId !== proposal.chapterId;
+}
+
 export function proposalStaleChangeIds(
   proposal: PendingProposal,
 ): Set<string> {
@@ -203,7 +231,6 @@ export function proposalStaleChangeIds(
       return stale;
     case "manuscript":
       if (
-        projectState.activeChapterId !== proposal.chapterId ||
         !projectState.project.chapters.some(
           (chapter) => chapter.id === proposal.chapterId,
         )
@@ -211,6 +238,7 @@ export function proposalStaleChangeIds(
         proposal.changes.forEach((change) => stale.add(change.id));
         return stale;
       }
+      if (projectState.activeChapterId !== proposal.chapterId) return stale;
       validateManuscriptChanges(proposal, projectState.blocks).forEach(
         (change) => stale.add(change.changeId),
       );
@@ -253,7 +281,7 @@ export function acceptProposalChange(
     } else if (!applyProposalChanges(current, [changeId])) {
       return;
     }
-    agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
+    agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() });
     recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
     return;
   }
@@ -262,7 +290,7 @@ export function acceptProposalChange(
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
   if (!applyProposalChanges(current, [changeId])) return;
-  agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "applied", decidedAt: new Date().toISOString() });
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(proposalEvent(current, "accepted", 1), sessionId);
 }
@@ -273,7 +301,7 @@ export function acceptAllProposalChanges(
 ): void {
   const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
   requireAgentSessionProject(sessionId, proposal.projectRoot);
-  const current = currentProposalForDecision(proposal, sessionId);
+  const current = capturedProposalForDecision(proposal, sessionId);
   const changeIds = [
     ...current.changes.map((change) => change.id),
     ...(current.overviewChange ? [current.overviewChange.id] : []),
@@ -283,7 +311,7 @@ export function acceptAllProposalChanges(
   if (current.kind === "overview") {
     useProjectStore.getState().setOverview(current.overviewChange.after);
   }
-  agentSessionStore(sessionId).getState().clearPendingProposal();
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, changeIds, { status: "applied", decidedAt: new Date().toISOString() });
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(
     proposalEvent(
@@ -309,7 +337,7 @@ export function rejectProposalChange(
   ) {
     throw new Error(`Pending proposal change not found: ${changeId}`);
   }
-  agentSessionStore(sessionId).getState().removePendingChanges([changeId]);
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, [changeId], { status: "dismissed", decidedAt: new Date().toISOString() });
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(proposalEvent(current, "rejected", 1), sessionId);
 }
@@ -320,9 +348,10 @@ export function rejectAllProposalChanges(
 ): void {
   const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
   requireAgentSessionProject(sessionId, proposal.projectRoot);
-  const current = currentProposalForDecision(proposal, sessionId);
+  const current = capturedProposalForDecision(proposal, sessionId);
   const changeCount = current.changes.length + (current.overviewChange ? 1 : 0);
-  agentSessionStore(sessionId).getState().clearPendingProposal();
+  const changeIds = proposalChangeIds(current);
+  agentSessionStore(sessionId).getState().decideProposalChanges(current.id, changeIds, { status: "dismissed", decidedAt: new Date().toISOString() });
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(
     proposalEvent(current, "rejected-all", changeCount),

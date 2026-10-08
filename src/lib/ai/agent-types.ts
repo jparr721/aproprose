@@ -105,7 +105,7 @@ export type AgentTask =
   | {
       kind: "bridge";
       chapterId: string;
-      anchorBlockId: string;
+      anchorBlockId: string | null;
       successorBlockId: string | null;
     }
   | {
@@ -244,6 +244,27 @@ export type PersistedPendingProposal =
   | Omit<OutlinePendingProposal, "projectRoot">
   | Omit<OverviewPendingProposal, "projectRoot">;
 
+export type ProposalSource =
+  | { kind: "run"; runId: string; task: AgentTask; text: string }
+  | { kind: "legacy" };
+
+export interface ProposalChangeDecision {
+  status: "applied" | "dismissed";
+  decidedAt: string;
+}
+
+export interface AgentProposalRecord {
+  proposal: PendingProposal;
+  source: ProposalSource;
+  decisions: Record<string, ProposalChangeDecision>;
+  replacedByProposalId: string | null;
+}
+
+export interface PersistedAgentProposalRecord
+  extends Omit<AgentProposalRecord, "proposal"> {
+  proposal: PersistedPendingProposal;
+}
+
 export type AgentProposalApplyResult =
   | { status: "applied"; appliedChangeIds: string[] }
   | { status: "stale"; staleChangeIds: string[] }
@@ -354,6 +375,7 @@ export interface AgentPersistenceIssue {
   kind: "corrupt" | "load" | "save";
   projectRoot: string;
   message: string;
+  scope?: "collection";
 }
 
 export interface AgentMessageMetadata {
@@ -540,23 +562,32 @@ export interface ConversationSummary {
   throughMessageId: string;
 }
 
-interface AgentPersistenceState<Proposal> {
-  v: 3;
+interface AgentPersistenceState<ProposalRecord> {
+  v: 4;
   mode: AgentMode;
   messages: AgentUIMessage[];
   summary: ConversationSummary | null;
   draftText: string;
   draftContextRefs: DraftContextRef[];
   draftSourceLocators: Record<string, DraftSourceLocator>;
-  pendingProposal: Proposal | null;
+  proposalRecords: ProposalRecord[];
+  currentProposalId: string | null;
   lastUsage: PersistedUsage | null;
   interruptedRun: InterruptedRun | null;
 }
 
-export type PersistedAgentState = AgentPersistenceState<PendingProposal>;
+export type PersistedAgentState = AgentPersistenceState<AgentProposalRecord>;
 
 export type PersistedAgentSnapshot =
-  AgentPersistenceState<PersistedPendingProposal>;
+  AgentPersistenceState<PersistedAgentProposalRecord>;
+
+export interface LegacyPersistedAgentState
+  extends Omit<PersistedAgentState, "v" | "proposalRecords" | "currentProposalId"> {
+  v: 3;
+  pendingProposal: PendingProposal | null;
+}
+
+export type AgentHydrationState = PersistedAgentState | LegacyPersistedAgentState;
 
 export interface ContextSourceResolver {
   resolveBlock: (

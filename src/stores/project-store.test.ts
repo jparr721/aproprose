@@ -1546,6 +1546,60 @@ describe("selectChapter resets the multi-selection across chapters", () => {
   });
 });
 
+describe("selectChapter completion ownership", () => {
+  beforeEach(() => {
+    vi.mocked(writeAppData).mockClear();
+  });
+
+  it.each(["switch", "close", "reopen"] as const)("ignores a chapter read after project %s", async (transition) => {
+    const original = projectFixture("/books/original");
+    const source = deferred<string>();
+    vi.mocked(readTextFile).mockReturnValueOnce(source.promise);
+    useProjectStore.setState({ project: original, activeChapterId: "ch1" });
+    const loading = useProjectStore.getState().selectChapter("ch1");
+    const current = transition === "close" ? null : projectFixture(transition === "switch" ? "/books/next" : original.root);
+    const currentBlocks = [mkBlock({ id: "current", text: "Current manuscript" })];
+    useProjectStore.setState({ project: current, activeChapterId: "current-chapter", blocks: currentBlocks, chapterDirty: true });
+
+    source.resolve("Old project prose.");
+    await loading;
+
+    expect(useProjectStore.getState()).toMatchObject({ project: current, activeChapterId: "current-chapter", chapterDirty: true });
+    expect(useProjectStore.getState().blocks).toBe(currentBlocks);
+    expect(writeAppData).not.toHaveBeenCalled();
+  });
+
+  it("keeps the latest chapter when an older read finishes last", async () => {
+    const original = projectFixture("/books/original");
+    const chapter = original.chapters[0];
+    const first = deferred<string>();
+    useProjectStore.setState({ project: { ...original, chapters: [chapter, { ...chapter, id: "ch2", file: "two.tex" }] } });
+    vi.mocked(readTextFile).mockReturnValueOnce(first.promise).mockResolvedValueOnce("Latest chapter prose.");
+    const older = useProjectStore.getState().selectChapter("ch1");
+    await useProjectStore.getState().selectChapter("ch2");
+    const latestBlocks = useProjectStore.getState().blocks;
+
+    first.resolve("Outdated chapter prose.");
+    await older;
+
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks).toBe(latestBlocks);
+  });
+
+  it("does not publish an old chapter read error into a different project", async () => {
+    const source = deferred<string>();
+    vi.mocked(readTextFile).mockReturnValueOnce(source.promise);
+    useProjectStore.setState({ project: projectFixture("/books/original") });
+    const loading = useProjectStore.getState().selectChapter("ch1");
+    useProjectStore.setState({ project: projectFixture("/books/next"), error: null });
+
+    source.reject(new Error("Old chapter is unavailable"));
+    await loading;
+
+    expect(useProjectStore.getState().error).toBeNull();
+  });
+});
+
 describe("selectionTargetIds (the block-scope precedence rule)", () => {
   it("prefers the multi-selection set when one is active", () => {
     expect(selectionTargetIds(["a", "b"], "a")).toEqual(["a", "b"]);

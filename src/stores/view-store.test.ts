@@ -127,6 +127,7 @@ describe("view-store buildErrorsOpen", () => {
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,
+      rightSurface: useViewStore.getState().changesOpen ? "changes" : useViewStore.getState().aiOpen ? "ai" : null,
     });
   });
 });
@@ -218,6 +219,7 @@ describe("view-store manuscript review lifecycle", () => {
       rightPanelWidth: useViewStore.getState().rightPanelWidth,
       pdfOpen: useViewStore.getState().pdfOpen,
       outlineOpen: useViewStore.getState().outlineOpen,
+      rightSurface: useViewStore.getState().changesOpen ? "changes" : useViewStore.getState().aiOpen ? "ai" : null,
     });
   });
 });
@@ -326,5 +328,35 @@ describe("view-store guarded action outcomes", () => {
       value: undefined,
     });
     expect(replacementAction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("view-store Changes routing", () => {
+  it("selects an exact proposal without replacing manuscript, PDF, or outline state", () => {
+    useViewStore.setState({ aiOpen: true, changesOpen: false, pdfOpen: true, outlineOpen: true, focus: true });
+    useViewStore.getState().selectChange("outline:chapter-2", "proposal-old");
+    expect(useViewStore.getState()).toMatchObject({ changesOpen: true, aiOpen: false, pdfOpen: true, outlineOpen: true, focus: false, selectedChange: { sessionKey: "outline:chapter-2", proposalId: "proposal-old" } });
+    useViewStore.getState().setChangesOpen(false);
+    expect(useViewStore.getState().selectedChange).toEqual({ sessionKey: "outline:chapter-2", proposalId: "proposal-old" });
+  });
+
+  it("switches between AI and Changes while PDF stays independent", () => {
+    useViewStore.setState({ pdfOpen: true });
+    useViewStore.getState().openChanges();
+    expect(useViewStore.getState()).toMatchObject({ aiOpen: false, changesOpen: true, pdfOpen: true });
+    useViewStore.getState().openAiConsole();
+    expect(useViewStore.getState()).toMatchObject({ aiOpen: true, changesOpen: false, pdfOpen: true });
+    useViewStore.getState().toggleChanges();
+    expect(useViewStore.getState()).toMatchObject({ aiOpen: false, changesOpen: true, pdfOpen: true });
+    useViewStore.getState().toggleChanges();
+    expect(useViewStore.getState()).toMatchObject({ aiOpen: false, changesOpen: false, pdfOpen: true });
+  });
+
+  it("restores the saved Changes surface without persisting selected proposal or guarded actions", async () => {
+    storage.getItem.mockResolvedValueOnce(JSON.stringify({ state: { rightPanelWidth: 432, pdfOpen: true, outlineOpen: false, rightSurface: "changes" }, version: 0 }));
+    await useViewStore.persist.rehydrate();
+    expect(useViewStore.getState()).toMatchObject({ aiOpen: false, changesOpen: true, pdfOpen: true, rightPanelWidth: 432 });
+    const persisted = useViewStore.persist.getOptions().partialize?.(useViewStore.getState());
+    expect(persisted).toEqual({ rightPanelWidth: 432, pdfOpen: true, outlineOpen: false, rightSurface: "changes" });
   });
 });

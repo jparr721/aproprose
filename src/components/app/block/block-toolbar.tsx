@@ -13,9 +13,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useProjectStore } from "@/stores/project-store";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
-import { SUGGEST_DIRECTIVE } from "@/lib/ai/agent-prompts";
+import { buildContinuationIntent } from "@/lib/ai/agent-continuation";
+import { getAgentChangesSnapshot, useAgentChanges } from "@/hooks/use-agent-changes";
 import type { Block as BlockT, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TypeChip } from "./type-chip";
@@ -35,6 +37,7 @@ export function BlockToolbar({
   actions: BlockAction[][];
 }) {
   const select = useProjectStore((s) => s.select);
+  const busy = useAgentChanges().runStatus !== "idle";
 
   const onMic = () => {
     select(block.id);
@@ -84,20 +87,18 @@ export function BlockToolbar({
             variant="ghost"
             size="icon-sm"
             aria-label="Suggest what comes next here"
+            aria-busy={busy}
+            disabled={busy}
             onClick={() => {
+              if (getAgentChangesSnapshot().runStatus !== "idle") return;
               select(block.id);
-              const chapterId = useProjectStore.getState().activeChapterId;
+              const state = useProjectStore.getState();
+              const chapterId = state.activeChapterId;
               if (chapterId === null) return;
-              void dispatchAgentIntent({
-                kind: "run",
-                mode: "writing",
-                text: SUGGEST_DIRECTIVE,
-                refs: [{ kind: "block", chapterId, blockId: block.id }],
-                task: { kind: "conversation", targetChapterId: chapterId },
-              });
+              void dispatchAgentIntent(buildContinuationIntent(chapterId, state.blocks, [block.id]));
             }}
           >
-            <IconSparkles className="text-ai-ink" />
+            {busy ? <Spinner className="text-ai-ink motion-reduce:animate-none" /> : <IconSparkles className="text-ai-ink" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>Suggest what comes next here</TooltipContent>

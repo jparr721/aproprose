@@ -8,6 +8,7 @@ import type {
   DraftContextRef,
   DraftContextSource,
   InterruptedRun,
+  LegacyPersistedAgentState,
   ManuscriptPendingChange,
   ManuscriptPendingProposal,
   OutlinePendingProposal,
@@ -135,14 +136,15 @@ const interrupted: InterruptedRun = {
 };
 
 const emptyPersistedState = (): PersistedAgentState => ({
-  v: 3,
+  v: 4,
   mode: "writing",
   messages: [],
   summary: null,
   draftText: "",
   draftContextRefs: [],
   draftSourceLocators: {},
-  pendingProposal: null,
+  proposalRecords: [],
+  currentProposalId: null,
   lastUsage: null,
   interruptedRun: null,
 });
@@ -420,17 +422,18 @@ describe("agent console store", () => {
     ]);
   });
 
-  it("deduplicates live context and replaces the whole proposal", () => {
+  it("deduplicates live context and retains earlier proposals", () => {
     const ref = { kind: "block" as const, chapterId: "ch1", blockId: "b1" };
     const store = useAgentConsoleStore.getState();
     store.addDraftContextRefs([ref, ref]);
-    store.replacePendingProposal(proposal);
-    store.replacePendingProposal({ ...proposal, id: "proposal-2" });
+    store.replacePendingProposal(proposalWithChanges);
+    store.replacePendingProposal({ ...proposalWithChanges, id: "proposal-2" });
 
     expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([ref]);
     expect(useAgentConsoleStore.getState().pendingProposal?.id).toBe(
       "proposal-2",
     );
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(2);
   });
 
   it("preserves an unsent composer draft for an immediate external run", () => {
@@ -630,8 +633,8 @@ describe("agent console store", () => {
             },
           ],
         ),
-      () => store.removePendingChanges(["change-1"]),
-      () => store.clearPendingProposal(),
+      () => store.decideProposalChanges("proposal-1", ["change-1"], { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" }),
+      () => store.restoreProposalChanges("proposal-1", ["change-1"]),
       () => store.appendLocalMessage(message("local-message")),
       () => store.beginPreflight(),
       () => store.beginRun(run, message("user-1")),
@@ -653,7 +656,7 @@ describe("agent console store", () => {
   });
 
   it("hydrates persisted fields while clearing transient and active run state", () => {
-    const persisted: PersistedAgentState = {
+    const persisted: LegacyPersistedAgentState = {
       v: 3,
       mode: "edit",
       messages: [message("persisted-user")],
@@ -663,7 +666,7 @@ describe("agent console store", () => {
       draftSourceLocators: {
         "block:ch1:b1": { order: 0, sourceFingerprint: "fp-1" },
       },
-      pendingProposal: proposal,
+      pendingProposal: proposalWithChanges,
       lastUsage: usage,
       interruptedRun: interrupted,
     };
@@ -1245,18 +1248,19 @@ describe("agent console store", () => {
     expect(agentAfter.draftRevision).toBe(draftRevisionBefore);
   });
 
-  it("removes selected pending changes and clears an empty proposal", () => {
+  it("decides selected pending changes and retains the complete proposal", () => {
     const store = useAgentConsoleStore.getState();
     store.replacePendingProposal(proposalWithChanges);
-    store.removePendingChanges(["change-1"]);
+    store.decideProposalChanges("proposal-1", ["change-1"], { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" });
     expect(
       useAgentConsoleStore.getState().pendingProposal?.changes.map(
         (change) => change.id,
       ),
     ).toEqual(["change-2"]);
 
-    store.removePendingChanges(["change-2"]);
+    store.decideProposalChanges("proposal-1", ["change-2"], { status: "applied", decidedAt: "2026-10-07T12:00:00.000Z" });
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposalWithChanges);
   });
 
   it("appends local data messages and updates summary and persistence issues", () => {
@@ -1277,7 +1281,6 @@ describe("agent console store", () => {
       summary,
       persistenceIssue: issue,
     });
-    store.clearPendingProposal();
     store.setPersistenceIssue(null);
     expect(useAgentConsoleStore.getState().persistenceIssue).toBeNull();
   });

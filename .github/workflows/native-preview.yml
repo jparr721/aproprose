@@ -1,0 +1,57 @@
+name: Native preview
+run-name: Native preview ${{ inputs.commit_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact commit to preview
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Isolated macOS preview
+    runs-on: macos-latest
+    env:
+      PREVIEW_COMMIT_SHA: ${{ inputs.commit_sha }}
+    steps:
+      - name: Require an exact commit
+        run: |
+          set -euo pipefail
+          [[ "$PREVIEW_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+      - name: Record preview provenance
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PREVIEW_COMMIT_SHA"
+          git rev-parse HEAD > preview-commit.txt
+          uname -m
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - run: bun install --frozen-lockfile
+      - name: Build isolated app without publishing
+        run: >-
+          bun run tauri build --debug --target aarch64-apple-darwin
+          --bundles app --ci --no-sign
+          --config '{"productName":"aproprose Changes QA","identifier":"com.jsp.aproprose.pipeline-qa","bundle":{"createUpdaterArtifacts":false}}'
+      - name: Preserve app permissions
+        run: tar -C src-tauri/target/aarch64-apple-darwin/debug/bundle/macos -czf native-preview.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-preview-${{ inputs.commit_sha }}
+          path: |
+            native-preview.tar.gz
+            preview-commit.txt
+          if-no-files-found: error
+          retention-days: 7

@@ -28,16 +28,18 @@ import type {
   ProposalSource,
   SubmittedAgentDraft,
 } from "@/lib/ai/agent-types";
+import {
+  ownsAgentPersistenceTransition,
+  type AgentPersistenceTransition,
+  type AgentPersistenceTransitionCapture,
+  type AgentPersistenceTransitionKind,
+} from "@/stores/agent-persistence-coordinator";
 
-export type AgentPersistenceTransitionKind = "load" | "recovery" | "reset";
-
-export interface AgentPersistenceTransition {
-  generation: number;
-  kind: AgentPersistenceTransitionKind;
-  projectRoot: string | null;
-}
-
-export type AgentPersistenceTransitionCapture = AgentPersistenceTransition;
+export type {
+  AgentPersistenceTransition,
+  AgentPersistenceTransitionCapture,
+  AgentPersistenceTransitionKind,
+} from "@/stores/agent-persistence-coordinator";
 
 export type AgentPersistenceTransitionCompletion =
   | { status: "stale" }
@@ -557,10 +559,7 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
   },
   activatePersistenceTransition: (capture) => {
     const transition = get().persistenceTransition;
-    if (
-      transition?.generation !== capture.generation ||
-      transition.projectRoot !== capture.projectRoot
-    ) {
+    if (!ownsAgentPersistenceTransition(transition, capture)) {
       return false;
     }
     set({ activeProjectRoot: capture.projectRoot });
@@ -568,10 +567,7 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
   },
   completePersistenceTransition: (capture, state) => {
     const transition = get().persistenceTransition;
-    if (
-      transition?.generation !== capture.generation ||
-      transition.projectRoot !== capture.projectRoot
-    ) {
+    if (!ownsAgentPersistenceTransition(transition, capture)) {
       return { status: "stale" };
     }
     if (capture.projectRoot === null) {
@@ -600,10 +596,7 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
   },
   finishPersistenceTransition: (capture) => {
     const transition = get().persistenceTransition;
-    if (
-      transition?.generation !== capture.generation ||
-      transition.projectRoot !== capture.projectRoot
-    ) {
+    if (!ownsAgentPersistenceTransition(transition, capture)) {
       return;
     }
     set({ persistenceTransition: null });

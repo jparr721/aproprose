@@ -123,9 +123,9 @@
 
 - Initial full gate: active in authorized local mode; frontend/browser and native debug checks passed, isolated native bundle/smoke pending.
 - PR: https://github.com/jparr721/aproprose/pull/70 (ready, attached), base `main`, initial pushed head `387810fb2bfa13e347a0a9ca5837e1b9a3833f9a`.
-- Review rounds: 5/5 completed; round 5 `FIX-THEN-SHIP`, 1 P2 must-fix active. Rounds 1/2 fixed 4 each; round 3 fixed 2; round 4 fixed 1. Cap reached without clean APPROVE exit; no round 6 or automatic merge authorized.
+- Review rounds: 5/5 completed; round 5 `FIX-THEN-SHIP`, final P2 fixed, 0 accepted must-fix remaining. Twelve accepted groups fixed across all rounds (4/4/2/1/1). Cap reached without clean APPROVE exit; no round 6 or automatic merge authorized. Final repair `f2e9e32` is unreviewed after the cap.
 - Simplification: skipped at cap-stop; clean APPROVE exit not reached, so Step 7 is not entered.
-- Final exact-commit gate and CI: pending.
+- Final application-source gate and CI: PASS on `8f372342babfc6e9754d12d4001f4dfb6e9f8374`; documentation/delivery commit gate and CI still pending at final QA checkpoint.
 
 ### First local gate results
 
@@ -462,8 +462,22 @@ residual risk: final accepted fix will be gated but unreviewed after the review 
 - New proof checks recursive tree snapshot equality, two refusals without mutation, and same-root retry after repaired source. Existing raw-TeX, backup identity, retry, and refusal positive controls also passed.
 - Standalone bug-fix commit active. No broad final gate or pushed/CI claim yet. Full gate and push precede real final-worktree QA/deck; cap-stop still prohibits automatic merge and skips simplifier.
 
+### Final application gate, QA, and cap-stop disposition
+
+- Exact application source: `8f372342babfc6e9754d12d4001f4dfb6e9f8374`, pushed and PR head confirmed. Final accepted repair `f2e9e32` preflights rendered metadata/chapter output before migration mutation; it is unreviewed after the fifth-round cap.
+- Full exact application gate PASS: typecheck, frontend build, version gate, 1784 frontend tests, 36 browser tests, native format/strict Clippy, 97 native tests plus 2 explicitly run real integration tests, isolated QA production package and actual launch.
+- Exact CI run 37736821713 SUCCESS: Linux/macOS/Windows native tests, package and launch; frontend/browser; required protected context names. Cross-platform CI artifact launch is verified; local interactive UI proof remains macOS only.
+- Final real-data QA targets the unmerged worktree/package at that source, not production or post-merge. Actual native proof covers New novel; dirty Add guard; save/reopen; five literal metadata fields and chapter title; real PDF title/body; focused outline/editor Undo; settings.
+- Destructive/failure proof uses disposable real files: missing metadata refusal with whole-tree unchanged; permission fault retains draft and leaves chapter/PDF/mtime unchanged, then successful retry; R3 failed preparation preserves backup and direct retry compiles; F5 refuses twice with complete-tree equality, then source-only repair permits direct retry and compilation.
+- Worker assessment: pipeline evidence `final-8f37234/evidence/worker-assessment.md`. No mocked provider or external backup result is claimed as native QA proof.
+- Self-contained 23-slide HTML proof created at `docs/slides/audit-remediation-2026-10-08.html`; embedded images, navigation, and caption geometry verified. Deck delivered to both starting-checkout `docs/slides/audit-remediation-2026-10-08.html` and `qa-decks/audit-remediation/audit-remediation-2026-10-08.html`; evidence delivered under `qa-decks/audit-remediation/evidence`. SHA256 `9165cecd8f0b5313c4aa0268fe21612a097555c3f0a83c74ed1a132edce1e1b7`; Codex open queued.
+- Delivery verification record will be `qa-decks/audit-remediation/evidence/delivery-verification.json`. Final documentation commit/gate/push/exact CI evidence will be populated there afterward; none is claimed in advance by this checkpoint.
+- Current accepted must-fix remaining: 0. Round 5 verdict remains FIX-THEN-SHIP because final repair followed that review; no fabricated APPROVE, round 6, or automatic merge. Step 7 simplifier not reached because clean APPROVE exit was not obtained.
+- Worktree retained intact and PR remains unmerged. User decision required to merge the gated unreviewed repair or explicitly raise review cap; followups #72 (descendant cleanup) and #76 (inherited real-PDF race) remain separate.
+- Residual proof limits: notification guidance remains generic; live provider inference and external backup were not run; other-platform interactive UI was not exercised locally. Local generated/disposable projects and local filesystem/Git/LaTeX paths supplied real-data proof without personal-data mutation.
+
 - QA target: final unmerged worktree/package after review-cap stop. Preserve worktree and deliver deck before final handoff.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.
 - Deck convention: self-contained HTML with screenshots in `docs/slides/<topic>-YYYY-MM-DD.html`; one screenshot per captioned slide, assets embedded or under `docs/slides`.
 - Deck copy-out: starting checkout `qa-decks/audit-remediation/` before any worktree removal.
-- QA, deck, and cleanup: pending.
+- QA complete on exact application source; 23-slide HTML deck verified and copy-out delivered. Only final documentation commit gate/push/CI evidence remains pending in external delivery-verification.json. Worktree cleanup intentionally not performed because PR remains unmerged.

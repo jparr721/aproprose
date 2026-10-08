@@ -181,7 +181,7 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
     }
     const request = proposal.chapterId === null
       ? navigateToProposalSource(proposal)
-      : navigateToProposalChange(proposal.chapterId, preview.source);
+      : navigateToProposalChange(proposal.projectRoot, proposal.chapterId, preview.source);
     void request.then((opened) => {
       if (!opened) onError("The captured source is unavailable. Your draft is still here.");
     }).catch((error) => onError(String(error)));

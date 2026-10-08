@@ -4,6 +4,23 @@
 
 import { useState } from "react";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ChevronRight as IconChevronRight,
   ChevronUp as IconChevronUp,
   ChevronDown as IconChevronDown,
@@ -59,6 +76,7 @@ import {
 import type { ChapterRef } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { cn } from "@/lib/utils";
 
 function AddChapterDialog() {
   const addChapter = useProjectStore((s) => s.addChapter);
@@ -154,21 +172,39 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const on = chapter.id === activeId;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: chapter.id });
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem
+      ref={(node) => {
+        setNodeRef(node);
+        if (node) {
+          node.style.setProperty("--chapter-transform", CSS.Translate.toString(transform) ?? null);
+          node.style.setProperty("--chapter-transition", transition ?? null);
+        }
+      }}
+      className={cn(
+        "[transform:var(--chapter-transform)] [transition:var(--chapter-transition)]",
+        isDragging && "z-10 bg-sidebar opacity-70",
+      )}
+    >
       <SidebarMenuButton
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
         isActive={on}
         onClick={() => guard(() => void selectChapter(chapter.id))}
-        className="pr-14"
+        className="touch-none cursor-grab active:cursor-grabbing"
       >
         <span>{chapter.title}</span>
       </SidebarMenuButton>
-      <SidebarMenuBadge className="right-8">{index + 1}</SidebarMenuBadge>
+      <SidebarMenuBadge className="w-5 px-0 group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0 group-has-data-[state=open]/menu-item:opacity-0">
+        {index + 1}
+      </SidebarMenuBadge>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuAction title="Chapter actions" showOnHover>
+          <SidebarMenuAction title="Chapter actions" showOnHover className="opacity-0">
             <IconDots />
           </SidebarMenuAction>
         </DropdownMenuTrigger>
@@ -178,13 +214,13 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={index === 0}
-            onSelect={() => void moveChapter(chapter.id, -1)}
+            onSelect={() => void moveChapter(chapter.id, index - 1)}
           >
             <IconChevronUp /> Move up
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={index === count - 1}
-            onSelect={() => void moveChapter(chapter.id, 1)}
+            onSelect={() => void moveChapter(chapter.id, index + 1)}
           >
             <IconChevronDown /> Move down
           </DropdownMenuItem>
@@ -224,6 +260,17 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
 
 export function ChapterList() {
   const chapters = useProjectStore((s) => s.project?.chapters ?? []);
+  const moveChapter = useProjectStore((s) => s.moveChapter);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = ({ active, over }: DragEndEvent): void => {
+    if (!over || active.id === over.id) return;
+    const toIndex = chapters.findIndex((chapter) => chapter.id === over.id);
+    if (toIndex >= 0) void moveChapter(String(active.id), toIndex);
+  };
+
   return (
     <Collapsible defaultOpen className="group/collapsible">
       <SidebarGroup>
@@ -239,11 +286,15 @@ export function ChapterList() {
             {chapters.length === 0 ? (
               <p className="px-2 py-1 text-xs text-faint">No chapters yet — add one.</p>
             ) : (
-              <SidebarMenu>
-                {chapters.map((c, idx) => (
-                  <ChapterRow key={c.id} chapter={c} index={idx} />
-                ))}
-              </SidebarMenu>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} onDragEnd={onDragEnd}>
+                <SortableContext items={chapters.map((chapter) => chapter.id)} strategy={verticalListSortingStrategy}>
+                  <SidebarMenu>
+                    {chapters.map((c, idx) => (
+                      <ChapterRow key={c.id} chapter={c} index={idx} />
+                    ))}
+                  </SidebarMenu>
+                </SortableContext>
+              </DndContext>
             )}
           </SidebarGroupContent>
         </CollapsibleContent>

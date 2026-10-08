@@ -111,6 +111,40 @@ describe("AgentConversation", () => {
     ).toBeTruthy();
   });
 
+  it("reveals a new follow-up after scrolling up, then respects manual scrolling during the reply", async () => {
+    const messages = Array.from({ length: 8 }, (_, index) =>
+      textMessage(`message-${index}`, index % 2 === 0 ? "user" : "assistant", `Message ${index}`),
+    );
+    const { rerender } = renderConversation(messages);
+    const viewport = screen.getByRole("region", { name: "Conversation messages" });
+    Object.defineProperty(viewport, "scrollHeight", { value: 600 });
+    Object.defineProperty(viewport, "clientHeight", { value: 100 });
+    viewport.scrollTop = 499;
+    fireEvent.scroll(viewport);
+    viewport.scrollTop = 20;
+    fireEvent.scroll(viewport);
+    await screen.findByRole("button", { name: "Scroll to latest message" });
+    const followUp = textMessage("follow-up", "user", "Keep the dry sarcasm");
+    const props = {
+      emptyDescription: "Add manuscript context or ask a project question.",
+      emptyTitle: "Ask about this project",
+      onRetry: vi.fn().mockResolvedValue({ status: "success" }),
+      onOpenSettings: vi.fn(),
+    };
+
+    rerender(<AgentConversation {...props} messages={[...messages, followUp]} />);
+
+    await waitFor(() => expect(viewport.scrollTop).toBe(499));
+    expect(screen.getByText("Keep the dry sarcasm")).toBeTruthy();
+    viewport.scrollTop = 20;
+    fireEvent.scroll(viewport);
+    await screen.findByRole("button", { name: "Scroll to latest message" });
+
+    rerender(<AgentConversation {...props} messages={[...messages, followUp, textMessage("reply", "assistant", "Updated edit")]} />);
+
+    await waitFor(() => expect(viewport.scrollTop).toBe(20));
+  });
+
   it("scrolls independently while a sibling tray or composer stays mounted", async () => {
     const siblingUnmounted = vi.fn();
     function Sibling() {

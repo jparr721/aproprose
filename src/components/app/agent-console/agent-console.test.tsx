@@ -175,13 +175,13 @@ afterEach(async () => {
 });
 
 describe("AgentConsole shell", () => {
-  it("omits the project sidebar header and its redundant close action", () => {
+  it("omits the project sidebar header and keeps an accessible close action", () => {
     render(<AgentConsole />);
 
     const shell = screen.getByRole("region", { name: "AI Console" });
     expect(shell.querySelector("header")).toBeNull();
     expect(screen.queryByText("Quiet Novel / 1. The Crossing")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Close AI Console" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Close AI Console" })).toBeTruthy();
     expect(screen.getByRole("log")).toBeTruthy();
     expect(screen.getByRole("region", { name: "Agent composer" })).toBeTruthy();
   });
@@ -497,8 +497,8 @@ describe("AgentConsole shell", () => {
       expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
       expect(
-        screen.queryByRole("button", { name: "Close AI Console" }),
-      ).toBeNull();
+        screen.getByRole("button", { name: "Close AI Console" }),
+      ).toBeTruthy();
     } finally {
       releaseWrite();
       await switching;

@@ -15,6 +15,7 @@ import { ChangesPanel } from "@/components/app/changes-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { AgentProposalRecord, ManuscriptPendingProposal, OutlinePendingProposal } from "@/lib/ai/agent-types";
 import { EMPTY_META } from "@/lib/migration";
+import { applyProposal } from "@/lib/blocks/proposal";
 import type { ProjectInfo } from "@/lib/types";
 import { EMPTY_AGENT_STATE, clearOutlineAgentSessions, useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
@@ -118,6 +119,58 @@ describe("ChangesPanel", () => {
     expect(screen.getByText("Full source first")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Apply 2" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Dismiss draft" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("passes the owning project with an individual source navigation request", () => {
+    const { container } = renderPanel();
+    const change = container.querySelector('[data-agent-change-id="one-first"]');
+    if (!(change instanceof HTMLElement)) throw new Error("Missing proposed change");
+    fireEvent.click(within(change).getByRole("button", { name: "Go to source" }));
+    expect(decisions.navigate).toHaveBeenCalledWith("/book", "ch1", proposal("one").changes[0]);
+  });
+
+  it("shows a retained dialogue tail through opening edits and applied history without duplicating it", () => {
+    const dialogue: ManuscriptPendingProposal = {
+      id: "dialogue", kind: "manuscript", projectRoot: "/book", chapterId: "ch1", summary: "Continue the conversation", createdAt: "2026-10-08T01:00:00.000Z", originatingMessageId: "assistant-dialogue",
+      changes: [{
+        id: "dialogue-insert",
+        change: { kind: "insert", blockId: null, afterId: null, type: "dialogue", speaker: "Mara", newText: "Wait.", segments: [{ kind: "beat", text: "She lifted the lantern." }, { kind: "quote", text: "Follow me." }], toIndex: null, reason: "Carry the conversation forward" },
+        precondition: { kind: "insert", boundary: "immediate", anchor: null, expectedNext: null },
+      }],
+    };
+    useAgentConsoleStore.getState().stageProposal(dialogue, { kind: "legacy" });
+    useViewStore.getState().selectChange("project", dialogue.id);
+    const { container } = renderPanel();
+    const change = container.querySelector('[data-agent-change-id="dialogue-insert"]');
+    if (!(change instanceof HTMLElement)) throw new Error("Missing dialogue insert");
+    expect(change.textContent).toContain("Wait.");
+    expect(change.textContent).toContain("She lifted the lantern.");
+    expect(change.textContent).toContain("Follow me.");
+    fireEvent.keyDown(within(change).getByRole("button", { name: "Change actions" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit draft" }));
+    const textbox = screen.getByRole("textbox", { name: "Edit proposed text" });
+    if (!(textbox instanceof HTMLTextAreaElement)) throw new Error("Missing opening-text editor");
+    expect(textbox.value).toBe("Wait.");
+    expect(change.textContent).toContain("She lifted the lantern.");
+    expect(change.textContent).toContain("Follow me.");
+    fireEvent.change(textbox, { target: { value: "Come here." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    const saved = useAgentConsoleStore.getState().proposalRecords.find((entry) => entry.proposal.id === dialogue.id)?.proposal;
+    if (saved === undefined || saved.kind !== "manuscript") throw new Error("Missing retained dialogue proposal");
+    expect(saved.changes[0].change.newText).toBe("Come here.");
+    expect(saved.changes[0].change.segments).toEqual([{ kind: "beat", text: "She lifted the lantern." }, { kind: "quote", text: "Follow me." }]);
+    const applied = applyProposal([], [saved.changes[0].change], () => undefined);
+    expect(applied.blocks).toHaveLength(1);
+    expect(applied.blocks[0]).toMatchObject({ text: "Come here.", tail: [{ kind: "beat", text: "She lifted the lantern." }, { kind: "quote", text: "Follow me." }] });
+    act(() => { useAgentConsoleStore.getState().decideProposalChanges(dialogue.id, ["dialogue-insert"], { status: "applied", decidedAt: "2026-10-08T02:00:00.000Z" }); });
+    fireEvent.click(screen.getByRole("button", { name: "History (1)" }));
+    expect(screen.getByText("Applied")).toBeTruthy();
+    const history = container.querySelector('[data-agent-change-id="dialogue-insert"]');
+    if (!(history instanceof HTMLElement)) throw new Error("Missing dialogue history");
+    expect(history.textContent).toContain("Come here.");
+    expect(history.textContent).toContain("She lifted the lantern.");
+    expect(history.textContent).toContain("Follow me.");
+    expect(within(history).queryByRole("button", { name: "Change actions" })).toBeNull();
   });
 
   it("edits the exact pending change while keeping the frozen source intact", () => {

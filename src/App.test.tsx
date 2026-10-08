@@ -71,8 +71,9 @@ const project: ProjectInfo = {
   ],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await useViewStore.persist.rehydrate();
   useViewStore.setState({
     aiOpen: true,
     changesOpen: false,
@@ -84,10 +85,12 @@ beforeEach(() => {
     rightPanelWidth: 388,
   });
   useProjectStore.setState({
+    status: "ready",
     project,
     meta: EMPTY_META,
     activeChapterId: "chapter-1",
     chapterDirty: false,
+    error: null,
   });
   useAgentConsoleStore.setState({
     ...EMPTY_AGENT_STATE,
@@ -229,7 +232,7 @@ describe("Workspace", () => {
     expect(useProjectStore.getState().chapterDirty).toBe(true);
   });
 
-  it("switches AI and Changes inside one retained dock while preserving editor and PDF", () => {
+  it("switches AI and Changes inside one retained dock while preserving editor and PDF", async () => {
     useAgentConsoleStore.getState().stageProposal({
       id: "retained-overview", kind: "overview", projectRoot: project.root, chapterId: null,
       summary: "Keep the stakes clear", createdAt: "2026-10-08T00:00:00.000Z", originatingMessageId: "assistant-1", changes: [],
@@ -241,22 +244,22 @@ describe("Workspace", () => {
     const pdf = screen.getByText("PDF Pane");
     const console = screen.getByRole("region", { name: "AI Console" });
     const changes = container.querySelector("[data-changes-panel]");
-    act(() => useViewStore.getState().openChanges());
+    await act(async () => { useViewStore.getState().openChanges(); });
     expect(screen.getByRole("region", { name: "Changes" })).toBe(changes);
     expect(screen.queryByRole("region", { name: "AI Console" })).toBeNull();
     expect(console.isConnected).toBe(true);
     expect(screen.getByText("Editor Pane")).toBe(editor);
     expect(screen.getByText("PDF Pane")).toBe(pdf);
-    act(() => useViewStore.getState().setChangesOpen(false));
+    await act(async () => { useViewStore.getState().setChangesOpen(false); });
     expect(screen.queryByRole("region", { name: "Changes" })).toBeNull();
     expect(changes?.isConnected).toBe(true);
-    act(() => useViewStore.getState().openChanges());
+    await act(async () => { useViewStore.getState().openChanges(); });
     expect(screen.getByRole("region", { name: "Changes" })).toBe(changes);
-    act(() => useViewStore.getState().openAiConsole());
+    await act(async () => { useViewStore.getState().openAiConsole(); });
     expect(screen.getByRole("region", { name: "AI Console" })).toBe(console);
     expect(screen.getByText("Editor Pane")).toBe(editor);
     expect(useAgentConsoleStore.getState().proposalRecords).toBe(retained);
-    act(() => useViewStore.getState().openChanges());
+    await act(async () => { useViewStore.getState().openChanges(); });
     expect(screen.getByRole("region", { name: "Changes" })).toBe(changes);
     expect(screen.getByText("Saved proposed story")).toBeTruthy();
   });

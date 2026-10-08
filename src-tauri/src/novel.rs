@@ -492,21 +492,41 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
     project::parse_chapters(&source, &root)?;
     let chapters = project::chapter_pairs(&source);
     let backup = root.join("main.tex.bak");
-    if backup.exists() {
-        return Err(format!(
-            "cannot migrate: backup {} already exists",
-            backup.display()
-        ));
+    match fs::read(&backup) {
+        Ok(bytes) if bytes == source.as_bytes() => {}
+        Ok(_) => {
+            return Err(format!(
+                "cannot migrate: backup {} differs from current main file {}; preserve both files before retrying",
+                backup.display(),
+                main_abs.display()
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            durable_write::stage(&backup, source.as_bytes())?.commit_new()?;
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot read migration backup {}: {error}",
+                backup.display()
+            ));
+        }
     }
-    durable_write::stage(&backup, source.as_bytes())?.commit_new()?;
-    scaffold_missing(&root)?;
     let metadata_text = render_metadata_preserving(&metadata, &source);
     let chapter_text = render_chapter_sources(&chapters);
-    let staged = vec![
-        durable_write::stage(&root.join("metadata.tex"), metadata_text.as_bytes())?,
-        durable_write::stage(&root.join("chapters.tex"), chapter_text.as_bytes())?,
-        durable_write::stage(&main_abs, MAIN_TEX.as_bytes())?,
-    ];
+    let staged = scaffold_missing(&root)
+        .and_then(|()| {
+            Ok(vec![
+                durable_write::stage(&root.join("metadata.tex"), metadata_text.as_bytes())?,
+                durable_write::stage(&root.join("chapters.tex"), chapter_text.as_bytes())?,
+                durable_write::stage(&main_abs, MAIN_TEX.as_bytes())?,
+            ])
+        })
+        .map_err(|error| {
+            format!(
+                "cannot prepare migration; backup {} preserved: {error}",
+                backup.display()
+            )
+        })?;
     commit_replacements_with(
         &root,
         staged,
@@ -826,6 +846,110 @@ mod tests {
         .unwrap();
         fs::write(root.join("content/chapter-001.tex"), "Hello world.\n").unwrap();
         dir
+    }
+
+    fn legacy_migration_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("content")).unwrap();
+        fs::write(dir.path().join("content/old.tex"), "Original chapter body.").unwrap();
+        fs::write(
+            dir.path().join("main.tex"),
+            "\\documentclass{book}\n\\newcommand{\\booktitle}{Legacy book}\n\\begin{document}\n\\mainmatter\n\\chapter{One}\n\\input{content/old.tex}\n\\end{document}\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn migration_retries_after_scaffold_failure_without_replacing_backup() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let source = fs::read(root.join("main.tex")).unwrap();
+        fs::write(root.join("frontmatter"), "Obstruction").unwrap();
+        let error = migrate_to_managed(root).unwrap_err();
+        assert_eq!(fs::read(root.join("main.tex")).unwrap(), source);
+        assert_eq!(fs::read(root.join("main.tex.bak")).unwrap(), source);
+        fs::remove_file(root.join("frontmatter")).unwrap();
+        assert_eq!(detect_and_open(root).unwrap().status, "needsMigration");
+
+        let opened = migrate_to_managed(root).unwrap();
+        assert!(error.contains("main.tex.bak"), "{error}");
+        assert_eq!(opened.chapters[0].file, "content/old.tex");
+        assert_eq!(fs::read(root.join("main.tex.bak")).unwrap(), source);
+        assert_eq!(
+            fs::read(root.join("content/old.tex")).unwrap(),
+            b"Original chapter body."
+        );
+    }
+
+    #[test]
+    fn migration_retries_after_staging_failure_with_original_backup() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let source = fs::read(root.join("main.tex")).unwrap();
+        fs::create_dir(root.join("metadata.tex")).unwrap();
+        let error = migrate_to_managed(root).unwrap_err();
+        assert!(error.contains("metadata.tex"), "{error}");
+        assert_eq!(fs::read(root.join("main.tex")).unwrap(), source);
+        assert_eq!(fs::read(root.join("main.tex.bak")).unwrap(), source);
+        fs::remove_dir(root.join("metadata.tex")).unwrap();
+
+        let opened = migrate_to_managed(root).unwrap();
+        assert!(error.contains("main.tex.bak"), "{error}");
+        assert_eq!(opened.metadata.title, "Legacy book");
+        assert_eq!(fs::read(root.join("main.tex.bak")).unwrap(), source);
+    }
+
+    #[test]
+    fn migration_reuses_identical_backup_without_replacing_its_identity() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let source = fs::read(root.join("main.tex")).unwrap();
+        fs::write(root.join("main.tex.bak"), &source).unwrap();
+        fs::hard_link(root.join("main.tex.bak"), root.join("backup-witness")).unwrap();
+
+        migrate_to_managed(root).unwrap();
+
+        assert_eq!(fs::read(root.join("main.tex.bak")).unwrap(), source);
+        fs::write(root.join("backup-witness"), "Identity witness").unwrap();
+        assert_eq!(
+            fs::read(root.join("main.tex.bak")).unwrap(),
+            b"Identity witness"
+        );
+    }
+
+    #[test]
+    fn migration_refuses_differing_backup_without_mutating_legacy_files() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let source = fs::read(root.join("main.tex")).unwrap();
+        fs::write(root.join("main.tex.bak"), "Unrelated backup").unwrap();
+
+        let error = migrate_to_managed(root).unwrap_err();
+
+        assert!(error.contains("main.tex.bak"), "{error}");
+        assert_eq!(fs::read(root.join("main.tex")).unwrap(), source);
+        assert_eq!(
+            fs::read(root.join("main.tex.bak")).unwrap(),
+            b"Unrelated backup"
+        );
+        assert!(!root.join("metadata.tex").exists());
+        assert!(!root.join("frontmatter").exists());
+    }
+
+    #[test]
+    fn migration_reports_unreadable_backup_without_mutating_legacy_files() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let source = fs::read(root.join("main.tex")).unwrap();
+        fs::create_dir(root.join("main.tex.bak")).unwrap();
+
+        let error = migrate_to_managed(root).unwrap_err();
+
+        assert!(error.contains("cannot read migration backup"), "{error}");
+        assert_eq!(fs::read(root.join("main.tex")).unwrap(), source);
+        assert!(root.join("main.tex.bak").is_dir());
+        assert!(!root.join("metadata.tex").exists());
     }
 
     #[test]

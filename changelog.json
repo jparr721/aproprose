@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.18.0",
+    "date": "2026-10-07",
+    "summary": "Clarify your writing preferences with AI and receive a new app release after each update to main.",
+    "highlights": [
+      "Use AI help above Writing voice and Writing and editing instructions to turn your existing text into a clearer suggestion. Review, edit, and apply it without losing newer edits.",
+      "Every change requires a synchronized version increase and a changelog entry before merging.",
+      "Passing updates to main automatically build signed desktop releases with their changelog notes."
+    ]
+  },
+  {
     "version": "0.17.1",
     "date": "2026-08-23",
     "summary": "Fixed Arch Linux packages so the app launches with its built-in interface.",

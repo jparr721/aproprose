@@ -1,15 +1,26 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      commit_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.commit_sha }}
   cancel-in-progress: false
 
 jobs:
@@ -19,31 +30,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
-      - name: Tag must match tauri.conf.json and be strictly newest
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Validate the main push and immutable release version
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          tag_ver="${tag#v}"
-          conf_ver="$(jq -r .version src-tauri/tauri.conf.json)"
-          if [ "$tag_ver" != "$conf_ver" ]; then
-            echo "::error::tag $tag (=$tag_ver) does not match tauri.conf.json version $conf_ver"
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ "$GITHUB_REF" != "refs/heads/main" ] || [ "$COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::releases must build the exact commit of a successful main push"
             exit 1
           fi
-          if [ "${{ github.event.created }}" != "true" ]; then
-            echo "::error::tag $tag already existed (force-update/overwrite); published releases cannot be overwritten"
+          version="$(bun run scripts/check-release.ts "$BASE_SHA")"
+          if [ "$version" != "$RELEASE_VERSION" ] || [ "$(git rev-parse HEAD)" != "$COMMIT_SHA" ]; then
+            echo "::error::release inputs do not match the checked-out version and commit"
             exit 1
           fi
-          others="$(git tag --list 'v*' | grep -vxF "$tag" || true)"
-          if [ -n "$others" ]; then
-            highest="$(printf '%s\n' "$others" | sed 's/^v//' | sort -V | tail -n1)"
-            newest="$(printf '%s\n%s\n' "$tag_ver" "$highest" | sort -V | tail -n1)"
-            if [ "$tag_ver" = "$highest" ] || [ "$newest" != "$tag_ver" ]; then
-              echo "::error::version $tag_ver is not greater than the highest existing tag $highest"
+          tag="v$version"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            if [ "$(git rev-parse "$tag^{commit}")" != "$COMMIT_SHA" ]; then
+              echo "::error::tag $tag already points at a different commit"
               exit 1
             fi
           fi
-          echo "guard ok: $tag_ver matches config and is the newest version"
+          highest="$(git tag --merged "$BASE_SHA" --list 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -n1 || true)"
+          if [ -n "$highest" ]; then
+            newest="$(printf '%s\n%s\n' "$tag" "$highest" | sort -V | tail -n1)"
+            if [ "$tag" = "$highest" ] || [ "$newest" != "$tag" ]; then
+              echo "::error::version $version must be greater than ancestor release $highest"
+              exit 1
+            fi
+          fi
+          echo "Release validated: $tag at $COMMIT_SHA"
 
   create-release:
     name: create draft release
@@ -55,33 +77,58 @@ jobs:
       release_id: ${{ steps.create-release.outputs.result }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
       - uses: oven-sh/setup-bun@v2
-      - name: Create the draft release
+      - run: bun install --frozen-lockfile
+      - name: Create or resume the draft release for this commit
         id: create-release
         uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         with:
           result-encoding: string
           script: |
             const { execFileSync } = require('child_process');
-            const tag = context.ref.replace('refs/tags/', '');
-            const version = tag.replace(/^v/, '');
-            // scripts/release-body.ts validates the changelog entry and builds the body
-            // (the same format the in-app parseUpdateNotes inverts). It exits non-zero with
-            // an actionable message if the entry is missing or malformed.
-            let body;
+            const version = process.env.RELEASE_VERSION;
+            const sha = process.env.COMMIT_SHA;
+            const tag = `v${version}`;
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            const body = execFileSync('bun', ['run', 'scripts/release-body.ts', version], {
+              encoding: 'utf8',
+            }).trimEnd();
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...repo, per_page: 100 });
+            const existing = releases.find((release) => release.tag_name === tag);
+            if (existing) {
+              if (!existing.draft) throw new Error(`Published release ${tag} cannot be modified`);
+              if (existing.target_commitish !== sha) throw new Error(`Draft ${tag} must target ${sha}; found ${existing.target_commitish}`);
+              if (existing.body !== body) throw new Error(`Draft ${tag} does not match the checked-in changelog`);
+            }
+            let reference;
             try {
-              body = execFileSync('bun', ['run', 'scripts/release-body.ts', version], {
-                encoding: 'utf8',
-              });
-            } catch (e) {
-              const detail = e.stderr ? e.stderr.toString() : e.message;
-              core.setFailed(`failed to build release body for ${version}: ${detail}`);
-              throw e;
+              reference = (await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` })).data.object;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (reference) {
+              while (reference.type === 'tag') {
+                reference = (await github.rest.git.getTag({ ...repo, tag_sha: reference.sha })).data.object;
+              }
+              if (reference.type !== 'commit' || reference.sha !== sha) {
+                throw new Error(`Tag ${tag} must point at ${sha}; found ${reference.type} ${reference.sha}`);
+              }
+            } else {
+              await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha });
+            }
+            if (existing) {
+              core.info(`Resuming draft ${tag} for ${sha}`);
+              return existing.id;
             }
             const { data } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              ...repo,
               tag_name: tag,
+              target_commitish: sha,
               name: `aproprose ${tag}`,
               body,
               draft: true,
@@ -96,6 +143,8 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # tauri-action merges latest.json by read/delete/upload, so serialize its writers.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -116,6 +165,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
       - name: Install Tauri system deps (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -132,19 +183,30 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Build the updater changelog notes for this version
         id: notes
-        # tauri-action defaults latest.json `notes` to a generic "See the assets..."
-        # string. The in-app updater surfaces `notes` as the upcoming version's changelog
+        # tauri-action defaults latest.json `notes` to a generic download message.
+        # The in-app updater surfaces `notes` as the upcoming version's changelog
         # ("See changes"), so feed it the real entry via releaseBody - the same body
         # release-body.ts builds for the GitHub release, which parseUpdateNotes inverts.
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
           {
             echo 'body<<RELEASE_BODY_EOF'
-            bun run scripts/release-body.ts "$version"
+            bun run scripts/release-body.ts "$RELEASE_VERSION"
             echo
             echo 'RELEASE_BODY_EOF'
           } >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+      - name: Require the release to remain a draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" != "true" ]; then
+            echo "::error::published release assets cannot be modified"
+            exit 1
+          fi
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -152,6 +214,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: v${{ inputs.version }}
+          releaseCommitish: ${{ inputs.commit_sha }}
+          releaseDraft: true
           releaseBody: ${{ steps.notes.outputs.body }}
           args: ${{ matrix.args }}
       # Runs after tauri-action so it packages the very binary tauri just built.
@@ -159,7 +224,9 @@ jobs:
       # binary (no embedded frontend) that fails to start - see the script's guard.
       - name: Package for Arch Linux
         if: matrix.platform == 'ubuntu-22.04'
-        run: ./scripts/create-arch-package.sh "${GITHUB_REF_NAME#v}"
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: ./scripts/create-arch-package.sh "$RELEASE_VERSION"
       - name: Upload Arch Linux package
         if: matrix.platform == 'ubuntu-22.04'
         env:
@@ -170,6 +237,14 @@ jobs:
           # Address the release by id, not by tag: it is still a draft at this point, so the
           # id is the unambiguous handle. Asset uploads go to uploads.github.com, not the API host.
           pkg="$(ls aproprose-*.pkg.tar.zst)"
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" != "true" ]; then
+            echo "::error::published release assets cannot be modified"
+            exit 1
+          fi
+          asset_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq ".[] | select(.name==\"$(basename "$pkg")\") | .id")"
+          if [ -n "$asset_id" ]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+          fi
           gh api --method POST \
             -H "Content-Type: application/octet-stream" \
             "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=$(basename "$pkg")" \
@@ -182,29 +257,51 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
       - name: Verify latest.json covers all platforms, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
+          if [ "$(git rev-parse "v${RELEASE_VERSION}^{commit}")" != "$COMMIT_SHA" ]; then
+            echo "::error::the release tag no longer points at the checked-out commit"
+            exit 1
+          fi
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" != "true" ]; then
+            echo "::error::published releases cannot be modified"
+            exit 1
+          fi
           asset_url="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | select(.name=="latest.json") | .url')"
           if [ -z "$asset_url" ]; then
             echo "::error::latest.json was not uploaded to the release"
             exit 1
           fi
           gh api "$asset_url" -H "Accept: application/octet-stream" > latest.json
+          if ! jq -e --arg v "$RELEASE_VERSION" '.version == $v' latest.json >/dev/null; then
+            echo "::error::latest.json version does not match the release"
+            exit 1
+          fi
           for plat in darwin-aarch64 linux-x86_64 windows-x86_64; do
-            if ! jq -e --arg p "$plat" '.platforms[$p]' latest.json >/dev/null; then
-              echo "::error::latest.json is missing platform $plat"
+            if ! jq -e --arg p "$plat" --arg path "/releases/download/v${RELEASE_VERSION}/" \
+              '.platforms[$p] | (.signature | strings | length > 0) and (.url | strings | contains($path))' latest.json >/dev/null; then
+              echo "::error::latest.json is missing a signed version-pinned update for $plat"
               cat latest.json
               exit 1
             fi
           done
           echo "latest.json contains darwin-aarch64, linux-x86_64, and windows-x86_64"
           notes="$(jq -r '.notes' latest.json)"
-          if [ -z "$notes" ] || [ "$notes" = "null" ] || [ "$notes" = "See the assets to download this version and install." ]; then
-            echo "::error::latest.json notes is empty or the tauri-action default; the in-app updater would show no real changelog for this version"
+          expected_notes="$(bun run scripts/release-body.ts "$RELEASE_VERSION")"
+          if [ "$notes" != "$expected_notes" ]; then
+            echo "::error::latest.json notes do not match the checked-in changelog for this version"
             cat latest.json
             exit 1
           fi
@@ -215,4 +312,4 @@ jobs:
             exit 1
           fi
           echo "the Arch Linux package is attached to the release"
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false -F prerelease=false
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false -F prerelease=false -f make_latest=legacy

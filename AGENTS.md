@@ -34,6 +34,13 @@ just clean        # remove dist, node_modules, and Rust target
 
 For day-to-day work use `just run` - it boots Vite and the native shell together with hot reload. Use `just dev` only when you want to iterate on pure-frontend changes in a browser without the native window.
 
+## Versions and releases
+
+- Every PR must increase the version relative to the current target branch, including documentation and CI changes. Keep `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the `aproprose` package in `src-tauri/Cargo.lock` synchronized. Use `bun run scripts/set-version.ts X.Y.Z` to update all four.
+- Add the new version as the first entry in `changelog.json`, with a valid `YYYY-MM-DD` date, a nonempty summary, and nonempty highlights. The version and changelog CI gate rejects unchanged versions, mismatches, and missing release notes.
+- PR branches must be up to date with their target and pass the version, frontend, and Rust checks before merging.
+- Each push to `main` that passes CI builds and publishes that exact commit as a signed desktop release. CI creates its version tag and uses the committed changelog for release notes. Pushing a tag alone does not start a release.
+
 ## Frontend Conventions
 
 ### Typography components

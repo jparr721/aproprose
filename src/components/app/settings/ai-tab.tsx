@@ -34,6 +34,7 @@ import {
   TypographyMutedSpan,
 } from "@/components/ui/typography";
 import { Field } from "@/components/app/settings/field";
+import { PreferenceAssistant } from "@/components/app/settings/preference-assistant";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   failureFromError,
@@ -347,15 +348,20 @@ function AiModelField({
   );
 }
 
-function PreferencesFields() {
+function PreferencesFields({ keyConfigured }: { keyConfigured: boolean }) {
   const styleGuide = useSettingsStore((s) => s.styleGuide);
   const editingRules = useSettingsStore((s) => s.editingRules);
   const setStyleGuide = useSettingsStore((s) => s.setStyleGuide);
   const setEditingRules = useSettingsStore((s) => s.setEditingRules);
   return (
     <>
-      <Field label="Writing voice" hint={`${styleGuide.length}/${PREFERENCE_MAX_CHARS}`}>
+      <Field
+        label="Writing voice"
+        hint={`${styleGuide.length}/${PREFERENCE_MAX_CHARS}`}
+        action={<PreferenceAssistant field="styleGuide" keyConfigured={keyConfigured} />}
+      >
         <Textarea
+          aria-label="Writing voice"
           value={styleGuide}
           onChange={(e) => setStyleGuide(e.currentTarget.value)}
           maxLength={PREFERENCE_MAX_CHARS}
@@ -367,8 +373,10 @@ function PreferencesFields() {
       <Field
         label="Writing and editing instructions"
         hint={`${editingRules.length}/${PREFERENCE_MAX_CHARS}`}
+        action={<PreferenceAssistant field="editingRules" keyConfigured={keyConfigured} />}
       >
         <Textarea
+          aria-label="Writing and editing instructions"
           value={editingRules}
           onChange={(event) => setEditingRules(event.currentTarget.value)}
           maxLength={PREFERENCE_MAX_CHARS}
@@ -465,7 +473,7 @@ export function AiTab() {
         onLoadingChange={setModelsLoading}
         provider={aiProvider}
       />
-      <PreferencesFields />
+      <PreferencesFields keyConfigured={keyConfigured} />
     </div>
   );
 }

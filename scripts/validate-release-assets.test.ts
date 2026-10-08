@@ -79,7 +79,11 @@ describe("artifact launch observation", () => {
 
   it("fails when the launched process exits before the settle interval", async () => {
     const child = spawn(process.execPath, ["-e", "process.exit(7)"], { stdio: "ignore" });
-    await expect(observeApplication(child, async () => true, 1_000, 400)).rejects.toThrow(/exited/);
+    const exited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+    await expect(observeApplication(child, async () => {
+      await exited;
+      return true;
+    }, 1_000, 400)).rejects.toThrow(/exited/);
   });
 
   it("fails a live process that never creates a visible window", async () => {

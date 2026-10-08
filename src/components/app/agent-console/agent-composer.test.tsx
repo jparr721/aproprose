@@ -26,6 +26,7 @@ import { draftContextRefKey } from "@/lib/ai/agent-context";
 import type {
   AgentMessageMetadata,
   AgentRun,
+  AgentSessionId,
   AgentTask,
   AgentUIMessage,
   DraftContextRef,
@@ -298,6 +299,150 @@ describe("AgentComposer mode controls", () => {
 });
 
 describe("AgentComposer draft behavior", () => {
+  it.each([
+    { kind: "project" },
+    { kind: "outline", chapterId: "chapter-1" },
+    { kind: "character", characterId: "character-1" },
+  ] satisfies AgentSessionId[])("shows activity before the first response in $kind sessions", (sessionId) => {
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate(project.root, emptyPersistedAgentState());
+    store.getState().beginPreflight();
+    render(<AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />);
+
+    expect(screen.getByRole("button", { name: "Working on your request" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+    const run = activeRun("edit");
+    act(() => {
+      store.getState().beginRun(run, userMessage(run, "Keep my follow-up"));
+      store.getState().markStreaming();
+    });
+
+    expect(screen.getByRole("button", { name: "Working on your request" })).toBeTruthy();
+    expect(store.getState().messages[0].parts).toEqual([{ type: "text", text: "Keep my follow-up" }]);
+  });
+
+  it("shows tool activity without reasoning and collapses it when the run finishes", () => {
+    const run = activeRun("edit");
+    const messageMetadata: AgentMessageMetadata = {
+      runId: run.id,
+      mode: run.mode,
+      task: run.task,
+      state: "streaming",
+      createdAt: run.startedAt,
+      failure: null,
+      retryOf: null,
+      usage: null,
+    };
+    const assistant: AgentUIMessage = {
+      id: "assistant-activity",
+      role: "assistant",
+      metadata: messageMetadata,
+      parts: [
+        { type: "reasoning", text: "Private model reasoning", state: "streaming" },
+        { type: "tool-read_pending_proposal", toolCallId: "read-proposal", state: "input-available", input: { proposalId: "proposal-1" } },
+      ],
+    };
+    useAgentConsoleStore.setState({ activeRun: run, runStatus: "streaming", messages: [userMessage(run, "Keep the voice"), assistant] });
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+
+    const activity = screen.getByRole("button", { name: "Working on your request" });
+    expect(activity.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Read proposal")).toBeTruthy();
+    expect(screen.getByText("Running")).toBeTruthy();
+    expect(screen.queryByText("Private model reasoning")).toBeNull();
+    expect(screen.queryByText(/Thinking/)).toBeNull();
+
+    const completed: AgentUIMessage = {
+      ...assistant,
+      metadata: { ...messageMetadata, state: "complete" },
+      parts: [{ type: "tool-read_pending_proposal", toolCallId: "read-proposal", state: "output-available", input: { proposalId: "proposal-1" }, output: { kind: "summary", summary: { label: "Read proposal", target: "Proposal", detail: "1 change", itemCount: 1 } } }],
+    };
+    act(() => useAgentConsoleStore.getState().finishRun(completed, null));
+
+    const finished = screen.getByRole("button", { name: "Activity complete" });
+    expect(finished.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Read proposal")).toBeNull();
+    fireEvent.click(finished);
+    expect(screen.getByText("Read proposal")).toBeTruthy();
+    expect(screen.getByText("Completed")).toBeTruthy();
+
+    act(() => useAgentConsoleStore.getState().beginPreflight());
+    expect(screen.getByRole("button", { name: "Working on your request" })).toBeTruthy();
+    expect(screen.queryByText("Read proposal")).toBeNull();
+  });
+
+  it.each(["stopped", "error"] satisfies AgentMessageMetadata["state"][])("settles unfinished tools after a run is %s", (state) => {
+    const run = activeRun("edit");
+    const assistant: AgentUIMessage = {
+      id: "assistant-interrupted",
+      role: "assistant",
+      metadata: {
+        runId: run.id,
+        mode: run.mode,
+        task: run.task,
+        state,
+        createdAt: run.startedAt,
+        failure: null,
+        retryOf: null,
+        usage: null,
+      },
+      parts: [{ type: "tool-read_pending_proposal", toolCallId: "read-proposal", state: "input-available", input: { proposalId: "proposal-1" } }],
+    };
+    useAgentConsoleStore.setState({ messages: [assistant] });
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+
+    const activity = screen.getByRole("button", { name: state === "stopped" ? "Activity stopped" : "Activity needs attention" });
+    expect(activity.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(activity);
+    expect(screen.getByText("Interrupted")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("keeps a failed tool visible as needing attention after the response completes", () => {
+    const run = activeRun("edit");
+    const user = userMessage(run, "Revise the proposal");
+    useAgentConsoleStore.setState({
+      messages: [{ ...user, id: "assistant-failed-tool", role: "assistant", parts: [{ type: "tool-read_pending_proposal", toolCallId: "failed-proposal", state: "output-error", input: { proposalId: "proposal-1" }, errorText: "Private tool diagnostics" }] }],
+    });
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Activity needs attention" }));
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.queryByText("Private tool diagnostics")).toBeNull();
+  });
+
+  it("tracks dynamic tool activity through running, completion, and failure", () => {
+    const run = activeRun("edit");
+    const user = userMessage(run, "Read the proposal");
+    const assistant: AgentUIMessage = {
+      ...user,
+      id: "assistant-dynamic",
+      role: "assistant",
+      parts: [{ type: "dynamic-tool", toolName: "read_pending_proposal", toolCallId: "dynamic-proposal", state: "input-available", input: { proposalId: "proposal-1" } }],
+    };
+    useAgentConsoleStore.setState({ activeRun: run, runStatus: "streaming", messages: [user, assistant] });
+    render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
+
+    expect(screen.getByText("Read proposal")).toBeTruthy();
+    expect(screen.getByText("Running")).toBeTruthy();
+
+    act(() => useAgentConsoleStore.getState().finishRun({
+      ...assistant,
+      parts: [{ type: "dynamic-tool", toolName: "read_pending_proposal", toolCallId: "dynamic-proposal", state: "output-available", input: { proposalId: "proposal-1" }, output: { kind: "summary", summary: { label: "Read proposal", target: "Proposal", detail: "1 change", itemCount: 1 } } }],
+    }, null));
+    fireEvent.click(screen.getByRole("button", { name: "Activity complete" }));
+    expect(screen.getByText("Completed")).toBeTruthy();
+
+    act(() => useAgentConsoleStore.getState().upsertAssistantMessage({
+      ...assistant,
+      parts: [{ type: "dynamic-tool", toolName: "read_pending_proposal", toolCallId: "dynamic-proposal", state: "output-error", input: { proposalId: "proposal-1" }, errorText: "Private diagnostics" }],
+    }));
+    expect(screen.getByRole("button", { name: "Activity needs attention" })).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+  });
+
   it("keeps the project composer editable while an outline session runs", () => {
     const outlineSession = { kind: "outline" as const, chapterId: "chapter-1" };
     const outlineStore = agentSessionStore(outlineSession);

@@ -2,6 +2,7 @@
 // before: pick an auto-sync window or stay manual. For a project with no GitHub
 // backup yet: name the repo + visibility, then create it and push.
 
+import { notifyAppError } from "@/lib/notifications";
 import { useState } from "react";
 import {
   Dialog,
@@ -68,7 +69,7 @@ export function BackupSetupDialog({
       await init(root); // re-detect: now a repo with a remote
       onOpenChange(false);
     } catch (e) {
-      toast.error(`Couldn't create the repo: ${String(e)}`);
+      notifyAppError("backup-setup", "Backup", root, e);
     } finally {
       setCreating(false);
     }

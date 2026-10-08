@@ -431,9 +431,7 @@ describe("proposal decisions", () => {
 
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
     expect(recordProposalEvent).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Proposal source changed", {
-      description: "Keep this proposal open and ask the agent to regenerate it.",
-    });
+    expect(toast.error).toHaveBeenCalledWith("Proposal source changed", expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }));
   });
 
   it("keeps an invalid outline proposal open with replacement guidance", () => {
@@ -453,9 +451,7 @@ describe("proposal decisions", () => {
     expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
     expect(recordProposalEvent).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith("Proposal couldn't be applied", {
-      description: "Keep this proposal open and ask the agent to replace it.",
-    });
+    expect(toast.error).toHaveBeenCalledWith("Proposal could not be applied", expect.objectContaining({ action: expect.objectContaining({ label: "View notification" }) }));
   });
 
   it.each([

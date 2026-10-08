@@ -36,7 +36,12 @@ const failureReasonSchema = z.enum([
 export interface AiErrorClassification {
   failure: AgentFailure;
   retryable: boolean;
+  type: AiErrorType;
 }
+
+export type AiErrorType = AgentFailureReason
+  | "content-policy" | "permission" | "context-limit" | "request-format"
+  | "rate-limit" | "timeout" | "provider-unavailable" | "conflict" | "invalid-response";
 
 export type AgentFailurePhase = "compaction" | null;
 
@@ -227,7 +232,7 @@ export function classifyAiError(
     const direct =
       failureFromDescriptor(details.failure, provider) ??
       failureFromDescriptor({ reason: details.agentFailureReason }, provider);
-    if (direct !== null) return { failure: direct, retryable: false };
+    if (direct !== null) return { failure: direct, retryable: false, type: direct.reason };
     const nested = details.lastError ?? details.cause;
     if (
       nested === undefined ||
@@ -255,6 +260,7 @@ export function classifyAiError(
     )
   ) {
     return {
+      type: "quota",
       failure: agentFailureFromReason("quota", provider),
       retryable: false,
     };
@@ -263,7 +269,7 @@ export function classifyAiError(
     /LoadAPIKey/.test(name) ||
     /api key is missing|api key must be set|no api key/.test(message)
   ) {
-    return { failure: keyMissingFailure(provider), retryable: false };
+    return { failure: keyMissingFailure(provider), retryable: false, type: "key-missing" };
   }
   if (
     status === 401 ||
@@ -271,12 +277,13 @@ export function classifyAiError(
       message,
     )
   ) {
-    return { failure: keyRejectedFailure(provider), retryable: false };
+    return { failure: keyRejectedFailure(provider), retryable: false, type: "key-rejected" };
   }
   if (
     /content_policy|content_filter|moderation|safety.*blocked/.test(message)
   ) {
     return {
+      type: "content-policy",
       failure: failure(
         "unknown",
         "Your AI provider blocked this request under its content policy. Revise the request and retry.",
@@ -288,6 +295,7 @@ export function classifyAiError(
   }
   if (status === 403) {
     return {
+      type: "permission",
       failure: failure(
         "unknown",
         "Your AI provider denied this request. Check your account permissions and model access.",
@@ -304,6 +312,7 @@ export function classifyAiError(
     )
   ) {
     return {
+      type: "context-limit",
       failure: failure(
         "unknown",
         "This request exceeds the model's context limit. Shorten the conversation or choose a model with a larger context window.",
@@ -319,13 +328,14 @@ export function classifyAiError(
       message,
     )
   ) {
-    return { failure: modelUnavailableFailure(provider), retryable: false };
+    return { failure: modelUnavailableFailure(provider), retryable: false, type: "model-unavailable" };
   }
   if (
     /UnsupportedFunctionality|UnsupportedModelVersion|NoSuchModel/.test(name) ||
     /does not support|unsupported (model|parameter|function)/.test(message)
   ) {
     return {
+      type: "model-unavailable",
       failure: failure(
         "model-unavailable",
         "The selected AI model does not support this operation. Choose another model.",
@@ -337,6 +347,7 @@ export function classifyAiError(
   }
   if (status === 400 || status === 422) {
     return {
+      type: "request-format",
       failure: failure(
         "unknown",
         "Your AI provider rejected the request format or parameters. Change the request or choose another model.",
@@ -348,6 +359,7 @@ export function classifyAiError(
   }
   if (status === 429) {
     return {
+      type: "rate-limit",
       failure: failure(
         "transport",
         "Your AI provider is rate limiting requests. Wait a moment and retry.",
@@ -364,6 +376,7 @@ export function classifyAiError(
     /timed? out|timeout/.test(message)
   ) {
     return {
+      type: "timeout",
       failure: failure(
         "transport",
         "The AI request timed out. Check your connection and retry.",
@@ -375,6 +388,7 @@ export function classifyAiError(
   }
   if (status !== undefined && status >= 500) {
     return {
+      type: "provider-unavailable",
       failure: failure(
         "transport",
         "Your AI provider is temporarily unavailable. Retry shortly.",
@@ -386,6 +400,7 @@ export function classifyAiError(
   }
   if (status === 409) {
     return {
+      type: "conflict",
       failure: failure(
         "transport",
         "Your AI provider could not process this request because of a conflict. Retry the request.",
@@ -407,6 +422,7 @@ export function classifyAiError(
       /JSONParse|TypeValidation/.test(responseCause.data.name ?? ""))
   ) {
     return {
+      type: "invalid-response",
       failure: failure(
         "transport",
         "Your AI provider returned an empty or invalid response. Retry the request.",
@@ -418,6 +434,7 @@ export function classifyAiError(
   }
   if (/InvalidTool|NoSuchTool|ToolCall/.test(name)) {
     return {
+      type: "tool",
       failure: agentFailureFromReason("tool", provider),
       retryable: false,
     };
@@ -429,17 +446,20 @@ export function classifyAiError(
     (/APICallError|DownloadError/.test(name) && status === undefined)
   ) {
     return {
+      type: "transport",
       failure: agentFailureFromReason("transport", provider),
       retryable,
     };
   }
   if (phase === "compaction") {
     return {
+      type: "compaction",
       failure: agentFailureFromReason("compaction", provider),
       retryable: false,
     };
   }
   return {
+      type: "unknown",
     failure: agentFailureFromReason("unknown", provider),
     retryable: false,
   };

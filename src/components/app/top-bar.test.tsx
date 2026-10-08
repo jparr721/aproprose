@@ -166,7 +166,7 @@ describe("TopBar save status", () => {
     expect(saveStatus("Saving").querySelector('[data-slot="spinner"]')).not.toBeNull();
   });
 
-  it("renders a failed save with its error in a tooltip", async () => {
+  it("renders a failed save with a notification hint", async () => {
     useProjectStore.setState({
       saving: false,
       chapterDirty: true,
@@ -182,7 +182,7 @@ describe("TopBar save status", () => {
     fireEvent.pointerMove(status);
     expect(
       (await screen.findByRole("tooltip", { hidden: true })).textContent,
-    ).toBe("Error: disk full");
+    ).toBe("Save failed. See Settings > Notifications.");
   });
 });
 

@@ -6,6 +6,7 @@
 // only dirty blocks are re-serialized on save, so unedited content is preserved
 // byte-for-byte.
 
+import { notifyAppError, reportNotification } from "@/lib/notifications";
 import { create } from "zustand";
 import { sumBy } from "es-toolkit";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -577,7 +578,8 @@ function applyOutlineChangesStrict(
   return next;
 }
 
-function notifyBuildFailed(errorCount: number): void {
+function notifyBuildFailed(errorCount: number, projectRoot: string): void {
+  reportNotification({ type: "build", source: "PDF build", projectRoot, provider: null });
   toast.error(
     errorCount > 0
       ? `Build failed - ${errorCount} error${errorCount === 1 ? "" : "s"}`
@@ -603,7 +605,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         meta,
       );
       void queueProjectMetaWrite(project.root, meta, provenance).catch((e) => {
-        toast.error("Couldn't save project metadata", { description: String(e) });
+        notifyAppError("metadata-save", "Project", project.root, e);
       });
     }
   };
@@ -616,9 +618,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     try {
       await queueProjectMetaWrite(root, meta, provenance);
     } catch (error) {
-      toast.error("Couldn't save project metadata", {
-        description: String(error),
-      });
+      notifyAppError("metadata-save", "Project", root, error);
       throw error;
     }
   };
@@ -647,7 +647,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
   const persistRecents = (recents: RecentProject[]) => {
     void writeAppData(RECENTS_KEY, recents).catch((e) => {
-      toast.error("Couldn't save recent projects", { description: String(e) });
+      notifyAppError("recents-save", "Project", get().project?.root ?? null, e);
     });
   };
 
@@ -782,6 +782,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         }
         await finishLoad(root, outcome.project);
       } catch (e) {
+        notifyAppError("project-open", "Project", root, e);
         set({ status: "empty", error: String(e) });
       }
     },
@@ -794,9 +795,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       useSyncStore.getState().teardown();
       if (root !== null) {
         void drainProjectMetaWrites(root).catch((error) => {
-          toast.error("Couldn't save project metadata", {
-            description: String(error),
-          });
+          notifyAppError("metadata-save", "Project", root, error);
         });
       }
       set({
@@ -849,6 +848,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           if (import.meta.env.DEV) console.warn("Couldn't persist last chapter:", e);
         });
       } catch (e) {
+        notifyAppError("chapter-open", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -867,7 +867,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const project = await createProjectCmd(parent, name, metadata);
         await finishLoad(project.root, project);
       } catch (e) {
-        toast.error("Couldn't create the project", { description: String(e) });
+        notifyAppError("project-create", "Project", parent, e);
         set({ status: "empty", error: String(e) });
       }
     },
@@ -886,7 +886,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const created = updated.chapters[updated.chapters.length - 1];
         if (created) await get().selectChapter(created.id);
       } catch (e) {
-        toast.error("Couldn't add the chapter", { description: String(e) });
+        notifyAppError("chapter-create", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -905,7 +905,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           .getState()
           .enqueueChapterTopology(project.root);
       } catch (e) {
-        toast.error("Couldn't rename the chapter", { description: String(e) });
+        notifyAppError("chapter-rename", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -924,7 +924,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           .getState()
           .enqueueChapterTopology(project.root);
       } catch (e) {
-        toast.error("Couldn't reorder chapters", { description: String(e) });
+        notifyAppError("chapter-reorder", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -969,7 +969,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             });
         }
       } catch (e) {
-        toast.error("Couldn't delete the chapter", { description: String(e) });
+        notifyAppError("chapter-delete", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -983,7 +983,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const updated = await writeSkeleton(project.root, model);
         set({ project: updated });
       } catch (e) {
-        toast.error("Couldn't save project settings", { description: String(e) });
+        notifyAppError("project-settings", "Project", project.root, e);
         set({ error: String(e) });
       }
     },
@@ -998,7 +998,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         await finishLoad(project.root, project);
       } catch (e) {
         // Restore the migration prompt so the user can retry without reopening.
-        toast.error("Migration failed", { description: String(e) });
+        notifyAppError("migration", "Project", nm.root, e);
         set({ status: "empty", error: String(e), needsMigration: nm });
       }
     },
@@ -1627,6 +1627,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         );
       } catch (e) {
         const message = String(e);
+        notifyAppError("chapter-save", "Editor", project.root, e);
         set({ saving: false, error: message, saveError: message });
       }
     },
@@ -1648,7 +1649,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             at: Date.now(),
           },
         });
-        if (!result.ok) notifyBuildFailed(result.errors.length);
+        if (!result.ok) notifyBuildFailed(result.errors.length, project.root);
       } catch (e) {
         set((s) => ({
           compile: {
@@ -1661,7 +1662,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           },
           error: String(e),
         }));
-        notifyBuildFailed(0);
+        notifyBuildFailed(0, project.root);
       }
     },
 

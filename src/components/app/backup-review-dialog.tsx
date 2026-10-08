@@ -2,6 +2,7 @@
 // screen dialog listing changed files; each row expands on demand to its diff,
 // rendered with @pierre/diffs, and commits+syncs via the engine.
 
+import { notifyAppError, openNotifications } from "@/lib/notifications";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { ChevronRight as IconChevronRight } from "lucide-react";
 import {
@@ -55,7 +56,8 @@ function FileRow({
       try {
         setDiff(await gitDiff(root, path));
       } catch (e) {
-        setError(String(e));
+        notifyAppError("backup-diff", "Backup", root, e);
+        setError("Backup changes could not be loaded");
       } finally {
         setLoading(false);
       }
@@ -89,7 +91,7 @@ function FileRow({
             </div>
           ) : error ? (
             <TypographyMuted className="px-1 py-2 text-[11px] text-destructive">
-              Couldn't load diff: {error}
+              <Button variant="ghost" size="sm" onClick={openNotifications}>View notifications</Button>
             </TypographyMuted>
           ) : diff && diff.trim() ? (
             <Suspense

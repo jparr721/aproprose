@@ -172,7 +172,7 @@ describe("CharacterCandidatesDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Inez" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("disk full");
+    expect((await screen.findByRole("alert")).textContent).toContain("See Settings > Notifications");
     expect(
       useProjectStore.getState().meta.knowledge.characterCandidates,
     ).toEqual([candidate]);

@@ -3,6 +3,7 @@
 // user-facing output goes through the global sonner Toaster. The decision logic
 // lives in `@/lib/updater`; this file only supplies the real side effects.
 
+import { notifyAppError } from "@/lib/notifications";
 import { useEffect, useRef } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -84,10 +85,8 @@ function buildDeps(): UpdateFlowDeps {
       toast.success("You are on the latest version", { id: UPDATE_TOAST_ID });
     },
     notifyError: (error: unknown) => {
-      toast.error("Update failed", {
-        id: UPDATE_TOAST_ID,
-        description: error instanceof Error ? error.message : String(error),
-      });
+      toast.dismiss(UPDATE_TOAST_ID);
+      notifyAppError("update", "Update", null, error);
     },
   };
 }

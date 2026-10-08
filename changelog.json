@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.17.8",
+    "date": "2026-10-07",
+    "summary": "App issues now have a dedicated Notifications page with clear repair steps.",
+    "highlights": [
+      "Review categorized app issues in Settings > Notifications, with grouped occurrences and resolved history.",
+      "Open a notification for repair steps and direct links to the relevant AI or backup settings.",
+      "Story refresh failures now leave a quiet status in the outline instead of exposing provider errors."
+    ]
+  },
+  {
     "version": "0.17.7",
     "date": "2026-10-07",
     "summary": "The AI dock reopens reliably after resizing.",

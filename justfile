@@ -79,6 +79,8 @@ _release VERSION MODE:
     bun x tsc --noEmit
     echo "==> frontend tests"
     bun x vitest run
+    echo "==> browser tests"
+    just test-browser
     echo "==> build frontend (required for cargo generate_context!)"
     bun run build
     echo "==> rust tests"
@@ -132,7 +134,7 @@ _release VERSION MODE:
     trap 'rm -f "$body_file"' EXIT
     {
         bun run scripts/release-body.ts "$ver"
-        printf '\n\nValidation: typecheck, frontend tests/build, Rust tests, Clippy, and version/changelog gate passed locally.\n'
+        printf '\n\nValidation: typecheck, frontend and browser tests, frontend build, Rust tests, Clippy, and version/changelog gate passed locally.\n'
         printf '\nMerge after required GitHub checks pass. The main push builds and publishes the signed desktop release.\n'
     } > "$body_file"
     gh pr create --base main --head "$release_branch" --title "Release v$ver" --body-file "$body_file"
@@ -146,6 +148,10 @@ typecheck:
 test:
     bun x vitest run
     cd src-tauri && cargo test
+
+# Run layout regressions in Chromium and WebKit (install with `bun x playwright install chromium webkit`).
+test-browser:
+    bun x playwright test
 
 # Format and lint the Rust side.
 fmt:

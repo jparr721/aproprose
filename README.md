@@ -130,8 +130,9 @@ summary, and nonempty highlights. Prepare these on your work branch with
 `bun run scripts/set-version.ts X.Y.Z`, then add the changelog entry.
 
 The `version + changelog` CI check compares against the current target branch.
-PR branches must be up to date and pass that check, `typecheck + tests`, and
-`cargo test + clippy` before merging. Each passing push to `main` builds a release
+PR branches must be up to date and pass that check, `typecheck + tests`,
+`Chromium + WebKit regression`, and `cargo test + clippy` before merging.
+Each passing push to `main` builds a release
 from that exact commit, creates its version tag, and uses its changelog as release
 notes. Pushing a tag alone does not start a release.
 

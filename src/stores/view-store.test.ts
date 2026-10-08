@@ -30,7 +30,19 @@ beforeEach(() => {
     pending: null,
     rightPanelWidth: 360,
   });
-  useProjectStore.setState({ chapterDirty: false });
+  useProjectStore.setState({ chapterDirty: false, remoteDivergence: null });
+});
+
+describe("guarded action ownership", () => {
+  it("cancels a pending action when its originating lifecycle is no longer current", async () => {
+    useProjectStore.setState({ chapterDirty: true });
+    const action = vi.fn();
+    const pending = useViewStore.getState().requestGuarded(action);
+    useProjectStore.getState().closeProject();
+    useViewStore.getState().confirmPending();
+    await expect(pending).resolves.toEqual({ status: "canceled" });
+    expect(action).not.toHaveBeenCalled();
+  });
 });
 
 describe("view-store AI console", () => {

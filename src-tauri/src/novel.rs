@@ -12,6 +12,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::project::{self, NovelMetadata, ProjectInfo};
+use crate::{durable_write, tex_text};
 
 // ── Baked template files ──────────────────────────────────────────────────────
 
@@ -61,45 +62,64 @@ pub struct OpenOutcome {
 
 /// Render `metadata.tex` — the 6 `\newcommand` macros. `editionyear` is always
 /// `\the\year{}` (current year at compile time).
-pub fn render_metadata(m: &NovelMetadata) -> String {
-    format!(
-        "\\newcommand{{\\authorname}}{{{author}}}\n\
-         \\newcommand{{\\booktitle}}{{{title}}}\n\
-         \\newcommand{{\\subtitle}}{{{subtitle}}}\n\
-         \\newcommand{{\\publisher}}{{{publisher}}}\n\
-         \\newcommand{{\\editionyear}}{{\\the\\year{{}}}}\n\
-         \\newcommand{{\\isbn}}{{{isbn}}}\n",
-        author = m.author,
-        title = m.title,
-        subtitle = m.subtitle,
-        publisher = m.publisher,
-        isbn = m.isbn,
-    )
+pub fn render_metadata(metadata: &NovelMetadata) -> String {
+    render_metadata_preserving(metadata, "")
 }
 
-/// Render `chapters.tex` — the ordered `\chapter{TITLE}` + `\input{FILE}` pairs.
-/// An empty list yields a single explanatory comment.
+fn render_metadata_preserving(metadata: &NovelMetadata, source: &str) -> String {
+    let mut output = String::from(tex_text::DEFINITION);
+    for (name, value) in [
+        ("authorname", &metadata.author),
+        ("booktitle", &metadata.title),
+        ("subtitle", &metadata.subtitle),
+        ("publisher", &metadata.publisher),
+        ("isbn", &metadata.isbn),
+    ] {
+        let existing = project::newcommand_value(source, name);
+        let rendered = match existing {
+            Some(raw) if metadata_value(&raw) == *value => raw,
+            _ => tex_text::encode(value),
+        };
+        output.push_str(&format!("\\newcommand{{\\{name}}}{{{rendered}}}\n"));
+    }
+    output.push_str("\\newcommand{\\editionyear}{\\the\\year{}}\n");
+    output
+}
+
 pub fn render_chapters(chapters: &[(String, String)]) -> String {
+    let rendered: Vec<(String, String)> = chapters
+        .iter()
+        .map(|(title, file)| (tex_text::encode(title), file.clone()))
+        .collect();
+    render_chapter_sources(&rendered)
+}
+
+fn render_chapter_sources(chapters: &[(String, String)]) -> String {
     if chapters.is_empty() {
-        return "% Chapters are managed by aproprose — add chapters from the app.\n".to_string();
+        return "% Chapters are managed by aproprose - add chapters from the app.\n".to_string();
     }
-    let mut out = String::new();
+    let mut output = String::from(tex_text::DEFINITION);
     for (title, file) in chapters {
-        out.push_str(&format!("\\chapter{{{title}}}\n\\input{{{file}}}\n"));
+        output.push_str(&format!("\\chapter{{{title}}}\n\\input{{{file}}}\n"));
     }
-    out
+    output
 }
 
 /// The largest leading-number found across `content/*.tex` filenames, or 0 if
 /// none. Tolerant of prelude's irregular legacy names (e.g. `chapter7-interlude.tex`
 /// → 7, `chapter13-interlude.tex` → 13, `chapter-001.tex` → 1). New chapters get
 /// `content/chapter-{max+1:03}.tex`, so there is never a collision.
-fn max_content_index(content_dir: &Path) -> usize {
-    let Ok(entries) = fs::read_dir(content_dir) else {
-        return 0;
-    };
+fn max_content_index(content_dir: &Path) -> Result<usize, String> {
+    let entries = fs::read_dir(content_dir).map_err(|error| {
+        format!(
+            "cannot read content directory {}: {error}",
+            content_dir.display()
+        )
+    })?;
     let mut max = 0usize;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("cannot read entry in {}: {error}", content_dir.display()))?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("tex") {
             continue;
@@ -117,7 +137,7 @@ fn max_content_index(content_dir: &Path) -> usize {
             max = max.max(n);
         }
     }
-    max
+    Ok(max)
 }
 
 /// Build a `NovelMetadata` from a source containing the `\newcommand` macros
@@ -128,10 +148,14 @@ fn max_content_index(content_dir: &Path) -> usize {
 /// that puts its title/author in bare `\title{…}` / `\author{…}` commands will
 /// migrate with empty metadata — the author can re-enter it in Project settings,
 /// and the original is preserved in `main.tex.bak`.
+fn metadata_value(raw: &str) -> String {
+    tex_text::decode(raw).unwrap_or_else(|| raw.trim().to_string())
+}
+
 fn read_metadata(source: &str) -> NovelMetadata {
     let get = |name: &str| {
         project::newcommand_value(source, name)
-            .map(|v| v.trim().to_string())
+            .map(|value| metadata_value(&value))
             .unwrap_or_default()
     };
     NovelMetadata {
@@ -143,6 +167,20 @@ fn read_metadata(source: &str) -> NovelMetadata {
     }
 }
 
+fn read_managed_metadata(source: &str) -> Result<NovelMetadata, String> {
+    for name in ["booktitle", "subtitle", "authorname", "publisher", "isbn"] {
+        let raw = project::newcommand_value(source, name).ok_or_else(|| {
+            format!("invalid required metadata.tex: missing or malformed \\{name} definition")
+        })?;
+        if raw.starts_with("\\aproproseplain{") && tex_text::decode(&raw).is_none() {
+            return Err(format!(
+                "invalid required metadata.tex: malformed plain-text value for \\{name}"
+            ));
+        }
+    }
+    Ok(read_metadata(source))
+}
+
 /// Open a managed project: chapters from `chapters.tex`, metadata from `metadata.tex`.
 pub fn open_managed(root: &Path) -> Result<ProjectInfo, String> {
     let root = root
@@ -151,11 +189,12 @@ pub fn open_managed(root: &Path) -> Result<ProjectInfo, String> {
 
     let main_rel = project::find_main_tex(&root)?;
 
-    let meta_src = fs::read_to_string(root.join("metadata.tex")).unwrap_or_default();
-    let metadata = read_metadata(&meta_src);
-
-    let chapters_src = fs::read_to_string(root.join("chapters.tex")).unwrap_or_default();
-    let chapters = project::parse_chapters(&chapters_src, &root);
+    read_required(&root, &main_rel)?;
+    let meta_src = read_required(&root, "metadata.tex")?;
+    let metadata = read_managed_metadata(&meta_src)?;
+    let chapters_src = read_required(&root, "chapters.tex")?;
+    project::validate_managed_chapters(&chapters_src)?;
+    let chapters = project::parse_chapters(&chapters_src, &root)?;
 
     let title = (!metadata.title.is_empty()).then(|| metadata.title.clone());
     let author = (!metadata.author.is_empty()).then(|| metadata.author.clone());
@@ -177,8 +216,17 @@ pub fn open_managed(root: &Path) -> Result<ProjectInfo, String> {
 }
 
 /// Whether a project directory uses the managed layout.
+fn read_required(root: &Path, file: &str) -> Result<String, String> {
+    fs::read_to_string(root.join(file)).map_err(|error| {
+        format!(
+            "cannot read required project file {}: {error}",
+            root.join(file).display()
+        )
+    })
+}
+
 fn is_managed(root: &Path) -> bool {
-    root.join("chapters.tex").is_file() && root.join("metadata.tex").is_file()
+    root.join("chapters.tex").exists() || root.join("metadata.tex").exists()
 }
 
 /// Open entry point used by the `open_project` command. Managed → ready project;
@@ -188,7 +236,12 @@ pub fn detect_and_open(root: &Path) -> Result<OpenOutcome, String> {
         .canonicalize()
         .map_err(|e| format!("cannot open project root {}: {e}", root.display()))?;
 
-    if is_managed(&root) {
+    let main_rel = project::find_main_tex(&root)?;
+    let source = read_required(&root, &main_rel)?;
+    if is_managed(&root)
+        || source.contains("\\input{metadata}")
+        || source.contains("\\input{chapters}")
+    {
         let project = open_managed(&root)?;
         return Ok(OpenOutcome {
             status: "managed".into(),
@@ -199,9 +252,7 @@ pub fn detect_and_open(root: &Path) -> Result<OpenOutcome, String> {
     }
 
     // Unmanaged: there must be a legacy main file to migrate, or it isn't a project.
-    let main_rel = project::find_main_tex(&root)?;
-    let source = fs::read_to_string(root.join(&main_rel)).unwrap_or_default();
-    let detected = project::parse_chapters(&source, &root).len();
+    let detected = project::parse_chapters(&source, &root)?.len();
 
     Ok(OpenOutcome {
         status: "needsMigration".into(),
@@ -214,44 +265,103 @@ pub fn detect_and_open(root: &Path) -> Result<OpenOutcome, String> {
 /// Regenerate `metadata.tex` + `chapters.tex` from `model`. For each chapter with
 /// `file: None`, allocate a stable name and create an empty stub (NEVER clobbering
 /// an existing body). Returns the resolved (title, file) pairs.
-fn regenerate(root: &Path, model: &SkeletonModel) -> Result<(), String> {
+fn regenerate(root: &Path, model: &SkeletonModel) -> Result<Vec<String>, String> {
+    let old_metadata = read_required(root, "metadata.tex")?;
+    read_managed_metadata(&old_metadata)?;
+    let old_chapters = read_required(root, "chapters.tex")?;
+    project::validate_managed_chapters(&old_chapters)?;
+    let old_pairs = project::chapter_pairs(&old_chapters);
     let content_dir = root.join("content");
     fs::create_dir_all(&content_dir)
-        .map_err(|e| format!("cannot create {}: {e}", content_dir.display()))?;
-
-    let mut next = max_content_index(&content_dir);
-    let mut resolved: Vec<(String, String)> = Vec::with_capacity(model.chapters.len());
-
-    for ch in &model.chapters {
-        let file = match &ch.file {
-            Some(f) => f.clone(),
+        .map_err(|error| format!("cannot create {}: {error}", content_dir.display()))?;
+    let mut next = max_content_index(&content_dir)?;
+    let mut resolved = Vec::with_capacity(model.chapters.len());
+    let mut staged_new = Vec::new();
+    for chapter in &model.chapters {
+        let file = match &chapter.file {
+            Some(file) => {
+                let root_name = root
+                    .to_str()
+                    .ok_or_else(|| "project root is not UTF-8".to_string())?;
+                let path = crate::resolve_within_root(root_name, file)?;
+                fs::read_to_string(&path).map_err(|error| {
+                    format!("cannot read required chapter {}: {error}", path.display())
+                })?;
+                file.clone()
+            }
             None => {
                 next += 1;
-                let rel = format!("content/chapter-{next:03}.tex");
-                let abs = root.join(&rel);
-                // create_new so we never overwrite an existing chapter body.
-                match fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&abs)
-                {
-                    Ok(_) => {}
-                    Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                        return Err(format!("chapter file {rel} already exists"));
-                    }
-                    Err(e) => return Err(format!("cannot create {}: {e}", abs.display())),
+                let file = format!("content/chapter-{next:03}.tex");
+                let path = root.join(&file);
+                if path.exists() {
+                    return Err(format!("chapter file {file} already exists"));
                 }
-                rel
+                staged_new.push(durable_write::stage(&path, b"")?);
+                file
             }
         };
-        resolved.push((ch.title.clone(), file));
+        let title = old_pairs
+            .iter()
+            .find(|(_, old_file)| old_file == &file)
+            .filter(|(raw, _)| project::chapter_display_title(raw) == chapter.title)
+            .map(|(raw, _)| raw.clone())
+            .unwrap_or_else(|| tex_text::encode(&chapter.title));
+        resolved.push((title, file));
     }
+    let metadata = render_metadata_preserving(&model.metadata, &old_metadata);
+    let chapters = render_chapter_sources(&resolved);
+    let staged_metadata = durable_write::stage(&root.join("metadata.tex"), metadata.as_bytes())?;
+    let staged_chapters = durable_write::stage(&root.join("chapters.tex"), chapters.as_bytes())?;
+    let mut committed = Vec::new();
+    for staged in staged_new {
+        let path = staged
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .display()
+            .to_string();
+        if let Err(error) = staged.commit_new() {
+            if error.replaced() {
+                committed.push(path.clone());
+            }
+            return Err(skeleton_failure(&committed, &path, &error.to_string()));
+        }
+        committed.push(path);
+    }
+    commit_replacements_with(
+        root,
+        vec![staged_metadata, staged_chapters],
+        committed,
+        durable_write::StagedWrite::commit,
+    )
+}
 
-    fs::write(root.join("metadata.tex"), render_metadata(&model.metadata))
-        .map_err(|e| format!("cannot write metadata.tex: {e}"))?;
-    fs::write(root.join("chapters.tex"), render_chapters(&resolved))
-        .map_err(|e| format!("cannot write chapters.tex: {e}"))?;
-    Ok(())
+fn commit_replacements_with(
+    root: &Path,
+    writes: Vec<durable_write::StagedWrite>,
+    mut committed: Vec<String>,
+    mut replace: impl FnMut(durable_write::StagedWrite) -> Result<(), durable_write::WriteFailure>,
+) -> Result<Vec<String>, String> {
+    for write in writes {
+        let path = write
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .display()
+            .to_string();
+        if let Err(error) = replace(write) {
+            if error.replaced() {
+                committed.push(path.clone());
+            }
+            return Err(skeleton_failure(&committed, &path, &error.to_string()));
+        }
+        committed.push(path);
+    }
+    Ok(committed)
+}
+
+fn skeleton_failure(committed: &[String], failed_path: &str, error: &str) -> String {
+    format!("skeleton operation incomplete: committed={committed:?}; failedPath={failed_path:?}; {error}")
 }
 
 /// Regenerate the skeleton from `model` and return the re-derived project.
@@ -274,12 +384,21 @@ pub fn delete_chapter(
     let root = root
         .canonicalize()
         .map_err(|e| format!("invalid project root {}: {e}", root.display()))?;
-    regenerate(&root, model)?;
-    let abs = root.join(file);
+    let committed = regenerate(&root, model)?;
+    let abs = crate::resolve_within_root(&root.display().to_string(), file)?;
     match fs::remove_file(&abs) {
         Ok(()) => {}
         Err(e) if e.kind() == ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("cannot delete {}: {e}", abs.display())),
+        Err(e) => {
+            return Err(skeleton_failure(
+                &committed,
+                file,
+                &format!(
+                    "cannot delete {}: {e}; original body preserved",
+                    abs.display()
+                ),
+            ))
+        }
     }
     open_managed(&root)
 }
@@ -322,7 +441,7 @@ fn scaffold_missing(root: &Path) -> Result<(), String> {
     for (rel, body) in files {
         let abs = root.join(rel);
         if !abs.exists() {
-            fs::write(&abs, body).map_err(|e| format!("cannot write {}: {e}", abs.display()))?;
+            durable_write::stage(&abs, body.as_bytes())?.commit_new()?;
         }
     }
     Ok(())
@@ -343,10 +462,13 @@ pub fn create_project(
     }
     fs::create_dir(&root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
 
-    fs::write(root.join("main.tex"), MAIN_TEX).map_err(|e| e.to_string())?;
+    durable_write::write(&root.join("main.tex"), MAIN_TEX.as_bytes())?;
     scaffold_missing(&root)?;
-    fs::write(root.join("metadata.tex"), render_metadata(metadata)).map_err(|e| e.to_string())?;
-    fs::write(root.join("chapters.tex"), render_chapters(&[])).map_err(|e| e.to_string())?;
+    durable_write::write(
+        &root.join("metadata.tex"),
+        render_metadata(metadata).as_bytes(),
+    )?;
+    durable_write::write(&root.join("chapters.tex"), render_chapters(&[]).as_bytes())?;
 
     open_managed(&root)
 }
@@ -367,20 +489,30 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
         .map_err(|e| format!("cannot read {}: {e}", main_abs.display()))?;
 
     let metadata = read_metadata(&source);
-    let chapters: Vec<(String, String)> = project::parse_chapters(&source, &root)
-        .into_iter()
-        .map(|c| (c.title, c.file))
-        .collect();
-
-    // Back up the original before we overwrite it.
-    fs::copy(&main_abs, root.join("main.tex.bak"))
-        .map_err(|e| format!("cannot back up main.tex: {e}"))?;
-
-    fs::write(root.join("metadata.tex"), render_metadata(&metadata)).map_err(|e| e.to_string())?;
-    fs::write(root.join("chapters.tex"), render_chapters(&chapters)).map_err(|e| e.to_string())?;
+    project::parse_chapters(&source, &root)?;
+    let chapters = project::chapter_pairs(&source);
+    let backup = root.join("main.tex.bak");
+    if backup.exists() {
+        return Err(format!(
+            "cannot migrate: backup {} already exists",
+            backup.display()
+        ));
+    }
+    durable_write::stage(&backup, source.as_bytes())?.commit_new()?;
     scaffold_missing(&root)?;
-    fs::write(&main_abs, MAIN_TEX)
-        .map_err(|e| format!("cannot write {}: {e}", main_abs.display()))?;
+    let metadata_text = render_metadata_preserving(&metadata, &source);
+    let chapter_text = render_chapter_sources(&chapters);
+    let staged = vec![
+        durable_write::stage(&root.join("metadata.tex"), metadata_text.as_bytes())?,
+        durable_write::stage(&root.join("chapters.tex"), chapter_text.as_bytes())?,
+        durable_write::stage(&main_abs, MAIN_TEX.as_bytes())?,
+    ];
+    commit_replacements_with(
+        &root,
+        staged,
+        vec!["main.tex.bak".to_string()],
+        durable_write::StagedWrite::commit,
+    )?;
 
     open_managed(&root)
 }
@@ -388,6 +520,196 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires an installed LaTeX toolchain"]
+    async fn real_latex_compiles_reserved_metadata_and_chapter_titles() {
+        let directory = tempfile::tempdir().unwrap();
+        let value = "A {brace} & 50% #1 $2 _x ^y ~z \\emph{literal} \\\ntwo lines";
+        let metadata = NovelMetadata {
+            title: value.into(),
+            subtitle: value.into(),
+            author: value.into(),
+            publisher: value.into(),
+            isbn: value.into(),
+        };
+        let created = create_project(directory.path(), "Metadata smoke", &metadata).unwrap();
+        let root = Path::new(&created.root);
+        let model = SkeletonModel {
+            metadata,
+            chapters: vec![SkeletonChapter {
+                title: value.into(),
+                file: None,
+            }],
+        };
+        let opened = write_skeleton(root, &model).unwrap();
+        assert_eq!(opened.metadata.title, value);
+        assert_eq!(opened.chapters[0].title, value);
+        fs::write(root.join(&opened.chapters[0].file), "A complete chapter.\n").unwrap();
+        let result = crate::compile::compile_project(root, &opened.main_file).await;
+        assert!(result.ok, "{}", result.log);
+        let pdf = fs::read(crate::compile::pdf_output_path(root, &opened.main_file)).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn plain_metadata_and_titles_round_trip_reserved_characters_repeatedly() {
+        let dir = managed_fixture();
+        let value = "A {brace} & 50% #1 $2 _x ^y ~z \\emph{literal} \\\ntwo lines";
+        let metadata = NovelMetadata {
+            title: value.into(),
+            subtitle: value.into(),
+            author: value.into(),
+            publisher: value.into(),
+            isbn: value.into(),
+        };
+        for _ in 0..3 {
+            let model = SkeletonModel {
+                metadata: metadata.clone(),
+                chapters: vec![SkeletonChapter {
+                    title: value.into(),
+                    file: Some("content/chapter-001.tex".into()),
+                }],
+            };
+            let opened = write_skeleton(dir.path(), &model).unwrap();
+            assert_eq!(opened.metadata.title, value);
+            assert_eq!(opened.metadata.subtitle, value);
+            assert_eq!(opened.metadata.author, value);
+            assert_eq!(opened.metadata.publisher, value);
+            assert_eq!(opened.metadata.isbn, value);
+            assert_eq!(opened.chapters[0].title, value);
+        }
+    }
+
+    #[test]
+    fn required_managed_files_and_chapter_bodies_do_not_become_empty() {
+        for file in ["metadata.tex", "chapters.tex", "content/chapter-001.tex"] {
+            let dir = managed_fixture();
+            fs::write(dir.path().join(file), [0xff]).unwrap();
+            let error = open_managed(dir.path()).unwrap_err();
+            assert!(error.contains(file), "{error}");
+            assert_eq!(fs::read(dir.path().join(file)).unwrap(), [0xff]);
+        }
+        let dir = managed_fixture();
+        fs::remove_file(dir.path().join("metadata.tex")).unwrap();
+        assert!(detect_and_open(dir.path()).is_err());
+    }
+
+    #[test]
+    fn malformed_managed_chapters_are_reported_without_replacing_source() {
+        for source in [
+            "broken data",
+            "\\chapter{Unclosed\n\\input{content/chapter-001.tex}\n",
+            "\\chapter{Missing input}\n",
+        ] {
+            let dir = managed_fixture();
+            fs::write(dir.path().join("chapters.tex"), source).unwrap();
+            assert!(open_managed(dir.path())
+                .unwrap_err()
+                .contains("chapters.tex"));
+            assert_eq!(
+                fs::read_to_string(dir.path().join("chapters.tex")).unwrap(),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn staging_failure_preserves_all_existing_skeleton_bytes() {
+        let dir = managed_fixture();
+        let old_metadata = fs::read(dir.path().join("metadata.tex")).unwrap();
+        fs::remove_file(dir.path().join("chapters.tex")).unwrap();
+        fs::create_dir(dir.path().join("chapters.tex")).unwrap();
+        let model = SkeletonModel {
+            metadata: meta(),
+            chapters: vec![],
+        };
+        let error = write_skeleton(dir.path(), &model).unwrap_err();
+        assert!(error.contains("chapters.tex"), "{error}");
+        assert_eq!(
+            fs::read(dir.path().join("metadata.tex")).unwrap(),
+            old_metadata
+        );
+    }
+
+    #[test]
+    fn malformed_plain_text_markers_fail_instead_of_becoming_legacy_text() {
+        let dir = managed_fixture();
+        let source = render_metadata(&meta()).replace("Prelude To Darkness", r"broken\unknown{}");
+        fs::write(dir.path().join("metadata.tex"), &source).unwrap();
+        assert!(open_managed(dir.path())
+            .unwrap_err()
+            .contains("metadata.tex"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("metadata.tex")).unwrap(),
+            source
+        );
+    }
+
+    #[test]
+    fn skeleton_partial_commit_identifies_changed_paths_and_preserves_failed_original() {
+        let dir = managed_fixture();
+        let old_chapters = fs::read(dir.path().join("chapters.tex")).unwrap();
+        let writes = vec![
+            durable_write::stage(&dir.path().join("metadata.tex"), b"new metadata").unwrap(),
+            durable_write::stage(&dir.path().join("chapters.tex"), b"new chapters").unwrap(),
+        ];
+        let error = commit_replacements_with(dir.path(), writes, vec![], |write| {
+            if write.path().ends_with("chapters.tex") {
+                return Err(durable_write::WriteFailure::BeforeReplacement {
+                    path: write.path().to_path_buf(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "injected replacement failure",
+                    ),
+                });
+            }
+            write.commit()
+        })
+        .unwrap_err();
+        assert!(error.contains("committed=[\"metadata.tex\"]"), "{error}");
+        assert!(error.contains("failedPath=\"chapters.tex\""), "{error}");
+        assert_eq!(
+            fs::read(dir.path().join("metadata.tex")).unwrap(),
+            b"new metadata"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("chapters.tex")).unwrap(),
+            old_chapters
+        );
+    }
+
+    #[test]
+    fn migration_and_unchanged_rewrites_preserve_legacy_tex_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("content")).unwrap();
+        fs::write(dir.path().join("content/old.tex"), "body").unwrap();
+        let source = "\\documentclass{book}\n\\newcommand{\\booktitle}{A \\emph{legacy} \\& title}\n\\begin{document}\n\\mainmatter\n\\chapter{\\emph{Legacy} \\{chapter\\}}\n\\input{content/old.tex}\n\\end{document}\n";
+        fs::write(dir.path().join("main.tex"), source).unwrap();
+        let opened = migrate_to_managed(dir.path()).unwrap();
+        let model = SkeletonModel {
+            metadata: opened.metadata,
+            chapters: vec![SkeletonChapter {
+                title: opened.chapters[0].title.clone(),
+                file: Some("content/old.tex".into()),
+            }],
+        };
+        write_skeleton(dir.path(), &model).unwrap();
+        let metadata = fs::read_to_string(dir.path().join("metadata.tex")).unwrap();
+        let chapters = fs::read_to_string(dir.path().join("chapters.tex")).unwrap();
+        assert!(
+            metadata.contains(r"{A \emph{legacy} \& title}"),
+            "{metadata}"
+        );
+        assert!(
+            chapters.contains(r"\chapter{\emph{Legacy} \{chapter\}}"),
+            "{chapters}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("main.tex.bak")).unwrap(),
+            source
+        );
+    }
 
     fn meta() -> NovelMetadata {
         NovelMetadata {
@@ -402,11 +724,11 @@ mod tests {
     #[test]
     fn metadata_renders_all_six_macros() {
         let out = render_metadata(&meta());
-        assert!(out.contains("\\newcommand{\\booktitle}{Prelude To Darkness}"));
-        assert!(out.contains("\\newcommand{\\authorname}{Jarred Parr}"));
-        assert!(out.contains("\\newcommand{\\subtitle}{}"));
-        assert!(out.contains("\\newcommand{\\publisher}{Publisher}"));
-        assert!(out.contains("\\newcommand{\\isbn}{978-3-16-148410-0}"));
+        assert!(out.contains("\\newcommand{\\booktitle}{\\aproproseplain{Prelude To Darkness}}"));
+        assert!(out.contains("\\newcommand{\\authorname}{\\aproproseplain{Jarred Parr}}"));
+        assert!(out.contains("\\newcommand{\\subtitle}{\\aproproseplain{}}"));
+        assert!(out.contains("\\newcommand{\\publisher}{\\aproproseplain{Publisher}}"));
+        assert!(out.contains("\\newcommand{\\isbn}{\\aproproseplain{978-3-16-148410-0}}"));
         assert!(out.contains("\\newcommand{\\editionyear}{\\the\\year{}}"));
     }
 
@@ -424,8 +746,7 @@ mod tests {
         ]);
         assert_eq!(
             out,
-            "\\chapter{Terry}\n\\input{content/chapter-001.tex}\n\
-             \\chapter{Party}\n\\input{content/chapter-002.tex}\n"
+            format!("{}\\chapter{{\\aproproseplain{{Terry}}}}\n\\input{{content/chapter-001.tex}}\n\\chapter{{\\aproproseplain{{Party}}}}\n\\input{{content/chapter-002.tex}}\n", tex_text::DEFINITION)
         );
     }
 
@@ -434,7 +755,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let content = dir.path().join("content");
         fs::create_dir_all(&content).unwrap();
-        assert_eq!(max_content_index(&content), 0);
+        assert_eq!(max_content_index(&content).unwrap(), 0);
     }
 
     #[test]
@@ -450,7 +771,7 @@ mod tests {
         ] {
             fs::write(content.join(name), "").unwrap();
         }
-        assert_eq!(max_content_index(&content), 13);
+        assert_eq!(max_content_index(&content).unwrap(), 13);
     }
 
     /// Write a minimal managed project (main.tex/metadata.tex/chapters.tex/content/)
@@ -531,8 +852,8 @@ mod tests {
         );
         // chapters.tex lists both, in order.
         let ch = fs::read_to_string(root.join("chapters.tex")).unwrap();
-        assert!(ch.contains("\\chapter{Terry}\n\\input{content/chapter-001.tex}"));
-        assert!(ch.contains("\\chapter{Party}\n\\input{content/chapter-002.tex}"));
+        assert!(ch.contains("\\chapter{\\aproproseplain{Terry}}\n\\input{content/chapter-001.tex}"));
+        assert!(ch.contains("\\chapter{\\aproproseplain{Party}}\n\\input{content/chapter-002.tex}"));
     }
 
     #[test]

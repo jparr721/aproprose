@@ -4,7 +4,8 @@ import { saveBeforeExit, type SaveBeforeExitDeps } from "@/lib/exit-guard";
 function makeDeps(overrides: Partial<SaveBeforeExitDeps>): SaveBeforeExitDeps {
   return {
     hasUnsavedChanges: vi.fn(() => false),
-    saveChanges: vi.fn(async () => {}),
+    isCurrent: vi.fn(() => true),
+    saveChanges: vi.fn(async () => ({ status: "clean" as const })),
     ...overrides,
   };
 }
@@ -22,10 +23,31 @@ describe("saveBeforeExit", () => {
       hasUnsavedChanges: vi.fn(() => dirty),
       saveChanges: vi.fn(async () => {
         dirty = false;
+        return { status: "saved" as const };
       }),
     });
     await expect(saveBeforeExit(deps)).resolves.toBe(true);
     expect(deps.saveChanges).toHaveBeenCalledOnce();
+  });
+
+  it("blocks exit when save failed even if another lifecycle is clean", async () => {
+    const deps = makeDeps({ hasUnsavedChanges: () => true, saveChanges: async () => ({ status: "failed", message: "disk full" }) });
+    await expect(saveBeforeExit(deps)).resolves.toBe(false);
+  });
+
+  it("blocks exit after ownership changes while saving", async () => {
+    let current = true;
+    let dirty = true;
+    const deps = makeDeps({
+      hasUnsavedChanges: () => dirty,
+      isCurrent: () => current,
+      saveChanges: async () => {
+        current = false;
+        dirty = false;
+        return { status: "saved" };
+      },
+    });
+    await expect(saveBeforeExit(deps)).resolves.toBe(false);
   });
 
   it("blocks exit when saving does not clear unsaved changes", async () => {

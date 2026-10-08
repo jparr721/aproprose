@@ -7,6 +7,7 @@
 //! JSON the webview receives matches the `ProjectInfo` / `ChapterRef` interfaces
 //! byte-for-byte.
 
+use crate::{durable_write, tex_text};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -181,7 +182,16 @@ fn match_brace_end(source: &str, open: usize) -> Option<usize> {
         return None;
     }
     let mut depth = 0i32;
+    let mut escaped = false;
     for (i, &b) in bytes.iter().enumerate().skip(open) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' {
+            escaped = true;
+            continue;
+        }
         match b {
             b'{' => depth += 1,
             b'}' => {
@@ -198,21 +208,15 @@ fn match_brace_end(source: &str, open: usize) -> Option<usize> {
 
 /// Scan the main file for `\chapter{TITLE}` commands, each optionally followed
 /// (next non-empty, non-comment line) by `\input{FILE}`.
-pub(crate) fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
-    // Restrict to \mainmatter so inline frontmatter \chapter{} entries (e.g.
-    // \chapter{Preface} before \mainmatter in a legacy main.tex) are excluded.
-    // Falls back to \begin{document}, then the whole source (for chapters.tex
-    // which has neither marker).
+pub(crate) fn chapter_pairs(source: &str) -> Vec<(String, String)> {
     let body = source
         .find("\\mainmatter")
         .or_else(|| source.find("\\begin{document}"))
-        .map(|i| &source[i..])
+        .map(|index| &source[index..])
         .unwrap_or(source);
-
     let lines: Vec<&str> = body.lines().collect();
-    let mut chapters: Vec<ChapterRef> = Vec::new();
-
-    for (idx, line) in lines.iter().enumerate() {
+    let mut pairs = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.starts_with('%') {
             continue;
@@ -220,49 +224,90 @@ pub(crate) fn parse_chapters(source: &str, root: &Path) -> Vec<ChapterRef> {
         let Some(title) = inline_command_arg(trimmed, "chapter") else {
             continue;
         };
-
-        // Look ahead for the next meaningful line; if it is \input{…}, that's
-        // the chapter's body file.
-        let mut file: Option<String> = None;
-        for next in lines.iter().skip(idx + 1) {
-            let nt = next.trim();
-            if nt.is_empty() || nt.starts_with('%') {
-                continue;
-            }
-            if let Some(arg) = inline_command_arg(nt, "input") {
-                file = Some(arg);
-            }
-            break;
-        }
-
-        let chapter_number = chapters.len() + 1;
-        let label = to_roman(chapter_number);
-
-        // Normalize the \input path: append .tex if it lacks an extension.
-        let file = file.unwrap_or_default();
+        let file = lines
+            .iter()
+            .skip(index + 1)
+            .map(|line| line.trim())
+            .find(|line| !line.is_empty() && !line.starts_with('%'))
+            .and_then(|line| inline_command_arg(line, "input"))
+            .unwrap_or_default();
         let file = if file.is_empty() || Path::new(&file).extension().is_some() {
             file
         } else {
             format!("{file}.tex")
         };
-
-        let id = slug(&file, chapter_number);
-        let word_count = if file.is_empty() {
-            0
-        } else {
-            count_words(&root.join(&file))
-        };
-
-        chapters.push(ChapterRef {
-            id,
-            label,
-            title: strip_inline(&title),
-            file,
-            word_count,
-        });
+        pairs.push((title, file));
     }
+    pairs
+}
 
-    chapters
+pub(crate) fn chapter_display_title(source: &str) -> String {
+    tex_text::decode(source).unwrap_or_else(|| strip_inline(source))
+}
+
+pub(crate) fn validate_managed_chapters(source: &str) -> Result<(), String> {
+    let lines: Vec<&str> = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('%'))
+        .collect();
+    let mut found = false;
+    for (index, line) in lines.iter().enumerate() {
+        if line.starts_with("\\chapter{") || line.starts_with("\\chapter ") {
+            found = true;
+            let title = inline_command_arg(line, "chapter").ok_or_else(|| {
+                format!(
+                    "invalid chapters.tex: malformed chapter command on line {}",
+                    index + 1
+                )
+            })?;
+            if title.starts_with("\\aproproseplain{") && tex_text::decode(&title).is_none() {
+                return Err(format!(
+                    "invalid chapters.tex: malformed plain-text title on line {}",
+                    index + 1
+                ));
+            }
+            let input = lines
+                .get(index + 1)
+                .and_then(|line| inline_command_arg(line, "input"));
+            if input.as_ref().is_none_or(|file| file.is_empty()) {
+                return Err(format!(
+                    "invalid chapters.tex: chapter on line {} has no body file",
+                    index + 1
+                ));
+            }
+        }
+    }
+    if !found
+        && lines
+            .iter()
+            .any(|line| !line.starts_with("\\providecommand"))
+    {
+        return Err("invalid chapters.tex: no recognizable chapter entries".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_chapters(source: &str, root: &Path) -> Result<Vec<ChapterRef>, String> {
+    chapter_pairs(source)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (title, file))| {
+            let number = index + 1;
+            let word_count = if file.is_empty() {
+                0
+            } else {
+                count_words(&root.join(&file))?
+            };
+            Ok(ChapterRef {
+                id: slug(&file, number),
+                label: to_roman(number),
+                title: chapter_display_title(&title),
+                file,
+                word_count,
+            })
+        })
+        .collect()
 }
 
 /// Extract `\<cmd>{ARG}` from a single line, returning the brace contents.
@@ -345,12 +390,11 @@ fn slug(file: &str, fallback_n: usize) -> String {
 
 /// Best-effort word count of a chapter body: strip LaTeX comments and commands,
 /// then count whitespace-separated tokens.
-fn count_words(path: &Path) -> usize {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return 0;
-    };
+fn count_words(path: &Path) -> Result<usize, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("cannot read required chapter {}: {error}", path.display()))?;
     let cleaned = strip_latex(&text);
-    cleaned.split_whitespace().count()
+    Ok(cleaned.split_whitespace().count())
 }
 
 /// Strip LaTeX comments, commands, and braces from a block of body text so it
@@ -442,7 +486,7 @@ pub fn write_meta(root: &Path, value: &str) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    std::fs::write(&path, value).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    durable_write::write(&path, value.as_bytes())
 }
 
 #[cfg(test)]

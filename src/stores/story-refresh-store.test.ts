@@ -552,7 +552,7 @@ describe("story refresh runtime queue", () => {
     store.getState().enqueueSavedChapter("/book", "ch1", "fp-1");
     useProjectStore.getState().setPremise("Author premise.");
     first.resolve(firstResult);
-    await flushPromises();
+    await vi.waitFor(() => expect(store.getState().status).toBe("idle"));
 
     expect(build).toHaveBeenCalledTimes(2);
     expect(

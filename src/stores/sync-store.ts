@@ -11,6 +11,8 @@ import type { ChangedFile, RepoStatus, SyncPrefs, SyncStatus } from "@/lib/types
 import { gitRepoStatus, syncProject, readAppData, writeAppData } from "@/lib/tauri";
 import { pathHash } from "@/lib/path-hash";
 import { backupMessage, deriveIdleStatus, outcomeMessage, outcomeToStatus } from "@/lib/backup/messages";
+import { noteProjectRemoteChanges, queueProjectOperation, type ProjectSyncSnapshot } from "@/lib/project-operations";
+import { useProjectStore } from "@/stores/project-store";
 
 const DEFAULT_PREFS: SyncPrefs = { autoSync: false, intervalMinutes: 10 };
 const prefsKey = (root: string) => `sync-${pathHash(root)}`;
@@ -21,6 +23,7 @@ const prefsKey = (root: string) => `sync-${pathHash(root)}`;
 export const STATUS_POLL_MS = 5_000;
 
 interface SyncState {
+  lifecycleGeneration: number;
   root: string | null;
   /** False after init() when this git repo has no stored prefs — drives the first-run setup dialog. */
   prefsKnown: boolean;
@@ -52,7 +55,7 @@ interface SyncState {
 export const useSyncStore = create<SyncState>((set, get) => {
   // Guards the read-only status operation against overlap from any caller
   // (the poll tick, init, or the review dialog) — one mechanism, all entry points.
-  let statusReadInFlight = false;
+  let statusReadOwner: object | null = null;
 
   // The RepoStatus we last wrote. A poll whose status is deeply equal is a no-op,
   // so we skip the write entirely — keeping every array ref stable so the 5s tick
@@ -88,11 +91,14 @@ export const useSyncStore = create<SyncState>((set, get) => {
   };
 
   const persistPrefs = () => {
-    const { root, autoSync, intervalMinutes } = get();
-    if (root) void writeAppData(prefsKey(root), { autoSync, intervalMinutes } satisfies SyncPrefs);
+    const { root, autoSync, intervalMinutes, lifecycleGeneration } = get();
+    if (root) void writeAppData(prefsKey(root), { autoSync, intervalMinutes } satisfies SyncPrefs).catch((error: unknown) => {
+      if (get().lifecycleGeneration === lifecycleGeneration && get().root === root) set({ lastError: `Couldn't save backup preferences: ${String(error)}`, status: "error" });
+    });
   };
 
   return {
+    lifecycleGeneration: 0,
     root: null,
     prefsKnown: true,
     status: "disabled",
@@ -111,15 +117,30 @@ export const useSyncStore = create<SyncState>((set, get) => {
 
     init: async (root) => {
       get().teardown();
-      const stored = await readAppData<SyncPrefs>(prefsKey(root));
+      const generation = get().lifecycleGeneration;
+      const current = (): boolean => get().lifecycleGeneration === generation && get().root === root;
       set({
         root,
+        autoSync: DEFAULT_PREFS.autoSync,
+        intervalMinutes: DEFAULT_PREFS.intervalMinutes,
+        lastError: null,
+      });
+      let stored: SyncPrefs | null;
+      try {
+        stored = await readAppData<SyncPrefs>(prefsKey(root));
+      } catch (error) {
+        if (current()) set({ status: "error", lastError: `Couldn't read backup preferences: ${String(error)}` });
+        return;
+      }
+      if (!current()) return;
+      set({
         prefsKnown: stored != null,
         autoSync: stored?.autoSync ?? DEFAULT_PREFS.autoSync,
         intervalMinutes: stored?.intervalMinutes ?? DEFAULT_PREFS.intervalMinutes,
         lastError: null,
       });
       await get().refreshStatus();
+      if (!current()) return;
       // Opportunistic sync on open when auto-sync is on.
       if (get().autoSync && get().isRepo && get().remoteUrl) {
         void get().syncNow();
@@ -132,9 +153,10 @@ export const useSyncStore = create<SyncState>((set, get) => {
       const { timer, statusTimer } = get();
       if (timer) clearInterval(timer);
       if (statusTimer) clearInterval(statusTimer);
-      statusReadInFlight = false;
+      statusReadOwner = null;
       lastStatus = null;
       set({
+        lifecycleGeneration: get().lifecycleGeneration + 1,
         root: null, prefsKnown: true, status: "disabled", isRepo: false, remoteUrl: null,
         lastSyncedAt: null, lastError: null, changedFiles: [], conflictedFiles: [],
         inFlight: false, timer: null, statusTimer: null,
@@ -142,14 +164,15 @@ export const useSyncStore = create<SyncState>((set, get) => {
     },
 
     refreshStatus: async () => {
-      const { root } = get();
-      if (!root || statusReadInFlight) return;
-      statusReadInFlight = true;
+      const { root, lifecycleGeneration } = get();
+      if (!root || statusReadOwner !== null) return;
+      const readOwner = {};
+      statusReadOwner = readOwner;
       const epoch = get().syncEpoch;
       // This snapshot is only safe to write if nothing authoritative changed during
       // the read: a sync that ran/started (epoch moved or inFlight) owns the status
       // and the file lists, and a project switch (root moved) makes our read stale.
-      const stale = () => get().root !== root || get().syncEpoch !== epoch || get().inFlight;
+      const stale = () => get().lifecycleGeneration !== lifecycleGeneration || get().root !== root || get().syncEpoch !== epoch || get().inFlight;
       try {
         let s: RepoStatus;
         try {
@@ -179,19 +202,35 @@ export const useSyncStore = create<SyncState>((set, get) => {
               : deriveIdleStatus(s),
         }));
       } finally {
-        statusReadInFlight = false;
+        if (statusReadOwner === readOwner) statusReadOwner = null;
       }
     },
 
     syncNow: async () => {
-      const { root, inFlight } = get();
+      const { root, inFlight, lifecycleGeneration } = get();
       if (!root || inFlight) return;
+      const current = (): boolean => get().lifecycleGeneration === lifecycleGeneration && get().root === root;
       set((p) => ({ inFlight: true, status: "syncing", lastError: null, syncEpoch: p.syncEpoch + 1 }));
       try {
-        const outcome = await syncProject(root, backupMessage(new Date()));
+        const result = await queueProjectOperation(root, async () => {
+          if (!current()) return null;
+          const project = useProjectStore.getState();
+          const beforePull: ProjectSyncSnapshot = {
+            lifecycleGeneration: project.lifecycleGeneration,
+            editRevision: project.editRevision,
+            meta: project.meta,
+          };
+          const synced = await syncProject(root, backupMessage(new Date()));
+          if (synced.changedFiles.length > 0) noteProjectRemoteChanges(root);
+          if (!current()) return null;
+          await useProjectStore.getState().reconcileRemoteChanges(root, synced.changedFiles, beforePull);
+          return synced;
+        });
+        if (result === null || !current()) return;
+        const { outcome } = result;
         const status = outcomeToStatus(outcome);
         if (outcome.kind !== "clean" && outcome.kind !== "synced" && get().root === root) {
-          const types = { conflict: "backup-conflict", pushRejected: "backup-rejected", needsSetup: "backup-setup", authMissing: "backup-auth", offline: "backup-offline" } satisfies Record<typeof outcome.kind, AppNotificationType>;
+          const types = { conflict: "backup-conflict", pushRejected: "backup-rejected", needsSetup: "backup-setup", authMissing: "backup-auth", offline: "backup-offline", error: "backup-sync" } satisfies Record<typeof outcome.kind, AppNotificationType>;
           reportNotification({ type: types[outcome.kind], source: "Backup", projectRoot: root, provider: null });
         }
         set({
@@ -207,24 +246,25 @@ export const useSyncStore = create<SyncState>((set, get) => {
         }
       } catch (e) {
         console.error("Backup sync failed", { root, error: e });
-        if (get().root === root) reportNotification({ type: "backup-sync", source: "Backup", projectRoot: root, provider: null });
-        set({ status: "error", lastError: String(e) });
+        if (current()) {
+          reportNotification({ type: "backup-sync", source: "Backup", projectRoot: root, provider: null });
+          set({ status: "error", lastError: String(e) });
+        }
       } finally {
-        set({ inFlight: false });
+        if (!current()) return;
         // Refresh the file lists WITHOUT overwriting the outcome status.
-        const { root: r } = get();
-        if (r) {
-          try {
-            const s = await gitRepoStatus(r);
-            set({
-              isRepo: s.isRepo,
-              remoteUrl: s.remoteUrl,
-              changedFiles: s.changedFiles,
-              conflictedFiles: s.conflictedFiles,
-            });
-          } catch {
-            // status already reflects the sync outcome; ignore a refresh failure
-          }
+        try {
+          const s = await gitRepoStatus(root);
+          if (current()) set({
+            isRepo: s.isRepo,
+            remoteUrl: s.remoteUrl,
+            changedFiles: s.changedFiles,
+            conflictedFiles: s.conflictedFiles,
+          });
+        } catch (error) {
+          if (current()) set({ lastError: `Couldn't refresh backup status: ${String(error)}` });
+        } finally {
+          if (current()) set({ inFlight: false });
         }
       }
     },

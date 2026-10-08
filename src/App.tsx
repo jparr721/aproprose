@@ -1,8 +1,8 @@
-// App.tsx — the workspace shell.
+// App.tsx - the workspace shell.
 //
 // Empty state -> Welcome (open/recent). Project open -> a Sidebar + top bar + a
 // resizable editor / PDF / AI split. Focus mode hides the PDF and AI panels; the
-// sidebar is independent (toggled by its own trigger / ⌘B). The unsaved-edits
+// sidebar is independent (toggled by its own trigger / Cmd+B). The unsaved-edits
 // confirm dialog is mounted once here, driven by the view store's guard.
 //
 // Keyboard shortcuts are not wired here: each lives with the component that owns
@@ -93,17 +93,17 @@ export function Workspace() {
   // The editor + PDF stay mounted in the `main` panel across every AI toggle, so
   // collapsing/expanding the right panel never remounts (and resets) the editor.
   const main = (
-    <div className="flex h-full min-w-0">
-      <div className={cn("min-w-0 flex-1", showOutline && "hidden")}>
+    <div className="flex h-full min-h-0 min-w-0 flex-col @min-[720px]/workspace:flex-row">
+      <div className={cn("min-h-0 min-w-0 flex-1", showOutline && "hidden")}>
         <Editor />
       </div>
       {showOutline ? (
-        <div className="min-w-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1">
           <OutlinePane />
         </div>
       ) : null}
       {showPdf ? (
-        <div className="min-w-[340px] flex-1">
+        <div className="min-h-0 min-w-0 flex-1 border-t border-border @min-[720px]/workspace:border-l @min-[720px]/workspace:border-t-0">
           <PdfPane />
         </div>
       ) : null}
@@ -125,7 +125,7 @@ export function Workspace() {
             } else setRightPanelWidth(Math.round(liveWidth.current));
           }}
         >
-          <ResizablePanel id="main" minSize={360} inert={narrow && showRight} aria-hidden={narrow && showRight}>
+          <ResizablePanel id="main" minSize={360} className="@container/workspace" inert={narrow && showRight} aria-hidden={narrow && showRight}>
             {main}
           </ResizablePanel>
           <ResizableHandle
@@ -167,6 +167,7 @@ export function Workspace() {
 }
 
 function UnsavedGuard() {
+  const remoteDivergence = useProjectStore((s) => s.remoteDivergence);
   const pending = useViewStore((s) => s.pending);
   const confirm = useViewStore((s) => s.confirmPending);
   const cancel = useViewStore((s) => s.cancelPending);
@@ -176,13 +177,14 @@ function UnsavedGuard() {
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
           <AlertDialogDescription>
-            This chapter has edits that haven't been saved to disk. Continuing will
-            discard them.
+            {remoteDivergence === null
+              ? "This chapter has edits that haven't been saved to disk. Continuing will discard them."
+              : "Backup pulled changes while this project was open. Continuing discards the preserved draft and opens the files from disk."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Keep editing</AlertDialogCancel>
-          <AlertDialogAction onClick={confirm}>Discard &amp; continue</AlertDialogAction>
+          <AlertDialogAction variant="destructive" onClick={confirm}>Discard &amp; continue</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -196,14 +198,25 @@ function ProcessExitGuard(): null {
     if (!isTauri()) return;
     const appWindow = getCurrentWindow();
     const unlisten = appWindow.onCloseRequested(async (event) => {
-      if (!useProjectStore.getState().chapterDirty) return;
+      const projectState = useProjectStore.getState();
+      if (!projectState.chapterDirty && projectState.remoteDivergence === null) return;
       event.preventDefault();
       if (saving.current) return;
       saving.current = true;
       try {
+        const owner = useProjectStore.getState();
         const safeToExit = await saveBeforeExit({
-          hasUnsavedChanges: () => useProjectStore.getState().chapterDirty,
+          hasUnsavedChanges: () => {
+            const current = useProjectStore.getState();
+            return current.chapterDirty || current.remoteDivergence !== null;
+          },
           saveChanges: () => useProjectStore.getState().saveChapter(),
+          isCurrent: () => {
+            const current = useProjectStore.getState();
+            return current.lifecycleGeneration === owner.lifecycleGeneration &&
+              current.activeChapterId === owner.activeChapterId &&
+              current.editRevision === owner.editRevision;
+          },
         });
         if (safeToExit) void appWindow.close();
         else notifyAppError("chapter-save", "Editor", useProjectStore.getState().project?.root ?? null, new Error("Close canceled: unsaved changes"));

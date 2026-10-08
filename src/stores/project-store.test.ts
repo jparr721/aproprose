@@ -1,5 +1,5 @@
 import { useNotificationStore } from "@/stores/notification-store";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock Tauri APIs before importing the store.
 vi.mock("@/lib/tauri", () => ({
@@ -26,6 +26,7 @@ vi.mock("sonner", () => ({
 import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 import { useSyncStore } from "@/stores/sync-store";
+import { noteProjectRemoteChanges, queueProjectOperation } from "@/lib/project-operations";
 import { buildManuscriptPendingProposal } from "@/lib/ai/agent-proposals";
 import {
   characterProfileFingerprint,
@@ -45,6 +46,7 @@ import {
   openProject,
   readAppData,
   readPdf,
+  readProjectMeta,
   readTextFile,
   writeAppData,
   writeProjectMeta,
@@ -357,12 +359,254 @@ beforeEach(() => {
     editing: false,
     editCaret: null,
     chapterDirty: false,
+    remoteDivergence: null,
     saving: false,
     error: null,
     saveError: null,
     past: [],
     future: [],
     lastTextEditId: null,
+  });
+});
+
+describe("owned project persistence", () => {
+  const syncActions = {
+    init: useSyncStore.getState().init,
+    refreshStatus: useSyncStore.getState().refreshStatus,
+  };
+
+  afterEach(() => {
+    useSyncStore.setState(syncActions);
+    vi.restoreAllMocks();
+  });
+
+  beforeEach(() => {
+    useProjectStore.getState().closeProject();
+    useProjectStore.setState({ project: projectFixture("/owned"), status: "ready", activeChapterId: "ch1", meta: storyMetaFixture() });
+    vi.mocked(writeTextFile).mockReset();
+    vi.mocked(readTextFile).mockReset().mockResolvedValue("Remote chapter");
+    vi.mocked(readProjectMeta).mockReset().mockResolvedValue(null);
+    vi.mocked(readAppData).mockResolvedValue(null);
+    vi.spyOn(useSyncStore.getState(), "init").mockResolvedValue(undefined);
+    vi.spyOn(useSyncStore.getState(), "refreshStatus").mockResolvedValue(undefined);
+  });
+
+  it("persists captured text without replacing edits and history made during save", async () => {
+    const write = deferred<void>();
+    vi.mocked(writeTextFile).mockReturnValueOnce(write.promise);
+    const block = mkBlock({ id: "owned-block", text: "First draft", dirty: true });
+    useProjectStore.setState({ blocks: [block], chapterDirty: true });
+    const saving = useProjectStore.getState().saveChapter();
+    await flushPromises();
+    useProjectStore.getState().updateBlockText(block.id, "Newer draft");
+    const history = useProjectStore.getState().past;
+    write.resolve();
+    await expect(saving).resolves.toMatchObject({ status: "saved" });
+    expect(useProjectStore.getState().blocks[0].text).toBe("Newer draft");
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+    expect(useProjectStore.getState().past).toBe(history);
+  });
+
+  it("never installs a prior document save into a new project", async () => {
+    const write = deferred<void>();
+    vi.mocked(writeTextFile).mockReturnValueOnce(write.promise);
+    useProjectStore.setState({ blocks: [mkBlock({ text: "Old draft", dirty: true })], chapterDirty: true });
+    const saving = useProjectStore.getState().saveChapter();
+    await flushPromises();
+    useProjectStore.getState().closeProject();
+    const next = [mkBlock({ text: "Other document" })];
+    useProjectStore.setState({ project: projectFixture("/other"), blocks: next, activeChapterId: "ch1" });
+    write.resolve();
+    await expect(saving).resolves.toMatchObject({ status: "stale" });
+    expect(useProjectStore.getState().blocks).toBe(next);
+    expect(useProjectStore.getState().project?.root).toBe("/other");
+  });
+
+  it("does not clear history when editing and undo return to the captured block array", async () => {
+    const write = deferred<void>();
+    vi.mocked(writeTextFile).mockReturnValueOnce(write.promise);
+    const block = mkBlock({ id: "undo-during-save", text: "Captured", dirty: true });
+    useProjectStore.setState({ blocks: [block], chapterDirty: true });
+    const saving = useProjectStore.getState().saveChapter();
+    useProjectStore.getState().updateBlockText(block.id, "Later edit");
+    useProjectStore.getState().undo();
+    const history = useProjectStore.getState().future;
+    write.resolve();
+    await saving;
+    expect(useProjectStore.getState().future).toBe(history);
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+  });
+
+  it("ignores a delayed first project load across A-B-A", async () => {
+    const first = deferred<Awaited<ReturnType<typeof openProject>>>();
+    vi.mocked(openProject).mockReturnValueOnce(first.promise).mockResolvedValueOnce({ status: "managed", project: projectFixture("/b"), mainFile: "main.tex", detectedChapters: null }).mockResolvedValueOnce({ status: "managed", project: { ...projectFixture("/a"), name: "Current A" }, mainFile: "main.tex", detectedChapters: null });
+    const obsolete = useProjectStore.getState().loadProjectAt("/a");
+    await flushPromises();
+    await useProjectStore.getState().loadProjectAt("/b");
+    const current = useProjectStore.getState().loadProjectAt("/a");
+    first.resolve({ status: "managed", project: { ...projectFixture("/a"), name: "Obsolete A" }, mainFile: "main.tex", detectedChapters: null });
+    await Promise.all([obsolete, current]);
+    expect(useProjectStore.getState().project?.name).toBe("Current A");
+  });
+
+  it("blocks obsolete compile output after the project lifecycle changes", async () => {
+    const compiling = deferred<Awaited<ReturnType<typeof compileProject>>>();
+    vi.mocked(compileProject).mockReturnValueOnce(compiling.promise);
+    const compile = useProjectStore.getState().compileNow();
+    await flushPromises();
+    useProjectStore.getState().closeProject();
+    useProjectStore.setState({ project: projectFixture("/other") });
+    compiling.resolve({ ok: true, pdfBase64: "OLD", log: "old log", errors: [], durationMs: 10 });
+    await compile;
+    expect(useProjectStore.getState().compile.pdfBase64).toBeNull();
+    expect(useProjectStore.getState().compile.status).toBe("idle");
+  });
+
+  it("does not compile after a failed save", async () => {
+    vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk full"));
+    vi.mocked(compileProject).mockClear();
+    useProjectStore.setState({ blocks: [mkBlock({ dirty: true })], chapterDirty: true });
+    await useProjectStore.getState().compileNow();
+    expect(compileProject).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().saveError).toContain("disk full");
+  });
+
+  it("settles a queued compile canceled by newer typing", async () => {
+    const gate = deferred<void>();
+    const queued = queueProjectOperation("/owned", async () => gate.promise);
+    const block = mkBlock({ id: "compile-edit", text: "Initial text" });
+    useProjectStore.setState({ blocks: [block], chapterDirty: false });
+    vi.mocked(compileProject).mockClear();
+    const compiling = useProjectStore.getState().compileNow();
+    await flushPromises();
+    expect(useProjectStore.getState().compile.status).toBe("compiling");
+    useProjectStore.getState().updateBlockText(block.id, "Newer text");
+    gate.resolve();
+    await Promise.all([queued, compiling]);
+    expect(compileProject).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().compile.status).toBe("idle");
+  });
+
+  it("ignores an older chapter load completing after the newest chapter", async () => {
+    const read = deferred<string>();
+    const project = projectFixture("/owned");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    useProjectStore.setState({ project });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise).mockResolvedValueOnce("Newest chapter");
+    const older = useProjectStore.getState().selectChapter("ch1");
+    await useProjectStore.getState().selectChapter("ch2");
+    read.resolve("Older chapter");
+    await older;
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks[0].text).toBe("Newest chapter");
+  });
+
+  it("retains edits made while a chapter read is pending", async () => {
+    const read = deferred<string>();
+    const block = mkBlock({ id: "live" });
+    useProjectStore.setState({ blocks: [block] });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise);
+    const loading = useProjectStore.getState().selectChapter("ch1");
+    useProjectStore.getState().updateBlockText(block.id, "Typed during load");
+    read.resolve("Disk chapter");
+    await loading;
+    expect(useProjectStore.getState().blocks[0].text).toBe("Typed during load");
+    expect(useProjectStore.getState().chapterDirty).toBe(true);
+  });
+
+  it.each(["{broken", "[]", '{"chapters":"broken"}', '{"characters":"broken"}', '{"outline":"broken"}'])("rejects corrupt in-repo metadata %s without replacing it from legacy storage", async (serialized) => {
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/corrupt"), mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readProjectMeta).mockResolvedValueOnce(serialized);
+    vi.mocked(writeProjectMeta).mockClear();
+    await useProjectStore.getState().loadProjectAt("/corrupt");
+    expect(useProjectStore.getState().status).toBe("empty");
+    expect(useProjectStore.getState().error).toContain("meta.json");
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it("invalidates a metadata snapshot queued before a remote pull", async () => {
+    const gate = deferred<void>();
+    const remote = queueProjectOperation("/owned", async () => gate.promise);
+    vi.mocked(writeProjectMeta).mockClear();
+    useProjectStore.getState().setPremise("Local queued premise");
+    noteProjectRemoteChanges("/owned");
+    gate.resolve();
+    await remote;
+    await flushPromises();
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Local queued premise");
+  });
+
+  it("builds queued skeleton edits from the most recent committed model", async () => {
+    const first = deferred<ProjectInfo>();
+    vi.mocked(writeSkeleton).mockReset().mockReturnValueOnce(first.promise).mockImplementationOnce(async (_root, model) => ({ ...projectFixture("/owned"), metadata: model.metadata, chapters: model.chapters.map((chapter, index) => ({ id: `ch${index + 1}`, file: chapter.file ?? "new.tex", title: chapter.title, label: "I", wordCount: 0 })) }));
+    const rename = useProjectStore.getState().renameChapter("ch1", "Renamed");
+    const metadata = useProjectStore.getState().updateMetadata({ author: "Updated author" });
+    await flushPromises();
+    first.resolve({ ...projectFixture("/owned"), chapters: [{ ...projectFixture("/owned").chapters[0], title: "Renamed" }] });
+    await Promise.all([rename, metadata]);
+    expect(useProjectStore.getState().project?.chapters[0].title).toBe("Renamed");
+    expect(useProjectStore.getState().project?.metadata.author).toBe("Updated author");
+  });
+
+  it("preserves a dirty draft and blocks chapter, skeleton, and metadata writes after remote changes", async () => {
+    const blocks = [mkBlock({ text: "Local draft", dirty: true })];
+    useProjectStore.setState({ blocks, chapterDirty: true });
+    vi.mocked(writeTextFile).mockClear();
+    vi.mocked(writeSkeleton).mockClear();
+    vi.mocked(writeProjectMeta).mockClear();
+    await useProjectStore.getState().reconcileRemoteChanges("/owned", ["chapter-one.tex", ".aproprose/meta.json"], useProjectStore.getState());
+    await expect(useProjectStore.getState().saveChapter()).resolves.toMatchObject({ status: "blocked" });
+    await useProjectStore.getState().renameChapter("ch1", "Unsafe rename");
+    expect(() => useProjectStore.getState().setPremise("Unsafe metadata")).toThrow(/remote/i);
+    expect(useProjectStore.getState().blocks).toBe(blocks);
+    expect(writeTextFile).not.toHaveBeenCalled();
+    expect(writeSkeleton).not.toHaveBeenCalled();
+    expect(writeProjectMeta).not.toHaveBeenCalled();
+  });
+
+  it("reloads clean chapter and metadata snapshots after a pull", async () => {
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/owned"), mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readProjectMeta).mockResolvedValueOnce(JSON.stringify({ ...storyMetaFixture(), outline: { premise: "Remote premise", overview: "" } }));
+    vi.mocked(readTextFile).mockResolvedValueOnce("Pulled chapter text");
+    await useProjectStore.getState().reconcileRemoteChanges("/owned", ["chapter-one.tex", ".aproprose/meta.json"], useProjectStore.getState());
+    expect(useProjectStore.getState().blocks[0].text).toBe("Pulled chapter text");
+    expect(useProjectStore.getState().meta.outline.premise).toBe("Remote premise");
+    expect(useProjectStore.getState().remoteDivergence).toBeNull();
+  });
+
+  it("settles compile activity invalidated by remote divergence", async () => {
+    const state = useProjectStore.getState();
+    useProjectStore.setState({ chapterDirty: true, compile: { ...state.compile, status: "compiling" } });
+    await useProjectStore.getState().reconcileRemoteChanges("/owned", ["chapter-one.tex"], state);
+    expect(useProjectStore.getState().remoteDivergence).not.toBeNull();
+    expect(useProjectStore.getState().compile.status).toBe("idle");
+  });
+
+  it("preserves optimistic metadata changed while the native pull was in flight", async () => {
+    const beforePull = useProjectStore.getState();
+    const localMeta = { ...beforePull.meta, outline: { ...beforePull.meta.outline, premise: "Local edit during pull" } };
+    useProjectStore.setState({ meta: localMeta });
+    vi.mocked(openProject).mockClear();
+    await useProjectStore.getState().reconcileRemoteChanges("/owned", [".aproprose/meta.json"], beforePull);
+    expect(useProjectStore.getState().meta).toBe(localMeta);
+    expect(useProjectStore.getState().remoteDivergence).not.toBeNull();
+    expect(openProject).not.toHaveBeenCalled();
+  });
+
+  it("retains edits entered during clean remote reconciliation", async () => {
+    const read = deferred<string>();
+    const block = mkBlock({ id: "edit-during-pull" });
+    useProjectStore.setState({ blocks: [block] });
+    vi.mocked(openProject).mockResolvedValueOnce({ status: "managed", project: projectFixture("/owned"), mainFile: "main.tex", detectedChapters: null });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise);
+    const reconcile = useProjectStore.getState().reconcileRemoteChanges("/owned", ["chapter-one.tex"], useProjectStore.getState());
+    await flushPromises();
+    useProjectStore.getState().updateBlockText(block.id, "Keep local typing");
+    read.resolve("Remote text");
+    await reconcile;
+    expect(useProjectStore.getState().blocks[0].text).toBe("Keep local typing");
+    expect(useProjectStore.getState().remoteDivergence).not.toBeNull();
   });
 });
 

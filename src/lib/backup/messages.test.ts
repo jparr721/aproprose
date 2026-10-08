@@ -5,11 +5,12 @@ import type { RepoStatus } from "@/lib/types";
 test("backupMessage embeds the given date", () => {
   const d = new Date("2026-06-22T14:30:00");
   const msg = backupMessage(d);
-  expect(msg.startsWith("Backup —")).toBe(true);
+  expect(msg.startsWith("Backup -")).toBe(true);
   expect(msg).toContain(d.toLocaleString());
 });
 
 test("outcomeToStatus maps each variant", () => {
+  expect(outcomeToStatus({ kind: "error", message: "push failed" })).toBe("error");
   expect(outcomeToStatus({ kind: "clean" })).toBe("clean");
   expect(outcomeToStatus({ kind: "synced" })).toBe("synced");
   expect(outcomeToStatus({ kind: "conflict", files: ["a"] })).toBe("conflict");
@@ -34,6 +35,7 @@ test("deriveIdleStatus precedence", () => {
 });
 
 test("outcomeMessage gives actionable text for failures and null for success", () => {
+  expect(outcomeMessage({ kind: "error", message: "push failed" })).toBe("push failed");
   expect(outcomeMessage({ kind: "clean" })).toBeNull();
   expect(outcomeMessage({ kind: "synced" })).toBeNull();
   expect(outcomeMessage({ kind: "authMissing" })).toContain("gh auth login");

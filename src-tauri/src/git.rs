@@ -4,11 +4,10 @@
 //! token with zero extra setup. All process spawning is native Rust, so no
 //! Tauri capability/HTTP-allowlist grant is required.
 
+use crate::{durable_write, process};
 use serde::Serialize;
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
 
 /// Network git ops (push/pull) can be slow; local ops are instant. One limit for
 /// all — local ops finish well under it, so the loose ceiling only bites a hung network op.
@@ -65,44 +64,24 @@ pub struct GitOut {
     pub ok: bool,
     pub stdout: String,
     pub stderr: String,
+    pub stdout_bytes: Vec<u8>,
 }
 
 /// Spawn `program` with `args` in `root`, capturing stdout/stderr, with the
 /// shared timeout. Mirrors compile.rs::run_one.
 pub async fn run(root: &Path, program: &str, args: &[&str]) -> GitOut {
-    let spawn = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn();
-    let child = match spawn {
-        Ok(c) => c,
-        Err(e) => {
-            return GitOut {
-                ok: false,
-                stdout: String::new(),
-                stderr: format!("failed to launch {program}: {e}"),
-            }
-        }
-    };
-    match tokio::time::timeout(TIMEOUT, child.wait_with_output()).await {
-        Ok(Ok(o)) => GitOut {
-            ok: o.status.success(),
-            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+    match process::run(root, Path::new(program), args, TIMEOUT).await {
+        Ok(output) => GitOut {
+            ok: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stdout_bytes: output.stdout,
         },
-        Ok(Err(e)) => GitOut {
+        Err(error) => GitOut {
             ok: false,
             stdout: String::new(),
-            stderr: format!("{program} error: {e}"),
-        },
-        Err(_) => GitOut {
-            ok: false,
-            stdout: String::new(),
-            stderr: format!("{program} timed out after {}s", TIMEOUT.as_secs()),
+            stderr: error.to_string(),
+            stdout_bytes: Vec::new(),
         },
     }
 }
@@ -143,6 +122,14 @@ pub enum SyncOutcome {
     NeedsSetup { reason: String },
     AuthMissing,
     Offline,
+    Error { message: String },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    pub outcome: SyncOutcome,
+    pub changed_files: Vec<String>,
 }
 
 /// Parse `git status --porcelain=v1 --branch` into a RepoStatus. The caller
@@ -211,10 +198,80 @@ pub fn parse_status(porcelain_branch: &str) -> RepoStatus {
     }
 }
 
-/// Is `root` inside a git work tree?
-pub async fn is_repo(root: &Path) -> bool {
-    let out = run(root, "git", &["rev-parse", "--is-inside-work-tree"]).await;
-    out.ok && out.stdout.trim() == "true"
+fn decode_git_path(bytes: &[u8]) -> Result<String, String> {
+    String::from_utf8(bytes.to_vec()).map_err(|error| {
+        format!("Git returned a non-UTF-8 path that cannot be represented by the app: {error}")
+    })
+}
+
+fn parse_status_nul(bytes: &[u8]) -> Result<RepoStatus, String> {
+    let mut records = bytes
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty());
+    let mut status = parse_status("");
+    while let Some(record) = records.next() {
+        if record.starts_with(b"## ") {
+            let header = std::str::from_utf8(record)
+                .map_err(|error| format!("invalid Git branch record: {error}"))?;
+            let branch = parse_status(header);
+            status.branch = branch.branch;
+            status.ahead = branch.ahead;
+            status.behind = branch.behind;
+            continue;
+        }
+        if record.len() < 4 || record[2] != b' ' {
+            return Err(format!("invalid Git status record: {record:?}"));
+        }
+        let code = std::str::from_utf8(&record[..2]).map_err(|error| error.to_string())?;
+        let path = decode_git_path(&record[3..])?;
+        if code.contains('R') || code.contains('C') {
+            let original = records
+                .next()
+                .ok_or_else(|| "Git rename record is missing its original path".to_string())?;
+            decode_git_path(original)?;
+        }
+        let conflicted = code.contains('U') || code == "AA" || code == "DD";
+        if conflicted {
+            status.conflicted_files.push(path.clone());
+        }
+        status.changed_files.push(ChangedFile {
+            path,
+            status: code.to_string(),
+            conflicted,
+        });
+    }
+    status.dirty = !status.changed_files.is_empty();
+    Ok(status)
+}
+
+async fn owns_repository(root: &Path) -> Result<bool, String> {
+    let canonical = root
+        .canonicalize()
+        .map_err(|error| format!("invalid project root {}: {error}", root.display()))?;
+    let output = run(&canonical, "git", &["rev-parse", "--show-toplevel"]).await;
+    if !output.ok {
+        if output.stderr.contains("not a git repository") {
+            return Ok(false);
+        }
+        return Err(format!(
+            "cannot resolve repository root {}: {}",
+            canonical.display(),
+            output.stderr
+        ));
+    }
+    let text = std::str::from_utf8(&output.stdout_bytes)
+        .map_err(|error| format!("Git repository root is not UTF-8: {error}"))?;
+    let reported = text.strip_suffix('\n').unwrap_or(text);
+    #[cfg(windows)]
+    let reported = reported.strip_suffix('\r').unwrap_or(reported);
+    let reported = Path::new(reported)
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve Git root {reported:?}: {error}"))?;
+    Ok(reported == canonical)
+}
+
+pub async fn is_repo(root: &Path) -> Result<bool, String> {
+    owns_repository(root).await
 }
 
 /// The `origin` remote URL, if any.
@@ -223,9 +280,9 @@ pub async fn origin_url(root: &Path) -> Option<String> {
     (out.ok && !out.stdout.trim().is_empty()).then(|| out.stdout.trim().to_string())
 }
 
-pub async fn repo_status(root: &Path) -> RepoStatus {
-    if !is_repo(root).await {
-        return RepoStatus {
+pub async fn repo_status(root: &Path) -> Result<RepoStatus, String> {
+    if !owns_repository(root).await? {
+        return Ok(RepoStatus {
             is_repo: false,
             has_remote: false,
             remote_url: None,
@@ -235,34 +292,29 @@ pub async fn repo_status(root: &Path) -> RepoStatus {
             dirty: false,
             changed_files: Vec::new(),
             conflicted_files: Vec::new(),
-        };
+        });
     }
-    let out = run(
-        root,
-        "git",
-        &[
-            "-c",
-            "core.quotePath=false",
-            "status",
-            "--porcelain=v1",
-            "--branch",
-        ],
-    )
-    .await;
-    let mut status = parse_status(&out.stdout);
+    let output = run(root, "git", &["status", "--porcelain=v1", "--branch", "-z"]).await;
+    if !output.ok {
+        return Err(format!("cannot read Git status: {}", output.stderr));
+    }
+    let mut status = parse_status_nul(&output.stdout_bytes)?;
     let remote = origin_url(root).await;
     status.has_remote = remote.is_some();
     status.remote_url = remote;
-    status
+    Ok(status)
 }
 
 #[tauri::command]
 pub async fn git_repo_status(root: String) -> Result<RepoStatus, String> {
-    Ok(repo_status(Path::new(&root)).await)
+    repo_status(Path::new(&root)).await
 }
 
 /// Unified diff of uncommitted changes vs HEAD (optionally one path).
 pub async fn diff(root: &Path, file: Option<&str>) -> Result<String, String> {
+    if !owns_repository(root).await? {
+        return Err("project directory does not own a Git repository".to_string());
+    }
     let mut args = vec!["diff", "HEAD"];
     if let Some(f) = file {
         args.push("--");
@@ -315,109 +367,158 @@ fn looks_like_conflict(text: &str) -> bool {
     t.contains("conflict") || t.contains("automatic merge failed")
 }
 
-pub async fn unmerged_files(root: &Path) -> Vec<String> {
-    let out = run(
+fn parse_path_list(bytes: &[u8]) -> Result<Vec<String>, String> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(decode_git_path)
+        .collect()
+}
+
+pub async fn unmerged_files(root: &Path) -> Result<Vec<String>, String> {
+    let output = run(
         root,
         "git",
-        &[
-            "-c",
-            "core.quotePath=false",
-            "diff",
-            "--name-only",
-            "--diff-filter=U",
-        ],
+        &["diff", "--name-only", "--diff-filter=U", "-z"],
     )
     .await;
-    out.stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+    if !output.ok {
+        return Err(format!("cannot read unmerged Git paths: {}", output.stderr));
+    }
+    parse_path_list(&output.stdout_bytes)
+}
+
+async fn changed_since(root: &Path, revision: &str) -> Result<Vec<String>, String> {
+    let output = run(
+        root,
+        "git",
+        &["diff", "--name-only", "--no-renames", "-z", revision, "--"],
+    )
+    .await;
+    if !output.ok {
+        return Err(format!(
+            "cannot determine files changed by pull: {}",
+            output.stderr
+        ));
+    }
+    parse_path_list(&output.stdout_bytes)
 }
 
 /// The backup sequence: stage → commit → pull/merge → push. Steps short-circuit
 /// into a SyncOutcome (conflict / push-rejected / offline / auth-missing) that
 /// leaves a recoverable partial state, surfaced to the UI — it is not atomic.
-pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
-    if !is_repo(root).await {
-        return Ok(SyncOutcome::NeedsSetup {
-            reason: "not a git repository".into(),
+pub async fn sync_with_changes(root: &Path, message: &str) -> Result<SyncResult, String> {
+    if !owns_repository(root).await? {
+        return Ok(SyncResult {
+            outcome: SyncOutcome::NeedsSetup {
+                reason: "project directory does not own a git repository".into(),
+            },
+            changed_files: vec![],
         });
     }
     if origin_url(root).await.is_none() {
-        return Ok(SyncOutcome::NeedsSetup {
-            reason: "no 'origin' remote".into(),
+        return Ok(SyncResult {
+            outcome: SyncOutcome::NeedsSetup {
+                reason: "no 'origin' remote".into(),
+            },
+            changed_files: vec![],
         });
     }
-
-    let pre = repo_status(root).await;
-
-    // Already conflicted (e.g. reopened mid-conflict): surface it directly
-    // rather than transiting an error state on a refused commit.
+    let pre = repo_status(root).await?;
     if !pre.conflicted_files.is_empty() {
-        return Ok(SyncOutcome::Conflict {
-            files: pre.conflicted_files,
+        return Ok(SyncResult {
+            outcome: SyncOutcome::Conflict {
+                files: pre.conflicted_files.clone(),
+            },
+            changed_files: pre.conflicted_files,
         });
     }
-
-    // Stage + commit anything local.
     if pre.dirty {
         let add = run(root, "git", &["add", "-A"]).await;
         if !add.ok {
-            return Err(add.stderr.trim().to_string());
+            return Err(format!("cannot stage backup: {}", add.stderr));
         }
         let commit = run(root, "git", &["commit", "-m", message]).await;
-        // A racy "nothing to commit" is fine; a real failure is not.
         if !commit.ok
             && !commit.stdout.contains("nothing to commit")
             && !commit.stderr.contains("nothing to commit")
         {
-            return Err(format!("{}{}", commit.stdout, commit.stderr)
-                .trim()
-                .to_string());
+            return Err(format!(
+                "cannot commit backup: {}{}",
+                commit.stdout, commit.stderr
+            ));
         }
     }
-
-    // Pull (merge). Conflicts are surfaced, not aborted.
+    let before = run(root, "git", &["rev-parse", "HEAD"]).await;
+    if !before.ok {
+        return Err(format!(
+            "cannot capture pre-pull revision: {}",
+            before.stderr
+        ));
+    }
+    let revision = before.stdout.trim();
     let pull = run(root, "git", &["pull", "--no-rebase", "--no-edit"]).await;
+    let changed_files = match changed_since(root, revision).await {
+        Ok(paths) => paths,
+        Err(message) => {
+            return Ok(SyncResult {
+                outcome: SyncOutcome::Error { message },
+                changed_files: vec![],
+            })
+        }
+    };
     if !pull.ok {
-        let blob = format!("{}{}", pull.stdout, pull.stderr);
-        if looks_like_conflict(&blob) {
-            return Ok(SyncOutcome::Conflict {
-                files: unmerged_files(root).await,
-            });
-        }
-        if let Some(o) = classify_transport_error(&blob.to_lowercase()) {
-            return Ok(o);
-        }
-        return Err(blob.trim().to_string());
+        let message = format!("{}{}", pull.stdout, pull.stderr);
+        let outcome = if looks_like_conflict(&message) {
+            match unmerged_files(root).await {
+                Ok(files) => SyncOutcome::Conflict { files },
+                Err(message) => SyncOutcome::Error { message },
+            }
+        } else {
+            classify_transport_error(&message.to_lowercase()).unwrap_or_else(|| {
+                SyncOutcome::Error {
+                    message: message.trim().to_string(),
+                }
+            })
+        };
+        return Ok(SyncResult {
+            outcome,
+            changed_files,
+        });
     }
-
-    // Push.
     let push = run(root, "git", &["push"]).await;
     if !push.ok {
-        let blob = format!("{}{}", push.stdout, push.stderr);
-        if let Some(o) = classify_git_error(&blob) {
-            return Ok(o);
-        }
-        return Err(blob.trim().to_string());
+        let message = format!("{}{}", push.stdout, push.stderr);
+        let outcome = classify_git_error(&message).unwrap_or_else(|| SyncOutcome::Error {
+            message: message.trim().to_string(),
+        });
+        return Ok(SyncResult {
+            outcome,
+            changed_files,
+        });
     }
-
-    let nothing_local = !pre.dirty;
     let pull_noop =
         pull.stdout.contains("Already up to date") || pull.stderr.contains("Already up to date");
     let push_noop = push.stderr.contains("Everything up-to-date")
         || push.stdout.contains("Everything up-to-date");
-    if nothing_local && pull_noop && push_noop && pre.ahead == 0 {
-        Ok(SyncOutcome::Clean)
+    let outcome = if !pre.dirty && pull_noop && push_noop && pre.ahead == 0 {
+        SyncOutcome::Clean
     } else {
-        Ok(SyncOutcome::Synced)
-    }
+        SyncOutcome::Synced
+    };
+    Ok(SyncResult {
+        outcome,
+        changed_files,
+    })
+}
+
+pub async fn sync(root: &Path, message: &str) -> Result<SyncOutcome, String> {
+    Ok(sync_with_changes(root, message).await?.outcome)
 }
 
 #[tauri::command]
-pub async fn sync_project(root: String, message: String) -> Result<SyncOutcome, String> {
-    sync(Path::new(&root), &message).await
+pub async fn sync_project(root: String, message: String) -> Result<SyncResult, String> {
+    sync_with_changes(Path::new(&root), &message).await
 }
 
 #[derive(Debug, Serialize)]
@@ -477,16 +578,19 @@ pub fn gitignore_with_defaults(existing: &str) -> String {
 /// make an initial commit. Uses ephemeral identity flags so it works even when
 /// the machine has no global git identity.
 pub async fn init_local_repo(root: &Path) -> Result<(), String> {
-    if !is_repo(root).await {
+    if !owns_repository(root).await? {
         let init = run(root, "git", &["init", "-b", "main"]).await;
         if !init.ok {
             return Err(init.stderr.trim().to_string());
         }
     }
     let gi_path = root.join(".gitignore");
-    let existing = std::fs::read_to_string(&gi_path).unwrap_or_default();
-    std::fs::write(&gi_path, gitignore_with_defaults(&existing))
-        .map_err(|e| format!("cannot write .gitignore: {e}"))?;
+    let existing = match std::fs::read_to_string(&gi_path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read {}: {error}", gi_path.display())),
+    };
+    durable_write::write(&gi_path, gitignore_with_defaults(&existing).as_bytes())?;
 
     let add = run(root, "git", &["add", "-A"]).await;
     if !add.ok {
@@ -619,6 +723,150 @@ mod tests {
     /// (the process id alone is identical across the test threads).
     static SEQ: AtomicU32 = AtomicU32::new(0);
 
+    #[tokio::test]
+    async fn nested_project_never_owns_or_stages_ancestor_repository() {
+        let parent = temp_repo();
+        std::fs::write(parent.join("private.txt"), "parent only").unwrap();
+        let child = parent.join("novel");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(child.join("main.tex"), "novel").unwrap();
+        assert!(!is_repo(&child).await.unwrap());
+        assert!(!repo_status(&child).await.unwrap().is_repo);
+        assert!(matches!(
+            sync(&child, "child").await.unwrap(),
+            SyncOutcome::NeedsSetup { .. }
+        ));
+        init_local_repo(&child).await.unwrap();
+        assert!(child.join(".git").exists());
+        let tracked = run(&child, "git", &["ls-files", "-z"]).await;
+        assert!(!tracked.stdout.contains("private.txt"));
+        let staged = run(&parent, "git", &["diff", "--cached", "--name-only"]).await;
+        assert!(staged.stdout.is_empty());
+        std::fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_git_status_preserves_quoted_whitespace_and_rename_paths() {
+        let dir = temp_repo();
+        let names = if cfg!(windows) {
+            vec!["space name.tex", "dash-name.tex"]
+        } else {
+            vec![
+                "space name.tex",
+                "quote\"name.tex",
+                "tab\tname.tex",
+                "line\nname.tex",
+            ]
+        };
+        for name in &names {
+            std::fs::write(dir.join(name), "one").unwrap();
+        }
+        let status = repo_status(&dir).await.unwrap();
+        for name in &names {
+            assert!(
+                status.changed_files.iter().any(|file| file.path == *name),
+                "{status:?}"
+            );
+        }
+        assert!(run(&dir, "git", &["add", "-A"]).await.ok);
+        assert!(run(&dir, "git", &["commit", "-m", "initial"]).await.ok);
+        let destination = if cfg!(windows) {
+            "renamed space.tex"
+        } else {
+            "renamed -> quote\"\t.tex"
+        };
+        assert!(run(&dir, "git", &["mv", names[0], destination]).await.ok);
+        let status = repo_status(&dir).await.unwrap();
+        assert_eq!(status.changed_files.len(), 1);
+        assert_eq!(status.changed_files[0].path, destination);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn nul_protocol_handles_rename_and_conflict_paths_without_text_decoding_loss() {
+        let status =
+            parse_status_nul(b"## main\0R  new -> \"\t.tex\0old\n.tex\0UU conflict\"\t\n.tex\0")
+                .unwrap();
+        assert_eq!(status.changed_files[0].path, "new -> \"\t.tex");
+        assert_eq!(status.conflicted_files, vec!["conflict\"\t\n.tex"]);
+        assert_eq!(
+            parse_path_list(b"space name.tex\0quote\"\t\n.tex\0").unwrap(),
+            vec!["space name.tex", "quote\"\t\n.tex"]
+        );
+        assert!(parse_path_list(b"invalid\xff.tex\0").is_err());
+    }
+
+    #[tokio::test]
+    async fn sync_envelope_reports_remote_changed_and_deleted_files() {
+        let (origin, work) = repo_with_origin();
+        let other = work.parent().unwrap().join("other");
+        assert!(
+            run(
+                work.parent().unwrap(),
+                "git",
+                &["clone", origin.to_str().unwrap(), other.to_str().unwrap()]
+            )
+            .await
+            .ok
+        );
+        assert!(
+            run(&other, "git", &["config", "user.email", "t@t.t"])
+                .await
+                .ok
+        );
+        assert!(run(&other, "git", &["config", "user.name", "t"]).await.ok);
+        std::fs::remove_file(other.join("a.tex")).unwrap();
+        std::fs::write(other.join("metadata.tex"), "remote").unwrap();
+        assert!(run(&other, "git", &["add", "-A"]).await.ok);
+        assert!(run(&other, "git", &["commit", "-m", "remote"]).await.ok);
+        assert!(run(&other, "git", &["push"]).await.ok);
+        let result = sync_with_changes(&work, "sync").await.unwrap();
+        assert!(result.changed_files.contains(&"a.tex".to_string()));
+        assert!(result.changed_files.contains(&"metadata.tex".to_string()));
+        std::fs::remove_dir_all(work.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sync_preserves_pulled_paths_when_push_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let (origin, work) = repo_with_origin();
+        let other = work.parent().unwrap().join("other");
+        assert!(
+            run(
+                work.parent().unwrap(),
+                "git",
+                &["clone", origin.to_str().unwrap(), other.to_str().unwrap()]
+            )
+            .await
+            .ok
+        );
+        assert!(
+            run(&other, "git", &["config", "user.email", "t@t.t"])
+                .await
+                .ok
+        );
+        assert!(run(&other, "git", &["config", "user.name", "t"]).await.ok);
+        std::fs::write(other.join("a.tex"), "remote change").unwrap();
+        assert!(run(&other, "git", &["commit", "-am", "remote"]).await.ok);
+        assert!(run(&other, "git", &["push"]).await.ok);
+        let hook = origin.join("hooks/pre-receive");
+        std::fs::write(&hook, "#!/bin/sh\necho rejected-by-fixture >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(work.join("local.tex"), "local").unwrap();
+        let result = sync_with_changes(&work, "local").await.unwrap();
+        assert!(matches!(
+            result.outcome,
+            SyncOutcome::Error { .. } | SyncOutcome::PushRejected
+        ));
+        assert!(result.changed_files.contains(&"a.tex".to_string()));
+        assert_eq!(
+            std::fs::read_to_string(work.join("a.tex")).unwrap(),
+            "remote change"
+        );
+        std::fs::remove_dir_all(work.parent().unwrap()).unwrap();
+    }
+
     fn unique(prefix: &str) -> std::path::PathBuf {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), n))
@@ -704,7 +952,7 @@ mod tests {
     async fn repo_status_reports_dirty_untracked() {
         let dir = temp_repo();
         std::fs::write(dir.join("a.tex"), "hello").unwrap();
-        let s = repo_status(&dir).await;
+        let s = repo_status(&dir).await.unwrap();
         assert!(s.is_repo);
         assert!(!s.has_remote);
         assert!(s.dirty);
@@ -950,7 +1198,9 @@ mod tests {
         gb(&["push", "-q"]);
         // A changes the same line and syncs → conflict.
         std::fs::write(work_a.join("a.tex"), "from-a\n").unwrap();
-        let out = sync(&work_a, "a-change").await.unwrap();
+        let result = sync_with_changes(&work_a, "a-change").await.unwrap();
+        assert!(result.changed_files.contains(&"a.tex".to_string()));
+        let out = result.outcome;
         assert!(
             matches!(out, SyncOutcome::Conflict { ref files } if files == &vec!["a.tex".to_string()])
         );

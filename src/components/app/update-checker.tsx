@@ -73,11 +73,22 @@ function buildDeps(): UpdateFlowDeps {
       await handle.downloadAndInstall();
       await relaunch();
     },
-    prepareToExit: () =>
-      saveBeforeExit({
-        hasUnsavedChanges: () => useProjectStore.getState().chapterDirty,
+    prepareToExit: () => {
+      const owner = useProjectStore.getState();
+      return saveBeforeExit({
+        hasUnsavedChanges: () => {
+          const current = useProjectStore.getState();
+          return current.chapterDirty || current.remoteDivergence !== null;
+        },
         saveChanges: () => useProjectStore.getState().saveChapter(),
-      }),
+        isCurrent: () => {
+          const current = useProjectStore.getState();
+          return current.lifecycleGeneration === owner.lifecycleGeneration &&
+            current.activeChapterId === owner.activeChapterId &&
+            current.editRevision === owner.editRevision;
+        },
+      });
+    },
     notifyChecking: () => {
       toast.loading("Checking for updates", { id: UPDATE_TOAST_ID });
     },

@@ -361,8 +361,10 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
       input: z.infer<typeof manuscriptStageSchema>,
     ) => {
       check("stage_manuscript_proposal");
+      if (input.overview !== undefined && input.overview !== null) check("stage_overview_proposal");
       const proposal = env.buildManuscriptProposal(input);
       assertProposalCorrelation(proposal);
+      if (proposal.overviewChange) check("stage_overview_proposal");
       env.replacePendingProposal(proposal);
       return runtimeOutput(
         {
@@ -382,8 +384,10 @@ export function createAgentToolHandlers(env: AgentToolEnvironment) {
     },
     stageOutline: async (input: z.infer<typeof outlineStageSchema>) => {
       check("stage_outline_proposal");
+      if (input.overview !== undefined && input.overview !== null) check("stage_overview_proposal");
       const proposal = env.buildOutlineProposal(input);
       assertProposalCorrelation(proposal);
+      if (proposal.overviewChange) check("stage_overview_proposal");
       env.replacePendingProposal(proposal);
       return runtimeOutput(
         {

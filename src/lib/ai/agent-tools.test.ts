@@ -425,6 +425,114 @@ describe("agent tool outputs", () => {
 });
 
 describe("stage tools", () => {
+  const overviewChange = {
+    id: "overview-change-1",
+    before: "Original overview",
+    after: "Revised overview",
+    reason: "Reflect the reviewed changes",
+    sourceFingerprint: "overview-fingerprint",
+  };
+  const scopedStages = [
+    {
+      action: "copyeditor",
+      task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b1"], operation: "clean" },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "block-structurer",
+      task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b1"], operation: "structure" },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "bridge-writer",
+      task: { kind: "bridge", chapterId: "ch1", anchorBlockId: "b1", successorBlockId: null },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "chapter-planner",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      stage: "stageOutline",
+      builder: "buildOutlineProposal",
+      proposal: pendingOutline,
+    },
+  ] satisfies Array<{
+    action: string;
+    task: AgentRun["task"];
+    stage: "stageManuscript" | "stageOutline";
+    builder: "buildManuscriptProposal" | "buildOutlineProposal";
+    proposal: ManuscriptPendingProposal | OutlinePendingProposal;
+  }>;
+
+  function environmentWithoutOverview(task: AgentRun["task"]): AgentToolEnvironment {
+    const scopedRun: AgentRun = { ...run, task };
+    const policy = compileAgentPolicy({
+      mode: scopedRun.mode,
+      task,
+      sessionId: { kind: "project" },
+      styleGuide: "",
+      editingRules: "",
+    });
+    return {
+      ...environment(),
+      run: scopedRun,
+      policy: { ...policy, capabilities: policy.capabilities.filter((capability) => capability !== "stage-overview") },
+    };
+  }
+
+  it.each(scopedStages)("rejects $action bundled overview input before construction", async ({ task, stage, builder }) => {
+    const env = environmentWithoutOverview(task);
+    const handlers = createAgentToolHandlers(env);
+    for (const overview of ["Revised overview", ""]) {
+      await expect(handlers[stage]({ summary: "Narrow edit", changes: [], overview }))
+        .rejects.toThrow("Agent tool is not permitted");
+    }
+    expect(env[builder]).not.toHaveBeenCalled();
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it.each(scopedStages)("rejects $action builder-produced overview changes before staging", async ({ task, stage, builder, proposal }) => {
+    const env = environmentWithoutOverview(task);
+    vi.spyOn(env, builder).mockReturnValue({ ...proposal, overviewChange });
+    await expect(createAgentToolHandlers(env)[stage]({ summary: "Narrow edit", changes: [] }))
+      .rejects.toThrow("Agent tool is not permitted");
+    expect(env[builder]).toHaveBeenCalledOnce();
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it.each(scopedStages)("permits $action staging with omitted or null overview", async ({ task, stage, builder, proposal }) => {
+    const env = environmentWithoutOverview(task);
+    const handlers = createAgentToolHandlers(env);
+    await handlers[stage]({ summary: "Narrow edit", changes: [] });
+    await handlers[stage]({ summary: "Narrow edit", changes: [], overview: null });
+    expect(env[builder]).toHaveBeenCalledTimes(2);
+    expect(env.replacePendingProposal).toHaveBeenCalledTimes(2);
+    expect(env.replacePendingProposal).toHaveBeenLastCalledWith(proposal);
+  });
+
+  it.each([
+    { stage: "stageManuscript", builder: "buildManuscriptProposal", proposal: pending },
+    { stage: "stageOutline", builder: "buildOutlineProposal", proposal: pendingOutline },
+  ] satisfies Array<{
+    stage: "stageManuscript" | "stageOutline";
+    builder: "buildManuscriptProposal" | "buildOutlineProposal";
+    proposal: ManuscriptPendingProposal | OutlinePendingProposal;
+  }>)("permits authorized overview bundles through $stage", async ({ stage, builder, proposal }) => {
+    const env = environment();
+    const bundled = { ...proposal, overviewChange };
+    vi.spyOn(env, builder).mockReturnValue(bundled);
+    const input = { summary: "Editorial change", changes: [], overview: "Revised overview" };
+    const output = await createAgentToolHandlers(env)[stage](input);
+    expect(env[builder]).toHaveBeenCalledWith(input);
+    expect(env.replacePendingProposal).toHaveBeenCalledWith(bundled);
+    expect(output.value.changeCount).toBe(2);
+  });
+
   it("replaces the pending workspace only after a proposal validates", async () => {
     const env = environment();
     const handlers = createAgentToolHandlers(env);

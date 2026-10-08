@@ -10,7 +10,7 @@
 - Communication: collaboration messages provide the available hub equivalent; worker questions route through the supervisor.
 - Planning: party required; audit findings describe acceptance but do not provide a complete file-disjoint implementation plan.
 - Verify mode: `local`, explicitly authorized by user: "hammer local that's fine". This covers full local typechecks, lint/format, tests, builds, and generators. Step 4 is active.
-- Merge: pipeline default gated merge authorized by explicit invocation; no separate merge permission question.
+- Merge: default gated merge initially authorized; now prohibited automatically because review cap reached with round-5 FIX-THEN-SHIP. Final fix requires stop/report and user decision.
 - Merge convention: merge commits, based on recent `Merge pull request` history.
 
 ## Verification surface at intake
@@ -123,8 +123,8 @@
 
 - Initial full gate: active in authorized local mode; frontend/browser and native debug checks passed, isolated native bundle/smoke pending.
 - PR: https://github.com/jparr721/aproprose/pull/70 (ready, attached), base `main`, initial pushed head `387810fb2bfa13e347a0a9ca5837e1b9a3833f9a`.
-- Review rounds: 4/5 completed; round 4 `FIX-THEN-SHIP`, 1 P2 must-fix active. Rounds 1/2 fixed 4 each; round 3 fixed 2. Minimum 3 met, but no clean APPROVE exit; round 5 is the final authorized round.
-- Simplification: pending; once over the whole PR diff after clean review exit.
+- Review rounds: 5/5 completed; round 5 `FIX-THEN-SHIP`, 1 P2 must-fix active. Rounds 1/2 fixed 4 each; round 3 fixed 2; round 4 fixed 1. Cap reached without clean APPROVE exit; no round 6 or automatic merge authorized.
+- Simplification: skipped at cap-stop; clean APPROVE exit not reached, so Step 7 is not entered.
 - Final exact-commit gate and CI: pending.
 
 ### First local gate results
@@ -431,7 +431,38 @@ residual risk: inherited descendant-process cleanup and separate real-PDF race r
 - Standalone CI fix `e32ba21` emits required context names through a fail-closed matrix depending on the entire reusable validation. Branch protection itself was not edited.
 - Rerun exact full gate on final documentation plus CI commit before push/final round 5. Earlier green gate does not cover `e32ba21`; no final push or review approval claimed yet.
 
-- QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
+### Round 5 verdict / cap stop enforced
+
+```text
+=== REVIEW VERDICT ===
+scope:      https://github.com/jparr721/aproprose/pull/70 @ ffcc3a6, base 827e65a
+variant:    full
+verdict:    FIX-THEN-SHIP
+must-fix:   1 P2 F5-1 (managed migration output preflight)
+followups:  #72, #76
+dissent:    none for round 5
+residual risk: final accepted fix will be gated but unreviewed after the review cap.
+=== END ===
+```
+
+- Five fresh angles plus fresh Level/Splinter and exactly one owner defense completed. All owners retained F5-1, no other survivors or dissent.
+- F5-1: independent public HEAD/base controls across no-input, mixed, and bad plain-metadata/title cases prove migration can commit invalid managed output, after which strict open/reopen/Retry fail despite original backup preservation.
+- Root owns regression-first fix only in `src-tauri/src/novel.rs`: preflight both rendered metadata and chapters through existing strict readers before any mutation, retaining required chapter-body reads. Five new tests are running red (three negative families, two positive controls); no passing claim yet.
+- Reviewed-head CI run 37734745909 passed all platforms, artifact launch, and protected-context names. This does not cover the pending final fix.
+- Review cap enforced: finish accepted fix, full local gate, and push; no round 6 and no automatic merge. Post-last-review fix must be reported as unreviewed.
+- Step 7 simplifier skipped because clean APPROVE exit was not reached; cap-stop is not a simplification or review waiver.
+- Always-required QA now targets final worktree/package identity, not post-merge. QA checklist worker prepares proof, root performs CUA; self-contained HTML deck copied out and committed/pushed with the unmerged branch. Preserve worktree.
+- Existing followups #72 and #76 unchanged. Final handoff must expose cap-stop, final fix and its unreviewed status, exact gate/CI evidence, QA/deck, and user decision needed to merge or raise cap.
+
+### Final accepted fix focused proof
+
+- F5-1 observed red: three negative families failed while two positive controls passed (`r5-preflight-red.log`).
+- Root preflights both generated metadata and chapters with existing strict readers before first backup/scaffold/staging mutation; required chapter-body reads remain unchanged.
+- All 11 `migration_` tests now pass (`r5-preflight-green.log`). Five new regressions cover inline/mixed declarations, all five metadata fields, bad title, missing/invalid body positive guards, and encoded metadata/title positive output.
+- New proof checks recursive tree snapshot equality, two refusals without mutation, and same-root retry after repaired source. Existing raw-TeX, backup identity, retry, and refusal positive controls also passed.
+- Standalone bug-fix commit active. No broad final gate or pushed/CI claim yet. Full gate and push precede real final-worktree QA/deck; cap-stop still prohibits automatic merge and skips simplifier.
+
+- QA target: final unmerged worktree/package after review-cap stop. Preserve worktree and deliver deck before final handoff.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.
 - Deck convention: self-contained HTML with screenshots in `docs/slides/<topic>-YYYY-MM-DD.html`; one screenshot per captioned slide, assets embedded or under `docs/slides`.
 - Deck copy-out: starting checkout `qa-decks/audit-remediation/` before any worktree removal.

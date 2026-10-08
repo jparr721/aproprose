@@ -10,6 +10,17 @@
     ]
   },
   {
+    "version": "0.18.4",
+    "date": "2026-10-07",
+    "summary": "Safer project persistence, consistent authoring controls, and verified desktop releases.",
+    "highlights": [
+      "Preserve newer drafts during saves, project changes, and remote backups, with clear recovery when disk content diverges.",
+      "Keep editor, PDF search, settings, and AI recovery controls usable and accessible across window sizes and themes.",
+      "Write native project files durably, handle Git paths accurately, and compile reserved metadata characters safely.",
+      "Require commit checks, installed desktop launch checks, and updater signature verification before release publication."
+    ]
+  },
+  {
     "version": "0.18.3",
     "date": "2026-10-07",
     "summary": "Keep desktop packaging compatible with the Tauri runtime.",

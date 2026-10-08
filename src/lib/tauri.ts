@@ -29,7 +29,7 @@ import type {
   RepoCreated,
   RepoStatus,
   SkeletonModel,
-  SyncOutcome,
+  SyncResult,
   ToolingStatus,
 } from "@/lib/types";
 
@@ -275,8 +275,8 @@ export function gitDiff(root: string, file?: string): Promise<string> {
   return invoke<string>("git_diff", { root, file: file ?? null });
 }
 
-export function syncProject(root: string, message: string): Promise<SyncOutcome> {
-  return invoke<SyncOutcome>("sync_project", { root, message });
+export function syncProject(root: string, message: string): Promise<SyncResult> {
+  return invoke<SyncResult>("sync_project", { root, message });
 }
 
 export function ghCheckRepoName(name: string): Promise<NameCheck> {

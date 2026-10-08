@@ -1,0 +1,75 @@
+name: Validate exact commit
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  frontend:
+    name: frontend and browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: extractions/setup-just@v3
+      - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: bun install --frozen-lockfile
+      - run: just typecheck
+      - run: just test-frontend
+      - run: just build
+      - run: bun x playwright install --with-deps chromium webkit
+      - run: just test-browser
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+  native:
+    name: native ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            bundle: deb
+          - os: macos-latest
+            bundle: app
+          - os: windows-latest
+            bundle: nsis
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: extractions/setup-just@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Linux native and display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xdotool dbus-x11
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - run: bun install --frozen-lockfile
+      - run: just build
+      - run: just lint
+      - run: just test-native
+      - name: Build installable native artifact
+        run: just bundle-smoke ${{ matrix.bundle }}
+      - name: Launch extracted Linux artifact
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- just smoke-artifact src-tauri/target/release/bundle
+      - name: Launch installed desktop artifact
+        if: runner.os != 'Linux'
+        run: just smoke-artifact src-tauri/target/release/bundle

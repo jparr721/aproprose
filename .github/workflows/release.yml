@@ -150,12 +150,15 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin --bundles app,dmg"
+            bundle_directory: src-tauri/target/aarch64-apple-darwin/release/bundle
           - platform: ubuntu-22.04
             target: ""
             args: "--bundles deb,appimage"
+            bundle_directory: src-tauri/target/release/bundle
           - platform: windows-latest
             target: ""
             args: "--bundles nsis"
+            bundle_directory: src-tauri/target/release/bundle
     runs-on: ${{ matrix.platform }}
     defaults:
       run:
@@ -172,8 +175,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file zstd \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xdotool dbus-x11
       - uses: oven-sh/setup-bun@v2
+      - uses: extractions/setup-just@v3
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -219,6 +223,12 @@ jobs:
           releaseDraft: true
           releaseBody: ${{ steps.notes.outputs.body }}
           args: ${{ matrix.args }}
+      - name: Smoke the actual Linux release bundle
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- just smoke-artifact "${{ matrix.bundle_directory }}"
+      - name: Smoke the actual desktop release bundle
+        if: runner.os != 'Linux'
+        run: just smoke-artifact "${{ matrix.bundle_directory }}"
       # Runs after tauri-action so it packages the very binary tauri just built.
       # Building it here with bare `cargo build --release` would produce a dev-mode
       # binary (no embedded frontend) that fails to start - see the script's guard.
@@ -262,8 +272,10 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
+      - uses: extractions/setup-just@v3
+      - run: sudo apt-get update && sudo apt-get install -y minisign
       - run: bun install --frozen-lockfile
-      - name: Verify latest.json covers all platforms, then publish
+      - name: Download draft assets by release ID, verify signatures, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
@@ -271,45 +283,32 @@ jobs:
           COMMIT_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
-          if [ "$(git rev-parse "v${RELEASE_VERSION}^{commit}")" != "$COMMIT_SHA" ]; then
-            echo "::error::the release tag no longer points at the checked-out commit"
+          release_ref="refs/tags/v${RELEASE_VERSION}"
+          git fetch --no-tags origin "+${release_ref}:${release_ref}"
+          if [ "$(git rev-parse "${release_ref}^{commit}")" != "$COMMIT_SHA" ]; then
+            echo "::error::the release tag moved after validation"
             exit 1
           fi
-          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" != "true" ]; then
-            echo "::error::published releases cannot be modified"
-            exit 1
-          fi
-          asset_url="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | select(.name=="latest.json") | .url')"
-          if [ -z "$asset_url" ]; then
-            echo "::error::latest.json was not uploaded to the release"
-            exit 1
-          fi
-          gh api "$asset_url" -H "Accept: application/octet-stream" > latest.json
-          if ! jq -e --arg v "$RELEASE_VERSION" '.version == $v' latest.json >/dev/null; then
-            echo "::error::latest.json version does not match the release"
-            exit 1
-          fi
-          for plat in darwin-aarch64 linux-x86_64 windows-x86_64; do
-            if ! jq -e --arg p "$plat" --arg path "/releases/download/v${RELEASE_VERSION}/" \
-              '.platforms[$p] | (.signature | strings | length > 0) and (.url | strings | contains($path))' latest.json >/dev/null; then
-              echo "::error::latest.json is missing a signed version-pinned update for $plat"
-              cat latest.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$RUNNER_TEMP/release.json"
+          jq -e --arg tag "v$RELEASE_VERSION" --arg sha "$COMMIT_SHA" \
+            '.draft == true and .tag_name == $tag and .target_commitish == $sha' "$RUNNER_TEMP/release.json" >/dev/null
+          download_directory="$RUNNER_TEMP/release-assets"
+          mkdir -p "$download_directory"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+            --jq '.[] | [.id, .name] | @tsv' > "$RUNNER_TEMP/release-assets.tsv"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            if [[ ! "$asset_id" =~ ^[0-9]+$ || "$asset_name" == */* || "$asset_name" == *\\* || "$asset_name" == "." || "$asset_name" == ".." ]]; then
+              echo "::error::invalid release asset identity"
               exit 1
             fi
-          done
-          echo "latest.json contains darwin-aarch64, linux-x86_64, and windows-x86_64"
-          notes="$(jq -r '.notes' latest.json)"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              -H "Accept: application/octet-stream" > "$download_directory/$asset_name"
+          done < "$RUNNER_TEMP/release-assets.tsv"
+          notes="$(jq -r '.notes' "$download_directory/latest.json")"
           expected_notes="$(bun run scripts/release-body.ts "$RELEASE_VERSION")"
           if [ "$notes" != "$expected_notes" ]; then
             echo "::error::latest.json notes do not match the checked-in changelog for this version"
-            cat latest.json
             exit 1
           fi
-          echo "latest.json carries real release notes"
-          arch_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '[.[] | select(.name | endswith(".pkg.tar.zst"))] | length')"
-          if [ "$arch_count" -eq 0 ]; then
-            echo "::error::no Arch Linux package (*.pkg.tar.zst) was uploaded to the release"
-            exit 1
-          fi
-          echo "the Arch Linux package is attached to the release"
+          just verify-release-assets "$download_directory" "$RELEASE_VERSION" "$GITHUB_REPOSITORY"
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false -F prerelease=false -f make_latest=legacy

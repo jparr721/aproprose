@@ -4,13 +4,13 @@
 // lib/changelog + the changelog store.
 
 import {
-  TypographyEyebrow,
   TypographyH3,
   TypographyMuted,
   TypographyP,
 } from "@/components/ui/typography";
 import { CHANGELOG, type ChangelogEntry } from "@/lib/changelog";
 import type { IncomingVersion } from "@/stores/changelog-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 function EntryView({
   version,
@@ -43,14 +43,18 @@ function IncomingSection({ incoming }: { incoming: IncomingVersion }) {
   const { summary, highlights } = incoming.notes;
   const isEmpty = summary === "" && highlights.length === 0;
   return (
-    <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-3">
-      <TypographyEyebrow>Coming in this update</TypographyEyebrow>
+    <Card className="gap-2 py-3">
+      <CardHeader className="px-3">
+        <CardTitle>Coming in this update</CardTitle>
+      </CardHeader>
+      <CardContent className="px-3">
       {isEmpty ? (
         <TypographyMuted>No release notes for v{incoming.version}.</TypographyMuted>
       ) : (
         <EntryView version={incoming.version} date={null} summary={summary} highlights={highlights} />
       )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 

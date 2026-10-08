@@ -508,6 +508,7 @@ export interface RepoStatus {
 }
 
 export type SyncOutcome =
+  | { kind: "error"; message: string }
   | { kind: "clean" }
   | { kind: "synced" }
   | { kind: "conflict"; files: string[] }
@@ -515,6 +516,11 @@ export type SyncOutcome =
   | { kind: "needsSetup"; reason: string }
   | { kind: "authMissing" }
   | { kind: "offline" };
+
+export interface SyncResult {
+  outcome: SyncOutcome;
+  changedFiles: string[] | null;
+}
 
 export type SyncStatus =
   | "disabled"

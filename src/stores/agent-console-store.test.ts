@@ -578,6 +578,29 @@ describe("agent console store", () => {
     });
   });
 
+  it("keeps a returned root owned by its newest transition generation", () => {
+    const store = useAgentConsoleStore.getState();
+    store.hydrate("/book-a", emptyPersistedState());
+    const stale = store.beginPersistenceTransition("/book-a", "load");
+    store.beginPersistenceTransition("/book-b", "load");
+    store.resetProject();
+    const current = store.beginPersistenceTransition("/book-a", "reset");
+    const before = useAgentConsoleStore.getState();
+
+    expect(store.activatePersistenceTransition(stale)).toBe(false);
+    store.finishPersistenceTransition(stale);
+    expect(
+      store.completePersistenceTransition(stale, emptyPersistedState()),
+    ).toEqual({ status: "stale" });
+    expect(useAgentConsoleStore.getState()).toBe(before);
+    expect(current.generation).toBeGreaterThan(stale.generation);
+    expect(store.activatePersistenceTransition(current)).toBe(true);
+    expect(
+      store.completePersistenceTransition(current, emptyPersistedState()),
+    ).toEqual({ status: "current" });
+    expect(useAgentConsoleStore.getState().hydratedProjectRoot).toBe("/book-a");
+  });
+
   it("requires exact requested, active, and hydrated ownership", () => {
     expect(
       agentConsoleOwnershipStatus(

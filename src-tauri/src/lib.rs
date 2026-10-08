@@ -7,10 +7,13 @@
 //! these snake_case parameters.
 
 pub mod compile;
+pub mod durable_write;
 pub mod git;
 pub mod novel;
 pub mod path_env;
+pub mod process;
 pub mod project;
+pub mod tex_text;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -97,8 +100,7 @@ fn write_text_file(root: String, path: String, content: String) -> Result<(), St
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    std::fs::write(&resolved, content)
-        .map_err(|e| format!("cannot write {}: {e}", resolved.display()))
+    durable_write::write(&resolved, content.as_bytes())
 }
 
 // ── Compile ─────────────────────────────────────────────────────────────────
@@ -315,7 +317,7 @@ fn write_ai_key(
         api_key: trimmed.to_string(),
     })
     .map_err(|_| settings_unavailable_failure())?;
-    std::fs::write(&path, body).map_err(|_| settings_unavailable_failure())?;
+    durable_write::write(&path, body.as_bytes()).map_err(|_| settings_unavailable_failure())?;
 
     #[cfg(unix)]
     {
@@ -497,8 +499,7 @@ fn append_agent_failure_log_entry(
     }
     let body = serde_json::to_string_pretty(&log)
         .map_err(|error| format!("cannot serialize agent failure log: {error}"))?;
-    std::fs::write(path, body)
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    durable_write::write(path, body.as_bytes())?;
 
     #[cfg(unix)]
     {
@@ -545,7 +546,7 @@ fn write_app_data(app: tauri::AppHandle, key: String, value: String) -> Result<(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    std::fs::write(&path, value).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    durable_write::write(&path, value.as_bytes())
 }
 
 /// Build the on-disk path for an app-data key: `<app_config_dir>/data/<key>.json`.

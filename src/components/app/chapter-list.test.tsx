@@ -40,11 +40,30 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useViewStore.getState().cancelPending();
   cleanup();
   vi.restoreAllMocks();
 });
 
 describe("ChapterList", () => {
+  it("guards sidebar Add before replacing a dirty draft", () => {
+    useProjectStore.setState({
+      chapterDirty: true,
+      remoteDivergence: null,
+      blocks: [{ id: "draft", type: "narration", text: "Keep this draft", raw: "", dirty: true }],
+    });
+    render(<SidebarProvider><ChapterList /></SidebarProvider>);
+
+    fireEvent.click(screen.getByTitle("Add chapter"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Four" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(useViewStore.getState().pending).not.toBeNull();
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks[0].text).toBe("Keep this draft");
+    expect(useProjectStore.getState().project?.chapters).toHaveLength(3);
+  });
+
   it("selects a chapter on a normal click", () => {
     render(<SidebarProvider><ChapterList /></SidebarProvider>);
 

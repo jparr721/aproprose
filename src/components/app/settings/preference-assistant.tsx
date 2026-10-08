@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { IconSparkles } from "@tabler/icons-react";
-import { Field } from "@/components/app/settings/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,6 +46,7 @@ function PreferenceAssistantForm({
   keyConfigured,
   onClose,
 }: PreferenceAssistantFormProps): ReactElement {
+  const inputId = useId();
   const value = useSettingsStore((state) => state[field]);
   const [request, setRequest] = useState("");
   const [refinement, setRefinement] = useState<RefinementState>({ status: "idle" });
@@ -135,12 +136,15 @@ function PreferenceAssistantForm({
         </DialogDescription>
       </DialogHeader>
       {value.trim() ? (
-        <Field label="Current text">
-          <Textarea aria-label="Current preference" value={value} readOnly className="min-h-20" />
+        <Field>
+          <FieldLabel htmlFor={`${inputId}-current`}>Current text</FieldLabel>
+          <Textarea id={`${inputId}-current`} aria-label="Current preference" value={value} readOnly className="min-h-20" />
         </Field>
       ) : null}
-      <Field label={value.trim() ? "Additional direction (optional)" : "What should this say?"}>
+      <Field>
+        <FieldLabel htmlFor={`${inputId}-intent`}>{value.trim() ? "Additional direction (optional)" : "What should this say?"}</FieldLabel>
         <Textarea
+          id={`${inputId}-intent`}
           aria-label="Your intent"
           value={request}
           onChange={(event) => {
@@ -166,8 +170,11 @@ function PreferenceAssistantForm({
         </div>
       )}
       {refinement.status === "ready" ? (
-        <Field label="Suggested text" hint={`${refinement.text.length}/${PREFERENCE_MAX_CHARS}`}>
+        <Field>
+          <FieldLabel htmlFor={`${inputId}-suggestion`}>Suggested text</FieldLabel>
+          <FieldDescription>{refinement.text.length}/{PREFERENCE_MAX_CHARS}</FieldDescription>
           <Textarea
+            id={`${inputId}-suggestion`}
             aria-label="Suggested preference"
             value={refinement.text}
             onChange={(event) => {

@@ -290,11 +290,15 @@ function AgentSectionContent({
         </>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2">
-          {project === null ? null : <Spinner className="motion-reduce:animate-none" />}
+          {project === null || (persistenceIssue !== null && persistenceIssue.kind !== "save") ? null : <Spinner className="motion-reduce:animate-none" />}
           <TypographyMuted>
             {project === null
               ? "Open a project to use AI Console."
-              : "Loading AI conversation"}
+              : persistenceIssue !== null && persistenceIssue.kind !== "save"
+                ? canResetAgentSessionPersistence(persistenceIssue)
+                  ? "Retry or reset the conversation to restore AI access."
+                  : "Retry loading the conversation to restore AI access."
+                : "Loading AI conversation"}
           </TypographyMuted>
         </div>
       )}

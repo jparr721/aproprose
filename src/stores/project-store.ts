@@ -7,7 +7,9 @@
 // byte-for-byte.
 
 import { notifyAppError, reportNotification } from "@/lib/notifications";
+import type { AppNotificationType } from "@/lib/notification-model";
 import { create } from "zustand";
+import { safeParse } from "zod";
 import { sumBy } from "es-toolkit";
 import { arrayMove } from "@dnd-kit/sortable";
 import { toast } from "sonner";
@@ -112,6 +114,7 @@ import {
   setChapterPlotPoint as setChapterPlotPointModel,
 } from "@/lib/outline/model";
 import { runMigrations, EMPTY_META } from "@/lib/migration";
+import { storedProjectMetaSchema } from "@/lib/migration/schema";
 import { updateLore, removeLore } from "@/lib/lore/model";
 import { DEFAULT_CHARACTER_COLOR } from "@/lib/characters/colors";
 import { applyCharacterKnowledgePatch } from "@/lib/story-knowledge/merge";
@@ -121,6 +124,7 @@ import type {
   StoryRefreshResult,
 } from "@/lib/story-knowledge/refresh";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
+import { noteProjectRemoteChanges, projectRemoteRevision, queueProjectOperation, type SaveOutcome, type ProjectSyncSnapshot } from "@/lib/project-operations";
 
 type ProjectStatus = "empty" | "loading" | "ready";
 type CompileStatus = "idle" | "compiling" | "clean" | "error";
@@ -162,6 +166,8 @@ const LOADING_RESET = {
   editing: false,
   editCaret: null,
   chapterDirty: false,
+  saving: false,
+  remoteDivergence: null,
   compile: EMPTY_COMPILE,
   error: null,
   saveError: null,
@@ -214,23 +220,13 @@ function queueProjectMetaWrite(
   root: string,
   meta: ProjectMeta,
   provenance: ProjectMetaProvenance,
+  assertOwned: () => void,
 ): Promise<void> {
-  const previous = metaWriteQueues.get(root);
-  const persist = (): Promise<void> => {
-    const write = writeProjectMeta(root, JSON.stringify(meta));
-    void write.then(
-      () => {
-        provenance.lastDurableMeta = meta;
-      },
-      () => undefined,
-    );
-    return write;
-  };
-  const write = previous
-    ? previous
-        .catch(() => undefined)
-        .then(persist)
-    : persist();
+  const write = queueProjectOperation(root, async () => {
+    assertOwned();
+    await writeProjectMeta(root, JSON.stringify(meta));
+    provenance.lastDurableMeta = meta;
+  });
   const tracked = write.finally(() => {
     if (metaWriteQueues.get(root) === tracked) {
       metaWriteQueues.delete(root);
@@ -245,6 +241,9 @@ export function drainProjectMetaWrites(root: string): Promise<void> {
 }
 
 interface ProjectState {
+  lifecycleGeneration: number;
+  editRevision: number;
+  remoteDivergence: { reason: "remote-pull" | "chapter-deleted" | "skeleton-write"; changedFiles: string[] | null } | null;
   status: ProjectStatus;
   project: ProjectInfo | null;
   meta: ProjectMeta;
@@ -363,7 +362,8 @@ interface ProjectState {
   redo: () => void;
 
   // persistence + build
-  saveChapter: () => Promise<void>;
+  saveChapter: () => Promise<SaveOutcome>;
+  reconcileRemoteChanges: (root: string, changedFiles: string[] | null, beforePull: ProjectSyncSnapshot) => Promise<void>;
   compileNow: () => Promise<void>;
 
   // metadata
@@ -598,18 +598,50 @@ function notifyBuildFailed(errorCount: number, projectRoot: string): void {
   );
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => {
-  let chapterLoadSequence = 0;
+export const useProjectStore = create<ProjectState>((rawSet, get) => {
+  const set = (partial: Partial<ProjectState> | ((state: ProjectState) => Partial<ProjectState>)): void => {
+    rawSet((state) => {
+      const next = typeof partial === "function" ? partial(state) : partial;
+      return next.blocks !== undefined && next.blocks !== state.blocks
+        ? { ...next, editRevision: state.editRevision + 1 }
+        : next;
+    });
+  };
+  let chapterRequest = 0;
+  let compileRequest = 0;
+  let saveRequest = 0;
+  const owns = (generation: number, root: string): boolean =>
+    get().lifecycleGeneration === generation && get().project?.root === root;
+  const assertWritable = (): void => {
+    const divergence = get().remoteDivergence;
+    if (divergence !== null) {
+      throw new Error(divergence.reason === "remote-pull"
+        ? "Remote project files changed. Reopen the project and confirm discarding the preserved draft to load them."
+        : "Project files changed on disk. Reopen the project and confirm discarding the preserved draft to load them.");
+    }
+  };
+  const captureWriteGuard = (root: string): (() => void) => {
+    const generation = get().lifecycleGeneration;
+    const remoteRevision = projectRemoteRevision(root);
+    assertWritable();
+    return () => {
+      if (projectRemoteRevision(root) !== remoteRevision) throw new Error(`Remote files changed before the queued metadata write for ${root}. Reopen the project to resolve the local draft.`);
+      // Already-accepted metadata snapshots drain at their captured root even
+      // after close. UI effects remain owned by the originating lifecycle.
+      if (owns(generation, root)) assertWritable();
+    };
+  };
   // Writes are cheap and infrequent, so persist eagerly (no debounce).
   const persistMeta = (meta: ProjectMeta) => {
     const project = get().project;
     if (project) {
+      const assertOwned = captureWriteGuard(project.root);
       const provenance = inheritProjectMetaProvenance(
         project.root,
         get().meta,
         meta,
       );
-      void queueProjectMetaWrite(project.root, meta, provenance).catch((e) => {
+      void queueProjectMetaWrite(project.root, meta, provenance, assertOwned).catch((e) => {
         notifyAppError("metadata-save", "Project", project.root, e);
       });
     }
@@ -620,8 +652,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     meta: ProjectMeta,
     provenance: ProjectMetaProvenance,
   ): Promise<void> => {
+    const assertOwned = captureWriteGuard(root);
     try {
-      await queueProjectMetaWrite(root, meta, provenance);
+      await queueProjectMetaWrite(root, meta, provenance, assertOwned);
     } catch (error) {
       notifyAppError("metadata-save", "Project", root, error);
       throw error;
@@ -633,6 +666,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     previousMeta: ProjectMeta,
     optimisticMeta: ProjectMeta,
   ): Promise<void> => {
+    const generation = get().lifecycleGeneration;
+    assertWritable();
     const provenance = inheritProjectMetaProvenance(
       root,
       previousMeta,
@@ -641,52 +676,70 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     set({ meta: optimisticMeta });
     try {
       await persistMetaAndWait(root, optimisticMeta, provenance);
+      if (!owns(generation, root)) throw new Error("Metadata completion belongs to an obsolete project lifecycle");
     } catch (error) {
       const current = get();
-      if (current.project?.root === root && current.meta === optimisticMeta) {
+      if (owns(generation, root) && current.meta === optimisticMeta && current.remoteDivergence === null) {
         set({ meta: provenance.lastDurableMeta });
       }
       throw error;
     }
   };
 
-  const persistRecents = (recents: RecentProject[]) => {
+  const persistRecents = (recents: RecentProject[], root: string): void => {
     void writeAppData(RECENTS_KEY, recents).catch((e) => {
-      notifyAppError("recents-save", "Project", get().project?.root ?? null, e);
+      notifyAppError("recents-save", "Project", root, e);
     });
   };
 
   // Shared tail of loading a ready project (used by loadProjectAt + migrate +
   // create): record recents, remember for relaunch, select first chapter, PDF.
-  const finishLoad = async (root: string, project: ProjectInfo) => {
-    // Metadata now lives in the repo (.aproprose/meta.json) so it's backed up.
-    // In-repo metadata wins; a corrupt meta.json must not brick the open — fall
-    // back to the legacy app-config record (or empty), migrating that record into
-    // the repo once when no in-repo file exists yet.
-    await drainProjectMetaWrites(root);
-    let meta: ProjectMeta;
+  const readMeta = async (root: string, requestedRoot: string): Promise<{ meta: ProjectMeta; source: "repo" | "legacy" | "empty" }> => {
     const inRepo = await readProjectMeta(root);
-    let parsed: unknown = null;
-    if (inRepo) {
-      try {
-        parsed = JSON.parse(inRepo);
-      } catch {
-        if (import.meta.env.DEV) console.warn("Corrupt meta.json, falling back to legacy storage");
-        parsed = null;
-      }
+    if (inRepo !== null) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(inRepo); }
+      catch (error) { throw new Error(`Cannot read ${root}/.aproprose/meta.json: ${String(error)}`); }
+      const validated = safeParse(storedProjectMetaSchema, parsed);
+      if (!validated.success) throw new Error(`Invalid project metadata in ${root}/.aproprose/meta.json: ${validated.error.message}`);
+      return { meta: runMigrations(parsed), source: "repo" };
     }
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      meta = runMigrations(parsed);
-    } else {
-      const legacy = await readAppData<ProjectMeta>(metaKey(root));
-      meta = runMigrations(legacy ?? null);
-      if (legacy && !inRepo) await writeProjectMeta(root, JSON.stringify(meta));
+    let legacyKey = metaKey(root);
+    let legacy = await readAppData<unknown>(legacyKey);
+    if (legacy === null && requestedRoot !== root) {
+      legacyKey = metaKey(requestedRoot);
+      legacy = await readAppData<unknown>(legacyKey);
+    }
+    if (legacy !== null) {
+      const validated = safeParse(storedProjectMetaSchema, legacy);
+      if (!validated.success) throw new Error(`Invalid project metadata in legacy app data ${legacyKey} for ${root}: ${validated.error.message}`);
+    }
+    return { meta: runMigrations(legacy), source: legacy === null ? "empty" : "legacy" };
+  };
+
+  const finishLoad = async (requestedRoot: string, project: ProjectInfo, generation: number) => {
+    const root = project.root;
+    await drainProjectMetaWrites(root);
+    if (get().lifecycleGeneration !== generation) return;
+    const loaded = await readMeta(root, requestedRoot);
+    if (get().lifecycleGeneration !== generation) return;
+    const { meta } = loaded;
+    if (loaded.source === "legacy") {
+      await queueProjectOperation(root, async () => {
+        if (get().lifecycleGeneration !== generation) return;
+        await writeProjectMeta(root, JSON.stringify(meta));
+      });
+      if (get().lifecycleGeneration !== generation) return;
     }
 
     const entry: RecentProject = { root, name: project.name, openedAt: Date.now() };
-    const recents = [entry, ...get().recents.filter((r) => r.root !== root)].slice(0, 12);
-    persistRecents(recents);
-    void writeAppData(LAST_PROJECT_KEY, root);
+    const recents = [entry, ...get().recents.filter((r) => r.root !== root && r.root !== requestedRoot)].slice(0, 12);
+    persistRecents(recents, root);
+    void writeAppData(LAST_PROJECT_KEY, root).catch((error: unknown) => {
+      if (owns(generation, root)) toast.error("Couldn't remember the project", { description: String(error) });
+    });
+    const initialChapterRequest = chapterRequest;
+    const initialEditRevision = get().editRevision;
     set({ project, meta, recents, status: "ready", needsMigration: null, error: null });
     useStatsStore
       .getState()
@@ -699,10 +752,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     // Reopen the chapter the author last had open (ids are stable across loads);
     // fall back to the first chapter if it's gone or none was recorded.
     const savedChapterId = await readAppData<string>(lastChapterKey(root));
+    if (!owns(generation, root)) return;
     const target =
       (savedChapterId && project.chapters.find((c) => c.id === savedChapterId)) ||
       project.chapters[0];
-    if (target) await get().selectChapter(target.id);
+    if (target && chapterRequest === initialChapterRequest && get().editRevision === initialEditRevision) await get().selectChapter(target.id);
+    if (!owns(generation, root)) return;
 
     const pdfName = project.mainFile.replace(/\.tex$/i, ".pdf");
     const pdfBase64 = await readPdf(root, pdfName).catch((e) => {
@@ -711,7 +766,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     });
     // A PDF on disk means a prior build exists: surface it as "clean" (the
     // "loaded" badge state) rather than leaving the idle "not built" status.
-    if (pdfBase64) set((s) => ({ compile: { ...s.compile, pdfBase64, status: "clean" } }));
+    if (pdfBase64 && owns(generation, root)) set((s) => ({ compile: { ...s.compile, pdfBase64, status: "clean" } }));
   };
 
   /** Build a regeneration model from the current project (order-preserving). */
@@ -720,7 +775,44 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     chapters: project.chapters.map((c) => ({ title: c.title, file: c.file })),
   });
 
+  const mutateSkeleton = async (
+    notificationType: AppNotificationType,
+    operation: (project: ProjectInfo) => Promise<ProjectInfo>,
+  ): Promise<ProjectInfo | null> => {
+    const { project, lifecycleGeneration } = get();
+    if (project === null) return null;
+    const remoteRevision = projectRemoteRevision(project.root);
+    let dispatched = false;
+    try {
+      return await queueProjectOperation(project.root, async () => {
+        if (!owns(lifecycleGeneration, project.root)) return null;
+        if (projectRemoteRevision(project.root) !== remoteRevision) throw new Error(`Remote files changed before the queued project write for ${project.root}. Reopen the project to resolve the local draft.`);
+        assertWritable();
+        const current = get().project;
+        if (current === null) return null;
+        dispatched = true;
+        const updated = await operation(current);
+        if (!owns(lifecycleGeneration, project.root)) return null;
+        if (updated === current) return current;
+        set({ project: updated });
+        useStoryRefreshStore.getState().enqueueChapterTopology(project.root);
+        return updated;
+      });
+    } catch (error) {
+      if (dispatched) noteProjectRemoteChanges(project.root);
+      if (owns(lifecycleGeneration, project.root)) {
+        const message = String(error);
+        set({ error: message, ...(dispatched ? { remoteDivergence: { reason: "skeleton-write", changedFiles: ["metadata.tex", "chapters.tex"] } } : {}) });
+        notifyAppError(notificationType, "Project", project.root, error);
+      }
+      return null;
+    }
+  };
+
   return {
+    lifecycleGeneration: 0,
+    editRevision: 0,
+    remoteDivergence: null,
     status: "empty",
     project: null,
     meta: EMPTY_META,
@@ -743,35 +835,42 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     lastTextEditId: null,
 
     init: async () => {
+      const generation = get().lifecycleGeneration;
       await useStatsStore.persist.rehydrate();
+      if (get().lifecycleGeneration !== generation) return;
       const recents = (await readAppData<RecentProject[]>(RECENTS_KEY)) ?? [];
+      if (get().lifecycleGeneration !== generation) return;
       set({ recents });
       // Re-open the last project so a refresh / relaunch lands back in the editor.
       // If it can't be reopened (folder moved or deleted), forget it so the
       // welcome screen doesn't show the same error on every launch.
       const lastRoot = await readAppData<string>(LAST_PROJECT_KEY);
+      if (get().lifecycleGeneration !== generation) return;
       if (lastRoot) {
         await get().loadProjectAt(lastRoot);
-        if (get().status !== "ready") void writeAppData(LAST_PROJECT_KEY, "");
       }
     },
 
     openProjectDialog: async () => {
+      const generation = get().lifecycleGeneration;
       const root = await pickProjectDir();
-      if (!root) return;
+      if (!root || get().lifecycleGeneration !== generation) return;
       await get().loadProjectAt(root);
     },
 
     loadProjectAt: async (root) => {
-      // Wipe everything — this is the multi-project reset.
       const previousRoot = get().project?.root ?? null;
+      const generation = get().lifecycleGeneration + 1;
       useStoryRefreshStore.getState().cancel();
-      set(LOADING_RESET);
+      useSyncStore.getState().teardown();
+      chapterRequest += 1;
+      compileRequest += 1;
+      set({ ...LOADING_RESET, lifecycleGeneration: generation });
       try {
-        if (previousRoot !== null) {
-          await drainProjectMetaWrites(previousRoot);
-        }
-        const outcome = await openProjectCmd(root);
+        if (previousRoot !== null) await drainProjectMetaWrites(previousRoot);
+        if (get().lifecycleGeneration !== generation) return;
+        const outcome = await queueProjectOperation(root, () => openProjectCmd(root));
+        if (get().lifecycleGeneration !== generation) return;
         if (outcome.status === "needsMigration") {
           set({
             status: "empty",
@@ -786,18 +885,35 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (!outcome.project) {
           throw new Error("managed project returned without data");
         }
-        await finishLoad(root, outcome.project);
+        let project = outcome.project;
+        if (project.root !== root) {
+          const canonicalRoot = project.root;
+          const reopened = await queueProjectOperation(canonicalRoot, () => openProjectCmd(canonicalRoot));
+          if (get().lifecycleGeneration !== generation) return;
+          if (reopened.status !== "managed" || reopened.project === null) {
+            throw new Error(`Managed project layout changed while reopening ${canonicalRoot}`);
+          }
+          project = reopened.project;
+        }
+        await finishLoad(root, project, generation);
       } catch (e) {
-        notifyAppError("project-open", "Project", root, e);
-        set({ status: "empty", error: String(e) });
+        if (get().lifecycleGeneration === generation) {
+          notifyAppError("project-open", "Project", root, e);
+          set({ status: "empty", error: String(e) });
+        }
       }
     },
 
     closeProject: () => {
       // Explicit close: forget the last project so it isn't auto-reopened.
       const root = get().project?.root ?? null;
+      const generation = get().lifecycleGeneration + 1;
+      chapterRequest += 1;
+      compileRequest += 1;
       useStoryRefreshStore.getState().cancel();
-      void writeAppData(LAST_PROJECT_KEY, "");
+      void writeAppData(LAST_PROJECT_KEY, "").catch((error: unknown) => {
+        if (get().lifecycleGeneration === generation) toast.error("Couldn't forget the project", { description: String(error) });
+      });
       useSyncStore.getState().teardown();
       if (root !== null) {
         void drainProjectMetaWrites(root).catch((error) => {
@@ -805,6 +921,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         });
       }
       set({
+        lifecycleGeneration: generation,
+        remoteDivergence: null,
+        saving: false,
         status: "empty",
         project: null,
         meta: EMPTY_META,
@@ -826,16 +945,24 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     selectChapter: async (id) => {
-      const { project } = get();
+      const { project, lifecycleGeneration, editRevision } = get();
       if (!project) return;
       const chapter = project.chapters.find((c) => c.id === id);
       if (!chapter) return;
-      const request = ++chapterLoadSequence;
-      const ownsRequest = (): boolean => get().project === project && request === chapterLoadSequence;
+      const request = ++chapterRequest;
+      const current = (): boolean => {
+        const state = get();
+        return owns(lifecycleGeneration, project.root) &&
+          chapterRequest === request &&
+          state.editRevision === editRevision &&
+          state.project !== null &&
+          state.project.chapters.some((entry) => entry.id === chapter.id && entry.file === chapter.file);
+      };
       try {
         const source = await readTextFile(project.root, chapter.file);
-        if (!ownsRequest()) return;
+        if (!current()) return;
         const blocks = parseChapter(source);
+        compileRequest += 1;
         set({
           activeChapterId: id,
           blocks,
@@ -846,6 +973,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           editing: false,
           editCaret: null,
           chapterDirty: false,
+          saving: false,
+          compile: { ...get().compile, status: "idle" },
           error: null,
           saveError: null,
           past: [],
@@ -855,18 +984,23 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // Remember this chapter so the next relaunch reopens it. Non-critical: a
         // failed write just means the next launch falls back to the first chapter.
         void writeAppData(lastChapterKey(project.root), id).catch((e) => {
-          if (import.meta.env.DEV) console.warn("Couldn't persist last chapter:", e);
+          if (owns(lifecycleGeneration, project.root) && chapterRequest === request) toast.error("Couldn't remember the chapter", { description: String(e) });
         });
       } catch (e) {
-        if (!ownsRequest()) return;
-        notifyAppError("chapter-open", "Project", project.root, e);
-        set({ error: String(e) });
+        if (current()) {
+          notifyAppError("chapter-open", "Project", project.root, e);
+          set({ error: String(e) });
+        }
       }
     },
 
     createProject: async (parent, name, author) => {
+      const generation = get().lifecycleGeneration + 1;
       useStoryRefreshStore.getState().cancel();
-      set(LOADING_RESET);
+      useSyncStore.getState().teardown();
+      chapterRequest += 1;
+      compileRequest += 1;
+      set({ ...LOADING_RESET, lifecycleGeneration: generation });
       try {
         const metadata: NovelMetadata = {
           title: name,
@@ -876,81 +1010,69 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           isbn: "",
         };
         const project = await createProjectCmd(parent, name, metadata);
-        await finishLoad(project.root, project);
+        if (get().lifecycleGeneration !== generation) return;
+        await finishLoad(project.root, project, generation);
       } catch (e) {
+        if (get().lifecycleGeneration !== generation) return;
         notifyAppError("project-create", "Project", parent, e);
         set({ status: "empty", error: String(e) });
       }
     },
 
     addChapter: async (title) => {
-      const { project } = get();
-      if (!project) return;
-      const model = toModel(project);
-      model.chapters.push({ title, file: null });
-      try {
-        const updated = await writeSkeleton(project.root, model);
-        set({ project: updated });
-        useStoryRefreshStore
-          .getState()
-          .enqueueChapterTopology(project.root);
-        const created = updated.chapters[updated.chapters.length - 1];
-        if (created) await get().selectChapter(created.id);
-      } catch (e) {
-        notifyAppError("chapter-create", "Project", project.root, e);
-        set({ error: String(e) });
-      }
+      await useViewStore.getState().requestGuarded(async () => {
+        const { lifecycleGeneration: generation, activeChapterId, editRevision } = get();
+        const request = chapterRequest;
+        const updated = await mutateSkeleton("chapter-create", async (project) => {
+          const model = toModel(project);
+          return writeSkeleton(project.root, { ...model, chapters: [...model.chapters, { title, file: null }] });
+        });
+        if (updated === null || !owns(generation, updated.root) || get().activeChapterId !== activeChapterId || get().editRevision !== editRevision || chapterRequest !== request) return;
+        const created = updated.chapters.at(-1);
+        if (created !== undefined) await get().selectChapter(created.id);
+      });
     },
 
     renameChapter: async (id, title) => {
-      const { project } = get();
-      if (!project) return;
-      const idx = project.chapters.findIndex((c) => c.id === id);
-      if (idx < 0) return;
-      const model = toModel(project);
-      model.chapters[idx] = { ...model.chapters[idx], title };
-      try {
-        const updated = await writeSkeleton(project.root, model);
-        set({ project: updated });
-        useStoryRefreshStore
-          .getState()
-          .enqueueChapterTopology(project.root);
-      } catch (e) {
-        notifyAppError("chapter-rename", "Project", project.root, e);
-        set({ error: String(e) });
-      }
+      await mutateSkeleton("chapter-rename", async (project) => {
+        const model = toModel(project);
+        return writeSkeleton(project.root, { ...model, chapters: model.chapters.map((chapter, index) => project.chapters[index].id === id ? { ...chapter, title } : chapter) });
+      });
     },
 
     moveChapter: async (id, toIndex) => {
-      const { project } = get();
-      if (!project) return;
-      const idx = project.chapters.findIndex((c) => c.id === id);
-      if (idx < 0 || idx === toIndex || !Number.isInteger(toIndex) || toIndex < 0 || toIndex >= project.chapters.length) return;
-      const model = toModel(project);
-      const reordered = { ...model, chapters: arrayMove(model.chapters, idx, toIndex) };
-      try {
-        const updated = await writeSkeleton(project.root, reordered);
-        set({ project: updated });
-        useStoryRefreshStore
-          .getState()
-          .enqueueChapterTopology(project.root);
-      } catch (e) {
-        notifyAppError("chapter-reorder", "Project", project.root, e);
-        set({ error: String(e) });
-      }
+      await mutateSkeleton("chapter-reorder", async (project) => {
+        const index = project.chapters.findIndex((chapter) => chapter.id === id);
+        if (index < 0 || index === toIndex || !Number.isInteger(toIndex) || toIndex < 0 || toIndex >= project.chapters.length) return project;
+        const model = toModel(project);
+        return writeSkeleton(project.root, { ...model, chapters: arrayMove(model.chapters, index, toIndex) });
+      });
     },
 
     deleteChapter: async (id) => {
-      const { project, activeChapterId } = get();
-      if (!project) return;
-      const idx = project.chapters.findIndex((c) => c.id === id);
-      if (idx < 0) return;
-      const file = project.chapters[idx].file;
-      const model = toModel(project);
-      model.chapters.splice(idx, 1);
-      try {
-        const updated = await deleteChapterCmd(project.root, model, file);
-        set({ project: updated });
+      const { lifecycleGeneration: generation, project: snapshot, editRevision } = get();
+      const request = chapterRequest;
+      const updated = await mutateSkeleton("chapter-delete", async (project) => {
+        const chapter = project.chapters.find((entry) => entry.id === id);
+        if (chapter === undefined) return project;
+        const model = toModel(project);
+        return deleteChapterCmd(project.root, { ...model, chapters: model.chapters.filter((_, index) => project.chapters[index].id !== id) }, chapter.file);
+      });
+      if (updated !== null && owns(generation, updated.root)) {
+        if (snapshot !== null && get().activeChapterId === id && (get().editRevision !== editRevision || chapterRequest !== request)) {
+          const deleted = snapshot.chapters.find((chapter) => chapter.id === id);
+          if (deleted !== undefined) {
+            noteProjectRemoteChanges(updated.root);
+            compileRequest += 1;
+            set((state) => ({
+              project: snapshot,
+              remoteDivergence: { reason: "chapter-deleted", changedFiles: [deleted.file] },
+              saveError: "This chapter was deleted from disk while you were editing. Copy the preserved draft before reopening the project.",
+              compile: { ...state.compile, status: "idle" },
+            }));
+            return;
+          }
+        }
         set((s) => {
           const meta = {
             ...s.meta,
@@ -963,9 +1085,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         });
         useStoryRefreshStore
           .getState()
-          .enqueueChapterTopology(project.root);
+          .enqueueChapterTopology(updated.root);
         deleteOutlineAgentSession(id);
-        if (activeChapterId === id) {
+        if (get().activeChapterId === id) {
           const first = updated.chapters[0];
           if (first) await get().selectChapter(first.id);
           else
@@ -979,35 +1101,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               saveError: null,
             });
         }
-      } catch (e) {
-        notifyAppError("chapter-delete", "Project", project.root, e);
-        set({ error: String(e) });
       }
     },
 
     updateMetadata: async (fields) => {
-      const { project } = get();
-      if (!project) return;
-      const model = toModel(project);
-      model.metadata = { ...project.metadata, ...fields };
-      try {
-        const updated = await writeSkeleton(project.root, model);
-        set({ project: updated });
-      } catch (e) {
-        notifyAppError("project-settings", "Project", project.root, e);
-        set({ error: String(e) });
-      }
+      await mutateSkeleton("project-settings", async (project) => writeSkeleton(project.root, { ...toModel(project), metadata: { ...project.metadata, ...fields } }));
     },
 
     migrateProject: async () => {
       const nm = get().needsMigration;
       if (!nm) return;
+      const generation = get().lifecycleGeneration + 1;
       useStoryRefreshStore.getState().cancel();
-      set(LOADING_RESET);
+      useSyncStore.getState().teardown();
+      chapterRequest += 1;
+      compileRequest += 1;
+      set({ ...LOADING_RESET, lifecycleGeneration: generation });
       try {
         const project = await migrateToManaged(nm.root);
-        await finishLoad(project.root, project);
+        if (get().lifecycleGeneration !== generation) return;
+        await finishLoad(project.root, project, generation);
       } catch (e) {
+        if (get().lifecycleGeneration !== generation) return;
         // Restore the migration prompt so the user can retry without reopening.
         notifyAppError("migration", "Project", nm.root, e);
         set({ status: "empty", error: String(e), needsMigration: nm });
@@ -1573,18 +1688,35 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }),
 
     saveChapter: async () => {
-      const { project, activeChapterId, blocks, chapterDirty } = get();
-      if (!project || !activeChapterId || !chapterDirty) return;
+      const { project, activeChapterId, blocks, chapterDirty, lifecycleGeneration, remoteDivergence, editRevision } = get();
+      if (remoteDivergence !== null) return { status: "blocked", message: "Project files changed on disk. Reopen the project before saving." };
+      if (!project || !activeChapterId || !chapterDirty) return { status: "clean" };
       const chapter = project.chapters.find((c) => c.id === activeChapterId);
-      if (!chapter) return;
+      if (!chapter) return { status: "failed", message: "The active chapter is missing from the project" };
+      const request = chapterRequest;
+      const remoteRevision = projectRemoteRevision(project.root);
+      const save = ++saveRequest;
+      const current = (): boolean => owns(lifecycleGeneration, project.root) && get().activeChapterId === activeChapterId && chapterRequest === request;
+      const ownsSaving = (): boolean => owns(lifecycleGeneration, project.root) && get().activeChapterId === activeChapterId && saveRequest === save;
       set({ saving: true, saveError: null });
       try {
         const source = serializeChapter(blocks);
-        await writeTextFile(project.root, chapter.file, source);
+        const persisted = await queueProjectOperation(project.root, async () => {
+          if (!current()) return false;
+          if (projectRemoteRevision(project.root) !== remoteRevision) throw new Error(`Remote files changed before the queued chapter write for ${project.root}. Reopen the project to resolve the local draft.`);
+          assertWritable();
+          await writeTextFile(project.root, chapter.file, source);
+          return true;
+        });
+        if (!persisted || !current()) {
+          if (ownsSaving()) set({ saving: false });
+          return { status: "stale" };
+        }
         // Re-parse what we wrote so spans reset and the chapter is clean again.
         const reparsed = parseChapter(source);
         const wordCount = countWords(reparsed);
-        set((s) => {
+        // Normalizing this durable snapshot is not a new author edit.
+        rawSet((s) => {
           // parseChapter re-mints every block id. When the reparse preserved the
           // block count, adopt the OLD ids positionally so a plain save keeps ids
           // stable - pending proposals, finding anchors, and the selection all
@@ -1592,25 +1724,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           // re-segmented, e.g. a blank line split a narration in two) positions
           // no longer denote the same blocks, so fall back to fresh ids and a
           // cleared selection rather than land it on a wrong or dead block.
-          const sameCount = reparsed.length === s.blocks.length;
+          const unchanged = s.editRevision === editRevision && s.blocks === blocks;
+          const sameCount = reparsed.length === blocks.length;
           if (import.meta.env.DEV && !sameCount) {
             console.warn(
               `saveChapter: reparse changed block count ${s.blocks.length} -> ${reparsed.length}; clearing selection (positional id adoption unreliable)`,
             );
           }
-          const blocks = sameCount
-            ? reparsed.map((b, i) => ({ ...b, id: s.blocks[i].id }))
+          const parsedBlocks = sameCount
+            ? reparsed.map((b, i) => ({ ...b, id: blocks[i].id }))
             : reparsed;
           return {
-            blocks,
-            selectedId: sameCount ? s.selectedId : null,
-            selectedIds: sameCount ? s.selectedIds : [],
-            chapterDirty: false,
-            saving: false,
+            ...(unchanged ? {
+              blocks: parsedBlocks,
+              selectedId: sameCount ? s.selectedId : null,
+              selectedIds: sameCount ? s.selectedIds : [],
+              chapterDirty: false,
+              past: [],
+              future: [],
+              lastTextEditId: null,
+            } : {}),
+            saving: saveRequest === save ? false : s.saving,
             saveError: null,
-            past: [],
-            future: [],
-            lastTextEditId: null,
             project: s.project
               ? {
                   ...s.project,
@@ -1621,6 +1756,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               : s.project,
           };
         });
+        if (!current()) return { status: "stale" };
         // Stats capture is best-effort: a recordSave failure must never abort the save.
         try {
           const updated = get().project;
@@ -1637,22 +1773,92 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         useStoryRefreshStore.getState().enqueueSavedChapter(
           project.root,
           activeChapterId,
-          storyChapterFingerprint(get().blocks),
+          storyChapterFingerprint(reparsed),
         );
+        return { status: "saved" };
       } catch (e) {
         const message = String(e);
+        if (!current()) {
+          if (ownsSaving()) set({ saving: false });
+          return { status: "stale" };
+        }
         notifyAppError("chapter-save", "Editor", project.root, e);
-        set({ saving: false, error: message, saveError: message });
+        set({ saving: ownsSaving() ? false : get().saving, error: message, saveError: message });
+        return { status: get().remoteDivergence === null ? "failed" : "blocked", message };
+      }
+    },
+
+    reconcileRemoteChanges: async (root, changedFiles, beforePull) => {
+      if ((changedFiles !== null && changedFiles.length === 0) || !owns(beforePull.lifecycleGeneration, root)) return;
+      const { lifecycleGeneration, blocks, meta, activeChapterId, chapterDirty, editRevision } = get();
+      const divergence = { reason: "remote-pull" as const, changedFiles };
+      chapterRequest += 1;
+      compileRequest += 1;
+      set((state) => ({ remoteDivergence: divergence, compile: { ...state.compile, status: "idle" } }));
+      if (chapterDirty || editRevision !== beforePull.editRevision || meta !== beforePull.meta) {
+        set({ saveError: "Remote files changed. Reopen the project and confirm discarding the local draft to load them." });
+        return;
+      }
+      try {
+        const outcome = await openProjectCmd(root);
+        if (!owns(lifecycleGeneration, root)) return;
+        if (outcome.status !== "managed" || outcome.project === null) throw new Error("Synced project no longer has a managed project layout");
+        const nextMeta = await readMeta(root, root);
+        if (!owns(lifecycleGeneration, root)) return;
+        const chapter = outcome.project.chapters.find((entry) => entry.id === activeChapterId) ?? outcome.project.chapters[0];
+        const source = chapter === undefined ? null : await readTextFile(root, chapter.file);
+        if (!owns(lifecycleGeneration, root)) return;
+        const live = get();
+        if (live.editRevision !== editRevision || live.blocks !== blocks || live.meta !== meta || live.chapterDirty || live.remoteDivergence !== divergence) {
+          set({ saveError: "Remote files changed during editing. Reopen the project to resolve the local draft." });
+          return;
+        }
+        const nextBlocks = source === null ? [] : parseChapter(source);
+        set({
+          project: outcome.project,
+          meta: nextMeta.meta,
+          activeChapterId: chapter === undefined ? null : chapter.id,
+          blocks: nextBlocks,
+          selectedId: nextBlocks.at(-1)?.id ?? null,
+          selectedIds: [],
+          chapterDirty: false,
+          editing: false,
+          editCaret: null,
+          past: [],
+          future: [],
+          lastTextEditId: null,
+          saving: false,
+          remoteDivergence: null,
+          saveError: null,
+          compile: EMPTY_COMPILE,
+        });
+      } catch (error) {
+        if (!owns(lifecycleGeneration, root)) return;
+        const message = `Couldn't reload synced project files: ${String(error)}`;
+        set({ error: message, saveError: message });
+        toast.error("Remote changes need resolution", { description: message });
       }
     },
 
     compileNow: async () => {
-      const { project, chapterDirty } = get();
+      const { project, lifecycleGeneration, activeChapterId } = get();
       if (!project) return;
-      if (chapterDirty) await get().saveChapter();
+      const request = ++compileRequest;
+      const current = (): boolean => owns(lifecycleGeneration, project.root) && compileRequest === request && get().activeChapterId === activeChapterId;
+      const saved = await get().saveChapter();
+      if ((saved.status !== "saved" && saved.status !== "clean") || !current() || get().chapterDirty || get().remoteDivergence !== null) return;
+      const revision = get().editRevision;
       set((s) => ({ compile: { ...s.compile, status: "compiling" } }));
       try {
-        const result = await compileProject(project.root, project.mainFile);
+        const result = await queueProjectOperation(project.root, async () => {
+          if (!current() || get().editRevision !== revision || get().chapterDirty || get().remoteDivergence !== null) return null;
+          return compileProject(project.root, project.mainFile);
+        });
+        if (!current()) return;
+        if (result === null || get().editRevision !== revision || get().chapterDirty) {
+          set((state) => ({ compile: { ...state.compile, status: "idle" } }));
+          return;
+        }
         set({
           compile: {
             status: result.ok ? "clean" : "error",
@@ -1665,6 +1871,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         });
         if (!result.ok) notifyBuildFailed(result.errors.length, project.root);
       } catch (e) {
+        if (!current()) return;
         set((s) => ({
           compile: {
             ...s.compile,

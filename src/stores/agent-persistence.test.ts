@@ -65,6 +65,7 @@ import {
   useAgentPersistence,
 } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
+import { createAgentPersistenceCoordinator } from "@/stores/agent-persistence-coordinator";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
 
@@ -591,6 +592,107 @@ describe("agent persistence", () => {
     expect(saved).not.toContain("PRIVATE KNOWLEDGE BODY");
     expect(saved).not.toContain("PRIVATE CHAPTER BODY");
     expect(saved).not.toContain("PRIVATE PROFILE BODY");
+  });
+
+  it("retains the newest recovery revision until that revision is durable", () => {
+    const coordinator = createAgentPersistenceCoordinator();
+    const root = "/books/one";
+    const firstRevision = coordinator.nextRevision();
+    const issue: AgentPersistenceIssue = {
+      kind: "save",
+      projectRoot: root,
+      message: "Disk is unavailable",
+    };
+    const original: CapturedFailedWrite = {
+      kind: "write",
+      root,
+      snapshot: persistedState("Original draft", []),
+      issue,
+      revision: firstRevision,
+      recovery: null,
+    };
+    coordinator.retainFailure(original);
+    const recoveryRevision = coordinator.nextRevision();
+    const recoverySource = persistedState("Protected recovery edit", []);
+    coordinator.retainRecoverySource({
+      root,
+      source: recoverySource,
+      revision: recoveryRevision,
+    });
+    coordinator.restoreRecovery({ root, revision: recoveryRevision });
+
+    expect(coordinator.retainFailure(original).recovery).toMatchObject({
+      source: recoverySource,
+      revision: recoveryRevision,
+    });
+    expect(
+      coordinator.clearRecoveredFailure({ root, revision: firstRevision }),
+    ).toBe(false);
+    expect(coordinator.failedSaveForRetry(null)?.root).toBe(root);
+    coordinator.suspendWrites();
+    expect(coordinator.isRecovering(root)).toBe(true);
+    expect(coordinator.isWritable(root)).toBe(false);
+
+    expect(
+      coordinator.clearRecoveredFailure({ root, revision: recoveryRevision }),
+    ).toBe(true);
+    coordinator.resumeWrites(root);
+    expect(coordinator.isWritable(root)).toBe(true);
+    expect(coordinator.isRecovering(root)).toBe(false);
+    expect(coordinator.failedSaveForRetry(null)).toBeNull();
+  });
+
+  it("continues serialized persistence after failure without overlapping work", async () => {
+    const coordinator = createAgentPersistenceCoordinator();
+    const first = deferred<void>();
+    const order: string[] = [];
+    const failing = coordinator.enqueueTransition(async () => {
+      order.push("first started");
+      await first.promise;
+      throw new Error("First write failed");
+    });
+    const failure = expect(failing).rejects.toThrow("First write failed");
+    const following = coordinator.enqueueTransition(async () => {
+      order.push("following started");
+    });
+    await Promise.resolve();
+    expect(order).toEqual(["first started"]);
+
+    first.resolve();
+    await failure;
+    await following;
+    expect(order).toEqual(["first started", "following started"]);
+  });
+
+  it("waits for persistence transitions queued while the barrier is pending", async () => {
+    const coordinator = createAgentPersistenceCoordinator();
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const order: string[] = [];
+    const initial = coordinator.enqueueTransition(async () => {
+      order.push("first started");
+      await first.promise;
+    });
+    const waiting = coordinator.waitForTransitions().then(() => {
+      order.push("barrier settled");
+    });
+    const following = coordinator.enqueueTransition(async () => {
+      order.push("following started");
+      await second.promise;
+    });
+    first.resolve();
+    await initial;
+    await Promise.resolve();
+    expect(order).toEqual(["first started", "following started"]);
+
+    second.resolve();
+    await following;
+    await waiting;
+    expect(order).toEqual([
+      "first started",
+      "following started",
+      "barrier settled",
+    ]);
   });
 
   it("rejects a persisted character describe task whose ID is blank", async () => {

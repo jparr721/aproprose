@@ -5,11 +5,17 @@ import type { LanguageModelV3StreamPart, LanguageModelV3StreamResult } from "@ai
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   readTextFile: vi.fn(),
+  reportAiError: vi.fn(),
 }));
 
 vi.mock("ai", async () => {
   const actual = await vi.importActual<typeof import("ai")>("ai");
   return { ...actual, generateText: mocks.generateText };
+});
+
+vi.mock("@/lib/notifications", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/notifications")>("@/lib/notifications");
+  return { ...actual, reportAiError: mocks.reportAiError };
 });
 
 vi.mock("@/lib/tauri", () => ({
@@ -526,6 +532,7 @@ function compactionMessages(payloadLength: number): AgentUIMessage[] {
 }
 
 beforeEach(() => {
+  mocks.reportAiError.mockReset();
   clearCharacterAgentSessions();
   clearOutlineAgentSessions();
   mocks.generateText.mockReset().mockResolvedValue({ text: "Compacted history" });
@@ -1702,6 +1709,13 @@ describe("dispatchAgentIntent", () => {
     });
 
     expect(dependencies.recordFailure).toHaveBeenCalledOnce();
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      streamError,
+      "openai",
+      "AI console",
+      "/book",
+      null,
+    );
     expect(dependencies.recordFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "run",
@@ -1745,6 +1759,13 @@ describe("dispatchAgentIntent", () => {
       messages: [],
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      { failure: useAgentConsoleStore.getState().runError },
+      "openai",
+      "AI console",
+      "/book",
+      null,
+    );
     expect(dependencies.recordFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "run",
@@ -1779,6 +1800,13 @@ describe("dispatchAgentIntent", () => {
         errorCode: "unknown",
         error: "Open a project before using the agent console.",
       }),
+    );
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Open a project before using the agent console." }),
+      "openai",
+      "AI console",
+      null,
+      null,
     );
   });
 
@@ -2521,6 +2549,13 @@ describe("frozen run preflight", () => {
       status: "failure",
       failure: { reason: "unknown" },
     });
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Remove unavailable context sources before submitting this request." }),
+      "openai",
+      "AI console",
+      "/book",
+      null,
+    );
 
     expect(useAgentConsoleStore.getState()).toMatchObject({
       draftText: "Use the missing source.",
@@ -2871,6 +2906,13 @@ describe("run settlement and cancellation", () => {
       status: "failure",
       failure: { reason: "unknown" },
     });
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "An agent run is already active" }),
+      "openai",
+      "AI console",
+      "/book",
+      null,
+    );
 
     expect(dependencies.stream).toHaveBeenCalledOnce();
     expect(useAgentConsoleStore.getState()).toMatchObject({
@@ -2909,6 +2951,74 @@ describe("run settlement and cancellation", () => {
       metadata: { state: "error", failure: { reason: "transport" } },
     });
   });
+
+  it.each(["model", "context-window", "stream"] as const)(
+    "allows a fresh proposal run after a %s failure",
+    async (failedStage) => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const transport = new Error("Provider unavailable");
+      transport.name = "AI_APICallError";
+      let failurePending = true;
+      const failOnce = (): void => {
+        if (!failurePending) return;
+        failurePending = false;
+        throw transport;
+      };
+      const dependencies = makeDependencies(async (input) => {
+        if (failedStage === "stream") failOnce();
+        const chapter = await input.environment.readChapter("ch1");
+        expect(chapter.blocks[0].text).toBe("Recovery paragraph.");
+        const proposal = input.environment.buildOverviewProposal({
+          summary: "Recovered proposal",
+          overview: "Recovered overview",
+          reason: "Continue after the failed run",
+        });
+        input.environment.replacePendingProposal(proposal);
+        return successfulResult(input, "Recovered");
+      });
+      const getModel = dependencies.getModel;
+      dependencies.getModel = async (provider, modelId) => {
+        if (failedStage === "model") failOnce();
+        return getModel(provider, modelId);
+      };
+      const getContextWindow = dependencies.getContextWindow;
+      dependencies.getContextWindow = async (provider, modelId) => {
+        if (failedStage === "context-window") failOnce();
+        return getContextWindow(provider, modelId);
+      };
+      const controller = createAgentController(dependencies);
+      const request: Extract<AgentIntent, { kind: "run" }> = {
+        kind: "run",
+        mode: "writing",
+        text: "Continue the chapter.",
+        refs: [],
+        task: conversationTask("ch1"),
+      };
+
+      await expect(controller.submitAgentRequest(request)).resolves.toMatchObject({
+        status: "failure",
+      });
+      expect(useAgentConsoleStore.getState().runStatus).toBe("idle");
+      useProjectStore.setState({
+        blocks: [block("recovery", "Recovery paragraph.", "narration")],
+      });
+
+      await expect(controller.submitAgentRequest(request)).resolves.toEqual({
+        status: "success",
+      });
+      expect(useAgentConsoleStore.getState()).toMatchObject({
+        runStatus: "idle",
+        runError: null,
+        pendingProposal: {
+          kind: "overview",
+          projectRoot: "/book",
+          summary: "Recovered proposal",
+        },
+      });
+      expect(dependencies.recordFailure).toHaveBeenCalledOnce();
+      consoleError.mockRestore();
+    },
+  );
 
   it("classifies exhausted OpenAI credits as a quota failure", async () => {
     const quota = new Error(
@@ -3033,6 +3143,13 @@ describe("run settlement and cancellation", () => {
       runStatus: "idle",
       runError: { reason: "compaction" },
     });
+    expect(mocks.reportAiError).toHaveBeenCalledWith(
+      expect.any(Error),
+      "openai",
+      "AI console",
+      "/book",
+      "compaction",
+    );
     expect(dependencies.stream).not.toHaveBeenCalled();
   });
 

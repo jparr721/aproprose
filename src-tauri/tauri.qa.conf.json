@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "aproprose QA",
+  "identifier": "com.jsp.aproprose.auditqa",
+  "app": {
+    "windows": [{
+      "label": "main", "title": "aproprose QA", "width": 1280, "height": 820,
+      "minWidth": 960, "minHeight": 640, "decorations": true,
+      "titleBarStyle": "Overlay", "hiddenTitle": true,
+      "trafficLightPosition": { "x": 24, "y": 24 }
+    }]
+  }
+}

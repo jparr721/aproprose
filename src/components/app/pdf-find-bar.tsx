@@ -12,6 +12,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { FindOptionToggle } from "@/components/app/find-option-toggle";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -76,11 +77,11 @@ export function PdfFindBar({
   };
 
   return (
-    <div
+    <Card
       data-find-widget
-      className="absolute right-4 top-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 font-sans shadow-md"
+      className="absolute right-3 top-3 z-20 w-[calc(100%-1.5rem)] max-w-lg flex-row flex-wrap items-center gap-1 p-1.5 shadow-md"
     >
-      <InputGroup className="w-72">
+      <InputGroup className="min-w-0 flex-[1_1_14rem]">
         <InputGroupInput
           ref={inputRef}
           value={query}
@@ -146,6 +147,6 @@ export function PdfFindBar({
       >
         <IconX />
       </Button>
-    </div>
+    </Card>
   );
 }

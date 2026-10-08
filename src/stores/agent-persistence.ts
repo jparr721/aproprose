@@ -43,6 +43,13 @@ import {
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import {
+  createAgentPersistenceCoordinator,
+  failedAgentSaveRevision,
+  ownsAgentPersistenceTransition,
+  type AgentSnapshotSource,
+  type FailedAgentSave,
+} from "@/stores/agent-persistence-coordinator";
 
 const agentModeSchema = z.enum(["writing", "edit"]);
 
@@ -675,20 +682,6 @@ interface LoadedAgentSessionCollection {
   corruptCharacterIds: string[];
 }
 
-type AgentSnapshotSource = Pick<
-  ReturnType<typeof useAgentConsoleStore.getState>,
-  | "mode"
-  | "messages"
-  | "summary"
-  | "draftText"
-  | "draftContextRefs"
-  | "draftSourceLocators"
-  | "proposalRecords"
-  | "currentProposalId"
-  | "lastUsage"
-  | "interruptedRun"
->;
-
 type ScopedAgentSessionId = Exclude<AgentSessionId, { kind: "project" }>;
 
 interface ScopedSessionSource {
@@ -701,46 +694,18 @@ interface FailedScopedSave {
   issue: AgentPersistenceIssue;
 }
 
-interface FailedRecoveryState {
-  source: AgentSnapshotSource;
-  revision: number;
-}
-
-interface FailedWriteSave {
-  kind: "write";
-  root: string;
-  snapshot: PersistedAgentSnapshot;
-  issue: AgentPersistenceIssue;
-  revision: number;
-  recovery: FailedRecoveryState | null;
-}
-
-interface FailedSnapshotSave {
-  kind: "snapshot";
-  root: string;
-  source: AgentSnapshotSource;
-  issue: AgentPersistenceIssue;
-  revision: number;
-  recovery: FailedRecoveryState | null;
-}
-
-type FailedAgentSave = FailedWriteSave | FailedSnapshotSave;
-
 const SAVE_DEBOUNCE_MS = 400;
-
-let writableRoot: string | null = null;
-let recoveryRoot: string | null = null;
-const failedSaves = new Map<string, FailedAgentSave>();
 const failedScopedSaves = new Map<string, FailedScopedSave>();
-let transition: Promise<void> = Promise.resolve();
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let sessionCollectionSaveTimer: ReturnType<typeof setTimeout> | null = null;
-const outlineHydrations = new Map<string, Promise<void>>();
-const characterHydrations = new Map<string, Promise<void>>();
-const sessionCollectionSaveQueues = new Map<string, Promise<void>>();
-let activeRevision = 0;
-let persistedRevision = 0;
-let revisionSequence = 0;
+const coordinator = createAgentPersistenceCoordinator();
+const {
+  enqueueTransition: appendTransition,
+  waitForTransitions: waitForPersistenceTransitions,
+  cancelSnapshotSave: clearSaveTimer,
+  cancelCollectionSave: clearSessionCollectionSaveTimer,
+  firstFailedSave,
+  failedSaveForRoot,
+  nextRevision,
+} = coordinator;
 
 export class AgentPersistenceError extends Error {
   readonly issue: AgentPersistenceIssue;
@@ -859,41 +824,13 @@ function normalizedUsage(
   };
 }
 
-function appendTransition(work: () => Promise<void>): Promise<void> {
-  const pending = transition.then(work, work);
-  transition = pending.catch(() => undefined);
-  return pending;
-}
-
-async function waitForPersistenceTransitions(): Promise<void> {
-  let pending: Promise<void>;
-  do {
-    pending = transition;
-    await pending;
-  } while (pending !== transition);
-}
-
 function ownsPersistenceCapture(
   capture: AgentPersistenceTransitionCapture,
 ): boolean {
-  const transitionState =
-    useAgentConsoleStore.getState().persistenceTransition;
-  return (
-    transitionState?.generation === capture.generation &&
-    transitionState.projectRoot === capture.projectRoot
+  return ownsAgentPersistenceTransition(
+    useAgentConsoleStore.getState().persistenceTransition,
+    capture,
   );
-}
-
-function clearSaveTimer(): void {
-  if (saveTimer === null) return;
-  clearTimeout(saveTimer);
-  saveTimer = null;
-}
-
-function clearSessionCollectionSaveTimer(): void {
-  if (sessionCollectionSaveTimer === null) return;
-  clearTimeout(sessionCollectionSaveTimer);
-  sessionCollectionSaveTimer = null;
 }
 
 function scheduleAgentSessionCollectionSave(
@@ -901,29 +838,31 @@ function scheduleAgentSessionCollectionSave(
 ): void {
   clearSessionCollectionSaveTimer();
   const root = useAgentConsoleStore.getState().activeProjectRoot;
-  if (root === null || writableRoot !== root) return;
-  sessionCollectionSaveTimer = setTimeout(() => {
-    sessionCollectionSaveTimer = null;
-    if (writableRoot !== root) return;
-    void saveAgentSessionCollection(root).then(
-      () => {
-        if (requestedStore === undefined) return;
-        if (requestedStore.getState().persistenceIssue?.kind === "save") {
-          requestedStore.getState().setPersistenceIssue(null);
-        }
-      },
-      (error) => {
-        if (requestedStore !== undefined) {
-          requestedStore.getState().setPersistenceIssue({
-            kind: "save",
-            projectRoot: root,
-            message: errorMessage(error),
-          });
-        }
-        logPersistenceFailure(root, error);
-      },
-    );
-  }, SAVE_DEBOUNCE_MS);
+  if (root === null || !coordinator.isWritable(root)) return;
+  coordinator.scheduleCollectionSave({
+    delay: SAVE_DEBOUNCE_MS,
+    work: () => {
+      if (!coordinator.isWritable(root)) return;
+      void saveAgentSessionCollection(root).then(
+        () => {
+          if (requestedStore === undefined) return;
+          if (requestedStore.getState().persistenceIssue?.kind === "save") {
+            requestedStore.getState().setPersistenceIssue(null);
+          }
+        },
+        (error) => {
+          if (requestedStore !== undefined) {
+            requestedStore.getState().setPersistenceIssue({
+              kind: "save",
+              projectRoot: root,
+              message: errorMessage(error),
+            });
+          }
+          logPersistenceFailure(root, error);
+        },
+      );
+    },
+  });
 }
 
 function saveIssue(root: string, error: unknown): AgentPersistenceError {
@@ -935,83 +874,24 @@ function saveIssue(root: string, error: unknown): AgentPersistenceError {
   return failure;
 }
 
-function firstFailedSave(): FailedAgentSave | null {
-  const first = failedSaves.values().next();
-  return first.done ? null : first.value;
-}
-
-function failedSaveForRoot(root: string): FailedAgentSave | null {
-  return failedSaves.get(root) ?? null;
-}
-
 function failedSaveForRetry(): FailedAgentSave | null {
-  const activeProjectRoot =
-    useAgentConsoleStore.getState().activeProjectRoot;
-  if (activeProjectRoot !== null) {
-    const activeFailure = failedSaveForRoot(activeProjectRoot);
-    if (activeFailure !== null) return activeFailure;
-  }
-  return firstFailedSave();
-}
-
-function nextRevision(): number {
-  revisionSequence += 1;
-  return revisionSequence;
-}
-
-function failedSaveRevision(failure: FailedAgentSave): number {
-  if (failure.recovery === null) return failure.revision;
-  return Math.max(failure.revision, failure.recovery.revision);
+  return coordinator.failedSaveForRetry(
+    useAgentConsoleStore.getState().activeProjectRoot,
+  );
 }
 
 function recordFailedSave(failure: FailedAgentSave): void {
-  const retainedFailure = failedSaveForRoot(failure.root);
-  if (
-    retainedFailure !== null &&
-    failedSaveRevision(retainedFailure) > failedSaveRevision(failure)
-  ) {
-    useAgentConsoleStore
-      .getState()
-      .setPersistenceIssue(retainedFailure.issue);
-    return;
-  }
-  failedSaves.set(failure.root, failure);
-  useAgentConsoleStore.getState().setPersistenceIssue(failure.issue);
-}
-
-function recordRecoveryState(
-  root: string,
-  source: AgentSnapshotSource,
-  revision: number,
-): void {
-  const failure = failedSaveForRoot(root);
-  if (failure === null) {
-    throw new Error(`Agent recovery state is missing for ${root}.`);
-  }
-  if (
-    failure.recovery !== null &&
-    failure.recovery.revision > revision
-  ) {
-    return;
-  }
-  failedSaves.set(root, {
-    ...failure,
-    recovery: { source, revision },
-  });
+  const retainedFailure = coordinator.retainFailure(failure);
+  useAgentConsoleStore.getState().setPersistenceIssue(retainedFailure.issue);
 }
 
 function clearRecoveredFailure(
   root: string,
   savedRevision: number,
 ): void {
-  const failure = failedSaveForRoot(root);
-  if (
-    failure !== null &&
-    failedSaveRevision(failure) > savedRevision
-  ) {
+  if (!coordinator.clearRecoveredFailure({ root, revision: savedRevision })) {
     return;
   }
-  if (failure !== null) failedSaves.delete(root);
   const currentIssue = useAgentConsoleStore.getState().persistenceIssue;
   if (currentIssue === null || currentIssue.projectRoot !== root) return;
   useAgentConsoleStore
@@ -1151,7 +1031,7 @@ export function resetAgentConversation(
     proposalRecords: ownsFailedLoad ? [] : initialState.proposalRecords,
   };
   clearSaveTimer();
-  writableRoot = null;
+  coordinator.suspendWrites();
   const capture = initialState.beginPersistenceTransition(root, "reset");
   return appendTransition(async () => {
     useAgentConsoleStore
@@ -1163,7 +1043,7 @@ export function resetAgentConversation(
       useAgentConsoleStore.getState().finishPersistenceTransition(capture);
       throw error;
     }
-    failedSaves.delete(root);
+    coordinator.forgetFailure(root);
     const currentState = useAgentConsoleStore.getState();
     if (
       currentState.activeProjectRoot !== root ||
@@ -1177,10 +1057,7 @@ export function resetAgentConversation(
       .completePersistenceTransition(capture, empty);
     if (completion.status === "stale") return;
     const resetRevision = nextRevision();
-    recoveryRoot = null;
-    writableRoot = root;
-    activeRevision = resetRevision;
-    persistedRevision = resetRevision;
+    coordinator.establishWritableSnapshot({ root, revision: resetRevision });
   });
 }
 
@@ -1581,22 +1458,14 @@ async function saveAgentSessionCollectionNow(root: string, sources: Record<strin
 }
 
 function queueSessionCollectionWrite(root: string, operation: () => Promise<void>): Promise<void> {
-  const previous = sessionCollectionSaveQueues.get(root) ?? Promise.resolve();
-  const save = previous
-    .catch(() => undefined)
-    .then(operation)
-    .catch((error: unknown) => {
+  return coordinator.enqueueCollectionSave({
+    root,
+    work: () => operation().catch((error: unknown) => {
       throw error instanceof AgentPersistenceError && error.issue.kind === "save"
         ? error
         : persistenceError("save", root, error);
-    });
-  const tracked = save.finally(() => {
-    if (sessionCollectionSaveQueues.get(root) === tracked) {
-      sessionCollectionSaveQueues.delete(root);
-    }
+    }),
   });
-  sessionCollectionSaveQueues.set(root, tracked);
-  return tracked;
 }
 
 export function saveAgentSessionCollection(root: string): Promise<void> {
@@ -1723,40 +1592,22 @@ export function hydrateAgentOutlineSession(
   root: string,
   chapterId: string,
 ): Promise<void> {
-  const key = JSON.stringify([root, chapterId]);
-  const current = outlineHydrations.get(key);
-  if (current !== undefined) return current;
-  const hydration = hydrateAgentScopedSessionOwned(
-    root,
-    { kind: "outline", chapterId },
-  ).finally(
-    () => {
-      if (outlineHydrations.get(key) === hydration) {
-        outlineHydrations.delete(key);
-      }
-    },
-  );
-  outlineHydrations.set(key, hydration);
-  return hydration;
+  const sessionId: ScopedAgentSessionId = { kind: "outline", chapterId };
+  return coordinator.hydrateScopedSession({
+    key: JSON.stringify([root, agentSessionKey(sessionId)]),
+    work: () => hydrateAgentScopedSessionOwned(root, sessionId),
+  });
 }
 
 export function hydrateAgentCharacterSession(
   root: string,
   characterId: string,
 ): Promise<void> {
-  const key = JSON.stringify([root, characterId]);
-  const current = characterHydrations.get(key);
-  if (current !== undefined) return current;
-  const hydration = hydrateAgentScopedSessionOwned(
-    root,
-    { kind: "character", characterId },
-  ).finally(() => {
-    if (characterHydrations.get(key) === hydration) {
-      characterHydrations.delete(key);
-    }
+  const sessionId: ScopedAgentSessionId = { kind: "character", characterId };
+  return coordinator.hydrateScopedSession({
+    key: JSON.stringify([root, agentSessionKey(sessionId)]),
+    work: () => hydrateAgentScopedSessionOwned(root, sessionId),
   });
-  characterHydrations.set(key, hydration);
-  return hydration;
 }
 
 async function hydrateScopedCollection(
@@ -1873,7 +1724,7 @@ export function saveAgentState(
   const revision = nextRevision();
   const initialState = useAgentConsoleStore.getState();
   const resetsActiveRecovery =
-    recoveryRoot === root &&
+    coordinator.isRecovering(root) &&
     agentConsoleOwnershipStatus(initialState, root) === "ready";
   const recoveryFailure = resetsActiveRecovery
     ? failedSaveForRoot(root)
@@ -1882,7 +1733,7 @@ export function saveAgentState(
     throw new Error(`Agent recovery state is missing for ${root}.`);
   }
   const recoveryFailureRevision =
-    recoveryFailure === null ? null : failedSaveRevision(recoveryFailure);
+    recoveryFailure === null ? null : failedAgentSaveRevision(recoveryFailure);
   const recoveryCapture = resetsActiveRecovery
     ? useAgentConsoleStore
         .getState()
@@ -1890,7 +1741,7 @@ export function saveAgentState(
     : null;
   if (recoveryCapture !== null) {
     clearSaveTimer();
-    writableRoot = null;
+    coordinator.suspendWrites();
   }
   return appendTransition(async () => {
     const ownsBookkeeping = (): boolean =>
@@ -1931,9 +1782,9 @@ export function saveAgentState(
           recoveryFailure !== null &&
           recoveryFailureRevision !== null &&
           currentFailure === recoveryFailure &&
-          failedSaveRevision(currentFailure) === recoveryFailureRevision
+          failedAgentSaveRevision(currentFailure) === recoveryFailureRevision
         ) {
-          failedSaves.delete(root);
+          coordinator.forgetFailure(root);
         }
         return;
       }
@@ -1962,10 +1813,7 @@ export function saveAgentState(
           restoreAgentSnapshot(root, safeSnapshot),
         );
       if (completion.status === "stale") return;
-      recoveryRoot = null;
-      writableRoot = root;
-      activeRevision = revision;
-      persistedRevision = revision;
+      coordinator.establishWritableSnapshot({ root, revision });
       restoreFailedSaveIssue();
       return;
     }
@@ -1974,20 +1822,17 @@ export function saveAgentState(
       agentConsoleOwnershipStatus(currentState, root) === "ready" &&
       failedSaveForRoot(root) === null
     ) {
-      recoveryRoot = null;
-      writableRoot = root;
+      coordinator.resumeWrites(root);
     }
   });
 }
 
 function markRevisionPersisted(root: string, revision: number): void {
-  if (
-    root !== useAgentConsoleStore.getState().activeProjectRoot ||
-    revision !== activeRevision
-  ) {
-    return;
-  }
-  persistedRevision = revision;
+  coordinator.markRevisionPersisted({
+    root,
+    revision,
+    activeProjectRoot: useAgentConsoleStore.getState().activeProjectRoot,
+  });
 }
 
 async function writeAgentSnapshot(
@@ -2065,7 +1910,7 @@ function captureActiveSnapshot(root: string): Promise<void> {
   const source = captureAgentSnapshotSource();
   const revision = nextRevision();
   if (useAgentConsoleStore.getState().activeProjectRoot === root) {
-    activeRevision = revision;
+    coordinator.markActiveRevision(revision);
   }
   return appendTransition(async () => {
     try {
@@ -2082,7 +1927,7 @@ function flushActiveSnapshot(): void {
   const root = state.activeProjectRoot;
   if (
     root === null ||
-    writableRoot !== root ||
+    !coordinator.isWritable(root) ||
     agentConsoleOwnershipStatus(state, root) !== "ready"
   ) {
     return;
@@ -2096,22 +1941,24 @@ function scheduleAgentSave(): void {
   const root = state.activeProjectRoot;
   if (
     root === null ||
-    writableRoot !== root ||
+    !coordinator.isWritable(root) ||
     agentConsoleOwnershipStatus(state, root) !== "ready"
   ) {
     return;
   }
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    const currentState = useAgentConsoleStore.getState();
-    if (
-      writableRoot !== root ||
-      agentConsoleOwnershipStatus(currentState, root) !== "ready"
-    ) {
-      return;
-    }
-    void captureActiveSnapshot(root);
-  }, SAVE_DEBOUNCE_MS);
+  coordinator.scheduleSnapshotSave({
+    delay: SAVE_DEBOUNCE_MS,
+    work: () => {
+      const currentState = useAgentConsoleStore.getState();
+      if (
+        !coordinator.isWritable(root) ||
+        agentConsoleOwnershipStatus(currentState, root) !== "ready"
+      ) {
+        return;
+      }
+      void captureActiveSnapshot(root);
+    },
+  });
 }
 
 export function transitionAgentProject(nextRoot: string | null): Promise<void> {
@@ -2124,20 +1971,23 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     oldRoot !== null &&
     agentConsoleOwnershipStatus(consoleBeforeSwitch, oldRoot) === "ready";
   const oldRootWasWritable =
-    ownsOldConsole && writableRoot === oldRoot;
+    ownsOldConsole && oldRoot !== null && coordinator.isWritable(oldRoot);
   const resetOwnsOldRoot =
     oldRoot !== null &&
     consoleBeforeSwitch.persistenceTransition?.kind === "reset" &&
     consoleBeforeSwitch.persistenceTransition.projectRoot === oldRoot;
   const oldRootWasRecovering =
-    ownsOldConsole && recoveryRoot === oldRoot && !resetOwnsOldRoot;
+    ownsOldConsole &&
+    oldRoot !== null &&
+    coordinator.isRecovering(oldRoot) &&
+    !resetOwnsOldRoot;
   const oldRootHasScopedSessions =
     oldRoot !== null &&
     [...outlineAgentSessionEntries(), ...characterAgentSessionEntries()].some(
       ([, store]) =>
         agentConsoleOwnershipStatus(store.getState(), oldRoot) === "ready",
     );
-  writableRoot = null;
+  coordinator.suspendWrites();
   const rootsWithActiveSessions = new Set<string>();
   if (oldRoot !== null) rootsWithActiveSessions.add(oldRoot);
   for (const [, store] of outlineAgentSessionEntries()) {
@@ -2160,7 +2010,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       ? captureAgentSnapshotSource()
       : null;
   const oldRevision = oldSource === null ? null : nextRevision();
-  if (oldRevision !== null) activeRevision = oldRevision;
+  if (oldRevision !== null) coordinator.markActiveRevision(oldRevision);
   const ownsTargetConsole =
     nextRoot !== null &&
     agentConsoleOwnershipStatus(consoleBeforeSwitch, nextRoot) === "ready";
@@ -2194,7 +2044,11 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       oldSource !== null &&
       oldRevision !== null
     ) {
-      recordRecoveryState(oldRoot, oldSource, oldRevision);
+      coordinator.retainRecoverySource({
+        root: oldRoot,
+        source: oldSource,
+        revision: oldRevision,
+      });
     }
 
     if (oldRoot !== null && oldRootHasScopedSessions) {
@@ -2220,9 +2074,7 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
     ) {
       return;
     }
-    recoveryRoot = null;
-    activeRevision = 0;
-    persistedRevision = 0;
+    coordinator.activateProject();
     if (nextRoot === null) {
       useAgentConsoleStore
         .getState()
@@ -2239,9 +2091,10 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
         .getState()
         .completePersistenceTransition(persistenceCapture, retainedState);
       if (completion.status === "stale") return;
-      recoveryRoot = nextRoot;
-      activeRevision = failedSaveRevision(retainedFailure);
-      persistedRevision = 0;
+      coordinator.restoreRecovery({
+        root: nextRoot,
+        revision: failedAgentSaveRevision(retainedFailure),
+      });
       useAgentConsoleStore
         .getState()
         .setPersistenceIssue(retainedFailure.issue);
@@ -2283,9 +2136,10 @@ export function transitionAgentProject(nextRoot: string | null): Promise<void> {
       .completePersistenceTransition(capture, loaded);
     if (completion.status === "stale") return;
     const hydratedRevision = nextRevision();
-    activeRevision = hydratedRevision;
-    persistedRevision = hydratedRevision;
-    writableRoot = nextRoot;
+    coordinator.establishWritableSnapshot({
+      root: nextRoot,
+      revision: hydratedRevision,
+    });
     restoreFailedSaveIssue();
     if (scopedIssue !== null) useAgentConsoleStore.getState().setPersistenceIssue(scopedIssue);
   });
@@ -2297,7 +2151,7 @@ export function retryAgentPersistence(): Promise<void> {
     if (retry !== null) {
       const state = useAgentConsoleStore.getState();
       const recoveringActiveRoot =
-        recoveryRoot === retry.root &&
+        coordinator.isRecovering(retry.root) &&
         agentConsoleOwnershipStatus(state, retry.root) === "ready";
       if (retry.kind === "write") {
         await writeAgentSnapshot(
@@ -2326,10 +2180,9 @@ export function retryAgentPersistence(): Promise<void> {
         recoveringActiveRoot &&
         failedSaveForRoot(retry.root) === null
       ) {
-        recoveryRoot = null;
-        writableRoot = retry.root;
+        coordinator.resumeWrites(retry.root);
       }
-      if (activeRevision !== persistedRevision) scheduleAgentSave();
+      if (coordinator.hasUnpersistedRevision()) scheduleAgentSave();
       return;
     }
     const state = useAgentConsoleStore.getState();
@@ -2345,13 +2198,13 @@ export function retryAgentPersistence(): Promise<void> {
     }
     if (
       root === null ||
-      writableRoot !== root ||
+      !coordinator.isWritable(root) ||
       agentConsoleOwnershipStatus(state, root) !== "ready"
     ) {
       return;
     }
     const revision = nextRevision();
-    activeRevision = revision;
+    coordinator.markActiveRevision(revision);
     await persistSnapshotSource(
       root,
       captureAgentSnapshotSource(),
@@ -2386,7 +2239,7 @@ export function useAgentPersistence(): void {
             state.activeProjectRoot,
           ) === "ready"
         ) {
-          activeRevision = nextRevision();
+          coordinator.markActiveRevision(nextRevision());
         }
         scheduleAgentSave();
         if (
@@ -2460,7 +2313,7 @@ export function useAgentPersistence(): void {
         return;
       }
       clearSaveTimer();
-      if (writableRoot !== root) return;
+      if (!coordinator.isWritable(root)) return;
       void captureActiveSnapshot(root);
       if (
         outlineAgentSessionEntries().length > 0 ||

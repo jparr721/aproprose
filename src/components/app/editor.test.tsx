@@ -440,6 +440,26 @@ describe("Editor add selection to AI", () => {
 });
 
 describe("Editor manuscript review activation", () => {
+  it("disables hidden editor commands and late dictation while Outline owns authoring", () => {
+    render(<Editor />);
+    const before = useProjectStore.getState().blocks;
+    act(() => { useViewStore.setState({ outlineOpen: true }); });
+    expectKeybindingEnabled(KEYBINDING_IDS.UNDO, false);
+    expectKeybindingEnabled(KEYBINDING_IDS.REDO, false);
+    expectKeybindingEnabled(KEYBINDING_IDS.SAVE_CHAPTER, false);
+    act(() => invokeDictation("Hidden editor text"));
+    expect(useProjectStore.getState().blocks).toBe(before);
+    act(() => { useViewStore.setState({ outlineOpen: false }); });
+    expectKeybindingEnabled(KEYBINDING_IDS.UNDO, true);
+  });
+
+  it("restores editor commands in focus mode when the stored Outline flag stays open", () => {
+    useViewStore.setState({ outlineOpen: true, focus: true });
+    render(<Editor />);
+    expectKeybindingEnabled(KEYBINDING_IDS.UNDO, true);
+    expectKeybindingEnabled(KEYBINDING_IDS.SAVE_CHAPTER, true);
+  });
+
   it("renders only the inline review body for a strictly matching proposal", () => {
     const proposal = manuscriptProposal();
     setReviewState(proposal, proposal.id);

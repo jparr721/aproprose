@@ -615,6 +615,43 @@ mod tests {
     }
 
     #[test]
+    fn mixed_valid_and_malformed_chapters_preserve_required_source() {
+        for invalid in [
+            "\\chapter\t{Unclosed\n\\input{content/chapter-001.tex}\n",
+            "\\chapter\t{Missing input}\n",
+            "\\chapter*{Unsupported}\n\\input{content/chapter-001.tex}\n",
+            "\\chapter[Short]{Unsupported}\n\\input{content/chapter-001.tex}\n",
+            "\\chapter\n\\input{content/chapter-001.tex}\n",
+            "\\chapterfoo{Unsupported}\n\\input{content/chapter-001.tex}\n",
+            "\\chapter{Extra} discarded text\n\\input{content/chapter-001.tex}\n",
+            "\\chapter{Extra}\n\\input{content/chapter-001.tex} discarded text\n",
+            "\\input{content/chapter-001.tex}\n",
+        ] {
+            let dir = managed_fixture();
+            let source =
+                format!("\\chapter{{Valid}}\n\\input{{content/chapter-001.tex}}\n{invalid}");
+            fs::write(dir.path().join("chapters.tex"), &source).unwrap();
+            let error = open_managed(dir.path()).unwrap_err();
+            assert!(error.contains("chapters.tex"), "{error}");
+            assert_eq!(
+                fs::read_to_string(dir.path().join("chapters.tex")).unwrap(),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn managed_chapter_whitespace_and_comments_match_the_parser() {
+        let dir = managed_fixture();
+        let source = "% heading\n\\providecommand{\\aproproseplain}[1]{#1}\n\n\\chapter\t{Valid} % title\n% body\n\\input\t{content/chapter-001.tex} % file\n";
+        fs::write(dir.path().join("chapters.tex"), source).unwrap();
+        let project = open_managed(dir.path()).unwrap();
+        assert_eq!(project.chapters.len(), 1);
+        assert_eq!(project.chapters[0].title, "Valid");
+        assert_eq!(project.chapters[0].file, "content/chapter-001.tex");
+    }
+
+    #[test]
     fn staging_failure_preserves_all_existing_skeleton_bytes() {
         let dir = managed_fixture();
         let old_metadata = fs::read(dir.path().join("metadata.tex")).unwrap();

@@ -246,46 +246,52 @@ pub(crate) fn chapter_display_title(source: &str) -> String {
 }
 
 pub(crate) fn validate_managed_chapters(source: &str) -> Result<(), String> {
-    let lines: Vec<&str> = source
+    let lines: Vec<(usize, &str)> = source
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('%'))
+        .enumerate()
+        .map(|(index, line)| (index + 1, line.trim()))
+        .filter(|(_, line)| !line.is_empty() && !line.starts_with('%'))
         .collect();
-    let mut found = false;
-    for (index, line) in lines.iter().enumerate() {
-        if line.starts_with("\\chapter{") || line.starts_with("\\chapter ") {
-            found = true;
-            let title = inline_command_arg(line, "chapter").ok_or_else(|| {
-                format!(
-                    "invalid chapters.tex: malformed chapter command on line {}",
-                    index + 1
-                )
-            })?;
-            if title.starts_with("\\aproproseplain{") && tex_text::decode(&title).is_none() {
-                return Err(format!(
-                    "invalid chapters.tex: malformed plain-text title on line {}",
-                    index + 1
-                ));
-            }
-            let input = lines
-                .get(index + 1)
-                .and_then(|line| inline_command_arg(line, "input"));
-            if input.as_ref().is_none_or(|file| file.is_empty()) {
-                return Err(format!(
-                    "invalid chapters.tex: chapter on line {} has no body file",
-                    index + 1
-                ));
-            }
+    let mut cursor = 0;
+    while let Some(&(line_number, line)) = lines.get(cursor) {
+        if tex_text::DEFINITION
+            .lines()
+            .any(|definition| definition == line)
+        {
+            cursor += 1;
+            continue;
         }
-    }
-    if !found
-        && lines
-            .iter()
-            .any(|line| !line.starts_with("\\providecommand"))
-    {
-        return Err("invalid chapters.tex: no recognizable chapter entries".to_string());
+        let title = managed_command_arg(line, "chapter").ok_or_else(|| {
+            format!("invalid chapters.tex: malformed or unsupported chapter command on line {line_number}")
+        })?;
+        if title.starts_with("\\aproproseplain{") && tex_text::decode(&title).is_none() {
+            return Err(format!(
+                "invalid chapters.tex: malformed plain-text title on line {line_number}"
+            ));
+        }
+        let input = lines
+            .get(cursor + 1)
+            .and_then(|(_, line)| managed_command_arg(line, "input"));
+        if input.as_ref().is_none_or(|file| file.is_empty()) {
+            return Err(format!(
+                "invalid chapters.tex: chapter on line {line_number} has a missing or malformed body file"
+            ));
+        }
+        cursor += 2;
     }
     Ok(())
+}
+
+fn managed_command_arg(line: &str, command: &str) -> Option<String> {
+    let prefix = format!("\\{command}");
+    let rest = line.strip_prefix(prefix.as_str())?.trim_start();
+    let open = line.len() - rest.len();
+    let end = match_brace_end(line, open)?;
+    let trailing = line[end + 1..].trim_start();
+    if !trailing.is_empty() && !trailing.starts_with('%') {
+        return None;
+    }
+    Some(line[open + 1..end].to_string())
 }
 
 pub(crate) fn parse_chapters(source: &str, root: &Path) -> Result<Vec<ChapterRef>, String> {

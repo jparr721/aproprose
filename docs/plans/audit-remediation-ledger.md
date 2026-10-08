@@ -123,7 +123,7 @@
 
 - Initial full gate: active in authorized local mode; frontend/browser and native debug checks passed, isolated native bundle/smoke pending.
 - PR: https://github.com/jparr721/aproprose/pull/70 (ready, attached), base `main`, initial pushed head `387810fb2bfa13e347a0a9ca5837e1b9a3833f9a`.
-- Review rounds: 2/5 completed; round 2 `FIX-THEN-SHIP`, 4 fixed, full fix gate finishing. Round 1 fixed 4, 0 remaining, 1 scope dissent. Minimum 3, no sixth round without explicit user override.
+- Review rounds: 3/5 completed; round 3 `FIX-THEN-SHIP`, 2 P2 must-fix fixed, gate finishing. Rounds 1/2 fixed 4 each; inherited round-1 scope dissent retained. Minimum 3 met, but no clean APPROVE exit; no sixth round without explicit user override.
 - Simplification: pending; once over the whole PR diff after clean review exit.
 - Final exact-commit gate and CI: pending.
 
@@ -353,6 +353,45 @@ residual risk: inherited descendant-process cleanup remains deferred in #72.
 - All integrated local lanes green on stable source: 137 frontend files / 1778 tests; 36 browser tests; 84 native tests plus 2 explicitly run ignored tests; Rust format/strict Clippy; frontend build/typecheck/version; native QA package and launch.
 - Root will commit planning/ledger documentation and push rebased work branch with force-with-lease against expected remote `a6afd2d`; never force-push target. Next fresh full round 3 reviews the confirmed pushed head only.
 - Round count remains 2 completed / cap 5, minimum 3. No round 3 review consumed yet; simplification, final exact-commit gate plus CI, merge, real-data QA, and deck delivery remain required.
+
+### Round 3 verdict / fixes active
+
+```text
+=== REVIEW VERDICT ===
+scope:      https://github.com/jparr721/aproprose/pull/70 @ bb6df68, base 827e65a
+variant:    full
+verdict:    FIX-THEN-SHIP
+must-fix:   2 P2 (B3-1 and F1 below)
+followups:  #72 (unchanged)
+dissent:    none for round 3
+residual risk: inherited process-descendant cleanup remains deferred.
+=== END ===
+```
+
+- Five fresh angles, fresh Level/Splinter, and one sole defense round completed against pushed source. Club independently reran and retained both proofs. Evidence retained in canonical `r3-spec`, `r3-breaker`, `r3-failure`, `r3-proof`, `r3-shape`, `r3-level`, and `r3-splinter` reports.
+- B3-1, `src/stores/project-store.ts:948`: deleting a nonactive chapter while its read is pending can install an orphan draft that cannot save. Proof: HEAD fails/base passes; actual subsequent save returns failure without writing. Fix: invalidate pending transition/read ownership for the removed chapter while preserving legitimate concurrent metadata operations. `/root/r3_breaker` owns the two assigned project-store files; regression first.
+- F1, `src-tauri/src/novel.rs:494`: migration backup commits before scaffold/staging preparation completes and blocks retry after a preparation error. Real native harness proves originals and backup unchanged yet repaired retry remains blocked. Fix: validate/stage preparation before committing the backup boundary, preserving valid existing backup semantics. Root owns native regression-first repair.
+- Splinter positive control proves public metadata edits during a pending read pass HEAD/fail base; restoring broad metadata object-identity rejection would be invalid. Preserve that passing ownership behavior.
+- Inherited compile-metadata and unchanged backup-caller observations waived with scope reasons; #72 unchanged. No round-3 dissent.
+- CI run 37731068187: frontend/browser, Linux, and macOS package/launch passed. Windows native had 71 passes and one assertion failure at `novel.rs:590`: expected forward slashes versus actual Windows path separators, with production behavior correct. Root makes a separate portable assertion correction with the native fix.
+- Full round-3 fix gate and push pending, then fresh round 4 full fight required. Simplification has not run; exact-final-commit gates, merge, real-data QA, and deck remain pending.
+
+### Round 3 fix verification checkpoint
+
+- Standalone commits: `1bab840` native backup preparation plus five regressions; `50d3513` Windows portable path assertion; `feacf30` project captured chapter id/file ownership plus six regressions.
+- Native observed red: `r3-migration-retry-red` had 4 failures / 2 positive passes, then focused suite passed all 6. Existing backup identity/hardlink positive control preserved.
+- Project observed red: 3 failures / 3 positive passes, then 251 tests across three focused files and typecheck passed.
+- Full available fix lanes PASS: 137 frontend files / 1784 tests; 36 browser tests; 89 native tests with 2 ignored, both explicitly run and passed (actual LaTeX/DNS); Rust format/strict Clippy; typecheck.
+- Frontend build active in session 76294; isolated QA package and artifact smoke follow successful build. Complete gate and push not yet claimed.
+- Main remains `827e65a` at last fetch. Round 4 has not run; next review requires the fully gated, newly pushed fix head.
+
+### Round 3 closed / round 4 ready
+
+- `round 3: verdict=FIX-THEN-SHIP must-fix=2 | fixed=2 dissent=0 followups=#72 | remaining=0`.
+- Complete fix gate green: frontend typecheck/build/version 0.18.4; 137 files / 1784 frontend tests; 36 browser tests; native format/strict Clippy; 89 native tests plus 2 explicitly passed ignored tests.
+- Updated isolated QA production bundle PASS in 1m47s; actual copied packaged app visible through 3-second settle PASS. Evidence `r3-fix-bundle.log` and `r3-fix-artifact.log`.
+- Fix commits `1bab840`, `50d3513`, `feacf30` remain the reviewed-fix source. Main `827e65a` stable; root commits ledger and pushes normally, no rebase.
+- Fresh round 4 full fight ready after push confirmation. No round 4 started and simplification has not run.
 
 - QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.

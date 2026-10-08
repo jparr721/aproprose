@@ -743,6 +743,83 @@ describe("owned project persistence", () => {
     expect(useProjectStore.getState().blocks[0].text).toBe("Newest chapter");
   });
 
+  it.each(["success", "failure"])("ignores a pending chapter read %s after its non-active target is deleted", async (outcome) => {
+    const read = deferred<string>();
+    const project = projectFixture("/owned");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    const blocks = [mkBlock({ id: "remaining-chapter", text: "Keep chapter one" })];
+    useProjectStore.setState({ project, blocks });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise);
+    const loading = useProjectStore.getState().selectChapter("ch2");
+    vi.mocked(deleteChapterCmd).mockResolvedValueOnce({ ...project, chapters: [project.chapters[0]] });
+
+    await useProjectStore.getState().deleteChapter("ch2");
+    if (outcome === "success") read.resolve("Deleted chapter body");
+    else read.reject(new Error("Deleted chapter is no longer readable"));
+    await loading;
+
+    expect(useProjectStore.getState().project?.chapters.map((chapter) => chapter.id)).toEqual(["ch1"]);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().blocks).toBe(blocks);
+    expect(useProjectStore.getState().error).toBeNull();
+    expect(useNotificationStore.getState().notifications.some((notification) => notification.type === "chapter-open")).toBe(false);
+    useProjectStore.getState().updateBlockText("remaining-chapter", "Edit the remaining chapter");
+    await expect(useProjectStore.getState().saveChapter()).resolves.toMatchObject({ status: "saved" });
+    expect(writeTextFile).toHaveBeenCalledWith("/owned", "chapter-one.tex", expect.stringContaining("Edit the remaining chapter"));
+  });
+
+  it("ignores a pending chapter read after its file changes without changing its id", async () => {
+    const read = deferred<string>();
+    const project = projectFixture("/owned");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    const blocks = [mkBlock({ id: "remaining-chapter", text: "Keep chapter one" })];
+    useProjectStore.setState({ project, blocks });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise);
+    const loading = useProjectStore.getState().selectChapter("ch2");
+    const updated: ProjectInfo = {
+      ...project,
+      metadata: { ...project.metadata, author: "Updated author" },
+      chapters: [project.chapters[0], { ...project.chapters[1], file: "replacement.tex" }],
+    };
+    vi.mocked(writeSkeleton).mockResolvedValueOnce(updated);
+
+    await useProjectStore.getState().updateMetadata({ author: "Updated author" });
+    read.resolve("Body from the replaced chapter file");
+    await loading;
+
+    expect(useProjectStore.getState().project).toBe(updated);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+    expect(useProjectStore.getState().blocks).toBe(blocks);
+    expect(useProjectStore.getState().error).toBeNull();
+  });
+
+  it.each(["metadata", "rename", "reorder"])("retains a valid pending chapter read across a %s mutation", async (mutation) => {
+    const read = deferred<string>();
+    const project = projectFixture("/owned");
+    project.chapters.push({ ...project.chapters[0], id: "ch2", file: "two.tex" });
+    useProjectStore.setState({ project });
+    vi.mocked(readTextFile).mockReturnValueOnce(read.promise);
+    const loading = useProjectStore.getState().selectChapter("ch2");
+    if (mutation === "metadata") {
+      vi.mocked(writeSkeleton).mockResolvedValueOnce({ ...project, metadata: { ...project.metadata, author: "Updated author" } });
+      await useProjectStore.getState().updateMetadata({ author: "Updated author" });
+    } else if (mutation === "rename") {
+      vi.mocked(writeSkeleton).mockResolvedValueOnce({ ...project, chapters: [project.chapters[0], { ...project.chapters[1], title: "Renamed second chapter" }] });
+      await useProjectStore.getState().renameChapter("ch2", "Renamed second chapter");
+    } else {
+      vi.mocked(writeSkeleton).mockResolvedValueOnce({ ...project, chapters: [project.chapters[1], project.chapters[0]] });
+      await useProjectStore.getState().moveChapter("ch2", 0);
+    }
+    expect(useProjectStore.getState().project).not.toBe(project);
+
+    read.resolve("Loaded second chapter");
+    await loading;
+
+    expect(useProjectStore.getState().activeChapterId).toBe("ch2");
+    expect(useProjectStore.getState().blocks[0].text).toBe("Loaded second chapter");
+    expect(useProjectStore.getState().error).toBeNull();
+  });
+
   it("retains edits made while a chapter read is pending", async () => {
     const read = deferred<string>();
     const block = mkBlock({ id: "live" });

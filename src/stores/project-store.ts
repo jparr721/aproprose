@@ -945,7 +945,14 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
       const chapter = project.chapters.find((c) => c.id === id);
       if (!chapter) return;
       const request = ++chapterRequest;
-      const current = (): boolean => owns(lifecycleGeneration, project.root) && chapterRequest === request && get().editRevision === editRevision;
+      const current = (): boolean => {
+        const state = get();
+        return owns(lifecycleGeneration, project.root) &&
+          chapterRequest === request &&
+          state.editRevision === editRevision &&
+          state.project !== null &&
+          state.project.chapters.some((entry) => entry.id === chapter.id && entry.file === chapter.file);
+      };
       try {
         const source = await readTextFile(project.root, chapter.file);
         if (!current()) return;

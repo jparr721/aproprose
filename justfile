@@ -124,6 +124,10 @@ test:
     bun x vitest run
     cd src-tauri && cargo test
 
+# Run layout regressions in Chromium and WebKit (install with `bun x playwright install chromium webkit`).
+test-browser:
+    bun x playwright test
+
 # Format and lint the Rust side.
 fmt:
     cd src-tauri && cargo fmt

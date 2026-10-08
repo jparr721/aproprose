@@ -214,6 +214,7 @@ function AgentSectionContent({
   title,
 }: AgentSectionProps) {
   const messages = useAgentSessionStore(sessionId, (state) => state.messages);
+  const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
   const pendingProposal = useAgentSessionStore(
     sessionId,
     (state) => state.pendingProposal,
@@ -242,15 +243,27 @@ function AgentSectionContent({
           <TypographyLarge>{title}</TypographyLarge>
           <TypographyMuted className="truncate">{contextLabel}</TypographyMuted>
         </div>
-        <Button
-          aria-label={closeLabel}
-          onClick={onClose}
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-        >
-          <IconX />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {ownershipStatus === "ready" && runStatus !== "idle" ? (
+            <TypographyMuted
+              aria-label="AI activity"
+              className="flex items-center gap-2"
+              role="status"
+            >
+              <Spinner aria-hidden="true" />
+              Thinking
+            </TypographyMuted>
+          ) : null}
+          <Button
+            aria-label={closeLabel}
+            onClick={onClose}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <IconX />
+          </Button>
+        </div>
       </header>
       {persistenceIssue === null ? null : (
         <AgentPersistenceBanner issue={persistenceIssue} sessionId={sessionId} />

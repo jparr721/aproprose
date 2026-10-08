@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +40,7 @@ import {
 import type {
   AgentMessageMetadata,
   AgentPersistenceIssue,
+  AgentSessionId,
   AgentUIMessage,
   DraftContextRef,
   PendingProposal,
@@ -172,6 +175,104 @@ afterEach(async () => {
 });
 
 describe("AgentConsole shell", () => {
+  it("shows thinking in the fixed header before the first assistant message arrives", () => {
+    render(<AgentConsole />);
+    expect(screen.queryByText("Thinking")).toBeNull();
+
+    act(() => useAgentConsoleStore.getState().beginPreflight());
+
+    const activity = screen.getByRole("status", { name: "AI activity" });
+    const header = screen.getByText("AI Console").closest("header");
+    expect(activity.textContent).toBe("Thinking");
+    expect(activity.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(activity.closest("header")).toBe(header);
+    expect(screen.getByRole("log").contains(activity)).toBe(false);
+    expect(useAgentConsoleStore.getState().messages).toEqual([]);
+
+    act(() => useAgentConsoleStore.getState().markStreaming());
+    expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+
+    act(() => useAgentConsoleStore.getState().finishRun(message, null));
+    expect(screen.queryByRole("status", { name: "AI activity" })).toBeNull();
+    expect(screen.getByText("The bridge can stay quiet.")).toBeTruthy();
+  });
+
+  it.each(["stopped", "error"] satisfies AgentMessageMetadata["state"][])(
+    "clears the header activity when a run ends with %s",
+    (state) => {
+      useAgentConsoleStore.setState({ runStatus: "streaming" });
+      render(<AgentConsole />);
+      expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+
+      act(() => {
+        if (state === "stopped") {
+          useAgentConsoleStore.getState().interruptRun({
+            runId: metadata.runId,
+            userMessageId: "user-1",
+            assistantMessageId: null,
+            reason: "stopped",
+            interruptedAt: metadata.createdAt,
+          });
+        } else {
+          useAgentConsoleStore.getState().failRun(message, {
+            reason: "transport",
+            message: "The AI provider could not be reached.",
+            action: "retry",
+            settingsTarget: null,
+          });
+        }
+      });
+
+      expect(screen.queryByRole("status", { name: "AI activity" })).toBeNull();
+    },
+  );
+
+  it.each([
+    { kind: "outline", chapterId: "chapter-1" },
+    { kind: "character", characterId: "c1" },
+  ] satisfies AgentSessionId[])(
+    "keeps the $kind panel activity isolated from the project console",
+    (sessionId) => {
+      const session = agentSessionStore(sessionId);
+      session.setState({
+        ...EMPTY_AGENT_STATE,
+        activeProjectRoot: project.root,
+        hydratedProjectRoot: project.root,
+        requestedProjectRoot: project.root,
+      });
+      useAgentConsoleStore.setState({ runStatus: "streaming" });
+      render(
+        <>
+          <AgentConsole />
+          <AgentSection
+            ariaLabel="Scoped AI panel"
+            closeLabel="Close scoped AI panel"
+            contextLabel="Quiet Novel"
+            emptyDescription="Ask a question"
+            emptyTitle="Scoped conversation"
+            onClose={vi.fn()}
+            placeholder="Ask a question"
+            sessionId={sessionId}
+            task={null}
+            title="Scoped AI panel"
+          />
+        </>,
+      );
+      const console = within(screen.getByRole("region", { name: "AI Console" }));
+      const scoped = within(screen.getByRole("region", { name: "Scoped AI panel" }));
+      expect(console.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(scoped.queryByRole("status", { name: "AI activity" })).toBeNull();
+
+      act(() => {
+        useAgentConsoleStore.getState().finishRun(null, null);
+        session.getState().beginPreflight();
+      });
+
+      expect(console.queryByRole("status", { name: "AI activity" })).toBeNull();
+      expect(scoped.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+    },
+  );
+
   it("renders header, conversation, tray, and composer in fixed DOM order", () => {
     useAgentConsoleStore.setState({ pendingProposal: proposal });
     render(<AgentConsole />);

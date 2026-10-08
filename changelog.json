@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.17.7",
+    "date": "2026-10-07",
+    "summary": "The AI dock reopens reliably after resizing.",
+    "highlights": [
+      "Dragging the dock closed no longer breaks the first reopen."
+    ]
+  },
+  {
     "version": "0.17.6",
     "date": "2026-10-07",
     "summary": "Scrollbars stay clear of your writing and settings.",

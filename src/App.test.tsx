@@ -23,8 +23,18 @@ vi.mock("@/components/app/outline/outline-pane", () => ({
   OutlinePane: () => <div>Outline Pane</div>,
 }));
 
+vi.mock("@/components/ui/resizable", async (importOriginal) => {
+  const resizable = await importOriginal<typeof import("@/components/ui/resizable")>();
+  return {
+    ...resizable,
+    ResizablePanel: vi.fn(resizable.ResizablePanel),
+    ResizablePanelGroup: vi.fn(resizable.ResizablePanelGroup),
+  };
+});
+
 import { Workspace } from "@/App";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
@@ -60,6 +70,7 @@ const project: ProjectInfo = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   useViewStore.setState({
     aiOpen: true,
     pdfOpen: true,
@@ -91,6 +102,29 @@ afterEach(() => {
 });
 
 describe("Workspace", () => {
+  it("finishes a collapse drag before hiding the dock", () => {
+    render(<Workspace />);
+    const panel = vi.mocked(ResizablePanel).mock.calls.find(([props]) => props.id === "right")?.[0];
+    const group = vi.mocked(ResizablePanelGroup).mock.calls[0][0];
+    if (!panel?.onResize || !group.onLayoutChanged) {
+      throw new Error("Workspace must register panel resize and layout completion callbacks");
+    }
+
+    act(() => {
+      panel.onResize?.({ asPercentage: 0, inPixels: 0 }, "right", {
+        asPercentage: 30,
+        inPixels: 388,
+      });
+    });
+
+    expect(useViewStore.getState().aiOpen).toBe(true);
+
+    act(() => { group.onLayoutChanged?.({ main: 100, right: 0 }); });
+
+    expect(useViewStore.getState().aiOpen).toBe(false);
+    expect(useViewStore.getState().rightPanelWidth).toBe(388);
+  });
+
   it("co-docks Editor, PDF, and AI Console with AI as the rightmost panel", () => {
     const { container } = render(<Workspace />);
 

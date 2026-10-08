@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   copyText: vi.fn(),
@@ -221,9 +221,7 @@ describe("AgentMessage content", () => {
     expect(screen.queryByText("Accepted one manuscript change.")).toBeNull();
   });
 
-  it("shows an elapsed thinking indicator while an answer streams", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-25T12:00:05.000Z"));
+  it("keeps the thinking indicator out of streaming replies", () => {
     renderAgentMessage(
       assistantMessage(
         "assistant-thinking",
@@ -232,9 +230,7 @@ describe("AgentMessage content", () => {
       ),
     );
 
-    expect(screen.getByText("Thinking 00:05")).toBeTruthy();
-    act(() => vi.advanceTimersByTime(1_000));
-    expect(screen.getByText("Thinking 00:06")).toBeTruthy();
+    expect(screen.queryByText(/Thinking/)).toBeNull();
   });
 
 });

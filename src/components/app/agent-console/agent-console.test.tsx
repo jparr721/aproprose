@@ -175,22 +175,22 @@ afterEach(async () => {
 });
 
 describe("AgentConsole shell", () => {
-  it("shows thinking in the fixed header before the first assistant message arrives", () => {
+  it("shows activity beside the composer before the first assistant message arrives", () => {
     render(<AgentConsole />);
     expect(screen.queryByText("Thinking")).toBeNull();
 
     act(() => useAgentConsoleStore.getState().beginPreflight());
 
     const activity = screen.getByRole("status", { name: "AI activity" });
-    const header = screen.getByText("AI Console").closest("header");
-    expect(activity.textContent).toBe("Thinking");
+    expect(activity.textContent).toBe("Working on your request");
     expect(activity.querySelector('[data-slot="spinner"]')).not.toBeNull();
-    expect(activity.closest("header")).toBe(header);
+    expect(screen.getByRole("region", { name: "Agent composer" }).contains(activity)).toBe(true);
     expect(screen.getByRole("log").contains(activity)).toBe(false);
     expect(useAgentConsoleStore.getState().messages).toEqual([]);
 
     act(() => useAgentConsoleStore.getState().markStreaming());
-    expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+    expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
+    expect(screen.queryByText("Thinking")).toBeNull();
 
     act(() => useAgentConsoleStore.getState().finishRun(message, null));
     expect(screen.queryByRole("status", { name: "AI activity" })).toBeNull();
@@ -198,11 +198,11 @@ describe("AgentConsole shell", () => {
   });
 
   it.each(["stopped", "error"] satisfies AgentMessageMetadata["state"][])(
-    "clears the header activity when a run ends with %s",
+    "clears the busy activity when a run ends with %s",
     (state) => {
       useAgentConsoleStore.setState({ runStatus: "streaming" });
       render(<AgentConsole />);
-      expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(screen.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
 
       act(() => {
         if (state === "stopped") {
@@ -260,7 +260,7 @@ describe("AgentConsole shell", () => {
       );
       const console = within(screen.getByRole("region", { name: "AI Console" }));
       const scoped = within(screen.getByRole("region", { name: "Scoped AI panel" }));
-      expect(console.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(console.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
       expect(scoped.queryByRole("status", { name: "AI activity" })).toBeNull();
 
       act(() => {
@@ -269,7 +269,7 @@ describe("AgentConsole shell", () => {
       });
 
       expect(console.queryByRole("status", { name: "AI activity" })).toBeNull();
-      expect(scoped.getByRole("status", { name: "AI activity" }).textContent).toBe("Thinking");
+      expect(scoped.getByRole("status", { name: "AI activity" }).textContent).toBe("Working on your request");
     },
   );
 

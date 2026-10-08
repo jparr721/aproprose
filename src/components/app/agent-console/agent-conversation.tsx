@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 import {
   AgentMessage,
   type AgentMessageProps,
@@ -16,6 +17,17 @@ import type {
 import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 
 const RECENT_MESSAGE_COUNT = 8;
+
+function FollowSubmittedMessage({ messageId }: { messageId: string | null }) {
+  const { scrollToBottom } = useStickToBottomContext();
+  const previousMessageId = useRef(messageId);
+  useEffect(() => {
+    if (messageId === previousMessageId.current) return;
+    previousMessageId.current = messageId;
+    if (messageId !== null) void scrollToBottom({ animation: "instant" });
+  }, [messageId, scrollToBottom]);
+  return null;
+}
 
 export interface AgentConversationProps
   extends Pick<AgentMessageProps, "onOpenSettings" | "onRetry"> {
@@ -39,6 +51,7 @@ export function AgentConversation({
   const hiddenMessageCount = messages.length - visibleMessages.length;
   return (
     <Conversation className="min-h-0">
+      <FollowSubmittedMessage messageId={messages.findLast((message) => message.role === "user")?.id ?? null} />
       <ConversationContent scrollClassName="overflow-y-auto">
         {messages.length === 0 ? (
           <ConversationEmptyState

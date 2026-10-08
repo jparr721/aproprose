@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.18.0",
+    "date": "2026-10-07",
+    "summary": "Review AI drafts in a persistent Changes panel before applying them.",
+    "highlights": [
+      "Open Changes separately from the AI conversation, with clear activity while a suggestion is being prepared.",
+      "Keep drafts across panel closing, chapter and project changes, and app reloads.",
+      "Preview and edit proposed text, apply or dismiss individual changes, and restore dismissed changes from history.",
+      "Check the original source before applying a draft so later manuscript edits are protected."
+    ]
+  },
+  {
     "version": "0.17.9",
     "date": "2026-10-07",
     "summary": "AI chat attachment previews stay compact and readable.",

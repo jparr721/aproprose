@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { IconMessages, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,9 @@ import { BEAT_TYPE_LABEL, BEAT_TYPE_ORDER } from "@/components/app/outline/plot-
 import { ACT_ORDER, ACT_TITLES, getChapterOutline } from "@/lib/outline/model";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
+import { agentConsoleOwnershipStatus, useAgentSessionStore } from "@/stores/agent-console-store";
+import { hydrateAgentOutlineSession } from "@/stores/agent-persistence";
+import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import { AgentSection } from "@/components/app/agent-console/agent-console";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { stopAgentRun } from "@/lib/ai/agent-controller";
@@ -61,6 +64,13 @@ export function ChapterSubview() {
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
   const projectRoot = project === null ? null : project.root;
+  const ready = useAgentSessionStore(
+    chapterId === null ? PROJECT_AGENT_SESSION : { kind: "outline", chapterId },
+    (state) => projectRoot !== null &&
+      agentConsoleOwnershipStatus(state, projectRoot) === "ready" &&
+      state.persistenceIssue === null,
+  );
+  const investigationController = useRef<AbortController | null>(null);
   useEffect(() => {
     if (
       chapterId === null ||
@@ -68,13 +78,24 @@ export function ChapterSubview() {
       chapterView !== "planner"
     ) return;
     const controller = new AbortController();
-    void editorial.investigateChapter({ projectRoot, chapterId, signal: controller.signal })
+    investigationController.current = controller;
+    void hydrateAgentOutlineSession(projectRoot, chapterId)
       .catch((error: unknown) => reportAiError(error, null, "Chapter investigation", projectRoot, null));
     return () => {
       controller.abort();
+      investigationController.current = null;
       stopAgentRun({ kind: "outline", chapterId });
     };
   }, [chapterId, chapterView, projectRoot]);
+  useEffect(() => {
+    const controller = investigationController.current;
+    if (
+      chapterId === null || projectRoot === null || chapterView !== "planner" ||
+      !ready || controller === null
+    ) return;
+    void editorial.investigateChapter({ projectRoot, chapterId, signal: controller.signal })
+      .catch((error: unknown) => reportAiError(error, null, "Chapter investigation", projectRoot, null));
+  }, [chapterId, chapterView, projectRoot, ready]);
   if (!chapterId || !ch || !chapterRef || !project) return null;
 
   const sessionId = { kind: "outline" as const, chapterId };

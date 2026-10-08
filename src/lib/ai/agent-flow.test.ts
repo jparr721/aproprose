@@ -2274,6 +2274,11 @@ describe("agent console authoring flows", () => {
             runId: "flow-1",
             task: { kind: "conversation", targetChapterId: "ch1" },
             text: "Revise the final beat in Book A.",
+            origin: {
+              kind: "task",
+              mode: "edit",
+              task: { kind: "conversation", targetChapterId: "ch1" },
+            },
           },
           decisions: {},
           replacedByProposalId: null,

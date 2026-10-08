@@ -286,6 +286,8 @@ function safeCompletedToolInput(name: AgentToolName, input: unknown): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "stage_overview_proposal":
+      return { summary: "", overview: "", reason: "" };
     case "update_character_profile":
       return {
         characterId: safeTarget(
@@ -325,6 +327,8 @@ function genericFailedToolInput(name: AgentToolName): unknown {
     case "stage_manuscript_proposal":
     case "stage_outline_proposal":
       return { summary: "", changes: [] };
+    case "stage_overview_proposal":
+      return { summary: "", overview: "", reason: "" };
     case "update_character_profile":
       return {
         characterId: descriptor.targetFallback,
@@ -529,6 +533,10 @@ export function settleAgentMessages(
         if (part.type === "reasoning") {
           return [{ ...part, state: "done" }];
         }
+        if (isToolOrDynamicToolUIPart(part)) {
+          const projected = settledToolProjection(part);
+          return projected === null ? [] : [projected];
+        }
         if (
           part.type !== "text" &&
           part.type !== "source-url" &&
@@ -538,27 +546,12 @@ export function settleAgentMessages(
           part.type !== "data-context" &&
           part.type !== "data-proposal-event" &&
           part.type !== "data-compaction" &&
-          part.type !== "data-findings" &&
-          part.type !== "dynamic-tool" &&
-          part.type !== "tool-read_chapter" &&
-          part.type !== "tool-read_outline" &&
-          part.type !== "tool-read_lore" &&
-          part.type !== "tool-run_critique" &&
-          part.type !== "tool-run_continuity" &&
-          part.type !== "tool-read_conversation_context" &&
-          part.type !== "tool-read_pending_proposal" &&
-          part.type !== "tool-stage_manuscript_proposal" &&
-          part.type !== "tool-stage_outline_proposal" &&
-          part.type !== "tool-update_character_profile"
+          part.type !== "data-findings"
         ) {
           throw new Error("Unknown agent message part cannot be persisted.");
         }
         if (part.type === "text") {
           return [{ ...part, state: "done" }];
-        }
-        if (isToolOrDynamicToolUIPart(part)) {
-          const projected = settledToolProjection(part);
-          return projected === null ? [] : [projected];
         }
         return [{ ...part }];
       }),

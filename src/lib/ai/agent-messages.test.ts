@@ -175,6 +175,19 @@ function assistantWithUntrustedToolTargets(): AgentUIMessage {
 }
 
 describe("sanitizeAgentMessages", () => {
+  it("keeps overview proposal history schema-valid without retaining its private body", async () => {
+    const message: AgentUIMessage = {
+      id: "assistant-overview", role: "assistant", metadata,
+      parts: [{
+        type: "tool-stage_overview_proposal", toolCallId: "overview", state: "output-available",
+        input: { summary: "PRIVATE SUMMARY", overview: "PRIVATE OVERVIEW", reason: "PRIVATE REASON" },
+        output: { kind: "runtime", summary: { label: "Stage story overview proposal", target: "Story overview", detail: "1 change", itemCount: 1 }, value: { proposalId: "overview-1", changeCount: 1 } },
+      }],
+    };
+    const sanitized = sanitizeAgentMessages([message]);
+    await expect(validateAgentMessages(sanitized)).resolves.toEqual(sanitized);
+    expect(JSON.stringify(sanitized)).not.toContain("PRIVATE");
+  });
   it("keeps reasoning in settled live messages", () => {
     const messages: AgentUIMessage[] = [
       {

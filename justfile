@@ -28,6 +28,18 @@ build:
 bundle:
     bun run tauri build
 
+# Build the installable artifact for CI without requiring updater signing secrets.
+bundle-smoke BUNDLE:
+    bun run tauri build --bundles "{{BUNDLE}}" --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+# Launch the installed or extracted bundle and require a stable visible window.
+smoke-artifact DIRECTORY:
+    bun scripts/smoke-release-artifact.ts "{{DIRECTORY}}"
+
+# Verify the downloaded draft release against the tagged config and public key.
+verify-release-assets DIRECTORY VERSION REPOSITORY:
+    bun scripts/validate-release-assets.ts "{{DIRECTORY}}" "{{VERSION}}" "{{REPOSITORY}}"
+
 # Build an Arch Linux package from the production binary.
 # `tauri build` (not bare `cargo build --release`) is required: tauri's build script
 # sets dev = !custom-protocol, so a plain cargo build embeds no frontend and the app
@@ -76,17 +88,17 @@ _release VERSION MODE:
     gh auth status
     # Full gate - the same checks ci.yml enforces - before release preparation.
     echo "==> typecheck"
-    bun x tsc --noEmit
+    just typecheck
     echo "==> frontend tests"
-    bun x vitest run
+    just test-frontend
     echo "==> browser tests"
     just test-browser
     echo "==> build frontend (required for cargo generate_context!)"
-    bun run build
+    just build
     echo "==> rust tests"
-    ( cd src-tauri && cargo test )
-    echo "==> clippy"
-    ( cd src-tauri && cargo clippy --all-targets -- -D warnings )
+    just test-native
+    echo "==> rust formatting and clippy"
+    just lint
     release_branch="codex/release-$ver"
     git switch -c "$release_branch"
     # Revert every file this recipe mutates if anything below fails or is interrupted, so an
@@ -144,14 +156,33 @@ _release VERSION MODE:
 typecheck:
     bun x tsc --noEmit
 
-# Run the unit tests (frontend Vitest + Rust).
-test:
-    bun x vitest run
-    cd src-tauri && cargo test
+# Serve browser regression fixtures on a port separate from the native app.
+dev-browser:
+    bun run dev --host 127.0.0.1 --port 1432
 
-# Run layout regressions in Chromium and WebKit (install with `bun x playwright install chromium webkit`).
+# Run the real browser layout, focus, theme, and recovery suite.
 test-browser:
     bun x playwright test
+
+# Check formatting without modifying source, then lint every Rust target.
+lint:
+    cd src-tauri && cargo fmt --check
+    cd src-tauri && cargo clippy --all-targets -- -D warnings
+
+# Run an isolated native app for disposable-data QA.
+run-qa:
+    bun run tauri dev --config src-tauri/tauri.qa.conf.json
+
+# Run the unit tests (frontend Vitest + Rust).
+test: test-frontend test-native
+
+# Run frontend and release-script regression tests.
+test-frontend:
+    bun x vitest run
+
+# Run Rust unit and integration tests.
+test-native:
+    cd src-tauri && cargo test
 
 # Format and lint the Rust side.
 fmt:

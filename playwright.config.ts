@@ -14,7 +14,7 @@ export default defineConfig({
     { name: "webkit", use: { browserName: "webkit" } },
   ],
   webServer: {
-    command: "bun run dev --host 127.0.0.1 --port 1432",
+    command: "just dev-browser",
     url: "http://127.0.0.1:1432/tests/browser/scroll-area.html?dir=ltr",
     reuseExistingServer: false,
   },

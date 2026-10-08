@@ -1,4 +1,4 @@
-import { blockSnapshotText } from "@/lib/ai/agent-context";
+import { projectChapter, type BookBlockValue } from "@/book";
 import { getChapterOutline } from "@/lib/outline/model";
 import type {
   Block,
@@ -27,20 +27,34 @@ function manuscriptChapter(
 ): {
   chapterId: string;
   title: string;
-  prose: string;
+  blocks: BookBlockValue[];
   truncated: boolean;
+  start: number;
+  endExclusive: number;
+  includedCharacters: number;
   totalBlocks: number;
   totalCharacters: number;
 } | null {
   if (chapter === null) return null;
-  const prose = chapter.blocks.map(blockSnapshotText).join("\n\n");
+  const projected = projectChapter(chapter);
+  const blocks: BookBlockValue[] = [];
+  let includedCharacters = 0;
+  for (const block of projected.blocks) {
+    const characters = JSON.stringify(block).length + (blocks.length === 0 ? 0 : 1);
+    if (includedCharacters + characters > maxCharacters) break;
+    blocks.push(block);
+    includedCharacters += characters;
+  }
   return {
     chapterId: chapter.chapterId,
     title: chapter.title,
-    prose: prose.slice(0, maxCharacters),
-    truncated: prose.length > maxCharacters,
+    blocks,
+    truncated: blocks.length < projected.blocks.length,
+    start: 0,
+    endExclusive: blocks.length,
+    includedCharacters,
     totalBlocks: chapter.blocks.length,
-    totalCharacters: prose.length,
+    totalCharacters: JSON.stringify(projected.blocks).length - 2,
   };
 }
 
@@ -100,14 +114,16 @@ export function buildOutlinePlannerGrounding(
     ),
   ]);
   const target = manuscriptChapter(input.target, maxManuscriptCharacters);
-  const remaining = maxManuscriptCharacters - (target === null ? 0 : target.prose.length);
+  const remaining = target !== null && target.truncated
+    ? 0
+    : maxManuscriptCharacters - (target === null ? 0 : target.includedCharacters);
   const previous = manuscriptChapter(input.previous, Math.floor(remaining / 2));
   const next = manuscriptChapter(input.next, Math.ceil(remaining / 2));
   const value = {
     discovery: {
       previousChapterId: expectedPrevious === null ? null : expectedPrevious.id,
       nextChapterId: expectedNext === null ? null : expectedNext.id,
-      policy: "Target material first. Neighbors are uninspected unless included below. Retrieve other book material with tools only to resolve a concrete uncertainty. If target.truncated is true, read the remaining ordered blocks using read_chapter_range before diagnosing the whole chapter. Distinguish source facts, existing plan, inferred intent and confirmed author choices.",
+      policy: "Target material first. Neighbors are uninspected unless included below. The manuscript character budget counts compact JSON block payloads and includes only complete ordered blocks. Retrieve other book material with tools only to resolve a concrete uncertainty. If target.truncated is true, read the remaining ordered blocks using read_chapter_range starting at target.endExclusive before diagnosing the whole chapter. Distinguish source facts, existing plan, inferred intent and confirmed author choices.",
     },
     logline: input.meta.outline.premise,
     storyOverview: input.meta.outline.overview,

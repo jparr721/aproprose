@@ -74,7 +74,7 @@
 | B | Field action slot; two target-labeled AI buttons; local steering/dialog/draft; explicit Apply writes own field; synchronous live source/config check; close/config/unmount abort and generation invalidation; blank-input gate; safe recovery; tests and existing mocks | src/components/app/settings/preference-assistant.tsx; src/components/app/settings/preference-assistant.test.tsx; src/components/app/settings/ai-tab.tsx; src/components/app/settings/ai-tab.test.tsx; src/components/app/settings/field.tsx | A exported API; root |
 | C | Deep source-backed audit of save/topology triggers, disk-only capture, queue/fingerprints, SDK/prose evidence, metadata/rollback, authored vs derived ownership, acceptance; intended live/bidirectional design/test matrix; source-visible save race labeled unproven | docs/architecture/background-ai-authoring.md | Read current source; architect; no new background implementation without scope answer |
 | D | Real native path and real component workshop where live states unreachable; capture screenshots for both fields and key states; one short-caption slide per screenshot; embed/relative local assets; copy to primary before cleanup | docs/slides/ai-preference-help-2026-10-07.html (actual final name); embedded screenshots | Finished code/gates; root QA completed |
-| E | Version/changelog gate; exact-SHA reusable main release; retain signing/platform/Arch/updater proof; release-body validation and tests; main-only release recipe; bump current change and document author policy | Architect: .github/workflows/ci.yml; .github/workflows/release.yml; scripts/check-release.ts; scripts/check-release.test.ts; scripts/release-body.ts; scripts/release-body.test.ts; justfile. Root: package.json; src-tauri/Cargo.toml; src-tauri/tauri.conf.json; src-tauri/Cargo.lock; changelog.json; AGENTS.md | Architect/root disjoint writes; final gate after E complete |
+| E | Version/changelog gate; exact-SHA reusable main release; retain signing/platform/Arch/updater proof; release-body validation and tests; main-only release recipe; bump current change and document author policy | Architect: .github/workflows/ci.yml; .github/workflows/release.yml; scripts/check-release.ts; scripts/check-release.test.ts; scripts/release-body.ts; scripts/release-body.test.ts; justfile. Root: package.json; src-tauri/Cargo.toml; src-tauri/tauri.conf.json; src-tauri/Cargo.lock; changelog.json; AGENTS.md; README.md | Architect/root disjoint writes; final gate after E complete |
 | F | Configure actual GitHub main branch protection with required checks and strict true, requiring PR head up to date before merge; verify readback | External GitHub settings only; no local write set | Exact finalized check job names; root; local Composio CLI preferred |
 
 - Research dispositions accepted SDK6/getModel/Zod, existing queue/proposals as future design foundation; rejected SDK upgrade, new dependencies and new approval state machine because existing capabilities suffice.
@@ -104,7 +104,10 @@
 - E seven-file implementation complete (architect report): stable CI check names match F; main reusable release waits all three gates; inputs/checkouts and concurrency keyed to exact SHA; platforms serialize within a release while different SHA releases may build concurrently. Same-SHA draft retry reuses release; published retry currently fails before build (not an idempotent no-op). Arch replacement requires draft. Focused tests/actionlint next.
 - E retry disposition (root): Published same-SHA retry failing before build is accepted as explicit safer outcome; no published assets touched. Only unfinished-draft retry must succeed. Earlier no-op suggestion dropped; no duplicate released-commit build required.
 - E integration amendment: strict main required checks block new direct main pushes. Existing version recipe will create codex/release-VERSION branch, commit/push that branch, and open ready PR through existing gh. It no longer directly pushes main or tags. Seven-file architect write ownership unchanged.
+- E root doc sync: README.md releasing section replaced stale tag/direct-main instructions with synchronized four-file versions, changelog, strict checks, automatic main release and version PR recipe. Required documentation update; root write-set expansion remains disjoint from architect.
 - F complete (root report): Composio PUT then independent GET confirms main branch protection strict=true; required contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy'; enforce_admins=true. No other policy extras. Exact API payload/readback proof held by root.
+- Rebase integration correction: New main d49a55b changed withAiRetry to transient-only classification and added toast.error. Nine helper tests used generic retry fixtures and one pre-existing operations test omitted error toast mock. Wildcard assigned only src/lib/ai/refine-preference.test.ts and src/lib/ai/story-knowledge/operations.test.ts. Updated real transient 503/network fixtures, complete error mock and nonretry validation expectations; added 401 no-retry/original-error assertion. Production classifier left unchanged. Root will commit standalone fixture correction.
+- C rebase doc sync: Audit source anchors and current error-handling description updated for latest main; source-visible limits remain labeled accurately.
 
 ## Verification
 
@@ -117,17 +120,20 @@
 - Root-reported clippy pass; debug macOS app bundle pass. Final E-slice gate still pending.
 - Final full-suite/typecheck rerun active after release edits (root report).
 - E architect results: scripts/check-release.test.ts + scripts/release-body.test.ts, 59/59 pass; actionlint on ci.yml and release.yml pass with shellcheck disabled because not installed; just dry-run release recipe rendered shell passes bash -n; actual check-release CLI against base 24e4aaa prints 0.18.0; git diff --check clean. Seven-file write set respected. Remote signed build/publication and recipe network steps unexecuted.
-- Full gate ongoing: just test plus cargo fmt --check and clippy (Rust job concurrency 2); final gate must rerun for release-scope edits.
+- Final pre-rebase full gate (root report): 1484 frontend tests and 54 Rust tests executed/passed; typecheck, frontend build, clippy and fmt passed.
+- Up-to-date rebase: Initial commit 6b4b8e1 created but not pushed. Fetch revealed new origin/main commits 001aeed and d49a55b (still 0.17.1); feature rebased cleanly onto d49a55b. Full local gate rerunning on rebased tree before initial push. Earlier green gate is not claimed for rebased commit.
+- Post-rebase initial gate: typecheck/build/clippy/fmt passed; frontend had 10 failures in two files (1523 passed of 1533). Focused repro confirmed RED 10/36 before integration fixture correction, then GREEN 37/37 after correction. Exact last-error, retry/maxRetries 0, validation and cancellation assertions retained.
+- Post-rebase corrected full gate (root report): 124 frontend files, 1534 tests pass; 53 regular Rust tests pass plus ignored DNS lane explicitly run and pass (all 54 executed); typecheck and frontend build pass. Clippy/fmt were green on identical production code post-rebase. Rebased feature commit d778d5e on d49a55b, before standalone test/doc commits.
 
 ## PR and review
 
-- PR: not opened; first commit/push pending local gate
+- PR: not opened; feature rebased to d778d5e on d49a55b; corrected local gate green, standalone test and audit/ledger commits next, then initial push and ready PR
 - Round 1: pending
 - Round 2: pending
 - Round 3: pending
 - Rounds 4-5: only if required by findings
 - Simplification: pending clean review exit
-- Exact-commit final gate: pending
+- Exact-commit final gate: corrected post-rebase full gate green; final pushed review fixes and simplification remain to gate
 - Merge: deferred for this turn; deliver commit/push and retain branch/worktree
 
 ## QA and deck
@@ -153,8 +159,8 @@
 - User continuation resolves verification permission and authorizes commit/push.
 - Confirmed code scope: two preference AI assistants; background synchronization remains audit/design only without implementation scope answer.
 - No additional user questions needed. Root executes approved local gate, regression-driven one-click generation change, commit and push.
-- New CI/release scope now included by direct user instruction; amended plans/write sets pending, intended version 0.18.0 for feature minor (not yet applied).
+- New CI/release scope implemented by direct user instruction; version 0.18.0 and changelog applied. Post-rebase gate green; commit/push/ready PR next.
 - GitHub up-to-date PR gate applied and independently read back: strict required checks with contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy'.
 - Optional scope fallback: audit/design remains selected; no new background synchronization implemented.
-- Preserve dirty dedicated worktree and all artifacts; do not claim pipeline complete or remove worktree.
+- Preserve dedicated worktree and all artifacts; do not claim pipeline complete or remove worktree. Supervisor records review-round results only at coordinated checkpoints to avoid ledger movement during commits.
 - Cleanup tail read: /Users/jarredparr/Projects/jp-skills/skills/cleanup/SKILL.md. Supervisor made no tmp scratch; nothing removed. Task records retained; no version/changelog/other-skill records touched.

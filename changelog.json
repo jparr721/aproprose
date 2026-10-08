@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.18.1",
+    "date": "2026-10-07",
+    "summary": "Keep macOS window buttons aligned with the toolbar icons.",
+    "highlights": [
+      "Window buttons retain their custom position after title changes and leaving fullscreen."
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-10-07",
     "summary": "Clarify your writing preferences with AI and receive a new app release after each update to main.",

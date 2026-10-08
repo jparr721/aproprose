@@ -45,6 +45,7 @@ import {
   acceptAllProposalChanges,
   acceptProposalChange,
   proposalStaleChangeIds,
+  proposalRequiresSourceNavigation,
   rejectAllProposalChanges,
   rejectProposalChange,
 } from "@/lib/ai/proposal-decisions";
@@ -193,7 +194,11 @@ const initialBlocks = (): Block[] => [
 const initialCards = (): Card[] => [cardFixture("card-1", "Arrival")];
 
 const setPending = (proposal: PendingProposal): void => {
-  useAgentConsoleStore.setState({ pendingProposal: proposal });
+  useAgentConsoleStore.setState({
+    proposalRecords: [{ proposal, source: { kind: "legacy" }, decisions: {}, replacedByProposalId: null }],
+    currentProposalId: proposal.id,
+    pendingProposal: proposal,
+  });
 };
 
 beforeEach(() => {
@@ -247,6 +252,67 @@ afterEach(() => {
 });
 
 describe("proposal decisions", () => {
+  it("does not expand a captured batch when another change is restored", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "First draft", "Revise"), rewrite("block-2", "Second draft", "Revise"),
+    ]);
+    setPending(proposal);
+    rejectProposalChange(proposal, "change-0");
+    const captured = useAgentConsoleStore.getState().pendingProposal;
+    if (captured === null) throw new Error("Expected a pending batch");
+    useAgentConsoleStore.getState().restoreProposalChanges(proposal.id, ["change-0"]);
+    acceptAllProposalChanges(captured);
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(["The rain fell.", "Second draft"]);
+    expect(useAgentConsoleStore.getState().pendingProposal).toMatchObject({ changes: [{ id: "change-0" }] });
+  });
+
+  it("refuses a captured batch if any selected change was already decided", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "First draft", "Revise"), rewrite("block-2", "Second draft", "Revise"),
+    ]);
+    setPending(proposal);
+    rejectProposalChange(proposal, "change-0");
+    expect(() => acceptAllProposalChanges(proposal)).toThrow("Pending proposal change not found: change-0");
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("applies an older retained draft by exact identity without retargeting chat", () => {
+    const older = manuscriptProposal(useProjectStore.getState().blocks, [rewrite("block-1", "Older draft", "Revise")]);
+    const newer = { ...manuscriptProposal(useProjectStore.getState().blocks, [rewrite("block-2", "Newer draft", "Revise")]), id: "newer" };
+    setPending(older);
+    useAgentConsoleStore.getState().stageProposal(newer, { kind: "legacy" });
+    acceptAllProposalChanges(older);
+    expect(useProjectStore.getState().blocks[0].text).toBe("Older draft");
+    expect(useAgentConsoleStore.getState().currentProposalId).toBe("newer");
+    expect(useAgentConsoleStore.getState().proposalRecords[0].decisions["change-0"].status).toBe("applied");
+    expect(() => acceptAllProposalChanges(older)).toThrow();
+    expect(useProjectStore.getState().past).toHaveLength(1);
+  });
+
+  it("retains dismissed content and restores it without restoring applied changes", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
+      rewrite("block-1", "Applied text", "Revise"), rewrite("block-2", "Dismissed text", "Revise"),
+    ]);
+    setPending(proposal);
+    acceptProposalChange(proposal, "change-0");
+    rejectProposalChange(proposal, "change-1");
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+    useAgentConsoleStore.getState().restoreProposalChanges(proposal.id, ["change-1"]);
+    expect(useAgentConsoleStore.getState().pendingProposal).toMatchObject({ changes: [{ id: "change-1" }] });
+    expect(useAgentConsoleStore.getState().proposalRecords[0].decisions["change-0"].status).toBe("applied");
+  });
+
+  it("requires explicit source navigation before off-chapter Apply", () => {
+    const proposal = manuscriptProposal(useProjectStore.getState().blocks, [rewrite("block-1", "Draft", "Revise")]);
+    setPending(proposal);
+    useProjectStore.setState({ activeChapterId: "ch2" });
+    expect(proposalRequiresSourceNavigation(proposal)).toBe(true);
+    acceptAllProposalChanges(proposal);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useAgentConsoleStore.getState().proposalRecords[0].decisions).toEqual({});
+    expect(toast.error).toHaveBeenCalledWith("Open the source chapter before applying this draft");
+  });
+
   it("applies only one manuscript change before removing and recording it", () => {
     const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
@@ -727,7 +793,7 @@ describe("proposal decisions", () => {
     }
     setPending({ ...editedProposal, changes: [editedProposal.changes[1]] });
 
-    acceptAllProposalChanges(callbackProposal);
+    acceptAllProposalChanges({ ...callbackProposal, changes: [callbackProposal.changes[1]] });
 
     expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
       "The rain fell.",
@@ -794,7 +860,7 @@ describe("proposal decisions", () => {
     };
     setPending(currentProposal);
 
-    rejectAllProposalChanges(callbackProposal);
+    rejectAllProposalChanges({ ...callbackProposal, changes: [callbackProposal.changes[1]] });
 
     expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
     expect(recordProposalEvent).toHaveBeenCalledWith({
@@ -831,16 +897,15 @@ describe("proposalStaleChangeIds", () => {
     );
   });
 
-  it("marks every manuscript change stale outside its active chapter", () => {
+  it("leaves off-chapter manuscript source unchecked until explicit navigation", () => {
     const proposal = manuscriptProposal(useProjectStore.getState().blocks, [
       rewrite("block-1", "Rain whispered.", "Quiet the opening"),
       rewrite("block-2", "The door eased open.", "Slow the reveal"),
     ]);
     useProjectStore.setState({ activeChapterId: "ch2" });
 
-    expect(proposalStaleChangeIds(proposal)).toEqual(
-      new Set(["change-0", "change-1"]),
-    );
+    expect(proposalStaleChangeIds(proposal)).toEqual(new Set());
+    expect(proposalRequiresSourceNavigation(proposal)).toBe(true);
   });
 
   it("marks only manuscript changes whose source changed as stale", () => {

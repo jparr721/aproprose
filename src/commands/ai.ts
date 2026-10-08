@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 import { dispatchAgentIntent } from "@/lib/ai/agent-controller";
 import { findBridgeSuccessor } from "@/lib/ai/agent-context";
+import { buildContinuationIntent } from "@/lib/ai/agent-continuation";
 import {
   CONTINUITY_DIRECTIVE,
   CRITIQUE_DIRECTIVE,
   PICK_UP_DIRECTIVE,
-  SUGGEST_DIRECTIVE,
 } from "@/lib/ai/agent-prompts";
 import type { DraftContextRef } from "@/lib/ai/agent-types";
 import {
@@ -22,6 +22,7 @@ import {
   useProjectStore,
 } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { getAgentChangesSnapshot } from "@/hooks/use-agent-changes";
 import type { Command } from "./types";
 
 function blockRefs(chapterId: string, blockIds: string[]): DraftContextRef[] {
@@ -37,7 +38,7 @@ function selectedBlockRefs(
 }
 
 function hasActiveChapter(): boolean {
-  return useProjectStore.getState().activeChapterId !== null;
+  return useProjectStore.getState().activeChapterId !== null && getAgentChangesSnapshot().runStatus === "idle";
 }
 
 function hasSelectedProse(): boolean {
@@ -51,16 +52,15 @@ function hasSelectedProse(): boolean {
 }
 
 function runSuggest(): void {
+  if (getAgentChangesSnapshot().runStatus !== "idle") return;
   const state = useProjectStore.getState();
   const chapterId = state.activeChapterId;
   if (chapterId === null) return;
-  void dispatchAgentIntent({
-    kind: "run",
-    mode: "writing",
-    text: SUGGEST_DIRECTIVE,
-    refs: selectedBlockRefs(chapterId, state.selectedIds, state.selectedId),
-    task: { kind: "conversation", targetChapterId: chapterId },
-  });
+  void dispatchAgentIntent(buildContinuationIntent(
+    chapterId,
+    state.blocks,
+    selectionTargetIds(state.selectedIds, state.selectedId),
+  ));
 }
 
 function runPickUp(): void {

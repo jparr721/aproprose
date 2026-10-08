@@ -45,6 +45,7 @@ import { Editor } from "@/components/app/editor";
 import {
   navigateToContextSnapshot,
   navigateToProposalChange,
+  navigateToProposalSource,
   openManuscriptProposalInEditor,
 } from "@/lib/ai/agent-navigation";
 import type {
@@ -200,6 +201,41 @@ const addScrollTarget = (attribute: string, id: string): HTMLElement => {
   document.body.append(element);
   return element;
 };
+
+describe("navigateToProposalSource", () => {
+  it("opens the ordinary manuscript after its historical text changed", async () => {
+    const frozen = blockFixture("source", "Before");
+    const change: ManuscriptPendingChange = {
+      id: "history-change",
+      change: { kind: "rewrite", blockId: frozen.id, afterId: null, type: null, speaker: null, newText: "After", toIndex: null, reason: "Revise" },
+      precondition: { kind: "target", target: blockLocator(frozen, 0) },
+    };
+    useProjectStore.setState({ blocks: [{ ...frozen, text: "After" }] });
+    useViewStore.setState({ outlineOpen: true });
+    await expect(navigateToProposalSource(manuscriptProposal("history", "/book", "ch1", [change]))).resolves.toBe(true);
+    expect(useProjectStore.getState().selectedId).toBe("source");
+    expect(useViewStore.getState().outlineOpen).toBe(false);
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+  });
+
+  it("does not navigate another project after a dirty guard waits", async () => {
+    useProjectStore.setState({ chapterDirty: true });
+    const navigation = navigateToProposalSource(manuscriptProposal("history", "/book", "ch2", [appendChange()]));
+    const selectChapter = vi.spyOn(useProjectStore.getState(), "selectChapter");
+    useProjectStore.setState({ project: { ...projectFixture(), root: "/other" } });
+    useViewStore.getState().confirmPending();
+    await expect(navigation).resolves.toBe(false);
+    expect(selectChapter).not.toHaveBeenCalled();
+  });
+
+  it("preserves a canceled chapter navigation", async () => {
+    useProjectStore.setState({ chapterDirty: true });
+    const navigation = navigateToProposalSource(manuscriptProposal("history", "/book", "ch2", [appendChange()]));
+    useViewStore.getState().cancelPending();
+    await expect(navigation).resolves.toBe(false);
+    expect(useProjectStore.getState().activeChapterId).toBe("ch1");
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -693,13 +729,27 @@ describe("openManuscriptProposalInEditor", () => {
 });
 
 describe("navigateToProposalChange", () => {
+  it("does not navigate another project after the dirty confirmation waits", async () => {
+    useProjectStore.setState({ chapterDirty: true });
+    const navigation = navigateToProposalChange("/book", "ch2", appendChange());
+    const currentBlocks = [blockFixture("current", "Current project prose")];
+    useProjectStore.setState({ project: { ...projectFixture(), root: "/other" }, blocks: currentBlocks, selectedId: "current" });
+    vi.mocked(readTextFile).mockResolvedValue("Wrong project read");
+    useViewStore.getState().confirmPending();
+
+    await expect(navigation).resolves.toBe(false);
+    expect(readTextFile).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().blocks).toBe(currentBlocks);
+    expect(useProjectStore.getState().selectedId).toBe("current");
+  });
+
   it("opens a valid sparse empty outline for an add change", async () => {
     useProjectStore.setState((state) => ({
       meta: { ...state.meta, chapters: {} },
     }));
 
     await expect(
-      navigateToProposalChange("ch1", outlineAddChange()),
+      navigateToProposalChange("/book", "ch1", outlineAddChange()),
     ).resolves.toBe(true);
 
     expect(useViewStore.getState().outlineOpen).toBe(true);
@@ -728,7 +778,7 @@ describe("navigateToProposalChange", () => {
     );
 
     await expect(
-      navigateToProposalChange("ch1", outlineAddChange()),
+      navigateToProposalChange("/book", "ch1", outlineAddChange()),
     ).resolves.toBe(false);
 
     expect(useViewStore.getState().outlineOpen).toBe(false);
@@ -744,7 +794,7 @@ describe("navigateToProposalChange", () => {
     document.body.append(target);
 
     await expect(
-      navigateToProposalChange("ch1", appendChange()),
+      navigateToProposalChange("/book", "ch1", appendChange()),
     ).resolves.toBe(true);
 
     expect(useProjectStore.getState().selectedId).toBeNull();
@@ -762,7 +812,7 @@ describe("navigateToProposalChange", () => {
     document.body.append(target);
 
     await expect(
-      navigateToProposalChange("ch2", appendChange()),
+      navigateToProposalChange("/book", "ch2", appendChange()),
     ).resolves.toBe(true);
 
     expect(requestGuarded).toHaveBeenCalledOnce();
@@ -778,7 +828,7 @@ describe("navigateToProposalChange", () => {
     document.body.append(target);
 
     await expect(
-      navigateToProposalChange("ch2", appendChange()),
+      navigateToProposalChange("/book", "ch2", appendChange()),
     ).resolves.toBe(true);
 
     expect(useProjectStore.getState().activeChapterId).toBe("ch2");
@@ -791,7 +841,7 @@ describe("navigateToProposalChange", () => {
     vi.mocked(readTextFile).mockResolvedValue("Loaded prose.");
     useProjectStore.setState({ chapterDirty: true });
 
-    const navigation = navigateToProposalChange("ch2", appendChange());
+    const navigation = navigateToProposalChange("/book", "ch2", appendChange());
     useViewStore.getState().cancelPending();
 
     await expect(navigation).resolves.toBe(false);
@@ -809,7 +859,7 @@ describe("navigateToProposalChange", () => {
     document.body.append(target);
 
     await expect(
-      navigateToProposalChange("ch1", appendChange()),
+      navigateToProposalChange("/book", "ch1", appendChange()),
     ).resolves.toBe(false);
 
     expect(useProjectStore.getState().selectedId).toBe("neighbor-id");
@@ -836,7 +886,7 @@ describe("navigateToProposalChange", () => {
       precondition: { kind: "target", target: blockLocator(frozen, 0) },
     };
 
-    await expect(navigateToProposalChange("ch1", change)).resolves.toBe(true);
+    await expect(navigateToProposalChange("/book", "ch1", change)).resolves.toBe(true);
     expect(useProjectStore.getState().selectedId).toBe("reminted-id");
     expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
@@ -876,7 +926,7 @@ describe("navigateToProposalChange", () => {
       precondition: { kind: "card", target: locator },
     };
 
-    await expect(navigateToProposalChange("ch1", change)).resolves.toBe(true);
+    await expect(navigateToProposalChange("/book", "ch1", change)).resolves.toBe(true);
 
     expect(useViewStore.getState().outlineOpen).toBe(true);
     expect(useOutlineBoardStore.getState().openChapterId).toBeNull();
@@ -921,7 +971,7 @@ describe("navigateToProposalChange", () => {
       },
     };
 
-    await expect(navigateToProposalChange("ch1", change)).resolves.toBe(true);
+    await expect(navigateToProposalChange("/book", "ch1", change)).resolves.toBe(true);
     expect(useOutlineBoardStore.getState().highlightedCardId).toBe(reminted.id);
     expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
@@ -947,7 +997,7 @@ describe("navigateToProposalChange", () => {
       precondition: { kind: "target", target: blockLocator(frozen, 0) },
     };
 
-    await expect(navigateToProposalChange("ch1", change)).resolves.toBe(false);
+    await expect(navigateToProposalChange("/book", "ch1", change)).resolves.toBe(false);
     expect(useProjectStore.getState().selectedId).toBeNull();
   });
 
@@ -969,7 +1019,7 @@ describe("navigateToProposalChange", () => {
       precondition: { kind: "target", target: blockLocator(frozen, 0) },
     };
 
-    await expect(navigateToProposalChange("ch2", change)).resolves.toBe(false);
+    await expect(navigateToProposalChange("/book", "ch2", change)).resolves.toBe(false);
     expect(useProjectStore.getState().activeChapterId).toBe("ch2");
     expect(useProjectStore.getState().selectedId).toBeNull();
   });

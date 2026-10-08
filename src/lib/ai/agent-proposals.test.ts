@@ -569,6 +569,37 @@ describe("proposal task boundaries", () => {
 });
 
 describe("proposal preconditions", () => {
+  it("invalidates an unanchored continuation when prose appears", () => {
+    const proposal = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [insert(null, "Opening passage.")],
+      [],
+    );
+    proposal.changes[0].precondition = {
+      kind: "insert",
+      boundary: "next-prose",
+      anchor: null,
+      expectedNext: null,
+    };
+    expect(validateManuscriptChanges(proposal, [])).toEqual([]);
+    expect(validateManuscriptChanges(proposal, [scratchpad("notes", "Ideas")])).toEqual([]);
+    const authored = block("new", "Author's opening.");
+    for (const current of [[authored], [scratchpad("notes", "Ideas"), authored], [authored, scratchpad("notes", "Ideas")]]) {
+      expect(validateManuscriptChanges(proposal, current)).toEqual([
+        { changeId: "generated-id", reason: "successor-changed" },
+      ]);
+    }
+  });
+
+  it("preserves ordinary null-anchor append behavior", () => {
+    const proposal = buildManuscript(
+      { kind: "conversation", targetChapterId: "ch1" },
+      [insert(null, "Append passage.")],
+      [],
+    );
+    expect(validateManuscriptChanges(proposal, [block("new", "Author's opening.")])).toEqual([]);
+  });
+
   it("separates mutable locator text from complete frozen manuscript previews", () => {
     const dialogue: Block = {
       id: "dialogue-1",

@@ -25,6 +25,7 @@ import { BlockToolbar } from "@/components/app/block/block-toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
+import { EMPTY_AGENT_STATE, useAgentConsoleStore } from "@/stores/agent-console-store";
 import type { Block } from "@/lib/types";
 
 const prose: Block = {
@@ -39,10 +40,17 @@ afterEach(() => cleanup());
 
 beforeEach(() => {
   controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
-    useViewStore.getState().openAiConsole();
+    useViewStore.getState().openChanges();
+    useAgentConsoleStore.getState().beginPreflight();
   });
-  useViewStore.setState({ aiOpen: false, focus: false });
+  useViewStore.setState({ aiOpen: false, changesOpen: false, focus: false });
+  useAgentConsoleStore.setState({ ...EMPTY_AGENT_STATE, requestedProjectRoot: "/book", activeProjectRoot: "/book", hydratedProjectRoot: "/book" });
   useProjectStore.setState({
+    project: {
+      root: "/book", name: "Book", mainFile: "main.tex", title: "Book", author: "Author",
+      metadata: { title: "Book", subtitle: "", author: "Author", publisher: "", isbn: "" },
+      chapters: [{ id: "chapter-1", label: "1", title: "One", file: "one.tex", wordCount: 5 }],
+    },
     activeChapterId: "chapter-1",
     selectedId: null,
     selectedIds: [],
@@ -51,7 +59,7 @@ beforeEach(() => {
 });
 
 describe("BlockToolbar Suggest", () => {
-  it("submits a read-only next-beat task with the clicked block as context", () => {
+  it("stages an anchored continuation and immediately prevents repeated clicks", () => {
     render(
       <TooltipProvider>
         <BlockToolbar
@@ -75,9 +83,14 @@ describe("BlockToolbar Suggest", () => {
       refs: [
         { kind: "block", chapterId: "chapter-1", blockId: "block-1" },
       ],
-      task: { kind: "next-beat", chapterId: "chapter-1", blockIds: ["block-1"] },
+      task: { kind: "bridge", chapterId: "chapter-1", anchorBlockId: "block-1", successorBlockId: null },
     });
     expect(useProjectStore.getState().selectedId).toBe("block-1");
-    expect(useViewStore.getState().aiOpen).toBe(true);
+    expect(useViewStore.getState().changesOpen).toBe(true);
+    const suggest = screen.getByRole("button", { name: "Suggest what comes next here" });
+    expect(suggest.hasAttribute("disabled")).toBe(true);
+    expect(suggest.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(suggest);
+    expect(controller.dispatchAgentIntent).toHaveBeenCalledTimes(1);
   });
 });

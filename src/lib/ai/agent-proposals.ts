@@ -617,7 +617,9 @@ function validateManuscriptChange(
       : resolveBlockLocator(precondition.anchor, blocks);
   if (precondition.anchor !== null && anchor === null) return "anchor-changed";
   const anchorOrder =
-    anchor === null ? blocks.length - 1 : blocks.findIndex((block) => block.id === anchor.id);
+    anchor === null
+      ? precondition.boundary === "next-prose" ? -1 : blocks.length - 1
+      : blocks.findIndex((block) => block.id === anchor.id);
   const next =
     precondition.boundary === "next-prose"
       ? blocks

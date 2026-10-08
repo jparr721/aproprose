@@ -40,6 +40,7 @@ import { SearchCoordinator } from "@/components/app/search-coordinator";
 import { OutlinePane } from "@/components/app/outline/outline-pane";
 import { PdfPane } from "@/components/app/pdf-pane";
 import { AgentConsole } from "@/components/app/agent-console/agent-console";
+import { ChangesPanel } from "@/components/app/changes-panel";
 import { Welcome } from "@/components/app/welcome";
 import { UpdateChecker } from "@/components/app/update-checker";
 import { WhatsNewDialog } from "@/components/app/whats-new-dialog";
@@ -48,11 +49,12 @@ import { useViewStore } from "@/stores/view-store";
 import { useAgentPersistence } from "@/stores/agent-persistence";
 import { cn } from "@/lib/utils";
 import { saveBeforeExit } from "@/lib/exit-guard";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
 export function Workspace() {
   const aiOpen = useViewStore((s) => s.aiOpen);
+  const changesOpen = useViewStore((s) => s.changesOpen);
   const pdfOpen = useViewStore((s) => s.pdfOpen);
   const focus = useViewStore((s) => s.focus);
   const outlineOpen = useViewStore((s) => s.outlineOpen);
@@ -62,20 +64,31 @@ export function Workspace() {
   const showOutline = outlineOpen && !focus;
   const showPdf = pdfOpen && !focus && !showOutline;
   const showAi = aiOpen && !focus;
+  const showChanges = changesOpen && !focus;
+  const showRight = showAi || showChanges;
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = (): void => setNarrow(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   // Track the live px width during a drag in a ref (no re-render); persist it to
   // the store only on pointer release (the group's onLayoutChanged) so we don't
   // write to the Tauri-backed store on every frame of the drag.
   const liveWidth = useRef(rightPanelWidth);
   const rightPanel = useRef<PanelImperativeHandle>(null);
-  const previousShowAi = useRef(showAi);
+  const previousShowRight = useRef(showRight);
 
   useLayoutEffect(() => {
-    if (previousShowAi.current === showAi) return;
-    previousShowAi.current = showAi;
-    if (showAi) rightPanel.current?.resize(rightPanelWidth);
+    if (previousShowRight.current === showRight) return;
+    previousShowRight.current = showRight;
+    if (showRight) rightPanel.current?.resize(rightPanelWidth);
     else rightPanel.current?.collapse();
-  }, [showAi, rightPanelWidth]);
+  }, [showRight, rightPanelWidth]);
 
   // The editor + PDF stay mounted in the `main` panel across every AI toggle, so
   // collapsing/expanding the right panel never remounts (and resets) the editor.
@@ -100,41 +113,51 @@ export function Workspace() {
   return (
     <>
       <SearchCoordinator pdfAvailable={showPdf} />
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <ResizablePanelGroup
           orientation="horizontal"
           className="min-w-0 flex-1 [&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-250 [&>[data-panel]]:ease-in-out motion-reduce:[&>[data-panel]]:transition-none [&:has([data-separator=active])>[data-panel]]:transition-none"
           onLayoutChanged={(layout) => {
-            if (!showAi) return;
-            if (layout.right === 0) useViewStore.getState().setAiOpen(false);
-            else setRightPanelWidth(Math.round(liveWidth.current));
+            if (!showRight || narrow) return;
+            if (layout.right === 0) {
+              useViewStore.getState().setAiOpen(false);
+              useViewStore.getState().setChangesOpen(false);
+            } else setRightPanelWidth(Math.round(liveWidth.current));
           }}
         >
-          <ResizablePanel id="main" minSize={360}>
+          <ResizablePanel id="main" minSize={360} inert={narrow && showRight} aria-hidden={narrow && showRight}>
             {main}
           </ResizablePanel>
           <ResizableHandle
             withHandle
-            disabled={!showAi}
-            className={cn(!showAi && "invisible w-0")}
+            disabled={!showRight || narrow}
+            className={cn("max-lg:hidden", !showRight && "invisible w-0")}
           />
           <ResizablePanel
             id="right"
             panelRef={rightPanel}
-            aria-hidden={!showAi}
-            inert={!showAi}
-            className="overflow-hidden!"
-            defaultSize={showAi ? rightPanelWidth : 0}
+            aria-hidden={!showRight}
+            inert={!showRight}
+            className={cn(
+              "overflow-hidden! max-lg:absolute! max-lg:inset-0 max-lg:z-20 max-lg:w-full! max-lg:min-w-0! max-lg:max-w-none! max-lg:flex-none!",
+              !showRight && "max-lg:hidden",
+            )}
+            defaultSize={showRight ? rightPanelWidth : 0}
             collapsible
             minSize={320}
             maxSize={640}
             groupResizeBehavior="preserve-pixel-size"
             onResize={(size) => {
-              if (showAi && size.inPixels >= 320) liveWidth.current = size.inPixels;
+              if (showRight && !narrow && size.inPixels >= 320) liveWidth.current = size.inPixels;
             }}
           >
-            <div className="h-full min-w-80">
-              <AgentConsole />
+            <div className="h-full min-w-0 border-l border-border bg-background">
+              <div className={cn("h-full", !showAi && "hidden")} inert={!showAi} aria-hidden={!showAi}>
+                <AgentConsole />
+              </div>
+              <div className={cn("h-full", !showChanges && "hidden")} inert={!showChanges} aria-hidden={!showChanges}>
+                <ChangesPanel />
+              </div>
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

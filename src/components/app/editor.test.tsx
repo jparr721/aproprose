@@ -307,8 +307,9 @@ beforeEach(() => {
   editorHooks.dictationListening = false;
   editorHooks.dictationToggle.mockReset();
   editorHooks.keybindings.clear();
-  controller.dispatchAgentIntent.mockReset().mockImplementation(async () => {
-    useViewStore.getState().openAiConsole();
+  controller.dispatchAgentIntent.mockReset().mockImplementation(async (intent) => {
+    if (intent.kind === "run" && intent.task.kind === "bridge") useViewStore.getState().openChanges();
+    else useViewStore.getState().openAiConsole();
   });
   useSearchSurfaceStore.setState({
     activeSurface: "editor",
@@ -317,6 +318,7 @@ beforeEach(() => {
   });
   useViewStore.setState({
     aiOpen: false,
+    changesOpen: false,
     focus: false,
     aiComposerFocusRequested: false,
     manuscriptReviewProposalId: null,
@@ -373,12 +375,12 @@ describe("Editor Suggest from context", () => {
           blockId: "block-1",
         },
       ],
-      task: { kind: "conversation", targetChapterId: "chapter-1" },
+      task: { kind: "bridge", chapterId: "chapter-1", anchorBlockId: "block-2", successorBlockId: null },
     });
-    expect(useViewStore.getState().aiOpen).toBe(true);
+    expect(useViewStore.getState().changesOpen).toBe(true);
   });
 
-  it("still submits a chapter-targeted conversation without a selection", () => {
+  it("anchors final prose without a selection", () => {
     render(<Editor />);
 
     fireEvent.click(
@@ -390,7 +392,7 @@ describe("Editor Suggest from context", () => {
       mode: "writing",
       text: "Suggest what should come next from the selected context.",
       refs: [],
-      task: { kind: "conversation", targetChapterId: "chapter-1" },
+      task: { kind: "bridge", chapterId: "chapter-1", anchorBlockId: "block-2", successorBlockId: null },
     });
   });
 });

@@ -39,6 +39,7 @@ import {
   useAgentSessionStore,
 } from "@/stores/agent-console-store";
 import {
+  canResetAgentSessionPersistence,
   resetAgentConversation,
   retryAgentSessionPersistence,
 } from "@/stores/agent-persistence";
@@ -48,21 +49,26 @@ import {
 } from "@/stores/settings-dialog-store";
 import { useViewStore } from "@/stores/view-store";
 
-function AgentPersistenceBanner({
+export function AgentPersistenceBanner({
   issue,
   sessionId,
+  subject,
 }: {
   issue: AgentPersistenceIssue;
   sessionId: AgentSessionId;
+  subject: string;
 }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const saveFailed = issue.kind === "save";
+  const resetAllowed = canResetAgentSessionPersistence(issue);
 
   const retry = (): void => {
     setActionError(null);
     void retryAgentSessionPersistence(issue.projectRoot, sessionId).catch(() => {
       setActionError(
-        "AI conversation still could not be saved. Check storage access and retry.",
+        saveFailed
+          ? `${subject} still could not be saved. Check storage access and retry.`
+          : `${subject} still could not be loaded. Check storage access and retry.`,
       );
     });
   };
@@ -83,30 +89,29 @@ function AgentPersistenceBanner({
 
   return (
     <Alert
-      className="shrink-0 rounded-none border-x-0 border-t-0"
+      className="shrink-0 rounded-none border-x-0 border-t-0 has-data-[slot=alert-action]:pr-2"
       variant="destructive"
     >
       <AlertTitle>
         {saveFailed
-          ? "AI conversation could not be saved."
-          : "AI conversation could not be loaded."}
+          ? `${subject} could not be saved.`
+          : `${subject} could not be loaded.`}
       </AlertTitle>
       <AlertDescription>
         {saveFailed
-          ? "Your in-memory conversation is unchanged."
-          : "The stored conversation remains untouched until you reset it."}
+          ? "Your in-memory work is unchanged."
+          : "Stored data remains untouched until you reset it."}
         {actionError === null ? null : (
           <TypographyMuted className="text-destructive" role="alert">
             {actionError}
           </TypographyMuted>
         )}
       </AlertDescription>
-      <AlertAction>
-        {saveFailed ? (
-          <Button onClick={retry} size="sm" type="button" variant="outline">
-            Retry
-          </Button>
-        ) : (
+      <AlertAction className="static flex flex-wrap gap-2">
+        <Button onClick={retry} size="sm" type="button" variant="outline">
+          Retry
+        </Button>
+        {resetAllowed ? (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button size="sm" type="button" variant="outline">
@@ -118,7 +123,7 @@ function AgentPersistenceBanner({
                 <AlertDialogTitle>Reset AI conversation?</AlertDialogTitle>
                 <AlertDialogDescription>
                   This clears the saved AI transcript, draft, attachments, and
-                  pending proposal for this project. Manuscript and outline data
+                  retained Changes for this session. Manuscript and outline data
                   are unchanged.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -133,7 +138,7 @@ function AgentPersistenceBanner({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        )}
+        ) : null}
       </AlertAction>
     </Alert>
   );
@@ -162,7 +167,11 @@ function AgentConsoleRoute() {
       : activeChapter === undefined
         ? project.name
         : `${project.name} / ${activeChapter.label}. ${activeChapter.title}`;
-  const close = (): void => useViewStore.getState().setAiOpen(false);
+  const close = (): void => {
+    useViewStore.getState().setAiOpen(false);
+    const toggle = document.querySelector("[data-ai-toggle]");
+    if (toggle instanceof HTMLElement) toggle.focus();
+  };
 
   return (
     <AgentSection
@@ -254,8 +263,15 @@ function AgentSectionContent({
           </Button>
         </header>
       )}
+      {sessionId.kind === "project" ? (
+        <div className="flex shrink-0 justify-end px-3 pt-3">
+          <Button aria-label={closeLabel} onClick={onClose} size="icon-sm" variant="ghost">
+            <IconX />
+          </Button>
+        </div>
+      ) : null}
       {persistenceIssue === null ? null : (
-        <AgentPersistenceBanner issue={persistenceIssue} sessionId={sessionId} />
+        <AgentPersistenceBanner issue={persistenceIssue} sessionId={sessionId} subject="AI conversation" />
       )}
       {ownershipStatus === "ready" ? (
         <>
@@ -274,7 +290,7 @@ function AgentSectionContent({
         </>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2">
-          {project === null ? null : <Spinner />}
+          {project === null ? null : <Spinner className="motion-reduce:animate-none" />}
           <TypographyMuted>
             {project === null
               ? "Open a project to use AI Console."

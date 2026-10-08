@@ -85,6 +85,7 @@ import {
   type AgentDraftContextResolution,
   agentConsoleOwnershipStatus,
   agentSessionStore,
+  selectPendingProposal,
   requireAgentSessionProject,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
@@ -216,6 +217,13 @@ class OutlinePlannerGroundingError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "OutlinePlannerGroundingError";
+  }
+}
+
+class AgentDraftCompletionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentDraftCompletionError";
   }
 }
 
@@ -675,6 +683,12 @@ function requireBridgeAnchor(task: AgentTask, chapter: LoadedChapter): void {
   if (chapter.chapterId !== task.chapterId) {
     throw new Error(`Bridge chapter is unavailable: ${task.chapterId}`);
   }
+  if (task.anchorBlockId === null) {
+    if (chapter.blocks.some((block) => block.type === "narration" || block.type === "dialogue")) {
+      throw new Error("The empty continuation boundary changed. Suggest again from the current prose.");
+    }
+    return;
+  }
   const anchor = chapter.blocks.find(
     (block) => block.id === task.anchorBlockId,
   );
@@ -1064,6 +1078,9 @@ function runFailure(
   provider: AiProvider,
   phase: AgentFailurePhase,
 ): AgentFailure {
+  if (error instanceof AgentDraftCompletionError) {
+    return { reason: "tool", message: error.message, action: null, settingsTarget: null };
+  }
   if (error instanceof OutlinePlannerGroundingError) {
     return {
       reason: "tool",
@@ -1211,6 +1228,7 @@ export function createAgentController(
     assistantMessageId: string;
     signal: AbortSignal;
     sessionId: AgentSessionId;
+    stageProposal: (proposal: PendingProposal) => void;
   }): AgentToolEnvironment => {
     const book = new Book({
       project: args.project,
@@ -1233,7 +1251,10 @@ export function createAgentController(
     };
     const currentPending = (): PendingProposal | null => {
       checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
-      return agentSessionStore(args.sessionId).getState().pendingProposal;
+      const state = agentSessionStore(args.sessionId).getState();
+      return args.run.task.kind === "proposal-follow-up"
+        ? selectPendingProposal(state, args.run.task.proposalId)
+        : state.pendingProposal;
     };
     return {
       run: args.run,
@@ -1393,19 +1414,7 @@ export function createAgentController(
       },
       replacePendingProposal: (proposal) => {
         if (!ownsRun(args.run.projectRoot, args.run.id, args.sessionId)) return;
-        const viewState = useViewStore.getState();
-        viewState.closeManuscriptReview();
-        agentSessionStore(args.sessionId).getState().replacePendingProposal(proposal);
-        const projectState = useProjectStore.getState();
-        if (
-          !viewState.outlineOpen &&
-          proposal.kind === "manuscript" &&
-          projectState.project !== null &&
-          projectState.project.root === proposal.projectRoot &&
-          projectState.activeChapterId === proposal.chapterId
-        ) {
-          viewState.openManuscriptReview(proposal.id);
-        }
+        args.stageProposal(proposal);
       },
       updateCharacterProfile: async ({ characterId, profile }) => {
         checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
@@ -1532,6 +1541,7 @@ export function createAgentController(
     let enteredRun = false;
     let latestAssistant: AgentUIMessage | null = null;
     let failurePhase: AgentFailurePhase = null;
+    let stagedProposal: PendingProposal | null = null;
 
     try {
       const modelId = capture.modelId;
@@ -1679,6 +1689,24 @@ export function createAgentController(
         assistantMessageId,
         signal: abortController.signal,
         sessionId: capture.sessionId,
+        stageProposal: (proposal) => {
+          if (run.task.kind === "bridge" && (
+            proposal.kind !== "manuscript" || proposal.changes.length === 0 ||
+            proposal.changes.some((item) => item.change.kind !== "insert" || item.change.newText === null || item.change.newText.trim() === "")
+          )) {
+            throw new AgentDraftCompletionError("No continuation draft was produced. Open AI to review the response before trying again.");
+          }
+          stagedProposal = proposal;
+          if (run.task.kind !== "proposal-follow-up") {
+            useViewStore.getState().closeManuscriptReview();
+            sessionStore.getState().stageProposal(proposal, {
+              kind: "run", runId: run.id, task: run.task, text: capture.text,
+            });
+            if (run.task.kind === "bridge") {
+              useViewStore.getState().selectChange(agentSessionKey(capture.sessionId), proposal.id);
+            }
+          }
+        },
       });
       capture.enterRun(run, user);
       enteredRun = true;
@@ -1727,9 +1755,21 @@ export function createAgentController(
         retryOf: capture.retryOf,
         failure: null,
       });
-      sessionStore
-        .getState()
-        .finishRun(settledAssistantMessage(completed), result.usage);
+      latestAssistant = completed;
+      if (run.task.kind === "bridge" && stagedProposal === null) {
+        throw new AgentDraftCompletionError("No continuation draft was produced. Open AI to review the response before trying again.");
+      }
+      const settled = settledAssistantMessage(completed);
+      if (run.task.kind === "proposal-follow-up" && stagedProposal !== null) {
+        const current = selectPendingProposal(sessionStore.getState(), run.task.proposalId);
+        if (current === null || JSON.stringify(current) !== JSON.stringify(capture.pendingProposal)) {
+          throw new AgentDraftCompletionError("The draft changed during this request. Its replacement was not saved; review the current draft before trying again.");
+        }
+        sessionStore.getState().commitProposalReplacement(run.task.proposalId, stagedProposal, {
+          kind: "run", runId: run.id, task: run.task, text: capture.text,
+        });
+      }
+      sessionStore.getState().finishRun(settled, result.usage);
       return { status: "success" };
     } catch (error) {
       if (!ownsCurrentRun()) return { status: "stopped" };
@@ -1859,10 +1899,10 @@ export function createAgentController(
     const settings = useSettingsStore.getState();
     const consoleState = agentSessionStore(args.sessionId).getState();
     const task = structuredClone(args.task);
-    const pendingProposal =
-      consoleState.pendingProposal === null
-        ? null
-        : structuredClone(consoleState.pendingProposal);
+    const pendingTarget = task.kind === "proposal-follow-up"
+      ? selectPendingProposal(consoleState, task.proposalId)
+      : consoleState.pendingProposal;
+    const pendingProposal = pendingTarget === null ? null : structuredClone(pendingTarget);
     const frozenProject = cloneProject(project);
     const activeChapter = captureActiveChapter(
       frozenProject,
@@ -1923,10 +1963,10 @@ export function createAgentController(
       return { status: "success" };
     }
     const frozenTask = structuredClone(task);
-    const pendingProposal =
-      consoleState.pendingProposal === null
-        ? null
-        : structuredClone(consoleState.pendingProposal);
+    const pendingTarget = frozenTask.kind === "proposal-follow-up"
+      ? selectPendingProposal(consoleState, frozenTask.proposalId)
+      : consoleState.pendingProposal;
+    const pendingProposal = pendingTarget === null ? null : structuredClone(pendingTarget);
     const frozenProject = cloneProject(project);
     const activeChapter = captureActiveChapter(
       frozenProject,
@@ -2266,7 +2306,13 @@ export function createAgentController(
     const sessionId = requestedSessionId ?? PROJECT_AGENT_SESSION;
     const sessionStore = agentSessionStore(sessionId);
     const frozenIntent = structuredClone(intent);
-    if (sessionId.kind === "project") useViewStore.getState().openAiConsole();
+    if (sessionId.kind === "project") {
+      if (frozenIntent.kind === "run" && frozenIntent.task.kind === "bridge") {
+        useViewStore.getState().openChanges();
+      } else {
+        useViewStore.getState().openAiConsole();
+      }
+    }
     sessionStore.setState({ runError: null });
     try {
       const project = useProjectStore.getState().project;

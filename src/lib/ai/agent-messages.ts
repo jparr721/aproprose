@@ -28,7 +28,7 @@ const agentTaskSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("bridge"),
     chapterId: z.string(),
-    anchorBlockId: z.string(),
+    anchorBlockId: z.string().nullable(),
     successorBlockId: z.string().nullable(),
   }),
   z.object({

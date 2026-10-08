@@ -12,7 +12,7 @@ export function isKeyboardCaptured(element: Element | null): boolean {
 }
 
 const AUX_SURFACE_SELECTOR =
-  '[data-agent-console],[data-find-widget],[role="dialog"],[role="alertdialog"]';
+  '[data-agent-console],[data-changes-panel],[data-find-widget],[role="dialog"],[role="alertdialog"]';
 
 export function isInAuxSurface(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;

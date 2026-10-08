@@ -2,6 +2,10 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentChangesSnapshot } from "@/hooks/use-agent-changes";
+
+const changes = vi.hoisted((): Pick<AgentChangesSnapshot, "pendingCount" | "runStatus" | "activeSessionId"> => ({ pendingCount: 0, runStatus: "idle", activeSessionId: null }));
+vi.mock("@/hooks/use-agent-changes", () => ({ useAgentChanges: () => changes }));
 
 vi.mock("@/components/app/backup-review-dialog", () => ({
   BackupReviewDialog: () => null,
@@ -106,6 +110,9 @@ function expectSaveIcon(label: string, icon: string): void {
 afterEach(cleanup);
 
 beforeEach(() => {
+  changes.pendingCount = 0;
+  changes.runStatus = "idle";
+  changes.activeSessionId = null;
   compileNow.mockClear();
   useProjectStore.setState({
     project,
@@ -125,9 +132,35 @@ beforeEach(() => {
   });
   useViewStore.setState({
     aiOpen: false,
+    changesOpen: false,
     pdfOpen: false,
     focus: false,
     buildErrorsOpen: false,
+  });
+});
+
+describe("TopBar Changes controls", () => {
+  it("offers icon-only Changes and AI toggles beside the independent PDF control", () => {
+    changes.pendingCount = 3;
+    renderTopBar();
+    const button = screen.getByRole("button", { name: "Changes - 3 pending" });
+    expect(button.querySelector("svg")).not.toBeNull();
+    expect(button.textContent).toBe("3");
+    expect(button.className).toContain("shadow-");
+    fireEvent.click(button);
+    expect(useViewStore.getState()).toMatchObject({ changesOpen: true, aiOpen: false, pdfOpen: false });
+    fireEvent.click(screen.getByRole("button", { name: "Toggle AI Console" }));
+    expect(useViewStore.getState()).toMatchObject({ changesOpen: false, aiOpen: true, pdfOpen: false });
+  });
+
+  it("exposes preflight activity and restricts animation to motion-safe classes", () => {
+    changes.runStatus = "submitted";
+    changes.activeSessionId = { kind: "project" };
+    renderTopBar();
+    const button = screen.getByRole("button", { name: "Changes - 0 pending" });
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.className).toContain("motion-safe:animate-pulse");
+    expect(button.querySelector('[data-slot="spinner"]')?.getAttribute("class")).toContain("motion-reduce:animate-none");
   });
 });
 

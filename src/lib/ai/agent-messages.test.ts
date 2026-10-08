@@ -266,19 +266,50 @@ describe("sanitizeAgentMessages", () => {
     }
   });
 
-  it("keeps overview proposal history schema-valid without retaining its private body", async () => {
+  it("settles overview staging and persists only its schema-valid summary", async () => {
     const message: AgentUIMessage = {
-      id: "assistant-overview", role: "assistant", metadata,
+      id: "overview-complete",
+      role: "assistant",
+      metadata,
       parts: [{
-        type: "tool-stage_overview_proposal", toolCallId: "overview", state: "output-available",
-        input: { summary: "PRIVATE SUMMARY", overview: "PRIVATE OVERVIEW", reason: "PRIVATE REASON" },
-        output: { kind: "runtime", summary: { label: "Stage story overview proposal", target: "Story overview", detail: "1 change", itemCount: 1 }, value: { proposalId: "overview-1", changeCount: 1 } },
+        type: "tool-stage_overview_proposal",
+        toolCallId: "overview-stage",
+        state: "output-available",
+        input: { summary: "Private summary", overview: "Private overview", reason: "Private reason" },
+        output: { kind: "runtime", summary: toolSummary, value: { proposalId: "Private payload", changeCount: 1 } },
       }],
     };
-    const sanitized = sanitizeAgentMessages([message]);
-    await expect(validateAgentMessages(sanitized, createAgentTools(messageToolEnvironment()))).resolves.toEqual(sanitized);
-    expect(JSON.stringify(sanitized)).not.toContain("PRIVATE");
+    expect(settleAgentMessages([message])[0].parts).toHaveLength(1);
+    const persisted = sanitizeAgentMessages([message]);
+    await expect(validateAgentMessages(persisted, createAgentTools(messageToolEnvironment()))).resolves.toEqual(persisted);
+    expect(persisted[0].parts[0]).toMatchObject({
+      input: { summary: "", overview: "", reason: "" },
+      output: { kind: "summary", summary: { ...toolSummary, label: "Stage story overview proposal", detail: "2 changes" } },
+    });
+    expect(JSON.stringify(persisted)).not.toContain("Private");
   });
+
+  it("sanitizes failed overview staging input and diagnostics", () => {
+    const message: AgentUIMessage = {
+      id: "overview-failed",
+      role: "assistant",
+      metadata: { ...metadata, state: "error" },
+      parts: [{
+        type: "tool-stage_overview_proposal",
+        toolCallId: "overview-stage",
+        state: "output-error",
+        input: { summary: "Private summary", overview: "Private overview", reason: "Private reason" },
+        errorText: "Private diagnostic",
+      }],
+    };
+    const persisted = sanitizeAgentMessages([message]);
+    expect(persisted[0].parts[0]).toMatchObject({
+      input: { summary: "", overview: "", reason: "" },
+      errorText: "Tool execution failed.",
+    });
+    expect(JSON.stringify(persisted)).not.toContain("Private");
+  });
+
   it("keeps reasoning in settled live messages", () => {
     const messages: AgentUIMessage[] = [
       {

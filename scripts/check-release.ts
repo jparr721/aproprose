@@ -103,6 +103,7 @@ export function validateRelease(base: ReleaseFiles, proposed: ReleaseFiles): str
     throw new Error(`changelog.json must add a new entry for ${version}; that version already exists on the target branch`);
   }
   for (const previous of changelog.slice(1)) {
+    findEntry(changelog, previous.version);
     validateVersion(previous.version);
     if (!isStrictlyGreater(entry.version, previous.version)) {
       throw new Error(`changelog.json version ${version} must be newer than ${previous.version}`);

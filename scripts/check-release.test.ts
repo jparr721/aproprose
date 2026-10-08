@@ -139,6 +139,18 @@ describe("validateRelease", () => {
   ])("rejects an invalid new changelog entry", (newEntry) => {
     expect(() => validateRelease(snapshot("0.17.1"), { ...snapshot("0.18.0"), changelog: JSON.stringify([newEntry]) })).toThrow(/invalid/);
   });
+
+  it.each([
+    { ...entry("0.17.1"), date: "2026-02-30" },
+    { ...entry("0.17.1"), summary: " " },
+    { ...entry("0.17.1"), highlights: [] },
+    { ...entry("0.17.1"), highlights: [" "] },
+  ])("retains validation of historical changelog entries", (previousEntry) => {
+    expect(() => validateRelease(snapshot("0.17.1"), {
+      ...snapshot("0.18.0"),
+      changelog: JSON.stringify([entry("0.18.0"), previousEntry]),
+    })).toThrow(/invalid/);
+  });
 });
 
 describe("checkRelease git integration", () => {

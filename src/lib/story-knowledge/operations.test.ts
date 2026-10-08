@@ -357,10 +357,21 @@ describe("story chunk analysis", () => {
     expect(second.profile.mannerisms).toBe("Mara checks every lock twice.");
   });
 
-  it("forwards abort and retries one failed generation", async () => {
+  it.each([
+    {
+      name: "provider",
+      failure: Object.assign(new Error("provider temporarily unavailable"), { statusCode: 503 }),
+      warning: "Your AI provider is temporarily unavailable. Retry shortly.",
+    },
+    {
+      name: "network",
+      failure: new TypeError("fetch failed"),
+      warning: "The AI request could not be completed. Check your connection and retry.",
+    },
+  ] satisfies Array<{ name: string; failure: Error; warning: string }>)("forwards abort and retries one $name failure", async ({ failure, warning }) => {
     const abort = new AbortController();
     vi.mocked(generateText)
-      .mockRejectedValueOnce(Object.assign(new Error("provider temporarily unavailable"), { statusCode: 503 }))
+      .mockRejectedValueOnce(failure)
       .mockResolvedValueOnce({ output: emptyMapOutput() } as never);
 
     await analyzeStoryChunk(mapInputFixture(), aiOptions(abort.signal));
@@ -368,7 +379,7 @@ describe("story chunk analysis", () => {
     expect(generateText).toHaveBeenCalledTimes(2);
     expect(vi.mocked(generateText).mock.calls[1][0].abortSignal).toBe(abort.signal);
     expect(toast.warning).toHaveBeenCalledExactlyOnceWith(
-      "Your AI provider is temporarily unavailable. Retry shortly.",
+      warning,
       { id: "ai-request-retry", description: "Retrying once." },
     );
     expect(toast.error).not.toHaveBeenCalled();

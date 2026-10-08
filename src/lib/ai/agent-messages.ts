@@ -216,6 +216,10 @@ function toolName(part: AgentUIMessage["parts"][number]): AgentToolName {
   return name as AgentToolName;
 }
 
+export function agentToolTitle(part: AgentUIMessage["parts"][number]): string {
+  return agentToolDescriptors[toolName(part)].title;
+}
+
 function containsAbsolutePath(value: string): boolean {
   return (
     /(^|[\s("'=])\/(?!\/)\S+/.test(value) ||

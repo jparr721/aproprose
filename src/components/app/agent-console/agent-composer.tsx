@@ -1,5 +1,12 @@
 import { useEffect, useRef } from "react";
-import type { ChatStatus, LanguageModelUsage } from "ai";
+import { isToolOrDynamicToolUIPart, type ChatStatus, type LanguageModelUsage } from "ai";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+  type ChainOfThoughtStepProps,
+} from "@/components/ai-elements/chain-of-thought";
 import {
   Context,
   ContextContent,
@@ -22,6 +29,7 @@ import {
 import { DraftContextAttachments } from "@/components/app/agent-console/context-attachments";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import { Spinner } from "@/components/ui/spinner";
 import { TypographyMuted } from "@/components/ui/typography";
 import {
   stopAgentRun,
@@ -29,7 +37,8 @@ import {
 } from "@/lib/ai/agent-controller";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import { agentFailureActionLabel } from "@/lib/ai/agent-failure";
-import type { AgentSessionId, AgentTask } from "@/lib/ai/agent-types";
+import { agentToolTitle } from "@/lib/ai/agent-messages";
+import type { AgentSessionId, AgentTask, AgentUIMessage } from "@/lib/ai/agent-types";
 import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
 import { cn } from "@/lib/utils";
 import {
@@ -47,6 +56,61 @@ export interface AgentComposerProps {
   task: AgentTask | null;
   placeholder: string;
   sessionId?: AgentSessionId;
+}
+
+type AgentToolPart = Extract<AgentUIMessage["parts"][number], { type: `tool-${string}` | "dynamic-tool" }>;
+
+const toolStepStates: Record<AgentToolPart["state"], Pick<ChainOfThoughtStepProps, "status" | "description">> = {
+  "input-streaming": { status: "pending", description: "Preparing" },
+  "input-available": { status: "active", description: "Running" },
+  "approval-requested": { status: "active", description: "Awaiting approval" },
+  "approval-responded": { status: "active", description: "Approval received" },
+  "output-available": { status: "complete", description: "Completed" },
+  "output-error": { status: "complete", description: "Failed" },
+  "output-denied": { status: "complete", description: "Denied" },
+};
+
+function AgentActivity({ sessionId }: { sessionId: AgentSessionId }) {
+  const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
+  const assistant = useAgentSessionStore(sessionId, (state) =>
+    state.messages.findLast((message) =>
+      message.role === "assistant" &&
+      (state.runStatus === "idle" ||
+        (state.activeRun !== null && message.metadata?.runId === state.activeRun.id)),
+    ) ?? null,
+  );
+  const working = runStatus !== "idle";
+  const toolParts = assistant === null ? [] : assistant.parts.filter(isToolOrDynamicToolUIPart);
+  if (!working && toolParts.length === 0) return null;
+  const state = assistant?.metadata?.state;
+  const needsAttention = toolParts.some((part) => part.state === "output-error" || part.state === "output-denied");
+  let label = "Activity complete";
+  if (working) label = "Working on your request";
+  else if (state === "stopped") label = "Activity stopped";
+  else if (state === "error" || needsAttention) label = "Activity needs attention";
+
+  return (
+    <ChainOfThought aria-label="AI activity" role="status" key={working ? "working" : "settled"} defaultOpen={working}>
+      <ChainOfThoughtHeader>
+        {working ? <Spinner aria-hidden="true" /> : null}
+        {label}
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent className="max-h-32 overflow-y-auto">
+        {toolParts.map((part) => {
+          const step = toolStepStates[part.state];
+          const interrupted = !working && (step.status === "active" || step.status === "pending");
+          return (
+            <ChainOfThoughtStep
+              description={interrupted ? "Interrupted" : step.description}
+              key={part.toolCallId}
+              label={agentToolTitle(part)}
+              status={interrupted ? "complete" : step.status}
+            />
+          );
+        })}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
+  );
 }
 
 export function AgentComposer({
@@ -170,6 +234,7 @@ export function AgentComposer({
       className="flex shrink-0 flex-col gap-2 border-t border-border bg-background p-3"
       role="region"
     >
+      <AgentActivity sessionId={sessionId} />
       {sessionId.kind === "project" ? <ButtonGroup aria-label="Agent mode">
         <Button
           aria-pressed={mode === "writing"}

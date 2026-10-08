@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { IconPencil, IconWand } from "@tabler/icons-react";
 import { isToolOrDynamicToolUIPart, type ChatStatus, type LanguageModelUsage } from "ai";
 import {
   ChainOfThought,
@@ -22,15 +23,20 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputHeader,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { DraftContextAttachments } from "@/components/app/agent-console/context-attachments";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import { TypographyMuted } from "@/components/ui/typography";
+import { TypographyMuted, TypographySmall } from "@/components/ui/typography";
 import {
   stopAgentRun,
   submitAgentDraft,
@@ -168,6 +174,12 @@ export function AgentComposer({
   const hasMeaningfulDraft =
     draftText.trim().length > 0 || draftContextRefs.length > 0;
   const blocksTargetEditing = ownershipStatus !== "ready";
+  let composerPlaceholder: string = placeholder;
+  if (sessionId.kind === "project" && task === null) {
+    composerPlaceholder = mode === "writing"
+      ? "Where should the story go next?"
+      : "What would you like to refine?";
+  }
   const aiComposerFocusRequested = useViewStore(
     (state) => state.aiComposerFocusRequested,
   );
@@ -235,26 +247,6 @@ export function AgentComposer({
       role="region"
     >
       <AgentActivity sessionId={sessionId} />
-      {sessionId.kind === "project" ? <ButtonGroup aria-label="Agent mode">
-        <Button
-          aria-pressed={mode === "writing"}
-          disabled={blocksTargetEditing}
-          onClick={() => setMode("writing")}
-          type="button"
-          variant={mode === "writing" ? "default" : "outline"}
-        >
-          Writing
-        </Button>
-        <Button
-          aria-pressed={mode === "edit"}
-          disabled={blocksTargetEditing}
-          onClick={() => setMode("edit")}
-          type="button"
-          variant={mode === "edit" ? "default" : "outline"}
-        >
-          Edit
-        </Button>
-      </ButtonGroup> : null}
       {blocksTargetEditing ? (
         <TypographyMuted>AI conversation is loading.</TypographyMuted>
       ) : null}
@@ -304,12 +296,48 @@ export function AgentComposer({
             aria-label="Message AI Console"
             disabled={blocksTargetEditing}
             onChange={(event) => setDraftText(event.currentTarget.value)}
-            placeholder={placeholder}
+            placeholder={composerPlaceholder}
             value={draftText}
           />
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputTools>
+            {sessionId.kind === "project" ? (
+              <>
+                <PromptInputSelect
+                  disabled={blocksTargetEditing}
+                  onValueChange={(value: string): void => {
+                    if (value !== "writing" && value !== "edit") {
+                      throw new RangeError(`Unknown agent mode: ${value}`);
+                    }
+                    setMode(value);
+                  }}
+                  value={mode}
+                >
+                  <PromptInputSelectTrigger aria-label="Agent mode">
+                    {mode === "writing" ? <IconWand aria-hidden="true" /> : <IconPencil aria-hidden="true" />}
+                    <PromptInputSelectValue>{mode === "writing" ? "Writing" : "Edit"}</PromptInputSelectValue>
+                  </PromptInputSelectTrigger>
+                  <PromptInputSelectContent align="start" className="w-64 p-1" position="popper" side="top">
+                    <PromptInputSelectItem className="py-3 pr-8" textValue="Writing" value="writing">
+                      <IconWand aria-hidden="true" className="self-start text-ai-ink" />
+                      <div className="flex flex-col gap-1">
+                        <TypographySmall className="text-xs">Writing</TypographySmall>
+                        <TypographyMuted className="text-xs">Continue scenes and explore ideas</TypographyMuted>
+                      </div>
+                    </PromptInputSelectItem>
+                    <PromptInputSelectItem className="py-3 pr-8" textValue="Edit" value="edit">
+                      <IconPencil aria-hidden="true" className="self-start text-accent-ink" />
+                      <div className="flex flex-col gap-1">
+                        <TypographySmall className="text-xs">Edit</TypographySmall>
+                        <TypographyMuted className="text-xs">Refine prose and check continuity</TypographyMuted>
+                      </div>
+                    </PromptInputSelectItem>
+                  </PromptInputSelectContent>
+                </PromptInputSelect>
+                <Separator className="mx-1 h-3" orientation="vertical" />
+              </>
+            ) : null}
             <Context
               maxTokens={contextWindow}
               modelId={tokenlensModelId}

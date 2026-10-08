@@ -7,7 +7,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -241,12 +240,15 @@ afterEach(() => {
 });
 
 describe("AgentComposer mode controls", () => {
-  it("uses stock grouped Buttons and mode descendant selectors", () => {
+  it("keeps the mode picker in the composer footer and preserves the draft when switching", async () => {
+    useAgentConsoleStore.setState({
+      draftText: "Continue the crossing",
+      draftContextRefs: [firstRef],
+      draftContextSources: sources,
+    });
     render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
-    const group = screen.getByRole("group", { name: "Agent mode" });
-    const writing = within(group).getByRole("button", { name: "Writing" });
-    const edit = within(group).getByRole("button", { name: "Edit" });
+    const picker = screen.getByRole("combobox", { name: "Agent mode" });
     const textarea = screen.getByRole("textbox");
     const form = textarea.closest("form");
     const inputGroup = textarea.closest("[data-slot=input-group]");
@@ -254,13 +256,9 @@ describe("AgentComposer mode controls", () => {
       throw new Error("Stock PromptInput structure is missing");
     }
 
-    expect(group.dataset.slot).toBe("button-group");
-    expect(writing.dataset.slot).toBe("button");
-    expect(edit.dataset.slot).toBe("button");
-    expect(writing.dataset.variant).toBe("default");
-    expect(edit.dataset.variant).toBe("outline");
-    expect(writing.getAttribute("aria-pressed")).toBe("true");
-    expect(edit.getAttribute("aria-pressed")).toBe("false");
+    expect(picker.closest("[data-align=block-end]")?.closest("form")).toBe(form);
+    expect(picker.textContent).toBe("Writing");
+    expect(textarea.getAttribute("placeholder")).toBe("Where should the story go next?");
     expect(inputGroup.closest("form")).toBe(form);
     expect(form.className).toContain(
       "[&_[data-slot=input-group]]:border-ai-edge",
@@ -269,10 +267,16 @@ describe("AgentComposer mode controls", () => {
       "[&_[data-slot=input-group]]:bg-ai-tint/40",
     );
 
+    fireEvent.keyDown(picker, { key: "ArrowDown" });
+    const edit = await screen.findByRole("option", { name: /^Edit/ });
+    expect(screen.getByText("Continue scenes and explore ideas")).toBeTruthy();
+    expect(screen.getByText("Refine prose and check continuity")).toBeTruthy();
     fireEvent.click(edit);
 
-    expect(writing.dataset.variant).toBe("outline");
-    expect(edit.dataset.variant).toBe("default");
+    expect(picker.textContent).toBe("Edit");
+    expect(textarea.getAttribute("placeholder")).toBe("What would you like to refine?");
+    expect(useAgentConsoleStore.getState().draftText).toBe("Continue the crossing");
+    expect(useAgentConsoleStore.getState().draftContextRefs).toEqual([firstRef]);
     expect(form.className).toContain(
       "[&_[data-slot=input-group]]:border-accent-ink/40",
     );
@@ -281,7 +285,7 @@ describe("AgentComposer mode controls", () => {
     );
   });
 
-  it("changes only the next-turn mode while a run keeps its frozen mode", () => {
+  it("changes only the next-turn mode while a run keeps its frozen mode", async () => {
     const run = activeRun("writing");
     useAgentConsoleStore.setState({
       mode: "writing",
@@ -290,7 +294,8 @@ describe("AgentComposer mode controls", () => {
     });
     render(<AgentComposer placeholder="Ask about your manuscript" task={null} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Agent mode" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: /^Edit/ }));
 
     expect(useAgentConsoleStore.getState().mode).toBe("edit");
     expect(useAgentConsoleStore.getState().activeRun).toEqual(run);
@@ -308,6 +313,11 @@ describe("AgentComposer draft behavior", () => {
     store.getState().hydrate(project.root, emptyPersistedAgentState());
     store.getState().beginPreflight();
     render(<AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />);
+
+    if (sessionId.kind !== "project") {
+      expect(screen.queryByRole("combobox", { name: "Agent mode" })).toBeNull();
+      expect(screen.getByRole("textbox").getAttribute("placeholder")).toBe("Ask about your manuscript");
+    }
 
     expect(screen.getByRole("button", { name: "Working on your request" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
@@ -528,12 +538,7 @@ describe("AgentComposer draft behavior", () => {
       true,
     );
     expect(
-      (screen.getByRole("button", { name: "Writing" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement)
-        .disabled,
+      screen.getByRole("combobox", { name: "Agent mode" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       (screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement)
@@ -574,12 +579,7 @@ describe("AgentComposer draft behavior", () => {
       true,
     );
     expect(
-      (screen.getByRole("button", { name: "Writing" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement)
-        .disabled,
+      screen.getByRole("combobox", { name: "Agent mode" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       (screen.getByRole("button", {

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.17.2",
+    "date": "2026-10-07",
+    "summary": "AI follow-ups stay visible with clear, compact progress.",
+    "highlights": [
+      "Follow-up messages remain visible when you ask the AI to revise a proposed edit.",
+      "See when the AI is working and which tools are active, with finished activity collapsing automatically."
+    ]
+  },
+  {
     "version": "0.17.1",
     "date": "2026-08-23",
     "summary": "Fixed Arch Linux packages so the app launches with its built-in interface.",

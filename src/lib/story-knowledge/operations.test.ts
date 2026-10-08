@@ -355,7 +355,7 @@ describe("story chunk analysis", () => {
   it("forwards abort and retries one failed generation", async () => {
     const abort = new AbortController();
     vi.mocked(generateText)
-      .mockRejectedValueOnce(new Error("temporary"))
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
       .mockResolvedValueOnce({ output: emptyMapOutput() } as never);
 
     await analyzeStoryChunk(mapInputFixture(), aiOptions(abort.signal));

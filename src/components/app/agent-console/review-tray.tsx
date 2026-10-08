@@ -14,7 +14,7 @@ export function ReviewTray({ sessionId: requestedSessionId }: { sessionId?: Agen
   return (
     <Card data-agent-review-tray size="sm" className="mx-3 shrink-0">
       <CardHeader>
-        <CardTitle>{proposal.summary}</CardTitle>
+        <CardTitle className="line-clamp-2 leading-5">{proposal.summary}</CardTitle>
         <TypographyMuted>{count} {count === 1 ? "change" : "changes"} ready for review</TypographyMuted>
       </CardHeader>
       <CardContent>

@@ -23,5 +23,60 @@ for (const width of [1280, 480]) {
         expect(overflow).toBeLessThanOrEqual(0);
       });
     }
+
+    test("keeps preview names within two compact lines", async ({ page }) => {
+      await page.goto("/tests/browser/agent-review-tray.html");
+      await page.evaluate(() => document.fonts.ready);
+      for (const surface of ["planner", "sidebar"]) {
+        const title = page.getByTestId(surface).locator('[data-agent-review-tray] [data-slot="card-title"]');
+        await expect(title).toBeVisible();
+        const box = await title.boundingBox();
+        if (box === null) throw new Error("Missing review card title geometry");
+        expect(box.height).toBeLessThanOrEqual(40);
+      }
+      const names = page.getByTestId("changes").locator('[aria-label="Saved drafts"] small');
+      for (const name of await names.all()) {
+        const box = await name.boundingBox();
+        if (box === null) throw new Error("Missing saved draft name geometry");
+        expect(box.height).toBeLessThanOrEqual(40);
+      }
+    });
+
+    test("gives the full plan name compact type and its own row above actions", async ({ page }, testInfo) => {
+      await page.goto("/tests/browser/agent-review-tray.html");
+      const changes = page.getByTestId("changes");
+      const preview = changes.locator('[data-draft-preview="plan-sidebar"]');
+      const title = preview.getByRole("heading", { level: 2 });
+      await expect(title).toContainText("leaves the mechanism uncertain.");
+      await page.screenshot({ path: testInfo.outputPath("plan-card-type.png"), fullPage: true });
+      const fontSize = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+      expect(fontSize).toBeLessThanOrEqual(14);
+      const titleBox = await title.boundingBox();
+      const previewBox = await preview.boundingBox();
+      const actionsBox = await preview.locator('[aria-label="Draft actions"]').boundingBox();
+      if (titleBox === null || previewBox === null || actionsBox === null) throw new Error("Missing draft header geometry");
+      expect(Math.abs(titleBox.width - previewBox.width)).toBeLessThanOrEqual(0.5);
+      expect(titleBox.height).toBeLessThanOrEqual(120);
+      expect(actionsBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+    });
+
+    test("keeps planning text compact while preserving the manuscript and overview text size", async ({ page }) => {
+      await page.goto("/tests/browser/agent-review-tray.html");
+      const changes = page.getByTestId("changes");
+      const planningText = changes.locator('[data-agent-change-id="planning-change"] [data-slot="card-content"] p');
+      await expect(planningText).toContainText("Anchor the reunion");
+      const planSize = await planningText.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+      expect(planSize).toBeLessThanOrEqual(14);
+
+      await changes.getByRole("button", { name: /Review manuscript prose/ }).click();
+      const manuscriptText = changes.locator('[data-agent-change-id="manuscript-change"] [data-slot="card-content"] p');
+      await expect(manuscriptText).toContainText("station clock");
+      expect(await manuscriptText.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBe(28);
+
+      await changes.getByRole("button", { name: /Review story overview/ }).click();
+      const overviewText = changes.locator('[data-agent-change-id="overview-change"] [data-slot="card-content"] p');
+      await expect(overviewText).toContainText("A reunion tests an old friendship");
+      expect(await overviewText.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBe(28);
+    });
   });
 }

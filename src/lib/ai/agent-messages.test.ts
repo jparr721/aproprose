@@ -192,7 +192,7 @@ describe("sanitizeAgentMessages", () => {
     const persisted = sanitizeAgentMessages([message]);
     expect(persisted[0].parts[0]).toMatchObject({
       input: { summary: "", overview: "", reason: "" },
-      output: { kind: "summary", summary: toolSummary },
+      output: { kind: "summary", summary: { ...toolSummary, label: "Stage story overview proposal", detail: "2 changes" } },
     });
     expect(JSON.stringify(persisted)).not.toContain("Private");
   });

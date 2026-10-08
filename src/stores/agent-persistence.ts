@@ -1134,7 +1134,41 @@ export async function retryAgentSessionPersistence(
   sessionId: AgentSessionId,
 ): Promise<void> {
   if (sessionId.kind === "project") {
-    await retryAgentPersistence();
+    const state = useAgentConsoleStore.getState();
+    const issue = state.persistenceIssue;
+    if (
+      issue?.kind === "save" ||
+      agentConsoleOwnershipStatus(state, state.activeProjectRoot) === "ready"
+    ) {
+      await retryAgentPersistence();
+      return;
+    }
+    if (
+      useProjectStore.getState().project?.root !== root ||
+      state.requestedProjectRoot !== root ||
+      state.activeProjectRoot !== root ||
+      state.hydratedProjectRoot !== null ||
+      state.persistenceTransition !== null ||
+      issue === null ||
+      issue.projectRoot !== root ||
+      (issue.kind !== "load" && issue.kind !== "corrupt")
+    ) {
+      throw new AgentConsoleOwnershipError();
+    }
+    await transitionAgentProject(root);
+    const current = useAgentConsoleStore.getState();
+    if (
+      useProjectStore.getState().project?.root !== root ||
+      current.requestedProjectRoot !== root ||
+      current.activeProjectRoot !== root
+    ) {
+      throw new AgentConsoleOwnershipError();
+    }
+    if (agentConsoleOwnershipStatus(current, root) !== "ready") {
+      throw current.persistenceIssue === null
+        ? new AgentConsoleOwnershipError()
+        : new AgentPersistenceError(current.persistenceIssue);
+    }
     return;
   }
   const store = agentSessionStore(sessionId);

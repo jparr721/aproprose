@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { create, useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { StateCreator } from "zustand";
@@ -1201,5 +1202,10 @@ export function useAgentSessionStore<T>(
   sessionId: AgentSessionId,
   selector: (state: AgentConsoleState) => T,
 ): T {
-  return useStore(agentSessionStore(sessionId), selector);
+  const store = useSyncExternalStore(
+    subscribeAgentSessionRegistry,
+    () => agentSessionStore(sessionId),
+    () => agentSessionStore(sessionId),
+  );
+  return useStore(store, selector);
 }

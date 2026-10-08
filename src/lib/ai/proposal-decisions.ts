@@ -350,7 +350,7 @@ export function rejectAllProposalChanges(
   requireAgentSessionProject(sessionId, proposal.projectRoot);
   const current = capturedProposalForDecision(proposal, sessionId);
   const changeCount = current.changes.length + (current.overviewChange ? 1 : 0);
-  const changeIds = [...current.changes.map((change) => change.id), ...(current.overviewChange ? [current.overviewChange.id] : [])];
+  const changeIds = proposalChangeIds(current);
   agentSessionStore(sessionId).getState().decideProposalChanges(current.id, changeIds, { status: "dismissed", decidedAt: new Date().toISOString() });
   closeExhaustedManuscriptReview(current);
   recordSessionProposalEvent(

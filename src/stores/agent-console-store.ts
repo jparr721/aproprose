@@ -997,7 +997,23 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
         throw new AgentProposalRecordError("Follow-up proposals must commit through the replacement action.");
       }
       const record = stagedProposalRecord(state, proposal, source);
-      return proposalProjection([...state.proposalRecords, record], proposal.id);
+      const predecessor = source.kind === "run"
+        ? state.proposalRecords.find((candidate) =>
+            candidate.source.kind === "run" &&
+            candidate.source.runId === source.runId &&
+            candidate.proposal.kind === proposal.kind &&
+            candidate.proposal.chapterId === proposal.chapterId &&
+            pendingProposalChangeIds(candidate).length > 0,
+          )
+        : undefined;
+      const proposalRecords = predecessor === undefined
+        ? state.proposalRecords
+        : state.proposalRecords.map((candidate) =>
+            candidate.proposal.id === predecessor.proposal.id
+              ? { ...candidate, replacedByProposalId: proposal.id }
+              : candidate,
+          );
+      return proposalProjection([...proposalRecords, record], proposal.id);
     }),
   commitProposalReplacement: (targetId, proposal, source) =>
     set((state) => {

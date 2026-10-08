@@ -227,25 +227,11 @@ function queueProjectMetaWrite(
   provenance: ProjectMetaProvenance,
   assertOwned: () => void,
 ): Promise<void> {
-  const previous = metaWriteQueues.get(root);
-  const persist = (): Promise<void> => {
-    const write = queueProjectOperation(root, async () => {
-      assertOwned();
-      await writeProjectMeta(root, JSON.stringify(meta));
-    });
-    void write.then(
-      () => {
-        provenance.lastDurableMeta = meta;
-      },
-      () => undefined,
-    );
-    return write;
-  };
-  const write = previous
-    ? previous
-        .catch(() => undefined)
-        .then(persist)
-    : persist();
+  const write = queueProjectOperation(root, async () => {
+    assertOwned();
+    await writeProjectMeta(root, JSON.stringify(meta));
+    provenance.lastDurableMeta = meta;
+  });
   const tracked = write.finally(() => {
     if (metaWriteQueues.get(root) === tracked) {
       metaWriteQueues.delete(root);

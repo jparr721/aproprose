@@ -25,7 +25,7 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
 }));
 
-import { useProjectStore, selectionTargetIds } from "@/stores/project-store";
+import { useProjectStore, selectionTargetIds, drainProjectMetaWrites } from "@/stores/project-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 import { useSyncStore } from "@/stores/sync-store";
 import { useViewStore } from "@/stores/view-store";
@@ -753,6 +753,41 @@ describe("owned project persistence", () => {
     await loading;
     expect(useProjectStore.getState().blocks[0].text).toBe("Typed during load");
     expect(useProjectStore.getState().chapterDirty).toBe(true);
+  });
+
+  it("drains every accepted metadata edit before a manuscript-only pull", async () => {
+    const firstWrite = deferred<void>();
+    const trace: string[] = [];
+    let durableMeta = JSON.stringify(storyMetaFixture());
+    vi.mocked(writeProjectMeta).mockReset()
+      .mockImplementationOnce(async (_root, serialized) => {
+        trace.push("first start");
+        await firstWrite.promise;
+        durableMeta = serialized;
+        trace.push("first end");
+      })
+      .mockImplementation(async (_root, serialized) => {
+        trace.push("second");
+        durableMeta = serialized;
+      });
+    vi.mocked(openProject).mockResolvedValue({ status: "managed", project: projectFixture("/owned"), mainFile: null, detectedChapters: null });
+    vi.mocked(readProjectMeta).mockImplementation(async () => durableMeta);
+    vi.mocked(syncProject).mockImplementationOnce(async () => {
+      trace.push("pull");
+      return { outcome: { kind: "synced" }, changedFiles: ["chapter-one.tex"] };
+    });
+    useSyncStore.setState({ root: "/owned", inFlight: false });
+
+    useProjectStore.getState().setOverview("First local overview");
+    useProjectStore.getState().setOverview("Second local overview");
+    const syncing = useSyncStore.getState().syncNow();
+    firstWrite.resolve();
+    await syncing;
+    await drainProjectMetaWrites("/owned");
+
+    expect(trace).toEqual(["first start", "first end", "second", "pull"]);
+    expect(useProjectStore.getState().meta.outline.overview).toBe("Second local overview");
+    expect(useProjectStore.getState().remoteDivergence).toBeNull();
   });
 
   it.each(["{broken", "[]", '{"chapters":"broken"}', '{"characters":"broken"}', '{"outline":"broken"}'])("rejects corrupt in-repo metadata %s without replacing it from legacy storage", async (serialized) => {

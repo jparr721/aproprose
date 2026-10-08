@@ -1223,6 +1223,7 @@ export function createAgentController(
     editingRules: string;
     project: ProjectInfo;
     meta: ProjectMeta;
+    activeChapter: LoadedChapter | null;
     targetChapter: LoadedChapter | null;
     history: AgentUIMessage[];
     assistantMessageId: string;
@@ -1234,7 +1235,7 @@ export function createAgentController(
       project: args.project,
       meta: args.meta,
       chapter: args.targetChapter,
-      loadChapter: (chapterId) => loadChapterSnapshot(args.project, chapterId, args.targetChapter),
+      loadChapter: (chapterId) => loadChapterSnapshot(args.project, chapterId, args.activeChapter),
     });
     const requireTarget = (chapterId: string): LoadedChapter => {
       checkToolRun(args.run.projectRoot, args.run.id, args.sessionId);
@@ -1684,6 +1685,7 @@ export function createAgentController(
         editingRules: capture.editingRules,
         project: capture.project,
         meta: capture.meta,
+        activeChapter: capture.activeChapter,
         targetChapter: frozen.chapter,
         history: capture.messages,
         assistantMessageId,

@@ -49,6 +49,8 @@ import {
   draftContextRefKey,
 } from "@/lib/ai/agent-context";
 import { modelContextWindow } from "@/lib/ai/agent-compaction";
+import { createAgentToolHandlers } from "@/lib/ai/agent-tools";
+import { projectChapter } from "@/book";
 import { buildManuscriptPendingProposal, buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
 import type {
   AgentToolFailure,
@@ -559,6 +561,92 @@ beforeEach(() => {
   useViewStore.setState({ aiOpen: false });
 });
 
+describe("book tools retain the captured active chapter", () => {
+  for (const taskKind of ["outline-sculpt", "character-describe"] as const) {
+    it.each(["full", "range", "search"] as const)(
+      `${taskKind} reads unsaved semantic content when %s reads first`,
+      async (firstRead) => {
+        const sourceBlocks: Block[] = [
+          {
+            ...block("speech", "UNSAVED opening", "dialogue"),
+            speaker: "Mara",
+            tail: [
+              { kind: "beat", text: "UNSAVED pause" },
+              { kind: "quote", text: "UNSAVED answer" },
+            ],
+          },
+          block("scratch", "UNSAVED intention", "scratchpad"),
+        ];
+        const expectedChapter = projectChapter({
+          chapterId: "ch1",
+          title: "Chapter One",
+          blocks: sourceBlocks,
+        });
+        useProjectStore.setState({ blocks: sourceBlocks });
+        const sessionId = taskKind === "outline-sculpt"
+          ? { kind: "outline" as const, chapterId: "ch2" }
+          : { kind: "character" as const, characterId: "c1" };
+        const task: AgentTask = taskKind === "outline-sculpt"
+          ? { kind: taskKind, chapterId: "ch2" }
+          : { kind: taskKind, characterId: "c1" };
+        agentSessionStore(sessionId).getState().hydrate(
+          "/book",
+          emptyPersistedAgentState(),
+        );
+        const model = deferred<MockLanguageModelV3>();
+        let modelRequested = false;
+        const dependencies = makeDependencies(async (input) => {
+          const handlers = createAgentToolHandlers(input.environment);
+          const readFull = () => handlers.readChapter({ chapterId: "ch1" });
+          const readRange = () => handlers.readChapterRange({
+            chapterId: "ch1", start: 0, limit: 100,
+          });
+          const search = () => handlers.searchBook({
+            query: "UNSAVED", chapterIds: ["ch1"], limit: 10,
+          });
+          if (firstRead === "full") await readFull();
+          if (firstRead === "range") await readRange();
+          if (firstRead === "search") await search();
+          const full = await readFull();
+          const range = await readRange();
+          const matches = await search();
+          if (full.kind !== "runtime" || range.kind !== "runtime" || matches.kind !== "runtime") {
+            throw new Error("Expected runtime book tool results");
+          }
+          expect(full.value).toEqual(expectedChapter);
+          expect(range.value.blocks).toEqual(expectedChapter.blocks);
+          expect(range.value.totalBlocks).toBe(2);
+          expect(matches.value.matches.map((match) => match.blockId)).toEqual([
+            "speech", "scratch",
+          ]);
+          expect(matches.value.matches[0].text).toBe("UNSAVED opening\nUNSAVED pause\nUNSAVED answer");
+          expect(input.run.task).toEqual(task);
+          return successfulResult(input, "Inspected captured source");
+        });
+        dependencies.getModel = async () => {
+          modelRequested = true;
+          return model.promise;
+        };
+        const controller = createAgentController(dependencies);
+        const submission = controller.submitAgentRequest({
+          kind: "run", mode: "writing", text: "Inspect the book.", refs: [], task,
+        }, sessionId);
+        await vi.waitFor(() => expect(modelRequested).toBe(true));
+
+        sourceBlocks[0].text = "Later author edit";
+        sourceBlocks[0].speaker = "Ivo";
+        sourceBlocks[0].tail = [{ kind: "quote", text: "Later answer" }];
+        sourceBlocks[1].text = "Later intention";
+        model.resolve(new MockLanguageModelV3());
+
+        await expect(submission).resolves.toEqual({ status: "success" });
+        expect(mocks.readTextFile).not.toHaveBeenCalledWith("/book", "chapters/one.tex");
+        expect(mocks.readTextFile).toHaveBeenCalledTimes(taskKind === "outline-sculpt" ? 1 : 0);
+      },
+    );
+  }
+});
+
 describe("character Describe sessions", () => {
   it("rejects a task whose character differs from the session", async () => {
     const sessionId = { kind: "character" as const, characterId: "c1" };
@@ -909,9 +997,10 @@ describe("outline planner sessions", () => {
     expect(instructions).toContain('"previous": null');
     expect(instructions).not.toContain("Disk first.");
     expect(arbitraryChapterText).toEqual([
-      "Disk first.",
-      "Disk middle.",
-      "Disk final.",
+      "First live paragraph.",
+      "Private note.",
+      "Middle live paragraph.",
+      "Final live paragraph.",
     ]);
   });
 

@@ -1,5 +1,6 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { createStore } from "zustand/vanilla";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri", () => ({
@@ -48,6 +49,7 @@ import type {
   ProjectMeta,
 } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
+import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
 import {
   createStoryRefreshState,
   type StoryRefreshStoreDependencies,
@@ -174,6 +176,8 @@ function refreshStoreDependencies(
 }
 
 beforeEach(() => {
+  vi.mocked(toast.error).mockClear();
+  useSettingsDialogStore.setState({ open: false, aiTarget: null });
   useProjectStore.setState({
     project: projectFixture("/book"),
     meta: metaFixture(),
@@ -249,6 +253,28 @@ describe("story refresh runtime queue", () => {
       error: "Provider quota exceeded",
       pendingFingerprints: { ch1: "fp-1" },
     });
+  });
+
+  it("shows a Settings toast when missing credentials fail before inference", async () => {
+    const error = Object.assign(new Error("Missing key"), {
+      failure: { reason: "key-missing" },
+    });
+    const build = vi.fn<typeof buildStoryRefresh>().mockRejectedValue(error);
+    const store = createStore(
+      createStoryRefreshState(refreshStoreDependencies(build, "gpt-test")),
+    );
+    store.getState().enqueueSavedChapter("/book", "ch1", "fp-1");
+    await flushPromises();
+    expect(store.getState()).toMatchObject({
+      status: "failed",
+      pendingFingerprints: { ch1: "fp-1" },
+    });
+    expect(toast.error).toHaveBeenCalledWith(
+      "Add an OpenAI key, then submit again.",
+      expect.objectContaining({
+        action: expect.objectContaining({ label: "Open AI settings" }),
+      }),
+    );
   });
 
   it("commits a valid character patch beside an isolated character failure", async () => {
@@ -394,9 +420,16 @@ describe("story refresh runtime queue", () => {
     await flushPromises();
 
     expect(build).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Choose a model"),
+      expect.objectContaining({
+        action: expect.objectContaining({ label: "Open AI settings" }),
+      }),
+    );
+
     expect(store.getState()).toMatchObject({
       status: "failed",
-      error: "Choose an AI model in Settings before refreshing story knowledge.",
+      error: "Choose a model for OpenAI, then submit again.",
     });
   });
 

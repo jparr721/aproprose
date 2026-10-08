@@ -1,6 +1,7 @@
 import { create, type StateCreator } from "zustand";
 
-import { describeAiError } from "@/lib/ai/errors";
+import { describeAiError, showAiError } from "@/lib/ai/errors";
+import { modelUnselectedFailure } from "@/lib/ai/agent-failure";
 import { parseChapter } from "@/lib/latex";
 import type {
   buildStoryRefresh,
@@ -10,6 +11,7 @@ import type {
   StoryRefreshProgress,
   StoryRefreshResult,
 } from "@/lib/story-knowledge/refresh";
+import type { AiProvider } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -138,6 +140,7 @@ export function createStoryRefreshState(
     let nextTopologyRevision = 0;
 
     const execute = async (root: string): Promise<void> => {
+      let provider: AiProvider | null = null;
       const currentGeneration = generation + 1;
       generation = currentGeneration;
       const currentController = new AbortController();
@@ -149,15 +152,15 @@ export function createStoryRefreshState(
 
       try {
         const captured = dependencies.capture();
+        provider = captured.provider;
         if (captured.project.root !== root) {
           throw new Error(
             `Story refresh project does not match the saved project: ${root}`,
           );
         }
         if (captured.modelId === null) {
-          throw new Error(
-            "Choose an AI model in Settings before refreshing story knowledge.",
-          );
+          const failure = modelUnselectedFailure(captured.provider);
+          throw Object.assign(new Error(failure.message), { failure });
         }
         const capture: StoryRefreshCapture = {
           project: structuredClone(captured.project),
@@ -255,6 +258,7 @@ export function createStoryRefreshState(
           set({ status: "idle", progress: EMPTY_PROGRESS, error: null });
           return;
         }
+        showAiError(error, provider);
         set({ status: "failed", error: dependencies.describeError(error) });
       }
     };

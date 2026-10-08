@@ -1709,14 +1709,14 @@ describe("dispatchAgentIntent", () => {
 
     expect(useAgentConsoleStore.getState().runError).toMatchObject({
       reason: "transport",
-      message: "The AI request could not be completed. Check your connection and retry.",
+      message: "Your AI provider is temporarily unavailable. Retry shortly.",
     });
     expect(dependencies.stream).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "Agent run failed",
       expect.objectContaining({
         reason: "transport",
-        message: "The AI request could not be completed. Check your connection and retry.",
+        message: "Your AI provider is temporarily unavailable. Retry shortly.",
         phase: null,
       }),
     );

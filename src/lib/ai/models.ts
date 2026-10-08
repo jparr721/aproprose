@@ -1,6 +1,7 @@
 // models.ts - lists agent-capable models and resolves their context windows.
 
 import { uniq } from "es-toolkit";
+import { APICallError } from "@ai-sdk/provider";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import {
   fetchModels,
@@ -48,9 +49,13 @@ async function fetchModelResponse<T>(
     });
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(
-        `Model request failed for ${endpoint}: HTTP ${response.status} - ${body}`,
-      );
+      throw new APICallError({
+        message: "AI model listing failed",
+        url: endpoint,
+        requestBodyValues: undefined,
+        statusCode: response.status,
+        responseBody: body,
+      });
     }
     return (await response.json()) as T;
   });

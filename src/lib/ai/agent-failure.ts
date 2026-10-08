@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   AgentErrorCode,
   AgentFailure,
@@ -5,11 +6,36 @@ import type {
 } from "@/lib/ai/agent-types";
 import type { AiProvider } from "@/lib/types";
 
-interface ErrorDetails extends Error {
-  statusCode?: number;
-  status?: number;
-  failure?: unknown;
-  agentFailureReason?: unknown;
+const errorDetailsSchema = z.object({
+  name: z.string().optional(),
+  message: z.string().optional(),
+  statusCode: z.number().optional(),
+  status: z.number().optional(),
+  responseBody: z.string().optional(),
+  isRetryable: z.boolean().optional(),
+  failure: z.unknown().optional(),
+  agentFailureReason: z.unknown().optional(),
+  lastError: z.unknown().optional(),
+  cause: z.unknown().optional(),
+});
+
+const failureReasonSchema = z.enum([
+  "model-unselected",
+  "key-missing",
+  "key-rejected",
+  "model-unavailable",
+  "settings-unavailable",
+  "quota",
+  "transport",
+  "tool",
+  "compaction",
+  "transition",
+  "unknown",
+]);
+
+export interface AiErrorClassification {
+  failure: AgentFailure;
+  retryable: boolean;
 }
 
 export type AgentFailurePhase = "compaction" | null;
@@ -18,6 +44,10 @@ const providerLabels: Record<AiProvider, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
 };
+
+function providerLabel(provider: AiProvider | null): string {
+  return provider === null ? "AI provider" : providerLabels[provider];
+}
 
 function failure(
   reason: AgentFailureReason,
@@ -28,37 +58,41 @@ function failure(
   return { reason, message, action, settingsTarget };
 }
 
-export function modelUnselectedFailure(provider: AiProvider): AgentFailure {
+export function modelUnselectedFailure(
+  provider: AiProvider | null,
+): AgentFailure {
   return failure(
     "model-unselected",
-    `Choose a model for ${providerLabels[provider]}, then submit again.`,
+    `Choose a model for ${providerLabel(provider)}, then submit again.`,
     "choose-model",
     "model",
   );
 }
 
-export function keyMissingFailure(provider: AiProvider): AgentFailure {
+export function keyMissingFailure(provider: AiProvider | null): AgentFailure {
   return failure(
     "key-missing",
-    `Add an ${providerLabels[provider]} key, then submit again.`,
+    `Add an ${providerLabel(provider)} key, then submit again.`,
     "add-key",
     "key",
   );
 }
 
-export function keyRejectedFailure(provider: AiProvider): AgentFailure {
+export function keyRejectedFailure(provider: AiProvider | null): AgentFailure {
   return failure(
     "key-rejected",
-    `Replace the ${providerLabels[provider]} key, then submit again.`,
+    `Replace the ${providerLabel(provider)} key, then submit again.`,
     "replace-key",
     "key",
   );
 }
 
-export function modelUnavailableFailure(provider: AiProvider): AgentFailure {
+export function modelUnavailableFailure(
+  provider: AiProvider | null,
+): AgentFailure {
   return failure(
     "model-unavailable",
-    `The selected ${providerLabels[provider]} model is unavailable. Choose another model, then submit again.`,
+    `The selected ${providerLabel(provider)} model is unavailable. Choose another model, then submit again.`,
     "choose-model",
     "model",
   );
@@ -84,7 +118,7 @@ export function legacyAgentFailure(): AgentFailure {
 
 export function agentFailureFromReason(
   reason: AgentFailureReason,
-  provider: AiProvider,
+  provider: AiProvider | null,
 ): AgentFailure {
   switch (reason) {
     case "model-unselected":
@@ -168,102 +202,255 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function failureFromDescriptor(
   value: unknown,
-  provider: AiProvider,
+  provider: AiProvider | null,
 ): AgentFailure | null {
-  if (!isRecord(value) || typeof value.reason !== "string") return null;
-  const reason = value.reason as AgentFailureReason;
-  const known = new Set<AgentFailureReason>([
-    "model-unselected",
-    "key-missing",
-    "key-rejected",
-    "model-unavailable",
-    "settings-unavailable",
-    "quota",
-    "transport",
-    "tool",
-    "compaction",
-    "transition",
-    "unknown",
-  ]);
-  return known.has(reason) ? agentFailureFromReason(reason, provider) : null;
+  if (!isRecord(value)) return null;
+  const parsed = failureReasonSchema.safeParse(value.reason);
+  return parsed.success ? agentFailureFromReason(parsed.data, provider) : null;
 }
 
-function errorStatus(error: unknown): number | null {
-  if (!(error instanceof Error)) return null;
-  const detailed = error as ErrorDetails;
-  return detailed.statusCode ?? detailed.status ?? null;
-}
+export function classifyAiError(
+  error: unknown,
+  provider: AiProvider | null,
+  phase: AgentFailurePhase,
+): AiErrorClassification {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  let details: z.infer<typeof errorDetailsSchema> = {};
+  while (!seen.has(current)) {
+    seen.add(current);
+    const parsed = errorDetailsSchema.safeParse(
+      typeof current === "string" ? { message: current } : current,
+    );
+    if (!parsed.success) break;
+    details = parsed.data;
+    const direct =
+      failureFromDescriptor(details.failure, provider) ??
+      failureFromDescriptor({ reason: details.agentFailureReason }, provider);
+    if (direct !== null) return { failure: direct, retryable: false };
+    const nested = details.lastError ?? details.cause;
+    if (
+      nested === undefined ||
+      nested === null ||
+      seen.has(nested) ||
+      details.statusCode !== undefined ||
+      details.status !== undefined ||
+      /NoObjectGenerated|NoOutputGenerated|TypeValidation|JSONParse|InvalidTool|NoSuchTool|ToolCall/.test(
+        details.name ?? "",
+      )
+    )
+      break;
+    current = nested;
+  }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.toLowerCase() : "";
+  const status = details.statusCode ?? details.status;
+  const retryable = details.isRetryable !== false;
+  const message =
+    `${details.message ?? ""} ${details.responseBody ?? ""}`.toLowerCase();
+  const name = details.name ?? "";
+  if (
+    status === 402 ||
+    /credit_balance_exhausted|insufficient_quota|no credits remaining|insufficient credits/.test(
+      message,
+    )
+  ) {
+    return {
+      failure: agentFailureFromReason("quota", provider),
+      retryable: false,
+    };
+  }
+  if (
+    /LoadAPIKey/.test(name) ||
+    /api key is missing|api key must be set|no api key/.test(message)
+  ) {
+    return { failure: keyMissingFailure(provider), retryable: false };
+  }
+  if (
+    status === 401 ||
+    /invalid[_ ]api[_ ]key|incorrect api key|unauthorized|authentication_error/.test(
+      message,
+    )
+  ) {
+    return { failure: keyRejectedFailure(provider), retryable: false };
+  }
+  if (
+    /content_policy|content_filter|moderation|safety.*blocked/.test(message)
+  ) {
+    return {
+      failure: failure(
+        "unknown",
+        "Your AI provider blocked this request under its content policy. Revise the request and retry.",
+        null,
+        null,
+      ),
+      retryable: false,
+    };
+  }
+  if (status === 403) {
+    return {
+      failure: failure(
+        "unknown",
+        "Your AI provider denied this request. Check your account permissions and model access.",
+        null,
+        null,
+      ),
+      retryable: false,
+    };
+  }
+  if (
+    status === 413 ||
+    /context_length_exceeded|maximum context length|context (window|length|limit).*exceed|too many tokens/.test(
+      message,
+    )
+  ) {
+    return {
+      failure: failure(
+        "unknown",
+        "This request exceeds the model's context limit. Shorten the conversation or choose a model with a larger context window.",
+        "choose-model",
+        "model",
+      ),
+      retryable: false,
+    };
+  }
+  if (
+    status === 404 ||
+    /context-window metadata|model[_ ]not[_ ]found|model unavailable|no endpoints found/.test(
+      message,
+    )
+  ) {
+    return { failure: modelUnavailableFailure(provider), retryable: false };
+  }
+  if (
+    /UnsupportedFunctionality|UnsupportedModelVersion|NoSuchModel/.test(name) ||
+    /does not support|unsupported (model|parameter|function)/.test(message)
+  ) {
+    return {
+      failure: failure(
+        "model-unavailable",
+        "The selected AI model does not support this operation. Choose another model.",
+        "choose-model",
+        "model",
+      ),
+      retryable: false,
+    };
+  }
+  if (status === 400 || status === 422) {
+    return {
+      failure: failure(
+        "unknown",
+        "Your AI provider rejected the request format or parameters. Change the request or choose another model.",
+        "choose-model",
+        "model",
+      ),
+      retryable: false,
+    };
+  }
+  if (status === 429) {
+    return {
+      failure: failure(
+        "transport",
+        "Your AI provider is rate limiting requests. Wait a moment and retry.",
+        "retry",
+        null,
+      ),
+      retryable,
+    };
+  }
+  if (
+    status === 408 ||
+    status === 504 ||
+    /Timeout/.test(name) ||
+    /timed? out|timeout/.test(message)
+  ) {
+    return {
+      failure: failure(
+        "transport",
+        "The AI request timed out. Check your connection and retry.",
+        "retry",
+        null,
+      ),
+      retryable,
+    };
+  }
+  if (status !== undefined && status >= 500) {
+    return {
+      failure: failure(
+        "transport",
+        "Your AI provider is temporarily unavailable. Retry shortly.",
+        "retry",
+        null,
+      ),
+      retryable,
+    };
+  }
+  if (status === 409) {
+    return {
+      failure: failure(
+        "transport",
+        "Your AI provider could not process this request because of a conflict. Retry the request.",
+        "retry",
+        null,
+      ),
+      retryable,
+    };
+  }
+  const responseCause = errorDetailsSchema.safeParse(details.cause);
+  if (
+    /NoObjectGenerated|NoOutputGenerated|EmptyResponseBody|InvalidResponseData|JSONParse|TypeValidation/.test(
+      name,
+    ) ||
+    (status !== undefined &&
+      status >= 200 &&
+      status < 300 &&
+      responseCause.success &&
+      /JSONParse|TypeValidation/.test(responseCause.data.name ?? ""))
+  ) {
+    return {
+      failure: failure(
+        "transport",
+        "Your AI provider returned an empty or invalid response. Retry the request.",
+        "retry",
+        null,
+      ),
+      retryable,
+    };
+  }
+  if (/InvalidTool|NoSuchTool|ToolCall/.test(name)) {
+    return {
+      failure: agentFailureFromReason("tool", provider),
+      retryable: false,
+    };
+  }
+  if (
+    /fetch failed|failed to fetch|network|connection|error sending request|dns|tls|certificate|econn/.test(
+      message,
+    ) ||
+    (/APICallError|DownloadError/.test(name) && status === undefined)
+  ) {
+    return {
+      failure: agentFailureFromReason("transport", provider),
+      retryable,
+    };
+  }
+  if (phase === "compaction") {
+    return {
+      failure: agentFailureFromReason("compaction", provider),
+      retryable: false,
+    };
+  }
+  return {
+    failure: agentFailureFromReason("unknown", provider),
+    retryable: false,
+  };
 }
 
 export function failureFromError(
   error: unknown,
-  provider: AiProvider,
+  provider: AiProvider | null,
   phase: AgentFailurePhase,
 ): AgentFailure {
-  const direct =
-    error instanceof Error
-      ? failureFromDescriptor((error as ErrorDetails).failure, provider) ??
-        failureFromDescriptor(
-          { reason: (error as ErrorDetails).agentFailureReason },
-          provider,
-        )
-      : failureFromDescriptor(
-          isRecord(error) ? error.failure : undefined,
-          provider,
-        );
-  if (direct !== null) return direct;
-
-  const status = errorStatus(error);
-  const message = errorMessage(error);
-  if (
-    status === 402 ||
-    message.includes("credit_balance_exhausted") ||
-    message.includes("insufficient_quota") ||
-    message.includes("no credits remaining")
-  ) {
-    return agentFailureFromReason("quota", provider);
-  }
-  if (
-    status === 401 ||
-    status === 403 ||
-    message.includes("invalid api key") ||
-    message.includes("unauthorized")
-  ) {
-    return keyRejectedFailure(provider);
-  }
-  if (
-    status === 404 ||
-    message.includes("context-window metadata") ||
-    message.includes("model not found") ||
-    message.includes("model unavailable")
-  ) {
-    return modelUnavailableFailure(provider);
-  }
-  if (
-    error instanceof Error &&
-    (error.name.includes("InvalidTool") ||
-      error.name.includes("NoSuchTool") ||
-      error.name.includes("ToolCall"))
-  ) {
-    return agentFailureFromReason("tool", provider);
-  }
-  if (
-    status !== null ||
-    (error instanceof Error &&
-      (error.name.includes("APICallError") ||
-        error.name.includes("RetryError") ||
-        error.name.includes("DownloadError") ||
-        error.name.includes("EmptyResponseBodyError")))
-  ) {
-    return agentFailureFromReason("transport", provider);
-  }
-  if (phase === "compaction") {
-    return agentFailureFromReason("compaction", provider);
-  }
-  return agentFailureFromReason("unknown", provider);
+  return classifyAiError(error, provider, phase).failure;
 }
 
 export function agentFailureDiagnosticCode(

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getAiConfig: vi.fn(),
   tauriFetch: vi.fn(),
   toastWarning: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 // Keep the Tauri/http import graph inert and control metadata network requests.
@@ -14,7 +15,9 @@ vi.mock("tokenlens", async () => {
   const actual = await vi.importActual<typeof import("tokenlens")>("tokenlens");
   return { ...actual, fetchModels: mocks.fetchModels };
 });
-vi.mock("sonner", () => ({ toast: { warning: mocks.toastWarning } }));
+vi.mock("sonner", () => ({
+  toast: { warning: mocks.toastWarning, error: mocks.toastError },
+}));
 
 import {
   filterOpenRouterTextModels,
@@ -46,6 +49,7 @@ beforeEach(() => {
   mocks.getAiConfig.mockReset();
   mocks.tauriFetch.mockReset();
   mocks.toastWarning.mockReset();
+  mocks.toastError.mockReset();
 });
 
 describe("filterTextModels", () => {
@@ -115,6 +119,28 @@ describe("filterOpenRouterTextModels", () => {
 });
 
 describe("listTextModels", () => {
+  it.each(["openai", "openrouter"] as const)(
+    "preserves %s model HTTP failures and does not retry rejected credentials",
+    async (provider) => {
+      mocks.getAiConfig.mockResolvedValue({ apiKey: "test-key" });
+      mocks.tauriFetch.mockImplementation(
+        async () =>
+          new Response('{"error":{"message":"private auth detail"}}', {
+            status: 401,
+          }),
+      );
+
+      await expect(listTextModels(provider)).rejects.toMatchObject({
+        statusCode: 401,
+        responseBody: expect.stringContaining("private auth detail"),
+      });
+      expect(mocks.tauriFetch).toHaveBeenCalledTimes(1);
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        expect.stringContaining("Replace"),
+        expect.objectContaining({ action: expect.anything() }),
+      );
+    },
+  );
   it("lists tool-capable OpenRouter text models with the configured key", async () => {
     mocks.getAiConfig.mockResolvedValue({ apiKey: "openrouter-key" });
     mocks.tauriFetch.mockResolvedValue(
@@ -151,7 +177,7 @@ describe("listTextModels", () => {
 describe("resolveModelContextWindow", () => {
   it("retries and loads current metadata for a live model missing from the bundle", async () => {
     mocks.fetchModels
-      .mockRejectedValueOnce(new Error("models.dev unavailable"))
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
       .mockResolvedValueOnce({
         id: "openai",
         name: "OpenAI",

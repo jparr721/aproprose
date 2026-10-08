@@ -20,11 +20,11 @@
 ## Verification surface
 
 - CI runs (verified from .github/workflows/ci.yml): bun x tsc --noEmit; bun x vitest run; bun run build; src-tauri/cargo clippy --all-targets -- -D warnings; src-tauri/cargo test
-- CI skips: cargo fmt --check; just bundle (native bundle; tag-triggered release workflow does platform packaging)
+- CI skips: cargo fmt --check; native debug bundle. Final release workflow is called by successful main CI and performs signed platform packaging; tag-only triggering is retired.
 - recipes: just typecheck; just test (Vitest then cargo test); just build; just fmt (cargo fmt then cargo clippy); just bundle
 - generators: None identified during intake
 - needs: Bun dependencies, Rust dependencies, macOS Tauri; inspect optional external LaTeX tests
-- full gate: authorized; root running local surface
+- full gate: passed with exit 0 on staged integration of main c411d4312963d85ea14a99494a9865198fc69e68; root will commit/push this integrated tree and check its exact remote CI
 
 ## Intake user batch and resolved steering
 
@@ -32,9 +32,9 @@
 2. Outline edit approval: user reviews AI proposal before manuscript changes (recommended), or agent evaluates and applies automatically?
 
 - Request source: pipeline requires explicit permission before any local verification.
-- request_user_input_async is unavailable in the supervisor tool inventory; Plan-only request_user_input cannot be used for permission. Root successfully relayed supervisor's exact batch with its available request_user_input_async; answers pending.
-- Independent research and planning may continue; dependent local verification remains blocked on explicit answer.
-- Root relayed separate asynchronous scope clarification: (a) AI buttons plus deep audit/design, or (b) also implement automatic outline synchronization and approved manuscript updates. Pending answer, confirmed scope is buttons plus audit; no new background writes are authorized by assumption.
+- request_user_input_async was unavailable in the supervisor tool inventory; root relayed supervisor's exact batch with its available tool. Local permission was subsequently granted explicitly.
+- Initial independent research/planning continued while local verification awaited that answer; no local check preceded permission.
+- Root relayed separate optional synchronization scope clarification. Final confirmed scope is buttons plus deep audit/design; no new background synchronization writes were implemented.
 - Continuation answer: user explicitly authorizes local checks/tests, commit and push. verify-mode is local. No further verification permission question needed.
 - Latest feature correction: clicking an AI button must use the existing box text and generate directly. Nonblank/configured field opens dialog and starts exactly one initial generation; optional steering remains for follow-up; blank field still requires author intent. Review/Apply/Cancel remains.
 - Approval/synchronization optional questions do not block confirmed buttons plus audit/design scope; no new background synchronization implemented.
@@ -43,7 +43,7 @@
 
 ## Party plan
 
-- Round 1: architect and research complete, read-only; Wildcard/Level/Killjoy/Splinter to run as independent personas in two waves within concurrency limits
+- Party Round 1: Architect, research, Wildcard, Level and Killjoy completed; Round 2 Splinter signed off after cross-review
 - Runtime deviation: Additional spawn calls rejected with 'agent thread limit reached' despite completed workers. Root reuses architect slot for separately labeled Level and Killjoy passes, then Wildcard slot for Splinter. All required perspectives remain; fresh agent per persona could not be honored due to platform limit.
 - Topic research: complete, read-only; primary-source brief required input to Round 2
 - Research interim: Existing ai v6, zod and configured provider/model plus pending proposals cover scope. No new dependency recommended. Current v7 SDK docs differ in approval API; do not drive a v6 upgrade for this feature.
@@ -79,14 +79,14 @@
 
 - Research dispositions accepted SDK6/getModel/Zod, existing queue/proposals as future design foundation; rejected SDK upgrade, new dependencies and new approval state machine because existing capabilities suffice.
 - B amended acceptance from direct user correction: generate automatically once on open when existing field is nonblank and configured; use current box text immediately; do not require a second Generate click. Root writes regression tests and observes failure before adjustment.
-- Release scope deliberation active: Architect and Wildcard inspect actual Ronin workflows and Aproprose scripts. Exact new write sets pending amended consensus. Intended design: no bot bump loop; PR/main strict synchronized version + new valid changelog entry; main builds preserve signed matrix/updater publication.
+- Release scope deliberation completed: Architect and Wildcard inspected actual Ronin workflows and Aproprose scripts. Consensus exact write sets appear above. Final design has no bot bump loop; strict PR/main synchronized version and valid changelog gate; main builds preserve signed matrix/updater publication.
 - Wildcard release objection: Existing tag workflow assumes tag guard/event.created/GITHUB_REF_NAME version/release-body/Arch naming; main trigger cannot be added verbatim. Per-ref concurrency may replace pending main builds; use per-SHA identity for each-push guarantee. Build/publication intent must follow direct user wording and actual release design.
 - Wildcard primary-doc update: GitHub concurrency now supports queue: max (May 2026); cancel-in-progress: false plus queue: max can serialize main runs without historical pending replacement. Waiting-time FIFO does not ensure dispatch order, so latest publication still needs monotonicity guard. Existing gh PATCH default make_latest=true can let older late build replace latest. GITHUB_TOKEN-created push/tag does not recurse. Sources: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax ; https://docs.github.com/en/rest/releases/releases?apiVersion=latest
-- Wildcard source invariants: four current version files and newest changelog are 0.17.1; set-version.ts updates all four. release-body.ts validates summary/highlights but not uniqueness/date/order. Gate must require candidate > base, all four versions equal, and newly added/changed valid candidate-version entry; changelog file merely changing is insufficient. Existing _release pushes main plus tag together, so main workflow needs canonical version/SHA dedupe or legacy path double-creates releases/assets. Prefer author-committed bump/entry enforced by CI and build exact pushed SHA; avoid bot auto-bump loops.
-- Architect release plan: Ronin precedent is four-file monotonic gate only (no release/changelog workflow). Aproprose existing signed three-platform draft/verify/publish release becomes workflow_call invoked by main-push CI after version/changelog/frontend/Rust pass. Key main CI concurrency by SHA so every push builds; retain PR cancellation. Avoid workflow_run split, bot bump and tag-trigger loop. Exact write sets pending root consensus.
+- Wildcard source invariants at intake: four version files and newest changelog were 0.17.1; set-version.ts updates all four. Previous release-body validation covered summary/highlights but not uniqueness/date/order. Final gate requires candidate > base, four versions equal, and a new valid current-version changelog entry; changing old entries is insufficient. Old main-plus-tag recipe was replaced with branch/PR preparation to avoid duplicate releases and satisfy protection.
+- Architect release plan accepted: Ronin precedent is four-file monotonic gate only. Aproprose signed three-platform draft/verify/publish release is workflow_call invoked by main CI after version/changelog/frontend/Rust pass. Main concurrency is keyed by SHA; PR cancellation remains. Exact write sets are recorded above.
 - Release Wildcard/Level/Splinter acceptance: compare PR against base-repo origin including forks and stale equal-version PRs; support merge_group; main compares event.before to exact event SHA. Stable numeric SemVer and four proposed versions equal and above equal base, selecting only Aproprose Cargo.lock package. Unique valid candidate-version changelog entry must be new/changed versus base; old-entry-only edits fail. Every main push builds full matrix without dropped queued runs. Preserve platform/Arch/signing/updater notes and validation. If main publishes, enforce exact-SHA immutable version tag, same-SHA published no-op, draft rerun resume, mismatched/forced tag reject, no main bot commit, no duplicate main/tag release and monotonic latest. Root must explicitly choose publication interpretation versus build artifacts only.
 - Architect API review facts: createRelease ignores target_commitish when tag exists, requiring independent existing-tag SHA validation. Published lookup may omit drafts, so draft-resume requires paginated listReleases. GitHub token restrictions can block creating releases/tags for older targets modifying workflows relative to default branch; external release proof remains unverified before actual remote run.
-- Release plan cross-review signoff invariants: every reusable release job checks out inputs.sha and uses that SHA for identity; reusable concurrency must not retain old per-ref pending replacement. just version validates final bumped/changelog state against origin/main before main-only push. Canonical-main design retires tag-only push release trigger; root must record this material change explicitly rather than claim tag-only backcompat.
+- Release plan cross-review signoff invariants implemented: every reusable release job checks out inputs.sha and uses that SHA for identity; concurrency avoids old per-ref pending replacement. just version validates against origin/main, then prepares a release branch/ready PR. Canonical-main release explicitly retires tag-only release triggering.
 
 ## Implementation
 
@@ -101,40 +101,66 @@
 - B continuation: two one-click auto-generation regression cases observed red before correction, then green. Focused 45 tests passed (root report).
 - E implementation: architect assigned .github/workflows/ci.yml, release.yml, scripts/check-release.ts/.test.ts, release-body.ts/.test.ts and justfile. Root separately updated package.json/Cargo.toml/tauri.conf.json/Cargo.lock to 0.18.0, added current-version changelog entry and AGENTS release policy.
 - E reliability detail (architect evidence): tauri-action v0 reads/merges/deletes/reuploads latest.json across matrix jobs, creating a lost-platform race. Root approved max-parallel: 1 for existing signed three-platform matrix and same-draft Arch asset replacement on rerun; assigned file set unchanged. Upstream sources: https://raw.githubusercontent.com/tauri-apps/tauri-action/v0/src/upload-version-json.ts ; https://raw.githubusercontent.com/tauri-apps/tauri-action/v0/src/upload-release-assets.ts
-- E seven-file implementation complete (architect report): stable CI check names match F; main reusable release waits all three gates; inputs/checkouts and concurrency keyed to exact SHA; platforms serialize within a release while different SHA releases may build concurrently. Same-SHA draft retry reuses release; published retry currently fails before build (not an idempotent no-op). Arch replacement requires draft. Focused tests/actionlint next.
+- E seven-file implementation complete (architect report): stable CI check names match F; main reusable release waits all three gates; inputs/checkouts and concurrency keyed to exact SHA; platforms serialize within a release while different SHA releases may build concurrently. Same-SHA draft retry reuses release; published retry fails before build. Arch replacement requires draft. Focused tests/actionlint passed.
+- Later inherited browser gate: main PR61 added Chromium/WebKit regression coverage. Automatic release now depends on this fourth CI job; just version includes the browser suite, and README/AGENTS reflect the fourth gate. actionlint and rendered release-recipe bash syntax pass after this integration.
 - E retry disposition (root): Published same-SHA retry failing before build is accepted as explicit safer outcome; no published assets touched. Only unfinished-draft retry must succeed. Earlier no-op suggestion dropped; no duplicate released-commit build required.
 - E integration amendment: strict main required checks block new direct main pushes. Existing version recipe will create codex/release-VERSION branch, commit/push that branch, and open ready PR through existing gh. It no longer directly pushes main or tags. Seven-file architect write ownership unchanged.
 - E root doc sync: README.md releasing section replaced stale tag/direct-main instructions with synchronized four-file versions, changelog, strict checks, automatic main release and version PR recipe. Required documentation update; root write-set expansion remains disjoint from architect.
 - F complete (root report): Composio PUT then independent GET confirms main branch protection strict=true; required contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy'; enforce_admins=true. No other policy extras. Exact API payload/readback proof held by root.
-- Rebase integration correction: New main d49a55b changed withAiRetry to transient-only classification and added toast.error. Nine helper tests used generic retry fixtures and one pre-existing operations test omitted error toast mock. Wildcard assigned only src/lib/ai/refine-preference.test.ts and src/lib/ai/story-knowledge/operations.test.ts. Updated real transient 503/network fixtures, complete error mock and nonretry validation expectations; added 401 no-retry/original-error assertion. Production classifier left unchanged. Root will commit standalone fixture correction.
+- F final protection amendment (root report): Composio update and independent GET confirm strict=true, enforce_admins=true, and four required contexts: 'version + changelog', 'typecheck + tests', 'cargo test + clippy', 'Chromium + WebKit regression'.
+- Rebase integration correction: New main d49a55b changed withAiRetry to transient-only classification and added toast.error. Nine helper tests used generic retry fixtures and one pre-existing operations test omitted error toast mock. Wildcard changed only src/lib/ai/refine-preference.test.ts and src/lib/ai/story-knowledge/operations.test.ts: transient 503/network fixtures, complete error mock, nonretry validation expectations and 401 no-retry/original-error assertion. Production classifier unchanged; standalone fixture correction committed before initial push.
 - C rebase doc sync: Audit source anchors and current error-handling description updated for latest main; source-visible limits remain labeled accurately.
+- Published history integration through capped review: main fa492, 08b4774 and f7a8dae advanced during reviews; each merged without force rewriting history. Reviewed head bef2bcf contains main f7a8dae (0.17.4), preserving main App/composer/console/animations. All four app versions remain 0.18.0 with earlier histories retained.
+- Historical changelog validation integration: four regression cases observed RED 4/45 before a one-line existing findEntry loop correction; focused integration GREEN 76 afterward. Both main transient retry cases retained. Integration merge 3a85993 preceded 58c6bc0; final integration is bef2bcf.
+- Scope at fifth review: 25 intended PR files; application/helper/release implementation, audit and proof byte-identical between approved 58c6bc0 and bef2bcf.
+- Post-cap base integrations: main bdd637b (PR67 chapter drag reorder) merged as 09822d0; full gate passed. Main 3ad2cc5657ec97cfd6d9079c9a88fdd3b5e22034 (PR61 scrollbar fix, Playwright suite, 0.17.6) then merged/resolved; its full gate passed with exit 0. Main new runtime code is retained; our stronger parameterized provider/network tests remain. Audit updated 40 source-link anchors for shifted unchanged-semantic source. At that integration, versions remained 0.18.0 above retained 0.17.6 and prior history.
+- Final base integration: main c411d4312963d85ea14a99494a9865198fc69e68 (PR66 right-dock reopen fix and test, 0.17.7) retained unchanged, with only version/history resolution for this PR. Full integrated gate passed exit 0. All four app versions remain 0.18.0 above retained 0.17.7 and prior changelog history; no additional PR implementation introduced.
 
 ## Verification
 
-- No local checks run by supervisor.
-- Mode: local, explicitly authorized on continuation
-- Gate running by root: just typecheck; frontend Vitest; just build; just test (frontend plus Rust); cargo fmt --check; cargo clippy --all-targets -- -D warnings
-- Root-reported results: just typecheck pass; two regression cases red then green; focused 45 tests pass; just build pass.
-- Root-reported full frontend: 123 files, 1431 tests pass. cargo fmt --check pass. Rust tests compiling.
-- Root-reported full just test: frontend 1431 tests pass; 53 Rust tests pass. Formerly ignored DNS lane explicitly run, 1 pass; all 54 Rust tests executed. cargo fmt --check pass. Clippy active; isolated native QA app build active. Release-slice final verification remains pending.
-- Root-reported clippy pass; debug macOS app bundle pass. Final E-slice gate still pending.
-- Final full-suite/typecheck rerun active after release edits (root report).
-- E architect results: scripts/check-release.test.ts + scripts/release-body.test.ts, 59/59 pass; actionlint on ci.yml and release.yml pass with shellcheck disabled because not installed; just dry-run release recipe rendered shell passes bash -n; actual check-release CLI against base 24e4aaa prints 0.18.0; git diff --check clean. Seven-file write set respected. Remote signed build/publication and recipe network steps unexecuted.
-- Final pre-rebase full gate (root report): 1484 frontend tests and 54 Rust tests executed/passed; typecheck, frontend build, clippy and fmt passed.
-- Up-to-date rebase: Initial commit 6b4b8e1 created but not pushed. Fetch revealed new origin/main commits 001aeed and d49a55b (still 0.17.1); feature rebased cleanly onto d49a55b. Full local gate rerunning on rebased tree before initial push. Earlier green gate is not claimed for rebased commit.
-- Post-rebase initial gate: typecheck/build/clippy/fmt passed; frontend had 10 failures in two files (1523 passed of 1533). Focused repro confirmed RED 10/36 before integration fixture correction, then GREEN 37/37 after correction. Exact last-error, retry/maxRetries 0, validation and cancellation assertions retained.
-- Post-rebase corrected full gate (root report): 124 frontend files, 1534 tests pass; 53 regular Rust tests pass plus ignored DNS lane explicitly run and pass (all 54 executed); typecheck and frontend build pass. Clippy/fmt were green on identical production code post-rebase. Rebased feature commit d778d5e on d49a55b, before standalone test/doc commits.
+- Mode: local, explicitly authorized; supervisor records root/worker evidence without running checks itself.
+- Final verified source: staged integration containing main c411d4312963d85ea14a99494a9865198fc69e68. Root will include this final ledger amendment in its integration merge commit; this record does not recursively track its own commit hash.
+
+| Check | Command or proof | Result |
+|-------|------------------|--------|
+| TypeScript | just typecheck | pass |
+| Complete frontend/Rust suite | just test | 125 files/1566 frontend tests and 53 regular Rust tests pass |
+| Browser regression | Inherited Chromium/WebKit suite | all 24 tests pass |
+| CI-skipped Rust lane | Explicit ignored DNS test run | 1 pass; all 54 Rust tests executed |
+| Frontend build | just build | pass |
+| Format | cargo fmt --check in src-tauri | pass |
+| Rust lint | cargo clippy --all-targets -- -D warnings in src-tauri | pass |
+| Native current-platform build | Isolated macOS debug app bundle | pass on final staged integration |
+| Release guard | Actual check-release CLI against c411d431 | prints 0.18.0 |
+| Workflow syntax | actionlint on CI and reusable Release | pass; shellcheck unavailable and explicitly disabled |
+| Recipe syntax | just dry-run release recipe piped to bash -n | pass |
+| Generators | None documented/identified | not applicable |
+| Signed platform publication | Remote main-only release and recipe network steps | unexecuted while PR remains unmerged |
+
+- Regression evidence: one-click generation RED 2 cases then GREEN; post-d49 fixture integration RED 10/36 then GREEN 37/37; historical changelog validation RED 4/45 then focused GREEN 76. No assertion weakening, skips, classifier loosening or hook bypass.
+- Gate history: 1484 frontend/54 Rust pre-rebase; corrected post-rebase 1534/54; successive target integrations 1548/54, 1551/54 and 1565/54 at 09822d0, all passed. 3ad2cc5 integration passed 1565 frontend/24 browser/54 Rust plus all checks. Final c411d431 integration passed 1566 frontend, 24 browser and all 54 Rust tests plus typecheck/web build/fmt/clippy/native bundle and version CLI; full gate exit 0. Workflow actionlint and recipe bash syntax also passed after browser-gate integration.
+- Remote CI history: all three then-required checks succeeded at 58c6bc0 (run 37723093331); main-only release correctly skipped on PR. Root checks all four required jobs on the final pushed integration head separately in the final response. No final remote-green claim or recursive own-commit hash is recorded here.
 
 ## PR and review
 
-- PR: not opened; feature rebased to d778d5e on d49a55b; corrected local gate green, standalone test and audit/ledger commits next, then initial push and ready PR
-- Round 1: pending
-- Round 2: pending
-- Round 3: pending
-- Rounds 4-5: only if required by findings
-- Simplification: pending clean review exit
-- Exact-commit final gate: corrected post-rebase full gate green; final pushed review fixes and simplification remain to gate
-- Merge: deferred for this turn; deliver commit/push and retain branch/worktree
+- PR: https://github.com/jparr721/aproprose/pull/63 (ready, open and attached; created via local Composio CLI)
+- Initial push: b3b5290; screenshot MIME correction: 29c3ba7; target integrations: 58c6bc0 then bef2bcf.
+- Review runtime deviation: all five required lenses ran each round using paired reviewer slots plus root Level/Splinter club, because runtime rejected further agent spawns. Reviewers remained independent; supervisor never reviewed or implemented.
+
+| Pushed round | Snapshot | Final verdict | Remaining must-fix | Evidence |
+|--------------|----------|---------------|--------------------|----------|
+| 1 | b3b5290, proof correction 29c3ba7 independently checked | APPROVE | 0 | Five lenses plus club; proof MIME defect resolved |
+| 2 | 29c3ba7 | APPROVE | 0 | Swapped reviewer emphasis and root defense challenges |
+| 3 | 29c3ba7 | APPROVE | 0 | Mandatory third full bounded acceptance/proof pass |
+| 4 | 58c6bc0 against 08b4774 | APPROVE | 0 | Main integration, historical validator, preserved feature/history review |
+| 5 | bef2bcf against f7a8dae | APPROVE | 0 | Final integration ancestry and unchanged PR implementation checked |
+
+- Review cap: 5/5 completed, minimum 3 satisfied; no sixth round. No unresolved findings or dissent requiring disposition.
+- Root proof finding: five captured JPEG screenshots initially had image/png MIME labels. Structural validator failed, five labels corrected to image/jpeg, validator passed and primary copy resynced. Screenshot pixels unchanged; standalone docs fix 29c3ba7 reviewed in subsequent rounds.
+- SIMPLIFY RESULT: one final pass across frontend/helper/tests, release/scripts/recipe/version and docs; candidates=0, applied=0, dropped=0, followups=none; re-verify skipped because nothing applied. Later target integration left preference runtime/helper unchanged; inherited browser-gate CI/recipe integration is explicitly listed below. No repeated simplifier.
+- Exact application gate: full green on staged c411d431 integration; final pushed CI checked by root separately and not claimed green here.
+- Unreviewed after capped final round: later main history/version integrations; browser-job dependency in release CI; just version browser full gate; README/AGENTS fourth-gate documentation; audit anchor updates and this ledger. These small integration edits were locally verified but are outside the five approved review snapshots. Preference runtime/helper implementation remains unchanged. No sixth review and no repeated simplifier; final integrated full gate passed.
+- Merge: intentionally deferred per latest commit/push delivery scope; ready PR and dedicated worktree retained.
 
 ## QA and deck
 
@@ -144,23 +170,27 @@
 - Copy-out: primary checkout docs/slides; required before worktree removal
 - Token/key: existing configured provider key available; no secret values recorded
 - Result: pass (root report). Real selected OpenRouter/openai/gpt-6-luna calls from both existing voice and editing rules after one click; optional steering regeneration and manual preview edit also passed. Original unchanged before Apply; both exact final responses persisted after Apply; peer field preserved. Actual native CUA screenshots; no fabricated UI/model responses and user's installed novel not modified.
-- Deck: docs/slides/ai-preference-help-2026-10-07.html; self-contained HTML with five captured screenshots, 1474956 bytes
+- Deck: docs/slides/ai-preference-help-2026-10-07.html; self-contained HTML with five captured JPEG screenshots and correct image/jpeg MIME labels
 - Delivered copy-out: /Users/jarredparr/Projects/aproprose/docs/slides/ai-preference-help-2026-10-07.html (copied before cleanup; open_in_codex queued)
+- Matching final deck SHA256: 6c905d9a3308e137b5ea72a3226f2632edb04980ce432d7545b3fb1d90c7833d
+- QA source qualification: real-call captures precede target-main integrations; settings/helper implementation remains unchanged. Final staged integration passed isolated native debug app build. All five JPEGs and matching delivered-copy SHA remain valid.
+- Cleanup: QA app closed and verified through CUA; isolated QA config moved reversibly to a uniquely named Trash folder after force-remove was rejected. Own scratch moves to own Trash after final verified push. User's installed application/data untouched; unmerged worktree retained.
 
 ## Follow-ups and residual risk
 
-- Follow-ups: none identified
-- Residual risk: synchronization remains audit/design; final release verification and remote signed publication still pending
+- Follow-ups: none created; live/bidirectional synchronization remains explicitly audit/design only.
+- Residual risk: signed three-platform release/publication is unexecuted until merge. make_latest=legacy delegates latest selection to GitHub's date/SemVer rules; no universal highest-SemVer guarantee is claimed, and no canonical protected-main failure was proven.
+- Low-priority dropped suggestion remains: key-availability form remount may discard local steering without persisted preference loss.
 
 ## Current handoff status
 
-- A/B/C files written; final source-only B cross-review complete with no blockers.
+- A-F scope delivered to ready unmerged PR63; five pushed review rounds APPROVE, zero remaining must-fix; single simplifier made no changes.
 - Audit: /Users/jarredparr/.config/jp-skills/worktrees/aproprose/codex/ai-authoring-guidance/docs/architecture/background-ai-authoring.md (195 lines per worker/root report)
 - User continuation resolves verification permission and authorizes commit/push.
 - Confirmed code scope: two preference AI assistants; background synchronization remains audit/design only without implementation scope answer.
-- No additional user questions needed. Root executes approved local gate, regression-driven one-click generation change, commit and push.
-- New CI/release scope implemented by direct user instruction; version 0.18.0 and changelog applied. Post-rebase gate green; commit/push/ready PR next.
-- GitHub up-to-date PR gate applied and independently read back: strict required checks with contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy'.
+- No additional user questions needed. Final staged integration of main c411d431 passed 1566 frontend, 24 browser and 54 Rust tests plus typecheck/web build/fmt/clippy/native app and version CLI; full gate exit 0. Workflow/recipe syntax checks passed after browser-gate integration.
+- CI/release scope implemented; all four versions 0.18.0 and changelog above retained 0.17.7 history. Browser gate added to main release dependency and release recipe. Root checks final pushed integration CI separately.
+- GitHub up-to-date PR protection independently read back: strict=true, enforce_admins=true, contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy', 'Chromium + WebKit regression'.
 - Optional scope fallback: audit/design remains selected; no new background synchronization implemented.
-- Preserve dedicated worktree and all artifacts; do not claim pipeline complete or remove worktree. Supervisor records review-round results only at coordinated checkpoints to avoid ledger movement during commits.
-- Cleanup tail read: /Users/jarredparr/Projects/jp-skills/skills/cleanup/SKILL.md. Supervisor made no tmp scratch; nothing removed. Task records retained; no version/changelog/other-skill records touched.
+- Preserve dedicated worktree and all artifacts because PR is intentionally unmerged. Delivered deck also survives in primary checkout. This single authorized amendment is complete; supervisor holds permanently while root commits/pushes and separately verifies exact-head CI.
+- Cleanup tail read: /Users/jarredparr/Projects/jp-skills/skills/cleanup/SKILL.md. Supervisor made no tmp scratch and touched only this ledger; no other skill records modified.

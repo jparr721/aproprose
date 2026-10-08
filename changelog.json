@@ -10,6 +10,15 @@
     ]
   },
   {
+    "version": "0.17.9",
+    "date": "2026-10-07",
+    "summary": "AI chat attachment previews stay compact and readable.",
+    "highlights": [
+      "Hover over attached manuscript blocks, outline cards, and findings to see a fixed-width preview limited to four wrapped lines.",
+      "Previews fit the window while preserving the full saved text and attachment navigation."
+    ]
+  },
+  {
     "version": "0.17.8",
     "date": "2026-10-07",
     "summary": "App issues now have a dedicated Notifications page with clear repair steps.",

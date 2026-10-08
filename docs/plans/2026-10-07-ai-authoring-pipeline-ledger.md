@@ -24,7 +24,7 @@
 - recipes: just typecheck; just test (Vitest then cargo test); just build; just fmt (cargo fmt then cargo clippy); just bundle
 - generators: None identified during intake
 - needs: Bun dependencies, Rust dependencies, macOS Tauri; inspect optional external LaTeX tests
-- full gate: passed with exit 0 on staged integration of main c411d4312963d85ea14a99494a9865198fc69e68; root will commit/push this integrated tree and check its exact remote CI
+- full gate: passed with exit 0 on staged integration of main 7e80500a682a2e718e5a64f4ab5f4fed9bdd3499; root will commit/push this integrated tree and check its exact remote CI
 
 ## Intake user batch and resolved steering
 
@@ -114,32 +114,35 @@
 - Historical changelog validation integration: four regression cases observed RED 4/45 before a one-line existing findEntry loop correction; focused integration GREEN 76 afterward. Both main transient retry cases retained. Integration merge 3a85993 preceded 58c6bc0; final integration is bef2bcf.
 - Scope at fifth review: 25 intended PR files; application/helper/release implementation, audit and proof byte-identical between approved 58c6bc0 and bef2bcf.
 - Post-cap base integrations: main bdd637b (PR67 chapter drag reorder) merged as 09822d0; full gate passed. Main 3ad2cc5657ec97cfd6d9079c9a88fdd3b5e22034 (PR61 scrollbar fix, Playwright suite, 0.17.6) then merged/resolved; its full gate passed with exit 0. Main new runtime code is retained; our stronger parameterized provider/network tests remain. Audit updated 40 source-link anchors for shifted unchanged-semantic source. At that integration, versions remained 0.18.0 above retained 0.17.6 and prior history.
-- Final base integration: main c411d4312963d85ea14a99494a9865198fc69e68 (PR66 right-dock reopen fix and test, 0.17.7) retained unchanged, with only version/history resolution for this PR. Full integrated gate passed exit 0. All four app versions remain 0.18.0 above retained 0.17.7 and prior changelog history; no additional PR implementation introduced.
+- Later base integration: main c411d4312963d85ea14a99494a9865198fc69e68 (PR66 right-dock reopen fix and test, 0.17.7) retained unchanged; full gate passed exit 0 and pushed integration ec6d6be passed all four CI checks.
+- Notification integration: main 0892020454d8b70ecfa5002ad42596fe2f5cdb74 (PR69 actionable notifications, 0.17.8) retained unchanged across its 50 files. AiTab and tests auto-merged with both AI buttons/helper behavior preserved. Main changed shared error toast action to View notification: eight helper assertions observed RED, two exact action expectations changed to imported openNotifications without weakening, focused GREEN 48 then full GREEN 1596. Integration committed locally as 4debcea. Audit mapped 88 further anchors and truthfully updated error flow: categorized refresh notifications, quiet paused status linking Notifications, AI settings and retry for current failed project. No synchronization implementation added.
+- Final base integration: main 7e80500a682a2e718e5a64f4ab5f4fed9bdd3499 (PR68 attachment UI/test, 0.17.9) retained unchanged. Final full gate passed exit 0; all four versions remain 0.18.0 above retained 0.17.9 and prior changelog history. All 148 audit anchors resolve within source files. Only PR63 remains open at this checkpoint.
 
 ## Verification
 
 - Mode: local, explicitly authorized; supervisor records root/worker evidence without running checks itself.
-- Final verified source: staged integration containing main c411d4312963d85ea14a99494a9865198fc69e68. Root will include this final ledger amendment in its integration merge commit; this record does not recursively track its own commit hash.
+- Final verified source: staged integration containing main 7e80500a682a2e718e5a64f4ab5f4fed9bdd3499. Root will include this final ledger amendment in its integration merge commit; this record does not recursively track its own commit hash.
 
 | Check | Command or proof | Result |
 |-------|------------------|--------|
 | TypeScript | just typecheck | pass |
-| Complete frontend/Rust suite | just test | 125 files/1566 frontend tests and 53 regular Rust tests pass |
+| Complete frontend/Rust suite | just test | 127 files/1599 frontend tests and 53 regular Rust tests pass |
 | Browser regression | Inherited Chromium/WebKit suite | all 24 tests pass |
 | CI-skipped Rust lane | Explicit ignored DNS test run | 1 pass; all 54 Rust tests executed |
 | Frontend build | just build | pass |
 | Format | cargo fmt --check in src-tauri | pass |
 | Rust lint | cargo clippy --all-targets -- -D warnings in src-tauri | pass |
 | Native current-platform build | Isolated macOS debug app bundle | pass on final staged integration |
-| Release guard | Actual check-release CLI against c411d431 | prints 0.18.0 |
+| Release guard | Actual check-release CLI against 7e80500 | prints 0.18.0 |
 | Workflow syntax | actionlint on CI and reusable Release | pass; shellcheck unavailable and explicitly disabled |
 | Recipe syntax | just dry-run release recipe piped to bash -n | pass |
 | Generators | None documented/identified | not applicable |
 | Signed platform publication | Remote main-only release and recipe network steps | unexecuted while PR remains unmerged |
 
-- Regression evidence: one-click generation RED 2 cases then GREEN; post-d49 fixture integration RED 10/36 then GREEN 37/37; historical changelog validation RED 4/45 then focused GREEN 76. No assertion weakening, skips, classifier loosening or hook bypass.
-- Gate history: 1484 frontend/54 Rust pre-rebase; corrected post-rebase 1534/54; successive target integrations 1548/54, 1551/54 and 1565/54 at 09822d0, all passed. 3ad2cc5 integration passed 1565 frontend/24 browser/54 Rust plus all checks. Final c411d431 integration passed 1566 frontend, 24 browser and all 54 Rust tests plus typecheck/web build/fmt/clippy/native bundle and version CLI; full gate exit 0. Workflow actionlint and recipe bash syntax also passed after browser-gate integration.
-- Remote CI history: all three then-required checks succeeded at 58c6bc0 (run 37723093331); main-only release correctly skipped on PR. Root checks all four required jobs on the final pushed integration head separately in the final response. No final remote-green claim or recursive own-commit hash is recorded here.
+- Regression evidence: one-click generation RED 2 cases then GREEN; post-d49 fixture integration RED 10/36 then GREEN 37/37; historical changelog validation RED 4/45 then focused GREEN 76; notification action integration RED 8 assertions then focused GREEN 48 and full GREEN 1596. No assertion weakening, skips, classifier loosening or hook bypass.
+- Gate history: 1484 frontend/54 Rust pre-rebase; corrected post-rebase 1534/54; successive target integrations 1548/54, 1551/54 and 1565/54 at 09822d0, all passed. 3ad2cc5 integration passed 1565 frontend/24 browser/54 Rust plus all checks. c411d431 integration passed 1566 frontend, 24 browser and all 54 Rust tests plus typecheck/web build/fmt/clippy/native bundle and version CLI; full gate exit 0. Workflow actionlint and recipe bash syntax also passed after browser-gate integration.
+- Final gate update: 0892020 integration passed 1596 frontend/24 browser/54 Rust and all other checks. Latest 7e80500 integration passed 1599 frontend (127 files), 24 Chromium/WebKit and 54 Rust tests plus typecheck/web build/fmt/clippy/isolated native debug bundle; full gate exit 0. Actual release guard returns 0.18.0 against 7e80500; all 148 audit source anchors resolve.
+- Remote CI history: all three then-required checks succeeded at 58c6bc0 (run 37723093331). Pushed ec6d6be passed all four required checks (run 37724415539); main-only release correctly skipped on PR. Root checks all four jobs on the final pushed integration head separately in the final response. No final remote-green claim or recursive own-commit hash is recorded here.
 
 ## PR and review
 
@@ -158,8 +161,8 @@
 - Review cap: 5/5 completed, minimum 3 satisfied; no sixth round. No unresolved findings or dissent requiring disposition.
 - Root proof finding: five captured JPEG screenshots initially had image/png MIME labels. Structural validator failed, five labels corrected to image/jpeg, validator passed and primary copy resynced. Screenshot pixels unchanged; standalone docs fix 29c3ba7 reviewed in subsequent rounds.
 - SIMPLIFY RESULT: one final pass across frontend/helper/tests, release/scripts/recipe/version and docs; candidates=0, applied=0, dropped=0, followups=none; re-verify skipped because nothing applied. Later target integration left preference runtime/helper unchanged; inherited browser-gate CI/recipe integration is explicitly listed below. No repeated simplifier.
-- Exact application gate: full green on staged c411d431 integration; final pushed CI checked by root separately and not claimed green here.
-- Unreviewed after capped final round: later main history/version integrations; browser-job dependency in release CI; just version browser full gate; README/AGENTS fourth-gate documentation; audit anchor updates and this ledger. These small integration edits were locally verified but are outside the five approved review snapshots. Preference runtime/helper implementation remains unchanged. No sixth review and no repeated simplifier; final integrated full gate passed.
+- Exact application gate: full green on staged 7e80500 integration; final pushed CI checked by root separately and not claimed green here.
+- Unreviewed after capped final round: later main history/version integrations; browser-job dependency in release CI; just version browser full gate; README/AGENTS fourth-gate documentation; helper test action expectations matching main notifications; audit anchor/error-flow updates and this ledger. These integration edits were locally verified but are outside the five approved review snapshots. Preference runtime/helper implementation remains unchanged. No sixth review and no repeated simplifier; final integrated full gate passed.
 - Merge: intentionally deferred per latest commit/push delivery scope; ready PR and dedicated worktree retained.
 
 ## QA and deck
@@ -185,11 +188,11 @@
 ## Current handoff status
 
 - A-F scope delivered to ready unmerged PR63; five pushed review rounds APPROVE, zero remaining must-fix; single simplifier made no changes.
-- Audit: /Users/jarredparr/.config/jp-skills/worktrees/aproprose/codex/ai-authoring-guidance/docs/architecture/background-ai-authoring.md (195 lines per worker/root report)
+- Audit: /Users/jarredparr/.config/jp-skills/worktrees/aproprose/codex/ai-authoring-guidance/docs/architecture/background-ai-authoring.md (all 148 source anchors verified after latest integrations)
 - User continuation resolves verification permission and authorizes commit/push.
 - Confirmed code scope: two preference AI assistants; background synchronization remains audit/design only without implementation scope answer.
-- No additional user questions needed. Final staged integration of main c411d431 passed 1566 frontend, 24 browser and 54 Rust tests plus typecheck/web build/fmt/clippy/native app and version CLI; full gate exit 0. Workflow/recipe syntax checks passed after browser-gate integration.
-- CI/release scope implemented; all four versions 0.18.0 and changelog above retained 0.17.7 history. Browser gate added to main release dependency and release recipe. Root checks final pushed integration CI separately.
+- No additional user questions needed. Final staged integration of main 7e80500 passed 1599 frontend, 24 browser and 54 Rust tests plus typecheck/web build/fmt/clippy/native app and version CLI; full gate exit 0. Workflow/recipe syntax checks passed after browser-gate integration; only PR63 remains open.
+- CI/release scope implemented; all four versions 0.18.0 and changelog above retained 0.17.9 history. Browser gate added to main release dependency and release recipe. Root checks final pushed integration CI separately.
 - GitHub up-to-date PR protection independently read back: strict=true, enforce_admins=true, contexts 'version + changelog', 'typecheck + tests', 'cargo test + clippy', 'Chromium + WebKit regression'.
 - Optional scope fallback: audit/design remains selected; no new background synchronization implemented.
 - Preserve dedicated worktree and all artifacts because PR is intentionally unmerged. Delivered deck also survives in primary checkout. This single authorized amendment is complete; supervisor holds permanently while root commits/pushes and separately verifies exact-head CI.

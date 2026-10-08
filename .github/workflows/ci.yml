@@ -36,6 +36,24 @@ jobs:
       - name: Unit tests
         run: bun x vitest run
 
+  browser:
+    name: Chromium + WebKit regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Install browsers
+        run: bun x playwright install --with-deps chromium webkit
+      - name: Browser tests
+        run: bun x playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results/
+          retention-days: 7
+
   rust:
     name: cargo test + clippy
     runs-on: ubuntu-22.04

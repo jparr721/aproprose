@@ -22,6 +22,7 @@ import {
 } from "@/lib/ai/agent-context";
 import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import { sanitizeProposal, sanitizeSculpt } from "@/lib/ai/operations";
+import type { ApplicableBlockChange } from "@/lib/blocks/proposal";
 import type {
   Block,
   BlockChange,
@@ -735,15 +736,28 @@ export function rebaseManuscriptReviewPreconditions(
         : { kind: "move", target, orderFingerprint: blockOrderFingerprint(after) };
       continue;
     }
+    const append = item.change.afterId === null && precondition.boundary === "immediate";
     const source = precondition.anchor === null ? null : resolveBlockLocator(precondition.anchor, before);
-    if (precondition.anchor !== null && source !== null && !after.some((block) => block.id === source.id)) {
+    if (!append && precondition.anchor !== null && source !== null && !after.some((block) => block.id === source.id)) {
       changes[item.id] = { ...precondition, anchor: { ...precondition.anchor, removed: true } };
       continue;
     }
     let anchorId = source === null
       ? precondition.boundary === "immediate" && precondition.expectedNext === null ? before.at(-1)?.id ?? null : null
       : source.id;
-    if (anchorId !== null && !after.some((block) => block.id === anchorId)) continue;
+    if (!append && anchorId !== null && !after.some((block) => block.id === anchorId)) continue;
+    if (append) {
+      // Append groups stay at the end, before any already-applied later append sibling.
+      const successor = precondition.expectedNext === null ? null : resolveBlockLocator(precondition.expectedNext, before);
+      const rightIds = new Set(successor === null ? [] : [successor.id]);
+      for (const later of proposal.changes.slice(index + 1)) {
+        if (later.change.kind !== "insert" || later.change.afterId !== null) continue;
+        const insertedId = insertedIds.get(later.id);
+        if (insertedId !== undefined) rightIds.add(insertedId);
+      }
+      const rightOrder = after.findIndex((block) => rightIds.has(block.id));
+      anchorId = after[(rightOrder < 0 ? after.length : rightOrder) - 1]?.id ?? null;
+    }
     for (const preceding of proposal.changes.slice(0, index)) {
       if (preceding.change.kind !== "insert" || preceding.change.afterId !== item.change.afterId) continue;
       const insertedId = insertedIds.get(preceding.id);
@@ -769,7 +783,7 @@ export function materializeManuscriptChanges(
   proposal: ManuscriptPendingProposal,
   changeIds: string[],
   blocks: Block[],
-): BlockChange[] {
+): ApplicableBlockChange[] {
   const selected = new Set(changeIds);
   const stale = validateManuscriptChanges(
     { ...proposal, changes: proposal.changes.filter((item) => selected.has(item.id)) },
@@ -790,9 +804,16 @@ export function materializeManuscriptChanges(
           precondition.kind === "insert" && precondition.anchor !== null
             ? resolveBlockLocator(precondition.anchor, blocks)
             : null;
+        const append = item.change.afterId === null && precondition.kind === "insert" && precondition.boundary === "immediate";
+        const successor = append && precondition.expectedNext !== null ? resolveBlockLocator(precondition.expectedNext, blocks) : null;
+        if (append && precondition.expectedNext !== null && successor === null) {
+          throw new AgentProposalError("source-missing", "The append insertion boundary changed.");
+        }
         return {
           ...item.change,
           afterId: anchor?.id ?? null,
+          insertionGroup: JSON.stringify([item.change.afterId, append ? successor?.id ?? null : anchor?.id ?? null]),
+          ...(append ? { beforeId: successor?.id ?? null } : {}),
           toIndex: precondition.kind === "insert" && precondition.anchor === null && precondition.expectedNext !== null ? 0 : null,
         };
       }

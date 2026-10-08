@@ -8,6 +8,7 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import type { Block, BlockChange } from "@/lib/types";
+import type { ApplicableBlockChange } from "@/lib/blocks/proposal";
 
 export interface ManuscriptUnchangedRow {
   kind: "unchanged";
@@ -376,7 +377,7 @@ function materializedPairs(
   proposal: ManuscriptPendingProposal,
   blocks: Block[],
   staleChangeIds: Set<string>,
-): Array<{ pending: ManuscriptPendingChange; materialized: BlockChange }> {
+): Array<{ pending: ManuscriptPendingChange; materialized: ApplicableBlockChange }> {
   const pendingChanges = proposal.changes.filter(
     (change) => !staleChangeIds.has(change.id),
   );
@@ -489,18 +490,21 @@ export function projectManuscriptReview(
           afterId: materialized.afterId,
           change: pending,
         };
-        const priorInsert = lastInsertFor.get(materialized.afterId);
+        const insertionGroup = materialized.insertionGroup === undefined ? materialized.afterId : materialized.insertionGroup;
+        const priorInsert = lastInsertFor.get(insertionGroup);
         const anchor = priorInsert ?? (
-          materialized.afterId === null
+          materialized.beforeId !== undefined || materialized.afterId === null
             ? undefined
             : virtualContent.find(
                 (item) => persistedBlockId(item) === materialized.afterId,
               )
         );
         if (anchor === undefined) {
-          const index = materialized.afterId === null && materialized.toIndex !== null
-            ? Math.max(0, Math.min(materialized.toIndex, virtualContent.length))
-            : virtualContent.length;
+          const index = materialized.beforeId !== undefined
+            ? materialized.beforeId === null ? virtualContent.length : sourceContentIndex(virtualContent, materialized.beforeId)
+            : materialized.afterId === null && materialized.toIndex !== null
+              ? Math.max(0, Math.min(materialized.toIndex, virtualContent.length))
+              : virtualContent.length;
           const target = virtualContent[index];
           virtualContent = insertAt(virtualContent, index, node);
           layout = target === undefined
@@ -514,7 +518,7 @@ export function projectManuscriptReview(
           );
           layout = insertAt(layout, layoutNodeIndex(layout, anchor) + 1, node);
         }
-        lastInsertFor.set(materialized.afterId, node);
+        lastInsertFor.set(insertionGroup, node);
         break;
       }
       case "remove": {

@@ -57,6 +57,9 @@ import type {
 } from "@/lib/ai/agent-types";
 import { writeProjectMeta } from "@/lib/tauri";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
+import { applyProposal } from "@/lib/blocks/proposal";
+import { projectManuscriptReview } from "@/lib/ai/manuscript-review-projection";
+import { fromAgentSnapshot, toAgentSnapshot } from "@/stores/agent-persistence";
 import type {
   Block,
   BlockChange,
@@ -213,6 +216,19 @@ const initialBlocks = (): Block[] => [
 
 const initialCards = (): Card[] => [cardFixture("card-1", "Arrival")];
 
+const insertionAnchors: Array<string | null> = ["block-1", "block-2", null];
+const approvalBatches: number[][][] = [
+  [[0], [1], [2]], [[0], [2], [1]], [[1], [0], [2]],
+  [[1], [2], [0]], [[2], [0], [1]], [[2], [1], [0]],
+  [[0, 1], [2]], [[0, 2], [1]], [[1, 2], [0]],
+  [[0], [1, 2]], [[1], [0, 2]], [[2], [0, 1]],
+];
+const insertionApprovalCases = insertionAnchors.flatMap((first) =>
+  insertionAnchors.flatMap((second) => insertionAnchors.flatMap((third) =>
+    approvalBatches.map((batches) => ({ anchors: [first, second, third], batches })),
+  )),
+);
+
 const setPending = (proposal: PendingProposal): void => {
   useAgentConsoleStore.setState({
     proposalRecords: [{ proposal, source: { kind: "legacy" }, decisions: {}, replacedByProposalId: null }],
@@ -272,6 +288,85 @@ afterEach(() => {
 });
 
 describe("proposal decisions", () => {
+  it("does not refresh an end boundary removed by the author before another approval", () => {
+    const proposal = manuscriptProposal(initialBlocks(), [
+      manuscriptInsert("block-1", "Middle"), rewrite("block-1", "Revised opening", "Revise"),
+      manuscriptInsert(null, "End"),
+    ]);
+    setPending(proposal);
+    acceptProposalChange(proposal, "change-0");
+    useProjectStore.getState().deleteBlock("block-2");
+    acceptProposalChange(proposal, "change-1");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected stale end insertion");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set(["change-2"]));
+    acceptAllProposalChanges(pending);
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(["Revised opening", "Middle"]);
+  });
+
+  it.each(["remove", "move", "rewrite"] satisfies BlockChange["kind"][])(
+    "keeps end insertions valid after their own %s changes the captured tail", (kind) => {
+      const changes: BlockChange[] = [
+        manuscriptInsert("block-1", "Middle"),
+        { ...rewrite("block-2", "Revised tail", "Revise"), kind, toIndex: kind === "move" ? 0 : null },
+        manuscriptInsert(null, "End first"), manuscriptInsert(null, "End second"),
+      ];
+      const expected = applyProposal(initialBlocks(), changes, () => undefined).blocks.map((block) => block.text);
+      const proposal = manuscriptProposal(initialBlocks(), changes);
+      setPending(proposal);
+      acceptProposalChange(proposal, "change-0");
+      acceptProposalChange(proposal, "change-1");
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null) throw new Error("Expected end insertions after changing the tail");
+      expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+      acceptAllProposalChanges(pending);
+      expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(expected);
+    },
+  );
+
+  it("restores mixed end boundaries before applying the remaining insertion groups", async () => {
+    const proposal = manuscriptProposal(initialBlocks(), [
+      manuscriptInsert("block-2", "Anchored"), manuscriptInsert(null, "End first"),
+      manuscriptInsert(null, "End second"), manuscriptInsert(null, "End third"),
+    ]);
+    setPending(proposal);
+    acceptProposalChange(proposal, "change-2");
+    const snapshot = await toAgentSnapshot();
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", snapshot));
+    acceptProposalChange(proposal, "change-0");
+    const pending = useAgentConsoleStore.getState().pendingProposal;
+    if (pending === null) throw new Error("Expected restored end insertions");
+    expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+    acceptAllProposalChanges(pending);
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual([
+      "The rain fell.", "The door opened.", "Anchored", "End first", "End second", "End third",
+    ]);
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+  });
+
+  it.each(insertionApprovalCases)("preserves mixed insertion boundaries for $anchors with batches $batches", ({ anchors, batches }) => {
+    const original = initialBlocks();
+    const changes = anchors.map((anchor, index) => manuscriptInsert(anchor, `Passage ${index}`));
+    const expected = applyProposal(original, changes, () => undefined).blocks.map((block) => block.text);
+    const proposal = manuscriptProposal(original, changes);
+    setPending(proposal);
+    for (const batch of batches) {
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      if (pending === null || pending.kind !== "manuscript") throw new Error("Expected pending manuscript insertions");
+      expect(proposalStaleChangeIds(pending)).toEqual(new Set());
+      const preview = projectManuscriptReview(useProjectStore.getState().blocks, pending);
+      expect(preview.rows.map((row) => {
+        if (row.kind === "unchanged") return row.block.text;
+        if (row.kind === "insert") return row.change.change.newText;
+        throw new Error(`Unexpected insertion review row: ${row.kind}`);
+      })).toEqual(expected);
+      const selected = new Set(batch.map((index) => `change-${index}`));
+      acceptAllProposalChanges({ ...pending, changes: pending.changes.filter((item) => selected.has(item.id)) });
+    }
+    expect(useProjectStore.getState().blocks.map((block) => block.text)).toEqual(expected);
+    expect(useAgentConsoleStore.getState().proposalRecords[0].proposal).toEqual(proposal);
+  });
+
   it("keeps sibling outline additions reviewable after accepting one", () => {
     const proposal = outlineProposal(initialCards(), [
       outlineAdd("First beat"), outlineAdd("Second beat"), outlineAdd("Third beat"),

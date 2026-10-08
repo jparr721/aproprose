@@ -8,6 +8,12 @@
 import type { Block, BlockChange } from "@/lib/types";
 import { uid } from "@/lib/id";
 
+export interface ApplicableBlockChange extends BlockChange {
+  // Host-only placement preserves original groups after review remaps live boundaries.
+  insertionGroup?: string;
+  beforeId?: string | null;
+}
+
 export interface ApplyProposalOutcome {
   blocks: Block[];
   applied: number;
@@ -24,7 +30,7 @@ export interface ApplyProposalOutcome {
  *  clamps toIndex into range. Rewrite sets text + dirty. */
 export function applyProposal(
   blocks: Block[],
-  changes: BlockChange[],
+  changes: ApplicableBlockChange[],
   resolveSpeakerId: (name: string) => string | undefined,
 ): ApplyProposalOutcome {
   let cur = blocks;
@@ -72,12 +78,20 @@ export function applyProposal(
         // the second insert follows the first instead of displacing it. A
         // vanished afterId still inserts at the chapter end: the author kept
         // this change for its content, so landing it somewhere beats dropping it.
-        const anchorId = lastInsertFor.get(c.afterId) ?? c.afterId;
+        const insertionGroup = c.insertionGroup === undefined ? c.afterId : c.insertionGroup;
+        const priorInsertion = lastInsertFor.get(insertionGroup);
+        const anchorId = priorInsertion ?? c.afterId;
         const anchor = anchorId === null ? -1 : cur.findIndex((b) => b.id === anchorId);
-        const at = anchorId !== null && anchor >= 0 ? anchor + 1
-          : c.afterId === null && c.toIndex !== null ? Math.max(0, Math.min(c.toIndex, cur.length))
-          : cur.length;
-        lastInsertFor.set(c.afterId, block.id);
+        let at: number;
+        if (priorInsertion === undefined && c.beforeId !== undefined) {
+          at = c.beforeId === null ? cur.length : cur.findIndex((entry) => entry.id === c.beforeId);
+          if (at < 0) throw new Error(`Manuscript insertion boundary is missing: ${c.beforeId}`);
+        } else {
+          at = anchorId !== null && anchor >= 0 ? anchor + 1
+            : c.afterId === null && c.toIndex !== null ? Math.max(0, Math.min(c.toIndex, cur.length))
+            : cur.length;
+        }
+        lastInsertFor.set(insertionGroup, block.id);
         const next = [...cur];
         next.splice(at, 0, block);
         cur = next;

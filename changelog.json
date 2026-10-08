@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.18.3",
+    "date": "2026-10-07",
+    "summary": "Keep desktop packaging compatible with the Tauri runtime.",
+    "highlights": [
+      "Align the JavaScript API with the Rust runtime so native previews and desktop releases build successfully."
+    ]
+  },
+  {
     "version": "0.18.2",
     "date": "2026-10-07",
     "summary": "Review AI drafts in a persistent Changes panel before applying them.",

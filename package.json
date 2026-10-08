@@ -1,7 +1,7 @@
 {
   "name": "aproprose",
   "private": true,
-  "version": "0.18.2",
+  "version": "0.18.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,7 +27,7 @@
     "@rive-app/react-webgl2": "^4.29.1",
     "@tabler/icons-react": "^3.46.0",
     "@tailwindcss/vite": "^4.3.0",
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "~2.12.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-http": "^2.5.9",

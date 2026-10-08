@@ -490,6 +490,16 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
     let metadata = read_metadata(&source);
     project::parse_chapters(&source, &root)?;
     let chapters = project::chapter_pairs(&source);
+    let metadata_text = render_metadata_preserving(&metadata, &source);
+    let chapter_text = render_chapter_sources(&chapters);
+    read_managed_metadata(&metadata_text)
+        .and_then(|_| project::managed_chapter_pairs(&chapter_text))
+        .map_err(|error| {
+            format!(
+                "cannot prepare migration from {}: {error}",
+                main_abs.display()
+            )
+        })?;
     let backup = root.join("main.tex.bak");
     match fs::read(&backup) {
         Ok(bytes) if bytes == source.as_bytes() => {}
@@ -510,8 +520,6 @@ pub fn migrate_to_managed(root: &Path) -> Result<ProjectInfo, String> {
             ));
         }
     }
-    let metadata_text = render_metadata_preserving(&metadata, &source);
-    let chapter_text = render_chapter_sources(&chapters);
     let staged = scaffold_missing(&root)
         .and_then(|()| {
             Ok(vec![
@@ -963,16 +971,134 @@ mod tests {
         dir
     }
 
+    const LEGACY_MIGRATION_SOURCE: &str = "\\documentclass{book}\n\\newcommand{\\booktitle}{Legacy book}\n\\begin{document}\n\\mainmatter\n\\chapter{One}\n\\input{content/old.tex}\n\\end{document}\n";
+
     fn legacy_migration_fixture() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("content")).unwrap();
         fs::write(dir.path().join("content/old.tex"), "Original chapter body.").unwrap();
-        fs::write(
-            dir.path().join("main.tex"),
-            "\\documentclass{book}\n\\newcommand{\\booktitle}{Legacy book}\n\\begin{document}\n\\mainmatter\n\\chapter{One}\n\\input{content/old.tex}\n\\end{document}\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("main.tex"), LEGACY_MIGRATION_SOURCE).unwrap();
         dir
+    }
+
+    fn migration_snapshot(root: &Path) -> Vec<(std::path::PathBuf, Option<Vec<u8>>)> {
+        let mut snapshot = Vec::new();
+        for entry in fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                snapshot.push((path.clone(), None));
+                snapshot.extend(migration_snapshot(&path));
+            } else {
+                let bytes = fs::read(&path).unwrap();
+                snapshot.push((path, Some(bytes)));
+            }
+        }
+        snapshot.sort_by(|left, right| left.0.cmp(&right.0));
+        snapshot
+    }
+
+    fn assert_migration_preflight_preserves_files(source: &str) {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        fs::write(root.join("main.tex"), source).unwrap();
+        let before = migration_snapshot(root);
+        for _ in 0..2 {
+            assert_eq!(detect_and_open(root).unwrap().status, "needsMigration");
+            let error = migrate_to_managed(root).unwrap_err();
+            assert_eq!(migration_snapshot(root), before);
+            assert!(error.contains("cannot prepare migration"), "{error}");
+            assert!(error.contains("main.tex"), "{error}");
+        }
+        fs::write(root.join("main.tex"), LEGACY_MIGRATION_SOURCE).unwrap();
+        let opened = migrate_to_managed(root).unwrap();
+        assert_eq!(opened.chapters.len(), 1);
+        assert_eq!(opened.chapters[0].file, "content/old.tex");
+        assert_eq!(
+            fs::read_to_string(root.join("main.tex.bak")).unwrap(),
+            LEGACY_MIGRATION_SOURCE
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("content/old.tex")).unwrap(),
+            "Original chapter body."
+        );
+    }
+
+    #[test]
+    fn migration_preflight_rejects_inline_and_mixed_chapters_without_writes() {
+        for source in [
+            LEGACY_MIGRATION_SOURCE
+                .replace("\\input{content/old.tex}", "Original inline chapter body."),
+            LEGACY_MIGRATION_SOURCE.replace(
+                "\\end{document}",
+                "\\chapter{Inline}\nOriginal inline chapter body.\n\\end{document}",
+            ),
+        ] {
+            assert_migration_preflight_preserves_files(&source);
+        }
+    }
+
+    #[test]
+    fn migration_preflight_rejects_invalid_plain_metadata_without_writes() {
+        for name in ["booktitle", "subtitle", "authorname", "publisher", "isbn"] {
+            let source = LEGACY_MIGRATION_SOURCE
+                .replace("\\newcommand{\\booktitle}{Legacy book}\n", "")
+                .replace(
+                    "\\begin{document}",
+                    &format!(
+                        "\\newcommand{{\\{name}}}{{\\aproproseplain{{broken\\unknown{{}}}}}}\n\\begin{{document}}"
+                    ),
+                );
+            assert_migration_preflight_preserves_files(&source);
+        }
+    }
+
+    #[test]
+    fn migration_preflight_rejects_invalid_plain_chapter_titles_without_writes() {
+        let source = LEGACY_MIGRATION_SOURCE.replace(
+            "\\chapter{One}",
+            "\\chapter{\\aproproseplain{broken\\unknown{}}}",
+        );
+        assert_migration_preflight_preserves_files(&source);
+    }
+
+    #[test]
+    fn migration_preflight_keeps_required_body_reads_before_writes() {
+        for unreadable in [false, true] {
+            let dir = legacy_migration_fixture();
+            let root = dir.path();
+            let body = root.join("content/old.tex");
+            if unreadable {
+                fs::write(&body, [0xff]).unwrap();
+            } else {
+                fs::remove_file(&body).unwrap();
+            }
+            let before = migration_snapshot(root);
+            let error = migrate_to_managed(root).unwrap_err();
+            assert!(error.contains("old.tex"), "{error}");
+            assert_eq!(migration_snapshot(root), before);
+        }
+    }
+
+    #[test]
+    fn migration_preflight_accepts_encoded_metadata_and_chapter_titles() {
+        let dir = legacy_migration_fixture();
+        let root = dir.path();
+        let value = "A {brace} & 50% #1 $2 _x ^y ~z \\emph{literal}";
+        let encoded = tex_text::encode(value);
+        let source = LEGACY_MIGRATION_SOURCE
+            .replace("{Legacy book}", &format!("{{{encoded}}}"))
+            .replace("\\chapter{One}", &format!("\\chapter{{{encoded}}}"));
+        fs::write(root.join("main.tex"), &source).unwrap();
+        let opened = migrate_to_managed(root).unwrap();
+        assert_eq!(opened.metadata.title, value);
+        assert_eq!(opened.chapters[0].title, value);
+        let reopened = open_managed(root).unwrap();
+        assert_eq!(reopened.metadata.title, value);
+        assert_eq!(reopened.chapters[0].title, value);
+        assert_eq!(
+            fs::read_to_string(root.join("main.tex.bak")).unwrap(),
+            source
+        );
     }
 
     #[test]

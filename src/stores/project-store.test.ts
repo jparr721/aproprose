@@ -1547,6 +1547,10 @@ describe("selectChapter resets the multi-selection across chapters", () => {
 });
 
 describe("selectChapter completion ownership", () => {
+  beforeEach(() => {
+    vi.mocked(writeAppData).mockClear();
+  });
+
   it.each(["switch", "close", "reopen"] as const)("ignores a chapter read after project %s", async (transition) => {
     const original = projectFixture("/books/original");
     const source = deferred<string>();

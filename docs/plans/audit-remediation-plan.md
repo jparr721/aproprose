@@ -66,3 +66,12 @@ Detailed per-finding acceptance is in audit-remediation-task.md. Workers must re
 - Root owns the required synchronized 0.17.10 version/changelog update; no tag or release publication.
 - Browser configuration retains the upstream isolated port and both engines; reusable validation installs and runs both.
 - Integration resolves P lifecycle/notification changes, C/H extracted failure notifications, and U primitive/layout changes within their existing slices.
+
+## Round 2 integration amendment
+
+- Refreshed base is `28afd5d` (0.18.1). Preserve incoming AI preference help, automatic releases from validated main commits, immutable tag/draft guards, serialized updater uploads, and native traffic-light alignment fixes.
+- The required synchronized version/changelog is now 0.18.2. CI validates the exact main commit before calling release; signed artifact smoke and downloaded updater signature checks precede publication.
+- Incoming preference-assistant controls use the existing shared Field primitives after removal of the bespoke settings Field wrapper.
+- P also owns a strict stored-metadata boundary and its regression tests. Validate malformed provided nested fields in repository and legacy storage before permissive migrations; retain supported historical missing-field defaults and import recovery behavior.
+- Admit every accepted metadata write immediately to the shared root queue. Native canonical roots own load completion, recents, sync, and persistence; alias discovery reopens through the canonical queue before installing a snapshot.
+- Native managed-chapter validation must consume every supported declaration/body pair and reject unsupported or malformed entries, including mixed valid/corrupt files, without replacing their bytes.

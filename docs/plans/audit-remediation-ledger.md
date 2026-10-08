@@ -2,7 +2,7 @@
 
 - Task: resolve all 25 findings from the code-quality audit in one PR.
 - Acceptance source: `docs/plans/audit-remediation-task.md` and the audit in the initiating conversation.
-- Target: `main`; intake commit `d49a55b`, intermediate fetch `0892020`, actual integrated baseline `7e80500` (target advanced again during fetch).
+- Target: `main`; intake `d49a55b`, refreshed integration `7e80500`, latest rebased target `28afd5d` at version 0.18.1. Branch source version now 0.18.2.
 - Branch: `codex/audit-remediation`.
 - Worktree: `/Users/jarredparr/.config/jp-skills/worktrees/aproprose/codex/audit-remediation` (created, dedicated).
 - Starting checkout: `/Users/jarredparr/.codex/worktrees/385b/aproprose` (application files untouched).
@@ -123,7 +123,7 @@
 
 - Initial full gate: active in authorized local mode; frontend/browser and native debug checks passed, isolated native bundle/smoke pending.
 - PR: https://github.com/jparr721/aproprose/pull/70 (ready, attached), base `main`, initial pushed head `387810fb2bfa13e347a0a9ca5837e1b9a3833f9a`.
-- Review rounds: 1/5 completed; round 1 `FIX-THEN-SHIP`, 4 must-fix fixed, 0 remaining, 1 scope dissent. Minimum 3, no sixth round without explicit user override.
+- Review rounds: 2/5 completed; round 2 `FIX-THEN-SHIP`, 4 fixed, full fix gate finishing. Round 1 fixed 4, 0 remaining, 1 scope dissent. Minimum 3, no sixth round without explicit user override.
 - Simplification: pending; once over the whole PR diff after clean review exit.
 - Final exact-commit gate and CI: pending.
 
@@ -270,6 +270,43 @@ residual risk: inherited child-process-tree cleanup remains outside accepted rem
 - Standalone fixes committed: `80de12d` unknown pull, `fcad1f2` transitions, `acd3434` owned save, `aeec455` dotted PDF, `ed97c4a` CI identity/window observer.
 - Stable full gate and package smoke are green on the committed source. Native smoke exercised the compiled observer and actual isolated packaged app with 3-second visibility settle.
 - Root will commit this ledger checkpoint, push the fresh round 2 head, then dispatch the full fresh-angle fight. Round 2 remains pending; no unpushed diff review counts toward it.
+
+### Round 2 verdict / target reintegration
+
+```text
+=== REVIEW VERDICT ===
+scope:      https://github.com/jparr721/aproprose/pull/70, pushed round-2 diff
+variant:    full
+verdict:    FIX-THEN-SHIP
+must-fix:   4 (locations, proofs, and fixes retained in round-2 review records)
+followups:  #72 (unchanged)
+dissent:    none for round-2 accepted findings
+residual risk: inherited descendant-process cleanup remains deferred in #72.
+=== END ===
+```
+
+- Full five-angle fight plus Level/Splinter and sole owner defense completed. Level reran proofs 2/3/4. Metadata FIFO proof strengthened with a manuscript-only pull reading metadata before the first durable payload: a second accepted edit was lost while divergence remained null. All four proofs stood; no round-2 dissent.
+- Accepted must-fix: metadata FIFO gap; canonical-alias ownership; nested stored metadata corruption in repository/legacy paths; mixed valid tab-delimited and malformed chapter structure.
+- Root rebased onto advancing main `28afd5d` / 0.18.1; branch version synchronized to 0.18.2. Incoming AI preference helper uses stock Field; auto-release, immutability/draft guards, and serialized uploads preserved alongside this PR's full validation/artifact smoke/signatures.
+- Integration checks so far: typecheck and 24 focused UI tests passed; release worker YAML/bash/dependency-graph/recipe parse checks passed. These do not substitute for the required full rebased fix gate.
+- Fix ownership: `/root/r2_level` implements the three project groups after prior worker reactivation hit thread capacity; root owns native validation fix. Fix gate pending, no force-push yet.
+- Next: complete full local gate on rebased fixed source, push work branch only, then fresh round 3 full fight against that pushed head. No additional review round consumed by rebase or gate checks.
+
+### Round 2 fix checkpoint
+
+- Native parser regression observed red in `r2-chapters-red.log`: valid managed pairs followed by a tab-unclosed suffix returned success. Parser now consumes/validates all managed chapter/input pairs; focused novel suite passes 21 tests with 1 toolchain test ignored pending explicit ignored full gate.
+- Full native gate active in session 81665; logs `r2-lint.log`, `r2-native.log`, `r2-native-ignored.log`. No pass claimed before completion.
+- Project focused verification passes 253 tests plus typecheck. Canonical-ownership work is finishing alias-only historical app-data migration compatibility.
+- Source/fix gate remains active, next pushed round-3 head pending. Supervisor performs ledger-only coordination; no independent source edits, gate execution, review, or QA proof.
+
+### Round 2 committed fixes / packaging dependency correction
+
+- Four accepted groups fixed in standalone commits: `3608c4f` managed mixed chapter validation, `3e7391b` metadata FIFO, `9065fa2` strict nested stored metadata, `4c76073` canonical alias ownership and historical migration.
+- Pre-dependency-alignment full gate passed typecheck, frontend build, version 0.18.2 against `28afd5d`, 133 frontend files / 1721 tests, 36 browser tests, Rust format/strict Clippy, 84 native tests plus 2 explicit ignored tests (actual LaTeX and DNS).
+- Packaging then failed in `r2-bundle.log`: incoming main had Rust Tauri 2.12.1 versus JS API 2.11.0. Root aligned existing API and CLI to 2.12.1 in package/bun lock only; frozen install passed. This is required dependency compatibility, not a new feature/dependency family.
+- Frontend/browser gates and isolated QA package/smoke are repeating after dependency alignment. Total gate is not complete and no push claimed until package/smoke succeeds.
+- Evidence logs remain in pipeline-owned scratch, including `r2-chapters-red.log`, `r2-lint.log`, `r2-native.log`, `r2-native-ignored.log`, and `r2-bundle.log`; preserve findings/results in the owning ledger before final scratch cleanup.
+- Fresh round 3 push/fight remains pending.
 
 - QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.

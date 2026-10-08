@@ -34,7 +34,7 @@ Verification mode is local, explicitly authorized by the user: "hammer local tha
 | 22 | Native process executor duplicated | One structured process runner with explicit timeout; domain adapters preserve diagnostics. |
 | 23 | Compiler backend untested | Pure diagnostic/path tests and deterministic controlled process tests for discovery, passes, errors, timeout, missing/empty PDF. |
 | 24 | Tests mock failing boundaries | Small real browser layout/focus/theme suite and native adapter contracts; meaningful tests against changed code. |
-| 25 | Release skips tagged-SHA gates/runtime proof | Reusable validation required by tag workflow; platform native tests, supported artifact launch smoke, updater metadata/version/URL/signature validation before publication. |
+| 25 | Release skips commit gates/runtime proof | Reusable validation required before release; platform native tests, supported artifact launch smoke, updater metadata/version/URL/signature validation before publication. |
 
 ## Pipeline obligations
 

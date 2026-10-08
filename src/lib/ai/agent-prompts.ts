@@ -1,9 +1,7 @@
 import type { AgentMode, AgentSessionId, AgentTask } from "@/lib/ai/agent-types";
 import { agentSessionProfile } from "@/lib/ai/agent-types";
-import {
-  renderEditingPreference,
-  renderVoicePreference,
-} from "@/lib/ai/author-preferences";
+import { AuthorProfile } from "@/author";
+import { actionPrompt, createPurposeAgent, type PurposeAgentAction, type PurposeAgentPolicy } from "@/agents";
 
 export const WRITING_MODE_MARKER = "APROPROSE WRITING MODE";
 export const EDIT_MODE_MARKER = "APROPROSE EDIT MODE";
@@ -27,6 +25,8 @@ const ANALYSIS_VOICE_PREAMBLE = `You are the writing partner inside aproprose, a
 
 export const CRITIQUE_SYSTEM = `${ANALYSIS_VOICE_PREAMBLE}
 
+${actionPrompt("craft-critic")}
+
 Task: read the prose and return craft notes, each pinned to something concrete in the text.
 
 Each note has:
@@ -35,11 +35,13 @@ Each note has:
 - "text": one or two sentences naming the specific moment and why it lands or wavers. Quote or paraphrase the actual line you mean.
 - "blockIds": the ids of the specific SCENE BLOCKS the note is about, copied exactly from their [id] labels. Use [] when the note concerns the whole scene.
 
-Return a balanced handful (roughly 4-7 notes). Lead with at least one genuine strength; never produce only criticism. Do not invent problems that aren't on the page.
+Return high-signal findings in order of editorial impact. Include genuine strengths when their preservation matters; do not manufacture praise. Do not invent problems that aren't on the page.
 
 If the author included an explicit request ("AUTHOR'S REQUEST"), focus your notes on what they asked about. Otherwise, cover the most important craft notes you see.`;
 
 export const CONTINUITY_SYSTEM = `${ANALYSIS_VOICE_PREAMBLE}
+
+${actionPrompt("continuity-editor")}
 
 Task: act as a continuity editor. Scan the prose for internal consistency - names, pronouns, who is present, physical positions, props, time of day, established facts - and report what you find.
 
@@ -65,26 +67,6 @@ After material changes, check whether the story overview must change. Propose a 
 
 Read and preserve existing later prose. Use exact source ids returned by tools. A pending proposal is a complete workspace: read it before a follow-up, then stage one complete replacement.`;
 
-const WRITING_MODE_INSTRUCTIONS = `${WRITING_MODE_MARKER}
-
-Favor continuation, scene expansion, exploration, and bridges that preserve the author's voice and later text. Make the minimum insertion needed to connect existing boundaries.`;
-
-const EDIT_MODE_INSTRUCTIONS = `${EDIT_MODE_MARKER}
-
-Favor conservative revision, critique, continuity, cleanup, and restructuring. Change as little as possible to satisfy the request and keep every write reviewable.`;
-
-const OUTLINE_PLANNING_INSTRUCTIONS = `${OUTLINE_PLANNING_MARKER}
-
-Collaborate as a story planner. Ground every suggestion in the frozen target chapter, its current neighbors, and the ordered whole-novel outline. Stage reviewable outline changes only when the author has supplied enough direction.`;
-
-const CHARACTER_DESCRIBE_INSTRUCTIONS = `${CHARACTER_DESCRIBE_MARKER}
-
-Riff collaboratively when the author is exploring possibilities. In conversational text, distinguish authored manuscript facts from newly invented possibilities. Use read tools before making source-specific claims not present in the supplied grounding.
-
-Call update_character_profile whenever an exchange yields profile-worthy detail. Preserve every nonempty profile field unless the author explicitly revises it.
-
-Never update another character or create a character. Never stage any source changes in this session, including manuscript, outline, or story-overview changes.`;
-
 function taskInstructions(task: AgentTask): string {
   if (task.kind === "bridge") {
     const rightBoundary =
@@ -103,7 +85,10 @@ function taskInstructions(task: AgentTask): string {
     return `FROZEN TASK: read-only ${task.analysis} for chapter ${task.chapterId}.`;
   }
   if (task.kind === "outline-sculpt") {
-    return `FROZEN TASK: collaboratively plan chapter ${task.chapterId} and stage outline changes only for that chapter. Start from the author's prompt. When the direction is clear enough, stage an initial set of plot-point ideas with one independently reviewable change per plot point. On later turns, add or refine plot points from the author's feedback and the current reviewed outline.`;
+    return `FROZEN TASK: inspect and collaboratively plan chapter ${task.chapterId}. Diagnose existing material without waiting for the author to restate it. Stage outline changes only for that chapter. Revise independently reviewable cards from actual answers and current reviewed work; do not treat possibilities as author decisions.`;
+  }
+  if (task.kind === "next-beat") {
+    return `FROZEN TASK: read-only next-beat suggestions for blocks ${task.blockIds.join(", ")} in chapter ${task.chapterId}.`;
   }
   if (task.kind === "proposal-follow-up") {
     return `FROZEN TASK: replace pending proposal ${task.proposalId} completely.`;
@@ -116,37 +101,46 @@ function taskInstructions(task: AgentTask): string {
     : `FROZEN TASK: conversation may stage changes only for chapter ${task.targetChapterId}.`;
 }
 
-export function buildAgentInstructions(args: {
+export interface AgentPolicyInput {
+  origin?: { mode: AgentMode; task: AgentTask };
   mode: AgentMode;
   task: AgentTask;
   styleGuide: string;
   editingRules: string;
   sessionId: AgentSessionId;
-}): string {
+}
+
+export function resolvePurposeAgentAction(args: Pick<AgentPolicyInput, "mode" | "task" | "sessionId">): PurposeAgentAction {
   const profile = agentSessionProfile(args.sessionId, args.mode);
-  if (profile.kind === "character") {
-    return [
-      CHARACTER_DESCRIBE_INSTRUCTIONS,
-      taskInstructions(args.task),
-      renderVoicePreference(args.styleGuide),
-      renderEditingPreference(args.editingRules),
-    ]
-      .filter((part) => part.length > 0)
-      .join("\n\n");
+  if (profile.kind === "character" || args.task.kind === "character-describe") return "character-developer";
+  if (profile.kind === "outline" || args.task.kind === "outline-sculpt") return "chapter-planner";
+  switch (args.task.kind) {
+    case "bridge": return "bridge-writer";
+    case "next-beat": return "next-beat";
+    case "selected-block-edit":
+      return args.task.operation === "clean" ? "copyeditor" : args.task.operation === "structure" ? "block-structurer" : "literary-editor";
+    case "chapter-analysis": return args.task.analysis === "critique" ? "craft-critic" : "continuity-editor";
+    case "conversation":
+    case "proposal-follow-up": return args.mode === "writing" ? "writer" : "literary-editor";
   }
-  const modeInstructions =
-    profile.kind === "outline"
-      ? OUTLINE_PLANNING_INSTRUCTIONS
-      : profile.mode === "writing"
-        ? WRITING_MODE_INSTRUCTIONS
-        : EDIT_MODE_INSTRUCTIONS;
-  return [
-    BASE_AGENT_INSTRUCTIONS,
-    modeInstructions,
-    taskInstructions(args.task),
-    renderVoicePreference(args.styleGuide),
-    renderEditingPreference(args.editingRules),
-  ]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
+}
+
+export function compileAgentPolicy(args: AgentPolicyInput): PurposeAgentPolicy {
+  const purpose = args.origin ?? args;
+  const action = resolvePurposeAgentAction({ ...args, mode: purpose.mode, task: purpose.task });
+  const author = new AuthorProfile({ read: () => ({ styleGuide: args.styleGuide, editingRules: args.editingRules }) }).resolve();
+  const marker = action === "chapter-planner" ? OUTLINE_PLANNING_MARKER
+    : action === "character-developer" ? CHARACTER_DESCRIBE_MARKER
+      : purpose.mode === "writing" ? WRITING_MODE_MARKER : EDIT_MODE_MARKER;
+  return createPurposeAgent(action, author).compile({
+    applicationInstructions: action === "character-developer" ? "Work only on the open project. Never expose chain-of-thought or hidden reasoning." : BASE_AGENT_INSTRUCTIONS,
+    taskInstructions: args.task.kind === "proposal-follow-up" && purpose.task.kind !== "proposal-follow-up"
+      ? `${taskInstructions(purpose.task)}\n${taskInstructions(args.task)}`
+      : taskInstructions(args.task),
+    marker,
+  });
+}
+
+export function buildAgentInstructions(args: AgentPolicyInput): string {
+  return compileAgentPolicy(args).instructions;
 }

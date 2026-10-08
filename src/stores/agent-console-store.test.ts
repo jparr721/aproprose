@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentFailure,
   AgentFailureReason,
@@ -24,6 +24,7 @@ import {
   characterAgentSessionEntries,
   clearCharacterAgentSessions,
   deleteCharacterAgentSession,
+  subscribeAgentSessionRegistry,
   EMPTY_AGENT_STATE,
   PendingProposalEditError,
   useAgentConsoleStore,
@@ -392,6 +393,36 @@ describe("agent console store", () => {
     expect(characterAgentSessionEntries()).toHaveLength(1);
     deleteCharacterAgentSession("c1");
     expect(characterAgentSessionEntries()).toEqual([]);
+  });
+
+  it("notifies registry subscribers only when scoped store identity changes and honors unsubscribe", () => {
+    clearCharacterAgentSessions();
+    const listener = vi.fn();
+    const unsubscribe = subscribeAgentSessionRegistry(listener);
+    const sessionId = { kind: "character" as const, characterId: "registry-test" };
+    try {
+      const store = agentSessionStore(sessionId);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(agentSessionStore(sessionId)).toBe(store);
+      store.setState({ draftText: "Store state does not change registry identity" });
+      expect(listener).toHaveBeenCalledTimes(1);
+      deleteCharacterAgentSession(sessionId.characterId);
+      expect(listener).toHaveBeenCalledTimes(2);
+      deleteCharacterAgentSession(sessionId.characterId);
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(agentSessionStore(sessionId)).not.toBe(store);
+      expect(listener).toHaveBeenCalledTimes(3);
+      clearCharacterAgentSessions();
+      expect(listener).toHaveBeenCalledTimes(4);
+      clearCharacterAgentSessions();
+      expect(listener).toHaveBeenCalledTimes(4);
+      unsubscribe();
+      agentSessionStore(sessionId);
+      expect(listener).toHaveBeenCalledTimes(4);
+    } finally {
+      unsubscribe();
+      clearCharacterAgentSessions();
+    }
   });
 
   it("freezes the active run while later mode changes prepare the next turn", () => {

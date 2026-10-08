@@ -1967,6 +1967,7 @@ describe("saveChapter preserves block ids across the reparse", () => {
   });
 
   it("adopts the old ids positionally and keeps the selection as-is", async () => {
+    const generation = useProjectStore.getState().chapterSourceGeneration;
     await useProjectStore.getState().saveChapter();
     const { blocks, selectedId, selectedIds } = useProjectStore.getState();
     // Ids survive the save: pending proposals and finding anchors stay valid.
@@ -1974,9 +1975,11 @@ describe("saveChapter preserves block ids across the reparse", () => {
     expect(blocks.map((b) => b.text)).toEqual(["Alpha", "Beta", "Gamma"]);
     expect(selectedId).toBe("x1");
     expect(selectedIds).toEqual(["x0", "x2"]);
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(generation);
   });
 
   it("clears the selection and re-mints ids when the reparse changes the block count", async () => {
+    const generation = useProjectStore.getState().chapterSourceGeneration;
     // A narration containing a blank line reparses into two blocks, so positions
     // no longer denote the same blocks and id adoption would lie.
     useProjectStore.setState({
@@ -1991,6 +1994,7 @@ describe("saveChapter preserves block ids across the reparse", () => {
     expect(blocks.some((b) => b.id === "x0")).toBe(false);
     expect(selectedId).toBeNull();
     expect(selectedIds).toEqual([]);
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(generation);
   });
 });
 
@@ -2355,12 +2359,14 @@ describe("selectChapter completion ownership", () => {
     const older = useProjectStore.getState().selectChapter("ch1");
     await useProjectStore.getState().selectChapter("ch2");
     const latestBlocks = useProjectStore.getState().blocks;
+    const latestGeneration = useProjectStore.getState().chapterSourceGeneration;
 
     first.resolve("Outdated chapter prose.");
     await older;
 
     expect(useProjectStore.getState().activeChapterId).toBe("ch2");
     expect(useProjectStore.getState().blocks).toBe(latestBlocks);
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(latestGeneration);
   });
 
   it("does not publish an old chapter read error into a different project", async () => {
@@ -2374,6 +2380,36 @@ describe("selectChapter completion ownership", () => {
     await loading;
 
     expect(useProjectStore.getState().error).toBeNull();
+  });
+});
+
+describe("chapter source generation", () => {
+  it("renews only on a genuine published parse and survives live delete/recreate, history, and save", async () => {
+    useProjectStore.setState({ project: projectFixture("/books/generation") });
+    vi.mocked(readTextFile).mockResolvedValue("First paragraph.\n\nSecond paragraph.\n");
+    await useProjectStore.getState().selectChapter("ch1");
+    const initial = useProjectStore.getState();
+    const generation = initial.chapterSourceGeneration;
+    useProjectStore.getState().updateBlockText(initial.blocks[0].id, "Edited first paragraph.");
+    useProjectStore.getState().deleteBlocks(initial.blocks.map((block) => block.id));
+    useProjectStore.getState().insertAfter(null, { type: "narration", text: "Replacement paragraph." });
+    useProjectStore.getState().undo();
+    useProjectStore.getState().redo();
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(generation);
+    await useProjectStore.getState().saveChapter();
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(generation);
+    await useProjectStore.getState().selectChapter("ch1");
+    expect(useProjectStore.getState().chapterSourceGeneration).not.toBe(generation);
+    expect(useProjectStore.getState().blocks.every((block) => initial.blocks.every((source) => source.id !== block.id))).toBe(true);
+  });
+
+  it("retains generation and live blocks when the native read fails", async () => {
+    useProjectStore.setState({ project: projectFixture("/books/generation"), blocks: [mkBlock({ id: "live" })] });
+    const before = useProjectStore.getState();
+    vi.mocked(readTextFile).mockRejectedValueOnce(new Error("Source unavailable"));
+    await useProjectStore.getState().selectChapter("ch1");
+    expect(useProjectStore.getState().chapterSourceGeneration).toBe(before.chapterSourceGeneration);
+    expect(useProjectStore.getState().blocks).toBe(before.blocks);
   });
 });
 

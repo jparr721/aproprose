@@ -1,6 +1,9 @@
 import type { LanguageModel } from "ai";
-import { blockFingerprint, cardFingerprint } from "@/lib/ai/agent-context";
+import { Book } from "@/book";
+import type { PurposeAgentPolicy } from "@/agents";
+import type { ResolvedProposalOrigin } from "@/lib/ai/proposal-origin";
 import {
+  AgentProposalError,
   buildManuscriptPendingProposal,
   buildOverviewPendingProposal,
   buildOutlinePendingProposal,
@@ -18,10 +21,7 @@ import type {
   AgentRun,
   AgentSessionId,
   AgentUIMessage,
-  ChapterToolValue,
   ConversationContextToolValue,
-  LoreToolValue,
-  OutlineToolValue,
   PendingProposal,
 } from "@/lib/ai/agent-types";
 import { critique, continuityCheck, type AnchoredContext } from "@/lib/ai/operations";
@@ -42,11 +42,14 @@ interface ErrorWithDetails extends Error {
 
 interface AgentToolEnvironmentInput {
   run: AgentRun;
+  origin: ResolvedProposalOrigin;
+  policy: PurposeAgentPolicy;
   model: LanguageModel;
   styleGuide: string;
   editingRules: string;
   project: ProjectInfo;
   meta: ProjectMeta;
+  activeChapter: LoadedChapter | null;
   targetChapter: LoadedChapter | null;
   history: AgentUIMessage[];
   assistantMessageId: string;
@@ -57,73 +60,6 @@ interface AgentToolEnvironmentInput {
   makeId: () => string;
   now: () => string;
   stageProposal: (proposal: PendingProposal) => void;
-}
-
-function outlineValue(
-  project: ProjectInfo,
-  meta: ProjectMeta,
-  chapterId: string | null,
-): OutlineToolValue {
-  const selected =
-    chapterId === null
-      ? project.chapters
-      : project.chapters.filter((chapter) => chapter.id === chapterId);
-  if (chapterId !== null && selected.length === 0) {
-    throw new Error(`Outline chapter not found: ${chapterId}`);
-  }
-  return {
-    premise: meta.outline.premise,
-    overview: meta.outline.overview,
-    characters: meta.characters.map((character) => ({
-      ...character,
-      profile: { ...character.profile },
-    })),
-    chapters: selected.map((chapter) => {
-      const outline = getChapterOutline(meta.chapters, chapter.id);
-      return {
-        chapterId: chapter.id,
-        title: chapter.title,
-        act: outline.act,
-        plotPoint: outline.plotPoint,
-        premise: outline.premise,
-        goal: outline.goal,
-        conflict: outline.conflict,
-        turn: outline.turn,
-        characterIds: [...outline.characterIds],
-        cards: outline.cards.map((card, order) => ({
-          id: card.id,
-          order,
-          title: card.title,
-          intention: card.intention,
-          characterIds: [...card.characterIds],
-          loreIds: [...card.loreIds],
-          continuityFlags: structuredClone(card.continuityFlags),
-          fingerprint: cardFingerprint(card),
-        })),
-      };
-    }),
-  };
-}
-
-function loreValue(meta: ProjectMeta, query: string | null): LoreToolValue {
-  const normalized = query?.trim().toLocaleLowerCase() ?? null;
-  const entries =
-    normalized === null || normalized.length === 0
-      ? meta.lore
-      : meta.lore.filter((entry) =>
-          [entry.title, entry.description, ...entry.tags].some((value) =>
-            value.toLocaleLowerCase().includes(normalized),
-          ),
-        );
-  return {
-    entries: entries.map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      description: entry.description,
-      characterIds: [...entry.characterIds],
-      tags: [...entry.tags],
-    })),
-  };
 }
 
 function conversationValue(
@@ -246,20 +182,12 @@ export function isAbortError(error: unknown): boolean {
 export function createAgentToolEnvironment(
   args: AgentToolEnvironmentInput,
 ): AgentToolEnvironment {
-  const chapterSnapshots = new Map<string, ChapterToolValue>();
-  if (args.targetChapter !== null) {
-    chapterSnapshots.set(args.targetChapter.chapterId, {
-      chapterId: args.targetChapter.chapterId,
-      title: args.targetChapter.title,
-      blocks: args.targetChapter.blocks.map((block, order) => ({
-        id: block.id,
-        order,
-        type: block.type,
-        text: block.text,
-        fingerprint: blockFingerprint(block),
-      })),
-    });
-  }
+  const book = new Book({
+    project: args.project,
+    meta: args.meta,
+    chapter: args.targetChapter,
+    loadChapter: (chapterId) => loadChapterSnapshot(args.project, chapterId, args.activeChapter),
+  });
   const requireTarget = (chapterId: string): LoadedChapter => {
     args.checkRun();
     if (
@@ -280,33 +208,28 @@ export function createAgentToolEnvironment(
       ? selectPendingProposal(state, args.run.task.proposalId)
       : state.pendingProposal;
   };
+  const proposalRun = (kind: PendingProposal["kind"]): AgentRun => {
+    const pending = currentPending();
+    if (
+      args.run.task.kind === "proposal-follow-up" &&
+      (pending === null || pending.id !== args.run.task.proposalId || pending.kind !== kind)
+    ) {
+      throw new AgentProposalError("proposal-mismatch", "The pending proposal does not match this follow-up run.");
+    }
+    return { ...args.run, mode: args.origin.mode, task: args.origin.task };
+  };
   return {
     run: args.run,
     signal: args.signal,
+    book,
+    policy: args.policy,
+    assertRunOwnership: args.checkRun,
     readChapter: async (chapterId) => {
       args.checkRun();
-      const cached = chapterSnapshots.get(chapterId);
-      if (cached !== undefined) return structuredClone(cached);
       try {
-        const chapter = await loadChapterSnapshot(
-          args.project,
-          chapterId,
-          args.targetChapter,
-        );
+        const chapter = await book.readChapter(chapterId);
         args.checkRun();
-        const snapshot: ChapterToolValue = {
-          chapterId: chapter.chapterId,
-          title: chapter.title,
-          blocks: chapter.blocks.map((block, order) => ({
-            id: block.id,
-            order,
-            type: block.type,
-            text: block.text,
-            fingerprint: blockFingerprint(block),
-          })),
-        };
-        chapterSnapshots.set(chapterId, snapshot);
-        return structuredClone(snapshot);
+        return chapter;
       } catch (error) {
         if (isAbortError(error)) throw error;
         throw taggedError("tool", error);
@@ -314,11 +237,11 @@ export function createAgentToolEnvironment(
     },
     readOutline: async (chapterId) => {
       args.checkRun();
-      return outlineValue(args.project, args.meta, chapterId);
+      return book.readOutline(chapterId);
     },
     readLore: async (query) => {
       args.checkRun();
-      return loreValue(args.meta, query);
+      return book.readLore(query);
     },
     runCritique: async (chapterId, focus, signal) => {
       const chapter = requireTarget(chapterId);
@@ -382,7 +305,7 @@ export function createAgentToolEnvironment(
       const chapter = requireTarget(chapterId);
       try {
         return buildManuscriptPendingProposal({
-          run: args.run,
+          run: proposalRun("manuscript"),
           raw: { chapterId, ...input },
           blocks: chapter.blocks,
           currentPending: currentPending(),
@@ -412,7 +335,7 @@ export function createAgentToolEnvironment(
       const cards = getChapterOutline(args.meta.chapters, chapterId).cards;
       try {
         return buildOutlinePendingProposal({
-          run: args.run,
+          run: proposalRun("outline"),
           raw: { chapterId, ...input },
           cards,
           currentPending: currentPending(),
@@ -437,7 +360,7 @@ export function createAgentToolEnvironment(
       }
       try {
         return buildOverviewPendingProposal({
-          run: args.run,
+          run: proposalRun("overview"),
           currentPending: currentPending(),
           summary: input.summary,
           overview: input.overview,

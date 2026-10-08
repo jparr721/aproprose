@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
+import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
     warning: vi.fn(),
+    success: vi.fn(),
   },
 }));
 
@@ -64,6 +66,8 @@ import type {
   StreamAgentRunResult,
 } from "@/lib/ai/agent-runtime";
 import { createAgentToolHandlers } from "@/lib/ai/agent-tools";
+import { acceptAllProposalChanges, ProposalDecisionCorrelationError } from "@/lib/ai/proposal-decisions";
+import { getAgentChangesSnapshot } from "@/hooks/use-agent-changes";
 import type {
   AgentMessageMetadata,
   AgentRun,
@@ -88,6 +92,8 @@ import type { Block, ProjectInfo, ProjectMeta } from "@/lib/types";
 import {
   agentStateKey,
   emptyPersistedAgentState,
+  fromAgentSnapshot,
+  toAgentSnapshot,
   transitionAgentProject,
 } from "@/stores/agent-persistence";
 import {
@@ -95,6 +101,7 @@ import {
   clearCharacterAgentSessions,
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
+  selectPendingProposal,
 } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -304,6 +311,55 @@ beforeEach(() => {
 });
 
 describe("agent console authoring flows", () => {
+  it.each(["manuscript", "outline", "overview"] as const)("supersedes a same-run complete %s replacement through SDK staging and reopen", async (kind) => {
+    const runtime = await vi.importActual<typeof import("@/lib/ai/agent-runtime")>("@/lib/ai/agent-runtime");
+    const deps = dependencies(runtime.streamAgentRun);
+    let step = 0;
+    deps.getModel = async () => new MockLanguageModelV3({ doStream: async () => {
+      const draft = step === 0 ? "Initial idea" : "Revised idea";
+      const stageInput = kind === "manuscript"
+        ? { summary: draft, changes: [{ kind: "rewrite", blockId: "anchor", afterId: null, type: null, speaker: null, newText: draft, toIndex: null, reason: "Revise the complete draft" }] }
+        : kind === "outline"
+          ? { summary: draft, changes: ["Shared beat", draft].map((title) => ({ kind: "add", cardId: null, title, intention: "Develop the chapter", toIndex: null, reason: "Revise the complete plan" })) }
+          : { summary: draft, overview: draft, reason: "Revise the complete direction" };
+      const pending = useAgentConsoleStore.getState().pendingProposal;
+      const chunks: LanguageModelV3StreamPart[] = step === 1
+        ? [{ type: "tool-call", toolCallId: "inspect", toolName: "read_pending_proposal", input: JSON.stringify({ proposalId: pending === null ? "missing" : pending.id }) }]
+        : step < 3
+          ? [{ type: "tool-call", toolCallId: `stage-${step}`, toolName: `stage_${kind}_proposal`, input: JSON.stringify(stageInput) }]
+          : [{ type: "text-start", id: "done" }, { type: "text-delta", id: "done", delta: "The complete draft replaces the initial idea." }, { type: "text-end", id: "done" }];
+      chunks.push({ type: "finish", finishReason: { unified: step < 3 ? "tool-calls" : "stop", raw: "stop" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } });
+      step += 1;
+      return { stream: new ReadableStream<LanguageModelV3StreamPart>({ start(controller) {
+        chunks.forEach((chunk) => controller.enqueue(chunk));
+        controller.close();
+      } }) };
+    } });
+    const outcome = await createAgentController(deps).submitAgentRequest({ kind: "run", mode: "writing", text: "Stage a draft, inspect it and replace it completely", refs: [], task: kind === "outline" ? { kind: "outline-sculpt", chapterId: "ch1" } : { kind: "conversation", targetChapterId: "ch1" } });
+    expect(outcome).toEqual({ status: "success" });
+    expect(step).toBe(4);
+    const records = useAgentConsoleStore.getState().proposalRecords;
+    expect(records).toHaveLength(2);
+    const first = records[0].proposal;
+    const final = records[1].proposal;
+    expect(first.summary).toBe("Initial idea");
+    expect(final.summary).toBe("Revised idea");
+    expect(records[0].replacedByProposalId).toBe(final.id);
+    const savedFirst = structuredClone(first);
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    const restored = useAgentConsoleStore.getState();
+    expect(restored.proposalRecords[0].proposal).toEqual(savedFirst);
+    expect(selectPendingProposal(restored, first.id)).toBeNull();
+    expect(selectPendingProposal(restored, final.id)).not.toBeNull();
+    expect(getAgentChangesSnapshot().records.filter((entry) => entry.sessionId.kind === "project").map((entry) => entry.pendingChangeCount)).toEqual([0, kind === "outline" ? 2 : 1]);
+    expect(() => acceptAllProposalChanges(first, { kind: "project" })).toThrow(ProposalDecisionCorrelationError);
+    acceptAllProposalChanges(final, { kind: "project" });
+    expect(selectPendingProposal(useAgentConsoleStore.getState(), final.id)).toBeNull();
+    if (kind === "manuscript") expect(useProjectStore.getState().blocks[0].text).toBe("Revised idea");
+    if (kind === "outline") expect(useProjectStore.getState().meta.chapters.ch1.cards.map((card) => card.title)).toEqual(["Shared beat", "Revised idea"]);
+    if (kind === "overview") expect(useProjectStore.getState().meta.outline.overview).toBe("Revised idea");
+  });
+
   it("updates only the character frozen into a Describe session", async () => {
     const sessionId = { kind: "character" as const, characterId: "c1" };
     const characterStore = agentSessionStore(sessionId);
@@ -530,7 +586,7 @@ describe("agent console authoring flows", () => {
 
     expect(stageError).toBeInstanceOf(Error);
     expect((stageError as Error).message).toContain(
-      "The frozen character run cannot stage source changes.",
+      "Agent tool is not permitted for action character-developer: stage_overview_proposal",
     );
     expect(characterStore.getState().pendingProposal).toBeNull();
   });
@@ -1299,7 +1355,7 @@ describe("agent console authoring flows", () => {
             },
           ],
         });
-        await expect(attemptedStage).rejects.toThrow("read-only");
+        await expect(attemptedStage).rejects.toThrow("Agent tool is not permitted for action");
 
         if (
           input.run.task.kind !== "chapter-analysis" ||
@@ -2052,6 +2108,7 @@ describe("agent console authoring flows", () => {
                     order: 0,
                     type: "narration",
                     text: "Mara closed the ledger.",
+                    citationText: "Mara closed the ledger.",
                     fingerprint: "64e5c668",
                   },
                   {
@@ -2059,6 +2116,7 @@ describe("agent console authoring flows", () => {
                     order: 1,
                     type: "narration",
                     text: "At dawn, the harbor bells woke her.",
+                    citationText: "At dawn, the harbor bells woke her.",
                     fingerprint: "106a8c7e",
                   },
                   {
@@ -2066,6 +2124,7 @@ describe("agent console authoring flows", () => {
                     order: 2,
                     type: "narration",
                     text: "She found the summons under the door.",
+                    citationText: "She found the summons under the door.",
                     fingerprint: "bd042c29",
                   },
                 ],
@@ -2271,6 +2330,11 @@ describe("agent console authoring flows", () => {
             runId: "flow-1",
             task: { kind: "conversation", targetChapterId: "ch1" },
             text: "Revise the final beat in Book A.",
+            origin: {
+              kind: "task",
+              mode: "edit",
+              task: { kind: "conversation", targetChapterId: "ch1" },
+            },
           },
           decisions: {},
           replacedByProposalId: null,

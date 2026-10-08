@@ -1,3 +1,4 @@
+import { projectChapter, type BookBlockValue } from "@/book";
 import { getChapterOutline } from "@/lib/outline/model";
 import type {
   Block,
@@ -8,7 +9,7 @@ import type {
 export interface OutlinePlannerManuscriptChapter {
   chapterId: string;
   title: string;
-  blocks: Array<Pick<Block, "type" | "text">>;
+  blocks: Block[];
 }
 
 export interface OutlinePlannerGroundingInput {
@@ -26,24 +27,34 @@ function manuscriptChapter(
 ): {
   chapterId: string;
   title: string;
-  prose: string;
+  blocks: BookBlockValue[];
   truncated: boolean;
+  start: number;
+  endExclusive: number;
+  includedCharacters: number;
+  totalBlocks: number;
+  totalCharacters: number;
 } | null {
   if (chapter === null) return null;
-  const prose = chapter.blocks
-    .filter(
-      (block) =>
-        block.type === "narration" ||
-        block.type === "dialogue" ||
-        block.type === "chapter",
-    )
-    .map((block) => block.text)
-    .join("\n\n");
+  const projected = projectChapter(chapter);
+  const blocks: BookBlockValue[] = [];
+  let includedCharacters = 0;
+  for (const block of projected.blocks) {
+    const characters = JSON.stringify(block).length + (blocks.length === 0 ? 0 : 1);
+    if (includedCharacters + characters > maxCharacters) break;
+    blocks.push(block);
+    includedCharacters += characters;
+  }
   return {
     chapterId: chapter.chapterId,
     title: chapter.title,
-    prose: prose.slice(0, maxCharacters),
-    truncated: prose.length > maxCharacters,
+    blocks,
+    truncated: blocks.length < projected.blocks.length,
+    start: 0,
+    endExclusive: blocks.length,
+    includedCharacters,
+    totalBlocks: chapter.blocks.length,
+    totalCharacters: JSON.stringify(projected.blocks).length - 2,
   };
 }
 
@@ -64,21 +75,19 @@ export function buildOutlinePlannerGrounding(
       `Outline planner target mismatch: ${input.target.chapterId}`,
     );
   }
-  if (input.previous?.chapterId !== (expectedPrevious?.id ?? undefined)) {
+  if (input.previous !== null && input.previous.chapterId !== expectedPrevious?.id) {
     throw new Error(
       `Outline planner previous chapter mismatch: ${input.targetChapterId}`,
     );
   }
-  if (input.next?.chapterId !== (expectedNext?.id ?? undefined)) {
+  if (input.next !== null && input.next.chapterId !== expectedNext?.id) {
     throw new Error(
       `Outline planner next chapter mismatch: ${input.targetChapterId}`,
     );
   }
 
   const linkedLoreIds = new Set(
-    Object.values(input.meta.chapters).flatMap((chapter) =>
-      chapter.cards.flatMap((card) => card.loreIds),
-    ),
+    getChapterOutline(input.meta.chapters, input.targetChapterId).cards.flatMap((card) => card.loreIds),
   );
   const targetOutline = getChapterOutline(
     input.meta.chapters,
@@ -104,23 +113,18 @@ export function buildOutlinePlannerGrounding(
         ) ?? [],
     ),
   ]);
-  const manuscriptSources = [input.previous, input.target, input.next];
-  const presentManuscriptCount = manuscriptSources.filter(
-    (chapter) => chapter !== null,
-  ).length;
-  const baseChapterBudget =
-    presentManuscriptCount === 0
-      ? 0
-      : Math.floor(maxManuscriptCharacters / presentManuscriptCount);
-  let remainingCharacters =
-    maxManuscriptCharacters - baseChapterBudget * presentManuscriptCount;
-  const manuscriptBudgets = manuscriptSources.map((chapter) => {
-    if (chapter === null) return 0;
-    const extraCharacter = remainingCharacters > 0 ? 1 : 0;
-    remainingCharacters -= extraCharacter;
-    return baseChapterBudget + extraCharacter;
-  });
+  const target = manuscriptChapter(input.target, maxManuscriptCharacters);
+  const remaining = target !== null && target.truncated
+    ? 0
+    : maxManuscriptCharacters - (target === null ? 0 : target.includedCharacters);
+  const previous = manuscriptChapter(input.previous, Math.floor(remaining / 2));
+  const next = manuscriptChapter(input.next, Math.ceil(remaining / 2));
   const value = {
+    discovery: {
+      previousChapterId: expectedPrevious === null ? null : expectedPrevious.id,
+      nextChapterId: expectedNext === null ? null : expectedNext.id,
+      policy: "Target material first. Neighbors are uninspected unless included below. The manuscript character budget counts compact JSON block payloads and includes only complete ordered blocks. Retrieve other book material with tools only to resolve a concrete uncertainty. If target.truncated is true, read the remaining ordered blocks using read_chapter_range starting at target.endExclusive before diagnosing the whole chapter. Distinguish source facts, existing plan, inferred intent and confirmed author choices.",
+    },
     logline: input.meta.outline.premise,
     storyOverview: input.meta.outline.overview,
     targetPosition: {
@@ -133,7 +137,9 @@ export function buildOutlinePlannerGrounding(
       index,
       chapterId: chapter.id,
       title: chapter.title,
-      ...getChapterOutline(input.meta.chapters, chapter.id),
+      ...(chapter.id === input.targetChapterId
+        ? getChapterOutline(input.meta.chapters, chapter.id)
+        : { cardCount: getChapterOutline(input.meta.chapters, chapter.id).cards.length }),
     })),
     characters: input.meta.characters.map((character) =>
       relevantCharacterIds.has(character.id)
@@ -151,9 +157,9 @@ export function buildOutlinePlannerGrounding(
     ),
     linkedLore: input.meta.lore.filter((entry) => linkedLoreIds.has(entry.id)),
     manuscript: {
-      previous: manuscriptChapter(input.previous, manuscriptBudgets[0]),
-      target: manuscriptChapter(input.target, manuscriptBudgets[1]),
-      next: manuscriptChapter(input.next, manuscriptBudgets[2]),
+      previous,
+      target,
+      next,
     },
   };
   return `OUTLINE PLANNER GROUNDING\n${JSON.stringify(value, null, 2)}`;

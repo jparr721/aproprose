@@ -1,6 +1,6 @@
 import { reportAiError } from "@/lib/notifications";
 import { generateText } from "ai";
-import { COMPACTION_SYSTEM } from "@/lib/ai/agent-compaction";
+import { buildCompactionInstructions } from "@/lib/ai/agent-compaction";
 import { getModel } from "@/lib/ai/model";
 import { resolveModelContextWindow } from "@/lib/ai/models";
 import {
@@ -234,10 +234,10 @@ const productionController = createAgentController({
   id: () => uid("agent"),
   getModel,
   getContextWindow: resolveModelContextWindow,
-  summarize: async (model, source, signal) => {
+  summarize: async (model, source, signal, preferences) => {
     const result = await generateText({
       model,
-      system: COMPACTION_SYSTEM,
+      system: buildCompactionInstructions(preferences),
       prompt: source,
       abortSignal: signal,
     });

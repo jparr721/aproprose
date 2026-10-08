@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.19.0",
+    "date": "2026-10-07",
+    "summary": "Investigate existing chapters with a focused editorial partner and purpose-built AI actions.",
+    "highlights": [
+      "Plan with AI reads your chapter and cards, diagnoses weaknesses, and asks focused questions without requiring a starter prompt.",
+      "Writing, literary editing, cleanup, continuity, character development and settings refinement follow distinct specialist instructions while preserving your author preferences.",
+      "Agents can discover and search book material on demand, read complete dialogue and notes, and stage changes within enforced action permissions."
+    ]
+  },
+  {
     "version": "0.18.4",
     "date": "2026-10-07",
     "summary": "Safer project persistence, consistent authoring controls, and verified desktop releases.",

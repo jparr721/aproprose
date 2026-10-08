@@ -9,6 +9,7 @@ import { buildCharacterGrounding } from "@/lib/ai/character-grounding";
 import type {
   AgentIntent,
   AgentMode,
+  AgentProposalRecord,
   AgentRun,
   AgentSessionId,
   AgentTask,
@@ -52,6 +53,7 @@ interface LoadedChapterBlock extends Block {
 export interface LoadedChapter {
   chapterId: string;
   title: string;
+  sourceGeneration: string;
   blocks: LoadedChapterBlock[];
 }
 
@@ -113,6 +115,7 @@ export interface SubmissionCapture {
   summary: ReturnType<typeof useAgentConsoleStore.getState>["summary"];
   lastUsage: ReturnType<typeof useAgentConsoleStore.getState>["lastUsage"];
   pendingProposal: PendingProposal | null;
+  proposalRecords: AgentProposalRecord[];
   retryOf: string | null;
   activeChapter: LoadedChapter | null;
   resolveTaskAndTarget: () => Promise<{
@@ -175,10 +178,12 @@ function loadedChapter(
   chapterId: string,
   title: string,
   blocks: Block[],
+  sourceGeneration: string,
 ): LoadedChapter {
   return {
     chapterId,
     title,
+    sourceGeneration,
     blocks: blocks.map((block, order) => {
       const cloned = cloneBlock(block);
       return {
@@ -194,6 +199,7 @@ function captureActiveChapter(
   project: ProjectInfo,
   activeChapterId: string | null,
   blocks: Block[],
+  sourceGeneration: string,
 ): LoadedChapter | null {
   if (activeChapterId === null) return null;
   const chapter = project.chapters.find(
@@ -204,7 +210,7 @@ function captureActiveChapter(
       `Active chapter does not belong to the frozen project: ${activeChapterId}`,
     );
   }
-  return loadedChapter(chapter.id, chapter.title, blocks);
+  return loadedChapter(chapter.id, chapter.title, blocks, sourceGeneration);
 }
 
 export async function loadChapterSnapshot(
@@ -220,7 +226,7 @@ export async function loadChapterSnapshot(
   if (activeChapter?.chapterId === chapterId) return activeChapter;
   const source = await readTextFile(project.root, chapter.file);
   currentProjectAtRoot(project.root);
-  return loadedChapter(chapterId, chapter.title, parseChapter(source));
+  return loadedChapter(chapterId, chapter.title, parseChapter(source), uid());
 }
 
 function unavailableSource(
@@ -595,7 +601,7 @@ function requireCharacterDescribeTask(
   }
 }
 
-function requireBridgeAnchor(task: AgentTask, chapter: LoadedChapter): void {
+export function requireBridgeAnchor(task: AgentTask, chapter: LoadedChapter): void {
   if (task.kind !== "bridge") return;
   if (chapter.chapterId !== task.chapterId) {
     throw new Error(`Bridge chapter is unavailable: ${task.chapterId}`);
@@ -676,37 +682,13 @@ export async function resolveOutlinePlannerGroundingInput(
       `Outline planner grounding failed for chapter ${chapterId} at target source ${chapterId}: frozen target did not match the planner session.`,
     );
   }
-  const previousRef = capture.project.chapters[index - 1] ?? null;
-  const nextRef = capture.project.chapters[index + 1] ?? null;
-  const load = async (
-    source: "target" | "previous" | "next",
-    sourceChapterId: string,
-  ): Promise<LoadedChapter> => {
-    try {
-      return await loadChapterSnapshot(
-        capture.project,
-        sourceChapterId,
-        capture.activeChapter,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new OutlinePlannerGroundingError(
-        `Outline planner grounding failed for chapter ${chapterId} at ${source} source ${sourceChapterId}: ${message}`,
-        { cause: error },
-      );
-    }
-  };
-  const [previous, next] = await Promise.all([
-    previousRef === null ? Promise.resolve(null) : load("previous", previousRef.id),
-    nextRef === null ? Promise.resolve(null) : load("next", nextRef.id),
-  ]);
   return {
     chapters: capture.project.chapters,
     meta: capture.meta,
     targetChapterId: chapterId,
     target,
-    previous,
-    next,
+    previous: null,
+    next: null,
   };
 }
 
@@ -845,6 +827,7 @@ export function createAgentSubmissionContext(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     return {
       projectRoot: project.root,
@@ -868,6 +851,7 @@ export function createAgentSubmissionContext(
           ? null
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
+      proposalRecords: structuredClone(consoleState.proposalRecords),
       retryOf: args.retryOf,
       activeChapter,
     };
@@ -909,6 +893,7 @@ export function createAgentSubmissionContext(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     const taskTarget = captureTaskAndTarget({
       project: frozenProject,
@@ -939,6 +924,7 @@ export function createAgentSubmissionContext(
           ? null
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
+      proposalRecords: structuredClone(consoleState.proposalRecords),
       retryOf: null,
       activeChapter,
       resolveTaskAndTarget: taskTarget.resolve,
@@ -1116,6 +1102,7 @@ export function createAgentSubmissionContext(
       frozenProject,
       projectState.activeChapterId,
       projectState.blocks,
+      projectState.chapterSourceGeneration,
     );
     const contextCapture = captureDraftContext({
       project: frozenProject,
@@ -1208,6 +1195,7 @@ export async function refreshAttachedDraftSources(): Promise<void> {
     frozenProject,
     projectState.activeChapterId,
     projectState.blocks,
+    projectState.chapterSourceGeneration,
   );
   const contextCapture = captureDraftContext({
     project: frozenProject,

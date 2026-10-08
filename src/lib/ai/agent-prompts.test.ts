@@ -6,6 +6,7 @@ import {
   WRITING_MODE_MARKER,
   OUTLINE_PLANNING_MARKER,
   buildAgentInstructions,
+  compileAgentPolicy,
 } from "@/lib/ai/agent-prompts";
 
 const build = (mode: "writing" | "edit") =>
@@ -38,6 +39,27 @@ describe("buildAgentInstructions", () => {
       expect(instructions).toContain("AUTHOR EDITING RULES");
       expect(instructions).toContain("No throat-clearing.");
     }
+  });
+
+  it("gives the editor a rigorous literary mission without universal minimal-change bias", () => {
+    const instructions = build("edit");
+    expect(instructions).toContain("thirty years");
+    expect(instructions).toContain("causal and emotional logic");
+    expect(instructions).not.toContain("Change as little as possible");
+  });
+
+  it("starts planning from the existing draft and asks one consequential question", () => {
+    const instructions = buildAgentInstructions({
+      mode: "edit",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      styleGuide: "Keep ambiguity intentional.",
+      editingRules: "Do not force three-act structure.",
+      sessionId: { kind: "outline", chapterId: "ch1" },
+    });
+    expect(instructions).toContain("complete target chapter");
+    expect(instructions).toContain("one consequential question");
+    expect(instructions).toContain("missing causal or emotional steps");
+    expect(instructions).not.toContain("Start from the author's prompt");
   });
 
   it("keeps outline planning clarifying and individually reviewable", () => {
@@ -117,5 +139,28 @@ describe("analysis prompts", () => {
       expect(prompt).toContain("blockIds");
       expect(prompt).toContain("[id]");
     }
+  });
+});
+
+
+describe("follow-up purpose compilation", () => {
+  it("combines the original specialist boundary with the outer replacement identity", () => {
+    const policy = compileAgentPolicy({
+      mode: "writing", task: { kind: "proposal-follow-up", proposalId: "replacement-target" },
+      origin: { mode: "edit", task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["current-source"], operation: "clean" } },
+      styleGuide: "Latest voice", editingRules: "Latest protected rule", sessionId: { kind: "project" },
+    });
+    expect(policy.action).toBe("copyeditor");
+    expect(policy.instructions).toContain("Clean only the selected prose conservatively");
+    expect(policy.instructions).toContain("clean only blocks current-source in chapter ch1");
+    expect(policy.instructions).toContain("replace pending proposal replacement-target completely");
+    expect(policy.instructions).toContain("Latest voice");
+    expect(policy.instructions).toContain("Latest protected rule");
+    expect(policy.instructions).toContain(EDIT_MODE_MARKER);
+    expect(policy.instructions).not.toContain(WRITING_MODE_MARKER);
+  });
+
+  it("keeps declared legacy follow-ups on the existing mode policy", () => {
+    expect(compileAgentPolicy({ mode: "writing", task: { kind: "proposal-follow-up", proposalId: "legacy" }, styleGuide: "", editingRules: "", sessionId: { kind: "project" } }).action).toBe("writer");
   });
 });

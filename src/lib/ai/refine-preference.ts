@@ -1,6 +1,7 @@
 import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 
+import { actionPrompt } from "@/agents";
 import { withAiRetry } from "@/lib/ai/errors";
 import { getModel } from "@/lib/ai/model";
 import { PREFERENCE_MAX_CHARS, type AiProvider } from "@/lib/types";
@@ -30,7 +31,7 @@ const fieldLabels: Record<PreferenceField, string> = {
 
 const fieldScopes: Record<PreferenceField, string> = {
   styleGuide: "This field describes the author's standing voice for every AI response.",
-  editingRules: "This field gives standing drafting and revision rules for Writing and Edit.",
+  editingRules: "This field gives standing drafting, revision, planning and evaluation rules across AI actions.",
 };
 
 export async function refinePreference(
@@ -45,6 +46,7 @@ export async function refinePreference(
   }
 
   const system: string = [
+    actionPrompt(field === "styleGuide" ? "preference-voice" : "preference-editing"),
     "Help an author define one clear standing AI preference.",
     fieldScopes[field],
     "Preserve the author's meaning and every explicit constraint, exclusion, example, and exception unless their request explicitly changes it.",

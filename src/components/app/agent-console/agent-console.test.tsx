@@ -5,6 +5,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -14,6 +15,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tauri = vi.hoisted(() => ({
   readAppData: vi.fn(),
   writeAppData: vi.fn(),
+  readTextFile: vi.fn(),
+}));
+
+const inference = vi.hoisted(() => ({
+  stream: vi.fn<(input: StreamAgentRunInput) => Promise<StreamAgentRunResult>>(),
+}));
+
+vi.mock("@/lib/ai/model", async () => {
+  const { MockLanguageModelV3 } = await import("ai/test");
+  return { getModel: async () => new MockLanguageModelV3() };
+});
+
+vi.mock("@/lib/ai/models", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/ai/models")>(),
+  resolveModelContextWindow: async () => 128_000,
+}));
+
+vi.mock("@/lib/ai/agent-runtime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/ai/agent-runtime")>(),
+  streamAgentRun: inference.stream,
 }));
 
 vi.mock("@/lib/storage", () => ({
@@ -29,6 +50,7 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
   return {
     ...actual,
     readAppData: tauri.readAppData,
+    readTextFile: tauri.readTextFile,
     writeAppData: tauri.writeAppData,
   };
 });
@@ -37,6 +59,8 @@ import {
   AgentConsole,
   AgentSection,
 } from "@/components/app/agent-console/agent-console";
+import { ChapterSubview } from "@/components/app/outline/chapter-subview";
+import type { StreamAgentRunInput, StreamAgentRunResult } from "@/lib/ai/agent-runtime";
 import type {
   AgentMessageMetadata,
   AgentPersistenceIssue,
@@ -50,6 +74,11 @@ import type { ProjectInfo } from "@/lib/types";
 import {
   EMPTY_AGENT_STATE,
   agentSessionStore,
+  clearCharacterAgentSessions,
+  clearOutlineAgentSessions,
+  deleteCharacterAgentSession,
+  deleteOutlineAgentSession,
+  useAgentSessionStore,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
 import {
@@ -60,6 +89,8 @@ import {
   toAgentSnapshot,
   transitionAgentProject,
 } from "@/stores/agent-persistence";
+import { useOutlineBoardStore } from "@/stores/outline-board-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
   SETTINGS_TABS,
@@ -141,6 +172,11 @@ function resetConsoleState(): void {
 }
 
 beforeEach(async () => {
+  inference.stream.mockReset();
+  tauri.readTextFile.mockReset();
+  tauri.readTextFile.mockResolvedValue("A quiet bridge crosses the river.");
+  useSettingsStore.setState({ aiProvider: "openai", aiModel: "gpt-test" });
+  useOutlineBoardStore.setState({ openChapterId: null, chapterView: "manual" });
   tauri.readAppData.mockReset();
   tauri.readAppData.mockResolvedValue(null);
   tauri.writeAppData.mockReset();
@@ -172,6 +208,133 @@ afterEach(async () => {
   tauri.writeAppData.mockResolvedValue(undefined);
   await retryAgentPersistence();
   await transitionAgentProject(null);
+});
+
+describe("scoped agent store subscriptions", () => {
+  it.each([
+    { sessionId: { kind: "outline", chapterId: "chapter-1" }, clear: clearOutlineAgentSessions, remove: () => deleteOutlineAgentSession("chapter-1") },
+    { sessionId: { kind: "character", characterId: "character-1" }, clear: clearCharacterAgentSessions, remove: () => deleteCharacterAgentSession("character-1") },
+  ] satisfies Array<{ sessionId: AgentSessionId; clear: () => void; remove: () => void }>)(
+    "follows replacement of a registered $sessionId.kind store and detaches the previous store",
+    ({ sessionId, clear, remove }) => {
+      const original = agentSessionStore(sessionId);
+      original.getState().hydrate(project.root, emptyPersistedAgentState());
+      original.getState().setDraftText("Original draft");
+      const { result, unmount } = renderHook(() => useAgentSessionStore(sessionId, (state) => state.draftText));
+      expect(result.current).toBe("Original draft");
+
+      act(() => {
+        clear();
+        const replacement = agentSessionStore(sessionId);
+        replacement.getState().hydrate(project.root, emptyPersistedAgentState());
+        replacement.getState().setDraftText("Replacement draft");
+      });
+      expect(result.current).toBe("Replacement draft");
+      act(() => original.getState().setDraftText("Detached draft"));
+      expect(result.current).toBe("Replacement draft");
+
+      act(() => {
+        remove();
+        const replacement = agentSessionStore(sessionId);
+        replacement.getState().hydrate(project.root, emptyPersistedAgentState());
+        replacement.getState().setDraftText("Recreated draft");
+      });
+      expect(result.current).toBe("Recreated draft");
+      unmount();
+      act(() => clear());
+    },
+  );
+
+  it("keeps project and unchanged scoped subscriptions independent of unrelated registry changes", () => {
+    const sessionId: AgentSessionId = { kind: "outline", chapterId: "chapter-1" };
+    const scoped = agentSessionStore(sessionId);
+    scoped.getState().hydrate(project.root, emptyPersistedAgentState());
+    const { result } = renderHook(() => ({
+      project: useAgentSessionStore({ kind: "project" }, (state) => state.draftText),
+      scoped: useAgentSessionStore(sessionId, (state) => state.draftText),
+    }));
+    act(() => {
+      agentSessionStore({ kind: "character", characterId: "unrelated" });
+      clearCharacterAgentSessions();
+      useAgentConsoleStore.getState().setDraftText("Project draft");
+      scoped.getState().setDraftText("Scoped draft");
+    });
+    expect(agentSessionStore(sessionId)).toBe(scoped);
+    expect(result.current).toEqual({ project: "Project draft", scoped: "Scoped draft" });
+  });
+
+  it("shows the real planner run when a project transition replaces the store acquired during mount", async () => {
+    await transitionAgentProject(project.root);
+    const sessionId: AgentSessionId = { kind: "outline", chapterId: "chapter-1" };
+    const oldProjectStore = agentSessionStore(sessionId);
+    oldProjectStore.getState().hydrate(project.root, emptyPersistedAgentState());
+    oldProjectStore.getState().setDraftText("Old project draft");
+    useAgentConsoleStore.getState().setDraftText("Persist the old project before switching");
+    const nextProject: ProjectInfo = {
+      ...project,
+      root: "/private/books/next-novel",
+      name: "Next Novel",
+    };
+    let releaseWrite!: () => void;
+    const blockedWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    tauri.writeAppData.mockReturnValueOnce(blockedWrite);
+    inference.stream.mockImplementation(async (input) => {
+      const assistant: AgentUIMessage = {
+        ...message,
+        id: input.generateMessageId(),
+        metadata: {
+          ...metadata,
+          runId: input.run.id,
+          task: input.run.task,
+          state: "complete",
+        },
+        parts: [{ type: "text", text: "What does the crossing cost the narrator?" }],
+      };
+      input.onMessage(assistant);
+      return {
+        message: assistant,
+        usage: { modelId: input.modelId, inputTokens: 10, outputTokens: 10, totalTokens: 20, contextWindow: input.contextWindow,
+          raw: {
+            inputTokens: 10,
+            inputTokenDetails: { noCacheTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+            outputTokens: 10,
+            outputTokenDetails: { textTokens: 10, reasoningTokens: 0 },
+            totalTokens: 20,
+          } },
+      };
+    });
+    useProjectStore.setState({ project: nextProject });
+    const switching = transitionAgentProject(nextProject.root);
+    useOutlineBoardStore.getState().openPlanner("chapter-1");
+    render(<ChapterSubview />);
+    expect(screen.getByText("Loading AI conversation")).toBeTruthy();
+    expect(inference.stream).not.toHaveBeenCalled();
+
+    try {
+      await act(async () => {
+        releaseWrite();
+        await switching;
+      });
+      await waitFor(() => expect(inference.stream).toHaveBeenCalledOnce());
+      const registered = agentSessionStore(sessionId);
+      expect(registered).not.toBe(oldProjectStore);
+      await waitFor(() => expect(registered.getState().runStatus).toBe("idle"));
+      expect(registered.getState().hydratedProjectRoot).toBe(nextProject.root);
+      expect(registered.getState().messages.map((item) => item.role)).toEqual(["user", "assistant"]);
+      expect(oldProjectStore.getState().messages).toEqual([]);
+      await act(async () => {
+        await useProjectStore.getState().selectChapter("chapter-1");
+        useProjectStore.setState((state) => ({ compile: { ...state.compile, pdfBase64: "updated-pdf" } }));
+      });
+      await waitFor(() => expect(screen.queryByText("Loading AI conversation")).toBeNull());
+      expect(screen.getByText("What does the crossing cost the narrator?")).toBeTruthy();
+      expect(screen.getByRole("region", { name: "Agent composer" })).toBeTruthy();
+      expect(inference.stream).toHaveBeenCalledOnce();
+    } finally {
+      releaseWrite();
+      await switching;
+    }
+  });
 });
 
 describe("AgentConsole shell", () => {

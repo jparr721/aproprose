@@ -174,6 +174,9 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
   const status = recordStatus(entry.record, preview.id);
   const pending = status === "Pending";
   const editAllowed = pending && editableText !== null && !disabled;
+  const textClassName = entry.record.proposal.kind === "outline" && preview.source !== null
+    ? "text-sm leading-5"
+    : PROSE;
   const runAction = (action: () => void): void => {
     try {
       action();
@@ -215,7 +218,7 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
         </div>
       </div>
       {preview.sourceText || preview.context ? (
-        <TypographyP className={cn(PROSE, "whitespace-pre-wrap text-muted-foreground [&:not(:first-child)]:mt-0")}>{preview.sourceText || preview.context}</TypographyP>
+        <TypographyP className={cn(textClassName, "whitespace-pre-wrap text-muted-foreground [&:not(:first-child)]:mt-0")}>{preview.sourceText || preview.context}</TypographyP>
       ) : null}
       <Card size="sm" className="border border-success/25 bg-success/5 shadow-none">
         <CardHeader>
@@ -250,12 +253,12 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
                   <InputGroupButton onClick={save} size="sm" variant="default" className="ml-auto">Save draft</InputGroupButton>
                 </InputGroupAddon>
               </InputGroup>
-              {preview.tailText === null ? null : <TypographyP className={cn(PROSE, "whitespace-pre-wrap [&:not(:first-child)]:mt-0")}>{preview.tailText}</TypographyP>}
+              {preview.tailText === null ? null : <TypographyP className={cn(textClassName, "whitespace-pre-wrap [&:not(:first-child)]:mt-0")}>{preview.tailText}</TypographyP>}
             </div>
           ) : format === "diff" && preview.before && (preview.source === null || preview.source.change.kind !== "move") ? (
-            <AgentDiffPreview before={preview.before} after={preview.after} className={PROSE} />
+            <AgentDiffPreview before={preview.before} after={preview.after} className={textClassName} />
           ) : preview.after ? (
-            <TypographyP className={cn(PROSE, "whitespace-pre-wrap [&:not(:first-child)]:mt-0")}>{preview.after}</TypographyP>
+            <TypographyP className={cn(textClassName, "whitespace-pre-wrap [&:not(:first-child)]:mt-0")}>{preview.after}</TypographyP>
           ) : <TypographyMuted>Removed</TypographyMuted>}
         </CardContent>
       </Card>
@@ -263,7 +266,7 @@ function ChangeCard({ preview, entry, format, stale, disabled, sourceRequired, e
       {preview.nextContext === null ? null : (
         <div className="flex flex-col gap-2">
           <TypographySmall className="text-xs text-muted-foreground">Followed by</TypographySmall>
-          <TypographyP className={cn(PROSE, "whitespace-pre-wrap text-muted-foreground [&:not(:first-child)]:mt-0")}>{preview.nextContext}</TypographyP>
+          <TypographyP className={cn(textClassName, "whitespace-pre-wrap text-muted-foreground [&:not(:first-child)]:mt-0")}>{preview.nextContext}</TypographyP>
         </div>
       )}
     </div>
@@ -312,9 +315,9 @@ function ProposalPreview({ entry, disabled, onRestored }: { entry: AgentChangesE
   };
   return (
     <div className="flex flex-col gap-5" data-draft-preview={proposal.id}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1 space-y-2">
-          <TypographyH2 className="text-xl">{proposal.summary}</TypographyH2>
+          <TypographyH2 className="text-sm font-medium leading-5">{proposal.summary}</TypographyH2>
           <TypographyMuted className="text-xs">{proposal.kind === "overview" ? "Story overview" : chapter === undefined ? "Source chapter unavailable" : `Ch. ${chapter.label} / ${chapter.title}`}</TypographyMuted>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2" aria-label="Draft actions">
@@ -398,7 +401,7 @@ export function ChangesPanel() {
             <div className="flex flex-col gap-2" aria-label="Saved drafts">
               {visible.map((entry) => <Button key={`${entry.sessionKey}:${entry.record.proposal.id}`} variant="ghost" aria-pressed={selected === entry} onClick={() => useViewStore.getState().selectChange(entry.sessionKey, entry.record.proposal.id)} className={cn("h-auto items-start justify-start gap-3 whitespace-normal border border-transparent px-3 py-3 text-left", selected === entry && "border-border bg-muted/60")}>
                 {entry.pendingChangeCount === 0 && historyLabel(entry.record) === "Applied" ? <IconCheck className="mt-0.5 text-success" /> : <IconFileDiff className="mt-0.5 text-muted-foreground" />}
-                <div className="min-w-0 flex-1"><TypographySmall className="block leading-5">{entry.record.proposal.summary}</TypographySmall><TypographyMuted className="mt-1 text-xs">{entry.record.proposal.kind === "overview" ? "Story overview" : entry.record.proposal.kind === "outline" ? "Outline" : "Manuscript"}{entry.pendingChangeCount > 0 ? ` - ${entry.pendingChangeCount} pending` : ` - ${historyLabel(entry.record)}`}</TypographyMuted></div>
+                <div className="min-w-0 flex-1"><TypographySmall className="line-clamp-2 leading-5">{entry.record.proposal.summary}</TypographySmall><TypographyMuted className="mt-1 text-xs">{entry.record.proposal.kind === "overview" ? "Story overview" : entry.record.proposal.kind === "outline" ? "Outline" : "Manuscript"}{entry.pendingChangeCount > 0 ? ` - ${entry.pendingChangeCount} pending` : ` - ${historyLabel(entry.record)}`}</TypographyMuted></div>
                 <IconChevronRight className="mt-0.5 text-muted-foreground" />
               </Button>)}
             </div>

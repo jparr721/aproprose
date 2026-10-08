@@ -170,6 +170,7 @@ function refreshCaptureFixture(input: {
     provider: "openai",
     modelId: "test-model",
     reconcileCandidates: false,
+    preferences: { styleGuide: "Preserve clipped sentences.", editingRules: "Keep intentional uncertainty." },
   };
 }
 

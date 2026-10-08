@@ -53,6 +53,19 @@ describe("applyProposal rewrite", () => {
 });
 
 describe("applyProposal insert", () => {
+  it("returns insertion identities in application order across different anchors", () => {
+    const out = applyProposal(
+      [mk("a", "alpha"), mk("b", "bravo")],
+      [
+        change({ kind: "insert", afterId: "b", type: "narration", newText: "same" }),
+        change({ kind: "insert", afterId: "a", type: "narration", newText: "same" }),
+      ],
+      noSpeaker,
+    );
+    expect(out.blocks.map((block) => block.text)).toEqual(["alpha", "same", "bravo", "same"]);
+    expect(out.insertedBlockIds).toEqual([out.blocks[3].id, out.blocks[1].id]);
+  });
+
   it("inserts after the anchor block, minted dirty with empty raw", () => {
     const blocks = [mk("a", "alpha"), mk("b", "bravo")];
     const out = applyProposal(

@@ -90,6 +90,7 @@ interface AgentPersistenceCoordinator {
   clearRecoveredFailure: (args: { root: string; revision: number }) => boolean;
   forgetFailure: (root: string) => void;
   enqueueTransition: (work: () => Promise<void>) => Promise<void>;
+  waitForTransitions: () => Promise<void>;
   enqueueCollectionSave: (args: {
     root: string;
     work: () => Promise<void>;
@@ -275,6 +276,13 @@ export function createAgentPersistenceCoordinator(): AgentPersistenceCoordinator
       // The caller observes failure; only the queue barrier settles successfully.
       transitionQueue = pending.catch(() => undefined);
       return pending;
+    },
+    waitForTransitions: async (): Promise<void> => {
+      let pending: Promise<void>;
+      do {
+        pending = transitionQueue;
+        await pending;
+      } while (pending !== transitionQueue);
     },
     enqueueCollectionSave: (args: {
       root: string;

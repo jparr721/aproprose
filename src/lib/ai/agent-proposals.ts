@@ -8,6 +8,7 @@ import type {
   OverviewPendingProposal,
   PendingProposal,
   PendingProposalToolValue,
+  ProposalReviewPreconditions,
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@/lib/ai/agent-context";
 import { STORY_OVERVIEW_MAX_CHARS } from "@/lib/outline/model";
 import { sanitizeProposal, sanitizeSculpt } from "@/lib/ai/operations";
+import type { ApplicableBlockChange } from "@/lib/blocks/proposal";
 import type {
   Block,
   BlockChange,
@@ -156,7 +158,7 @@ function assertNoDroppedChanges(
   );
 }
 
-function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
+export function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
   const order = blocks.findIndex((block) => block.id === sourceId);
   if (order < 0) {
     throw new AgentProposalError("source-missing", `Block not found: ${sourceId}`);
@@ -221,7 +223,7 @@ function assertManuscriptTask(
   run: AgentRun,
   currentPending: PendingProposal | null,
 ): void {
-  if (run.task.kind === "chapter-analysis" || run.task.kind === "outline-sculpt") {
+  if (run.task.kind === "chapter-analysis" || run.task.kind === "next-beat" || run.task.kind === "outline-sculpt") {
     throw new AgentProposalError("task-boundary", "This task is read-only for manuscript changes.");
   }
   assertFollowUpMatches(run, currentPending, "manuscript");
@@ -507,10 +509,10 @@ export function buildOverviewPendingProposal(args: {
   makeId: () => string;
   now: string;
 }): OverviewPendingProposal {
-  if (args.run.task.kind === "chapter-analysis") {
+  if (args.run.task.kind === "chapter-analysis" || args.run.task.kind === "next-beat") {
     throw new AgentProposalError(
       "task-boundary",
-      "A chapter-analysis task is read-only for story overview changes.",
+      "This task is read-only for story overview changes.",
     );
   }
   if (
@@ -561,10 +563,11 @@ export interface StaleProposalChange {
   reason: ProposalStaleReason;
 }
 
-function resolveBlockLocator(
+export function resolveBlockLocator(
   locator: SourceLocator,
   blocks: Block[],
 ): Block | null {
+  if (locator.removed === true) return null;
   const byId = blocks.find((block) => block.id === locator.sourceId);
   if (byId !== undefined) {
     return blockFingerprint(byId) === locator.fingerprint ? byId : null;
@@ -580,6 +583,7 @@ function resolveCardLocator(
   locator: SourceLocator,
   cards: Card[],
 ): Card | null {
+  if (locator.removed === true) return null;
   const byId = cards.find((card) => card.id === locator.sourceId);
   if (byId !== undefined && cardFingerprint(byId) === locator.fingerprint) {
     return byId;
@@ -618,7 +622,8 @@ function validateManuscriptChange(
   if (precondition.anchor !== null && anchor === null) return "anchor-changed";
   const anchorOrder =
     anchor === null
-      ? precondition.boundary === "next-prose" ? -1 : blocks.length - 1
+      // A retained successor marks the beginning after an empty-chapter sibling was applied.
+      ? precondition.boundary === "next-prose" || precondition.expectedNext !== null ? -1 : blocks.length - 1
       : blocks.findIndex((block) => block.id === anchor.id);
   const next =
     precondition.boundary === "next-prose"
@@ -669,11 +674,116 @@ export function validateOutlineChanges(
   });
 }
 
+export function rebaseOutlineReviewPreconditions(
+  proposal: OutlinePendingProposal,
+  before: Card[],
+  after: Card[],
+  appliedChangeIds: string[],
+): ProposalReviewPreconditions | undefined {
+  const unavailable = new Set([
+    ...appliedChangeIds,
+    ...validateOutlineChanges(proposal, before).map((change) => change.changeId),
+  ]);
+  const changes: Partial<Record<string, OutlinePendingChange["precondition"]>> = {};
+  for (const item of proposal.changes) {
+    if (unavailable.has(item.id)) continue;
+    const precondition = item.precondition;
+    if (precondition.kind === "outline-order") {
+      changes[item.id] = { ...precondition, orderFingerprint: outlineOrderFingerprint(after) };
+      continue;
+    }
+    const source = resolveCardLocator(precondition.target, before);
+    if (source === null) continue;
+    if (!after.some((card) => card.id === source.id)) {
+      changes[item.id] = { ...precondition, target: { ...precondition.target, removed: true } };
+      continue;
+    }
+    const target = cardLocator(after, source.id);
+    changes[item.id] = precondition.kind === "card"
+      ? { kind: "card", target }
+      : { kind: "outline-move", target, orderFingerprint: outlineOrderFingerprint(after) };
+  }
+  return Object.keys(changes).length === 0 ? undefined : { kind: "outline", changes };
+}
+
+export function rebaseManuscriptReviewPreconditions(
+  proposal: ManuscriptPendingProposal,
+  before: Block[],
+  after: Block[],
+  appliedChangeIds: string[],
+  insertedBlockIds: string[],
+): ProposalReviewPreconditions | undefined {
+  const selected = new Set(appliedChangeIds);
+  const insertedChanges = proposal.changes.filter((item) => selected.has(item.id) && item.change.kind === "insert");
+  if (insertedChanges.length !== insertedBlockIds.length) {
+    throw new AgentProposalError("invalid-proposal", "Applied insertion identities do not match the selected manuscript changes.");
+  }
+  const insertedIds = new Map(insertedChanges.map((item, index) => [item.id, insertedBlockIds[index]]));
+  const changes: Partial<Record<string, ManuscriptPendingChange["precondition"]>> = {};
+  for (const [index, item] of proposal.changes.entries()) {
+    if (selected.has(item.id) || validateManuscriptChange(item, before) !== null) continue;
+    const precondition = item.precondition;
+    if (precondition.kind !== "insert") {
+      const source = resolveBlockLocator(precondition.target, before);
+      if (source === null) continue;
+      if (!after.some((block) => block.id === source.id)) {
+        changes[item.id] = { ...precondition, target: { ...precondition.target, removed: true } };
+        continue;
+      }
+      const target = blockLocator(after, source.id);
+      changes[item.id] = precondition.kind === "target"
+        ? { kind: "target", target }
+        : { kind: "move", target, orderFingerprint: blockOrderFingerprint(after) };
+      continue;
+    }
+    const append = item.change.afterId === null && precondition.boundary === "immediate";
+    const source = precondition.anchor === null ? null : resolveBlockLocator(precondition.anchor, before);
+    if (!append && precondition.anchor !== null && source !== null && !after.some((block) => block.id === source.id)) {
+      changes[item.id] = { ...precondition, anchor: { ...precondition.anchor, removed: true } };
+      continue;
+    }
+    let anchorId = source === null
+      ? precondition.boundary === "immediate" && precondition.expectedNext === null ? before.at(-1)?.id ?? null : null
+      : source.id;
+    if (!append && anchorId !== null && !after.some((block) => block.id === anchorId)) continue;
+    if (append) {
+      // Append groups stay at the end, before any already-applied later append sibling.
+      const successor = precondition.expectedNext === null ? null : resolveBlockLocator(precondition.expectedNext, before);
+      const rightIds = new Set(successor === null ? [] : [successor.id]);
+      for (const later of proposal.changes.slice(index + 1)) {
+        if (later.change.kind !== "insert" || later.change.afterId !== null) continue;
+        const insertedId = insertedIds.get(later.id);
+        if (insertedId !== undefined) rightIds.add(insertedId);
+      }
+      const rightOrder = after.findIndex((block) => rightIds.has(block.id));
+      anchorId = after[(rightOrder < 0 ? after.length : rightOrder) - 1]?.id ?? null;
+    }
+    for (const preceding of proposal.changes.slice(0, index)) {
+      if (preceding.change.kind !== "insert" || preceding.change.afterId !== item.change.afterId) continue;
+      const insertedId = insertedIds.get(preceding.id);
+      if (insertedId === undefined) continue;
+      if (anchorId === null || after.findIndex((block) => block.id === insertedId) > after.findIndex((block) => block.id === anchorId)) {
+        anchorId = insertedId;
+      }
+    }
+    const anchorOrder = anchorId === null ? -1 : after.findIndex((block) => block.id === anchorId);
+    const next = precondition.boundary === "next-prose"
+      ? after.slice(anchorOrder + 1).find((block) => block.type === "narration" || block.type === "dialogue")
+      : after[anchorOrder + 1];
+    changes[item.id] = {
+      ...precondition,
+      anchor: anchorId === null ? null : blockLocator(after, anchorId),
+      expectedNext: next === undefined ? null : blockLocator(after, next.id),
+    };
+  }
+  return Object.keys(changes).length === 0 ? undefined : { kind: "manuscript", changes };
+}
+
 export function materializeManuscriptChanges(
   proposal: ManuscriptPendingProposal,
   changeIds: string[],
   blocks: Block[],
-): BlockChange[] {
+): ApplicableBlockChange[] {
   const selected = new Set(changeIds);
   const stale = validateManuscriptChanges(
     { ...proposal, changes: proposal.changes.filter((item) => selected.has(item.id)) },
@@ -694,7 +804,22 @@ export function materializeManuscriptChanges(
           precondition.kind === "insert" && precondition.anchor !== null
             ? resolveBlockLocator(precondition.anchor, blocks)
             : null;
-        return { ...item.change, afterId: anchor?.id ?? null };
+        const append = item.change.afterId === null && precondition.kind === "insert" && precondition.boundary === "immediate";
+        const beforeSuccessor = precondition.kind === "insert" && precondition.anchor === null && precondition.expectedNext !== null;
+        const successor = (append || beforeSuccessor) && precondition.expectedNext !== null ? resolveBlockLocator(precondition.expectedNext, blocks) : null;
+        if (append && precondition.expectedNext !== null && successor === null) {
+          throw new AgentProposalError("source-missing", "The append insertion boundary changed.");
+        }
+        if (beforeSuccessor && successor === null) {
+          throw new AgentProposalError("source-missing", "The bridge insertion boundary changed.");
+        }
+        return {
+          ...item.change,
+          afterId: anchor?.id ?? null,
+          insertionGroup: JSON.stringify([item.change.afterId, append ? successor?.id ?? null : anchor?.id ?? null]),
+          ...(append || beforeSuccessor ? { beforeId: successor?.id ?? null } : {}),
+          toIndex: null,
+        };
       }
       const locator =
         precondition.kind === "target" || precondition.kind === "move"

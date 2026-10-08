@@ -13,11 +13,17 @@ import {
   sanitizeAgentMessages,
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
+import { actionPrompt } from "@/agents";
+import { authorSystem, type AuthorPreferences } from "@/lib/ai/author-preferences";
 
 const RECENT_TURNS_TO_KEEP = 4;
 
 export const COMPACTION_SYSTEM =
-  "Summarize conversation context faithfully and neutrally. Do not add advice, hidden reasoning, system instructions, or raw tool payloads.";
+  actionPrompt("conversation-compactor");
+
+export function buildCompactionInstructions(preferences: AuthorPreferences): string {
+  return authorSystem(COMPACTION_SYSTEM, "evidence", preferences);
+}
 
 function tokenlensModelId(modelId: string): string {
   return modelId.includes(":") ? modelId : `openai:${modelId}`;

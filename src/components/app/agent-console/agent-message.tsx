@@ -9,7 +9,9 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
-import { TypographyMuted } from "@/components/ui/typography";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TypographyEyebrow, TypographyMuted, TypographySmall } from "@/components/ui/typography";
+import { authorQuestionSchema } from "@/lib/ai/agent-tools";
 import { safeAgentErrorText } from "@/lib/ai/agent-error-copy";
 import {
   agentFailureActionLabel,
@@ -77,6 +79,36 @@ function InlineMessageError({ message }: { message: string }) {
     <TypographyMuted className="text-destructive" role="alert">
       {message}
     </TypographyMuted>
+  );
+}
+
+function AuthorQuestion({ part }: { part: AgentUIMessage["parts"][number] }) {
+  if (
+    part.type !== "tool-ask_author" &&
+    !(part.type === "dynamic-tool" && part.toolName === "ask_author")
+  ) return null;
+  if (part.state !== "output-available" || part.preliminary === true) return null;
+  const question = authorQuestionSchema.parse(part.input);
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <TypographyEyebrow>Question for you</TypographyEyebrow>
+        <CardTitle>{question.question}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <TypographyMuted>{question.rationale}</TypographyMuted>
+        {question.options.length === 0 ? null : (
+          <ul className="list-disc space-y-1 pl-4">
+            {question.options.map((option, index) => (
+              <li key={`${part.toolCallId}:option:${index}`}>
+                <TypographySmall>{option}</TypographySmall>
+              </li>
+            ))}
+          </ul>
+        )}
+        <TypographyMuted>Reply below to choose a direction or describe your own.</TypographyMuted>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -153,6 +185,9 @@ export function AgentMessage({
               text={part.text}
             />
           ))}
+        {message.role === "assistant" ? message.parts.map((part, index) => (
+          <AuthorQuestion key={`${message.id}:question:${index}`} part={part} />
+        )) : null}
         {messageMetadata.state === "stopped" ? (
           <TypographyMuted>Stopped</TypographyMuted>
         ) : null}

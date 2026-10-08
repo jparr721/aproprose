@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
+import type { LanguageModelV3StreamPart, LanguageModelV3StreamResult } from "@ai-sdk/provider";
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -55,7 +56,11 @@ import {
   draftContextRefKey,
 } from "@/lib/ai/agent-context";
 import { modelContextWindow } from "@/lib/ai/agent-compaction";
+import { createAgentToolHandlers } from "@/lib/ai/agent-tools";
+import { projectChapter } from "@/book";
 import { buildManuscriptPendingProposal, buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import { captureProposalOrigin } from "@/lib/ai/proposal-origin";
+import { streamAgentRun } from "@/lib/ai/agent-runtime";
 import type {
   AgentToolFailure,
   StreamAgentRunInput,
@@ -79,6 +84,7 @@ import { EMPTY_META } from "@/lib/migration";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type {
   Block,
+  BlockChange,
   ChapterOutline,
   ProjectInfo,
   ProjectMeta,
@@ -90,7 +96,7 @@ import {
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
-import { emptyPersistedAgentState } from "@/stores/agent-persistence";
+import { emptyPersistedAgentState, fromAgentSnapshot, toAgentSnapshot } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -566,6 +572,92 @@ beforeEach(() => {
   useViewStore.setState({ aiOpen: false });
 });
 
+describe("book tools retain the captured active chapter", () => {
+  for (const taskKind of ["outline-sculpt", "character-describe"] as const) {
+    it.each(["full", "range", "search"] as const)(
+      `${taskKind} reads unsaved semantic content when %s reads first`,
+      async (firstRead) => {
+        const sourceBlocks: Block[] = [
+          {
+            ...block("speech", "UNSAVED opening", "dialogue"),
+            speaker: "Mara",
+            tail: [
+              { kind: "beat", text: "UNSAVED pause" },
+              { kind: "quote", text: "UNSAVED answer" },
+            ],
+          },
+          block("scratch", "UNSAVED intention", "scratchpad"),
+        ];
+        const expectedChapter = projectChapter({
+          chapterId: "ch1",
+          title: "Chapter One",
+          blocks: sourceBlocks,
+        });
+        useProjectStore.setState({ blocks: sourceBlocks });
+        const sessionId = taskKind === "outline-sculpt"
+          ? { kind: "outline" as const, chapterId: "ch2" }
+          : { kind: "character" as const, characterId: "c1" };
+        const task: AgentTask = taskKind === "outline-sculpt"
+          ? { kind: taskKind, chapterId: "ch2" }
+          : { kind: taskKind, characterId: "c1" };
+        agentSessionStore(sessionId).getState().hydrate(
+          "/book",
+          emptyPersistedAgentState(),
+        );
+        const model = deferred<MockLanguageModelV3>();
+        let modelRequested = false;
+        const dependencies = makeDependencies(async (input) => {
+          const handlers = createAgentToolHandlers(input.environment);
+          const readFull = () => handlers.readChapter({ chapterId: "ch1" });
+          const readRange = () => handlers.readChapterRange({
+            chapterId: "ch1", start: 0, limit: 100,
+          });
+          const search = () => handlers.searchBook({
+            query: "UNSAVED", chapterIds: ["ch1"], limit: 10,
+          });
+          if (firstRead === "full") await readFull();
+          if (firstRead === "range") await readRange();
+          if (firstRead === "search") await search();
+          const full = await readFull();
+          const range = await readRange();
+          const matches = await search();
+          if (full.kind !== "runtime" || range.kind !== "runtime" || matches.kind !== "runtime") {
+            throw new Error("Expected runtime book tool results");
+          }
+          expect(full.value).toEqual(expectedChapter);
+          expect(range.value.blocks).toEqual(expectedChapter.blocks);
+          expect(range.value.totalBlocks).toBe(2);
+          expect(matches.value.matches.map((match) => match.blockId)).toEqual([
+            "speech", "scratch",
+          ]);
+          expect(matches.value.matches[0].text).toBe("UNSAVED opening\nUNSAVED pause\nUNSAVED answer");
+          expect(input.run.task).toEqual(task);
+          return successfulResult(input, "Inspected captured source");
+        });
+        dependencies.getModel = async () => {
+          modelRequested = true;
+          return model.promise;
+        };
+        const controller = createAgentController(dependencies);
+        const submission = controller.submitAgentRequest({
+          kind: "run", mode: "writing", text: "Inspect the book.", refs: [], task,
+        }, sessionId);
+        await vi.waitFor(() => expect(modelRequested).toBe(true));
+
+        sourceBlocks[0].text = "Later author edit";
+        sourceBlocks[0].speaker = "Ivo";
+        sourceBlocks[0].tail = [{ kind: "quote", text: "Later answer" }];
+        sourceBlocks[1].text = "Later intention";
+        model.resolve(new MockLanguageModelV3());
+
+        await expect(submission).resolves.toEqual({ status: "success" });
+        expect(mocks.readTextFile).not.toHaveBeenCalledWith("/book", "chapters/one.tex");
+        expect(mocks.readTextFile).toHaveBeenCalledTimes(taskKind === "outline-sculpt" ? 1 : 0);
+      },
+    );
+  }
+});
+
 describe("character Describe sessions", () => {
   it("rejects a task whose character differs from the session", async () => {
     const sessionId = { kind: "character" as const, characterId: "c1" };
@@ -858,7 +950,7 @@ describe("outline planner sessions", () => {
     expect(inputs).toHaveLength(1);
   });
 
-  it("injects frozen target and neighbor grounding while retaining arbitrary reads", async () => {
+  it("injects the frozen target and discovers neighboring prose on demand", async () => {
     const sessionId = { kind: "outline" as const, chapterId: "ch2" };
     agentSessionStore(sessionId).getState().hydrate(
       "/book",
@@ -913,10 +1005,13 @@ describe("outline planner sessions", () => {
     expect(instructions).toContain('"chapterId": "ch1"');
     expect(instructions).toContain('"chapterId": "ch2"');
     expect(instructions).toContain('"next": null');
+    expect(instructions).toContain('"previous": null');
+    expect(instructions).not.toContain("Disk first.");
     expect(arbitraryChapterText).toEqual([
-      "Disk first.",
-      "Disk middle.",
-      "Disk final.",
+      "First live paragraph.",
+      "Private note.",
+      "Middle live paragraph.",
+      "Final live paragraph.",
     ]);
   });
 
@@ -1755,6 +1850,25 @@ describe("dispatchAgentIntent", () => {
 });
 
 describe("frozen run preflight", () => {
+  it("preserves complete dialogue semantics in chapter tools", async () => {
+    useProjectStore.setState({ blocks: [{
+      id: "dialogue-full", type: "dialogue", text: "First quote", speaker: "Mara",
+      tail: [{ kind: "beat", text: "She turns the key." }, { kind: "quote", text: "Final quote" }],
+      raw: "", dirty: true,
+    }] });
+    const dependencies = makeDependencies(async (input) => {
+      const chapter = await input.environment.readChapter("ch1");
+      expect(chapter.blocks[0]).toMatchObject({
+        speaker: "Mara",
+        tail: [{ kind: "beat", text: "She turns the key." }, { kind: "quote", text: "Final quote" }],
+      });
+      expect(chapter.blocks[0].citationText).toContain("Final quote");
+      return successfulResult(input, "Read");
+    });
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Read", refs: [], task: { kind: "conversation", targetChapterId: "ch1" } })).toEqual({ status: "success" });
+  });
+
   it("freezes root, mode, task, attachments, and dispatched bridge successor", async () => {
     let chapterRead: Awaited<
       ReturnType<StreamAgentRunInput["environment"]["readChapter"]>
@@ -3121,7 +3235,7 @@ describe("retry and local events", () => {
       blocks: [
         block("b1", "Current first.", "narration"),
         block("b2", "Current anchor.", "narration"),
-        block("replacement-successor", "Current successor.", "narration"),
+        block("b3", "Current successor.", "narration"),
       ],
     });
     const dependencies = makeDependencies(null);
@@ -3213,6 +3327,7 @@ describe("proposal staging lifecycle", () => {
     expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
     expect(useAgentConsoleStore.getState().proposalRecords[1].source).toEqual({
       kind: "run", runId: run.input.run.id, task: run.input.run.task, text: "Stage a proposal.",
+      origin: { kind: "task", mode: run.input.run.mode, task: run.input.run.task },
     });
     await run.finish();
   });
@@ -3531,9 +3646,380 @@ describe("production compaction", () => {
 
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        system:
-          "Summarize conversation context faithfully and neutrally. Do not add advice, hidden reasoning, system instructions, or raw tool payloads.",
+        system: expect.stringContaining("SPECIALIST CONTRACT: conversation-compactor/1"),
       }),
     );
+  });
+});
+
+
+function providerOriginStream(chunks: LanguageModelV3StreamPart[]): LanguageModelV3StreamResult {
+  return { stream: new ReadableStream<LanguageModelV3StreamPart>({ start(controller) {
+    for (const chunk of chunks) controller.enqueue(chunk);
+    controller.close();
+  } }) };
+}
+
+describe("specialist proposal follow-up origin", () => {
+  it.each(["clean", "structure", "bridge"] as const)(
+    "retains %s policy and frozen scope over two restored follow-ups with renewed IDs",
+    async (operation) => {
+      const source = "First paragraph.\n\nSelected paragraph.\n\nLast paragraph.\n";
+      useProjectStore.setState({ blocks: parseChapter(source) });
+      let replacementTurn = false;
+      const dependencies = makeDependencies(null);
+      dependencies.stream.mockImplementation(streamAgentRun);
+      dependencies.getModel = async () => {
+        let step = 0;
+        return new MockLanguageModelV3({
+          doStream: async (): Promise<LanguageModelV3StreamResult> => {
+            const blocks = useProjectStore.getState().blocks;
+            const outside = replacementTurn && step === 0;
+            const target = blocks[outside ? 0 : 1];
+            const change = operation === "bridge" ? {
+              kind: "insert", blockId: null, afterId: target.id,
+              type: "narration", speaker: null, newText: "A precise bridge.",
+              toIndex: null, reason: "Connect the paragraphs",
+            } : {
+              kind: "rewrite", blockId: target.id, afterId: null,
+              type: "narration", speaker: null, newText: "A precise revision.",
+              toIndex: null, reason: "Improve the selection",
+            };
+            const chunks: LanguageModelV3StreamPart[] = step < (replacementTurn ? 2 : 1)
+              ? [{ type: "tool-call", toolCallId: `stage-${step}`, toolName: "stage_manuscript_proposal",
+                input: JSON.stringify({ summary: "Revise the same task", changes: [change] }) }]
+              : [{ type: "text-start", id: "done" }, { type: "text-delta", id: "done", delta: "Finished" }, { type: "text-end", id: "done" }];
+            step += 1;
+            chunks.push({ type: "finish", finishReason: { unified: chunks[0].type === "tool-call" ? "tool-calls" : "stop", raw: "stop" }, usage: {
+              inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 4, text: 4, reasoning: 0 },
+            } });
+            return providerOriginStream(chunks);
+          },
+        });
+      };
+      const controller = createAgentController(dependencies);
+      const blocks = useProjectStore.getState().blocks;
+      const task: AgentTask = operation === "bridge"
+        ? { kind: "bridge", chapterId: "ch1", anchorBlockId: blocks[1].id, successorBlockId: blocks[2].id }
+        : { kind: "selected-block-edit", chapterId: "ch1", blockIds: [blocks[1].id], operation };
+      expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Perform this action", refs: [], task })).toEqual({ status: "success" });
+      const initialPolicy = dependencies.stream.mock.calls[0][0].environment.policy;
+      expect(initialPolicy.action).toBe(operation === "bridge" ? "bridge-writer" : operation === "clean" ? "copyeditor" : "block-structurer");
+      replacementTurn = true;
+      for (let turn = 0; turn < 2; turn += 1) {
+        const snapshot = await toAgentSnapshot();
+        snapshot.messages = [];
+        snapshot.summary = null;
+        const restored = await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot)));
+        useAgentConsoleStore.getState().hydrate("/book", restored);
+        const previous = useAgentConsoleStore.getState().pendingProposal;
+        if (previous === null) throw new Error("Expected pending specialist proposal");
+        mocks.readTextFile.mockResolvedValue(source);
+        await useProjectStore.getState().selectChapter("ch1");
+        const renewed = useProjectStore.getState().blocks;
+        expect(renewed[1].id).not.toBe(blocks[1].id);
+        useSettingsStore.setState({ styleGuide: `Latest author voice ${turn}`, editingRules: `Latest author rule ${turn}` });
+        expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: previous.id } })).toEqual({ status: "success" });
+        const input = dependencies.stream.mock.calls.at(-1)?.[0];
+        if (input === undefined) throw new Error("Expected follow-up stream");
+        expect(input.run.task).toEqual({ kind: "proposal-follow-up", proposalId: previous.id });
+        expect(input.environment.policy.action).toBe(initialPolicy.action);
+        expect(input.environment.policy.capabilities).toEqual(initialPolicy.capabilities);
+        expect(input.environment.policy.stepBudget).toBe(initialPolicy.stepBudget);
+        expect(input.environment.policy.stopAfterProposal).toBe(true);
+        expect(input.instructions).toContain(`Latest author voice ${turn}`);
+        expect(input.instructions).toContain(`Latest author rule ${turn}`);
+        expect(input.instructions).toContain("APROPROSE EDIT MODE");
+        expect(input.instructions).not.toContain("APROPROSE WRITING MODE");
+        expect(input.instructions).toContain(previous.id);
+        expect(input.instructions).toContain(renewed[1].id);
+        const state = useAgentConsoleStore.getState();
+        expect(state.proposalRecords).toHaveLength(turn + 2);
+        expect(state.proposalRecords.at(-2)?.replacedByProposalId).toBe(state.pendingProposal?.id);
+        expect(state.messages.at(-1)?.parts).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: "tool-stage_manuscript_proposal", toolCallId: "stage-0", state: "output-error" }),
+          expect.objectContaining({ type: "tool-stage_manuscript_proposal", toolCallId: "stage-1", state: "output-available" }),
+        ]));
+        expect(state.pendingProposal?.changes[0].change).toMatchObject(operation === "bridge" ? { afterId: renewed[1].id } : { blockId: renewed[1].id });
+      }
+    },
+  );
+});
+
+
+function overviewOriginDependencies() {
+  const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => {
+      let staged = false;
+      return new MockLanguageModelV3({ doStream: async () => {
+        const chunks: LanguageModelV3StreamPart[] = staged
+          ? [{ type: "text-start", id: "done" }, { type: "text-delta", id: "done", delta: "Done" }, { type: "text-end", id: "done" }]
+          : [{ type: "tool-call", toolCallId: "overview", toolName: "stage_overview_proposal", input: JSON.stringify({ summary: "Clarify direction", overview: "The conflict changes the whole city.", reason: "Clarify the central stakes" }) }];
+        staged = true;
+        chunks.push({ type: "finish", finishReason: { unified: chunks[0].type === "tool-call" ? "tool-calls" : "stop", raw: "stop" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } });
+        return providerOriginStream(chunks);
+      } });
+    };
+  return dependencies;
+}
+
+describe("global overview follow-up origin", () => {
+  it("retains a chapter-targeted writer origin for a global overview replacement", async () => {
+    const dependencies = overviewOriginDependencies();
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise the overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected overview proposal");
+    expect(original.kind).toBe("overview");
+    expect(original.chapterId).toBeNull();
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+    expect(dependencies.stream.mock.calls.at(-1)?.[0].environment.policy.action).toBe("writer");
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(2);
+  });
+});
+
+
+describe("specialist follow-up completion and stale boundaries", () => {
+  function originalSelection() {
+    const task = { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b2"], operation: "clean" } satisfies AgentTask;
+    let id = 0;
+    const proposal = buildManuscriptPendingProposal({
+      run: { id: "original", projectRoot: "/book", mode: "edit", task, userMessageId: "original-user", attachments: [], startedAt: "now" },
+      raw: { chapterId: "ch1", summary: "Original selection", changes: [{ kind: "rewrite", blockId: "b2", afterId: null, type: "narration", speaker: null, newText: "Original cleaned text.", toIndex: null, reason: "Clean" }] },
+      blocks: activeBlocks, currentPending: null, originatingMessageId: "original-assistant", makeId: () => `original-${++id}`, now: "now", currentOverview: "",
+    });
+    useAgentConsoleStore.getState().stageProposal(proposal, { kind: "run", runId: "original", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks: activeBlocks, sourceGeneration: useProjectStore.getState().chapterSourceGeneration }) });
+    return proposal;
+  }
+
+  it.each(["success", "error", "stop"] as const)("keeps the original specialist draft until a %s completion", async (outcome) => {
+    const original = originalSelection();
+    const finish = deferred<void>();
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => new MockLanguageModelV3({ doStream: async () => ({
+      stream: new ReadableStream<LanguageModelV3StreamPart>({
+        start(controller) {
+          controller.enqueue({ type: "tool-call", toolCallId: "replacement", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Replace the same selection", changes: [{ kind: "rewrite", blockId: "b2", afterId: null, type: "narration", speaker: null, newText: "Better cleaned text.", toIndex: null, reason: "Clean" }] }) });
+          void finish.promise.then(() => {
+            if (outcome === "error") controller.error(new Error("Provider connection failed"));
+            else {
+              controller.enqueue({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } });
+              controller.close();
+            }
+          });
+        },
+      }),
+    }) });
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } });
+    await vi.waitFor(() => expect(useAgentConsoleStore.getState().messages.at(-1)?.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "tool-stage_manuscript_proposal", state: "output-available" })])));
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
+    if (outcome === "stop") controller.stopAgentRun();
+    finish.resolve();
+    expect((await submission).status).toBe(outcome === "error" ? "failure" : outcome === "stop" ? "stopped" : "success");
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(outcome === "success" ? 2 : 1);
+    if (outcome !== "success") expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+  });
+
+  it("refuses changed original source before invoking the provider and preserves the draft", async () => {
+    const original = originalSelection();
+    useProjectStore.setState({ blocks: activeBlocks.map((item) => item.id === "b2" ? { ...item, text: "The author revised this source." } : item) });
+    const dependencies = makeDependencies(null);
+    const getModel = vi.fn(dependencies.getModel);
+    dependencies.getModel = getModel;
+    const result = await createAgentController(dependencies).submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } });
+    expect(result).toMatchObject({ status: "failure", failure: { reason: "tool", action: null, message: expect.stringContaining("Start the original action again") } });
+    expect(getModel).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+    expect(useAgentConsoleStore.getState().messages).toEqual([]);
+  });
+});
+
+
+describe("historic proposal mode authority", () => {
+  it.each(["retained", "missing"] as const)("does not stamp a guessed original mode with %s metadata", async (history) => {
+    const dependencies = overviewOriginDependencies();
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const oldSnapshot = await toAgentSnapshot();
+    for (const record of oldSnapshot.proposalRecords) if (record.source.kind === "run") delete record.source.origin;
+    if (history === "missing") oldSnapshot.messages = [];
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(oldSnapshot))));
+    for (const mode of ["edit", "writing"] as const) {
+      const original = useAgentConsoleStore.getState().pendingProposal;
+      if (original === null) throw new Error("Expected pending old overview");
+      expect(await controller.submitAgentRequest({ kind: "run", mode, text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+      const input = dependencies.stream.mock.calls.at(-1)?.[0];
+      if (input === undefined) throw new Error("Expected follow-up stream");
+      expect(input.environment.policy.action).toBe(history === "retained" || mode === "writing" ? "writer" : "literary-editor");
+      const source = useAgentConsoleStore.getState().proposalRecords.at(-1)?.source;
+      if (source?.kind !== "run") throw new Error("Expected run source");
+      expect(source.origin).toMatchObject({ mode: history === "retained" ? "writing" : "legacy" });
+      useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    }
+  });
+
+  it.each(["mode", "task"] as const)("refuses conflicting original run %s metadata before provider invocation", async (conflict) => {
+    const dependencies = overviewOriginDependencies();
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const oldSnapshot = await toAgentSnapshot();
+    for (const record of oldSnapshot.proposalRecords) if (record.source.kind === "run") delete record.source.origin;
+    if (conflict === "mode") oldSnapshot.messages[0].metadata.mode = "edit";
+    else oldSnapshot.messages[0].metadata.task = conversationTask("ch2");
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(oldSnapshot))));
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected old proposal");
+    const getModel = vi.fn(dependencies.getModel);
+    dependencies.getModel = getModel;
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Try again", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("original run metadata") } });
+    expect(getModel).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+  });
+});
+
+
+describe("existing non-prose selected actions", () => {
+  it.each(["structure", "clean"] as const)("allows %s on existing selected block types through actual SDK and JSON reopen", async (operation) => {
+    const source = operation === "structure" ? "``One.'' ``Two.''\n" : "Narration first.\n\n% @scratch: A private intention.\n";
+    useProjectStore.setState({ blocks: parseChapter(source) });
+    expect(useProjectStore.getState().blocks.map((item) => item.type)).toEqual(operation === "structure" ? ["latex"] : ["narration", "scratchpad"]);
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => new MockLanguageModelV3({ doStream: async () => {
+      const blocks = useProjectStore.getState().blocks;
+      const changes: BlockChange[] = blocks.map((item, index) => ({ kind: "rewrite", blockId: item.id, afterId: null, type: "narration", speaker: null, newText: `Preserved selected wording ${index}.`, toIndex: null, reason: "Apply the selected operation" }));
+      if (operation === "structure") changes.push({ kind: "insert", blockId: null, afterId: blocks[0].id, type: "dialogue", speaker: "Mara", newText: "Two.", toIndex: null, reason: "Separate the quote" });
+      return providerOriginStream([
+        { type: "tool-call", toolCallId: "selected", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Work on these selected blocks", changes }) },
+        { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } },
+      ]);
+    } });
+    const controller = createAgentController(dependencies);
+    const task: AgentTask = { kind: "selected-block-edit", chapterId: "ch1", blockIds: useProjectStore.getState().blocks.map((item) => item.id), operation };
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Apply the selected operation", refs: [], task })).toEqual({ status: "success" });
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected selected proposal");
+    expect(original.changes).toHaveLength(2);
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    mocks.readTextFile.mockResolvedValue(source);
+    await useProjectStore.getState().selectChapter("ch1");
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same operation", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+    const latest = useAgentConsoleStore.getState().proposalRecords.at(-1);
+    if (latest?.source.kind !== "run") throw new Error("Expected selected replacement");
+    expect(latest.source.origin).toMatchObject({ kind: "selected-block-edit", operation });
+    expect(dependencies.stream.mock.calls.at(-1)?.[0].environment.policy.action).toBe(operation === "clean" ? "copyeditor" : "block-structurer");
+    expect(latest.proposal.changes).toHaveLength(2);
+  });
+});
+
+describe("proposal origin source generation", () => {
+  const duplicateSource = "Identical paragraph.\n\nIdentical paragraph.\n\nIdentical paragraph.\n";
+
+  function dependenciesFor(operation: "clean" | "bridge") {
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = vi.fn(async () => new MockLanguageModelV3({ doStream: async () => {
+      const selected = useProjectStore.getState().blocks[1];
+      const change: BlockChange = operation === "bridge"
+        ? { kind: "insert", blockId: null, afterId: selected.id, type: "narration", speaker: null, newText: "New continuation.", toIndex: null, reason: "Continue here" }
+        : { kind: "rewrite", blockId: selected.id, afterId: null, type: "narration", speaker: null, newText: "Precise revision.", toIndex: null, reason: "Clean this source" };
+      return providerOriginStream([
+        { type: "tool-call", toolCallId: "stage", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Revise the captured source", changes: [change] }) },
+        { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } },
+      ]);
+    } }));
+    return dependencies;
+  }
+
+  async function begin(operation: "clean" | "bridge") {
+    mocks.readTextFile.mockResolvedValue(duplicateSource);
+    await useProjectStore.getState().selectChapter("ch1");
+    const selected = useProjectStore.getState().blocks[1];
+    const task: AgentTask = operation === "bridge"
+      ? { kind: "bridge", chapterId: "ch1", anchorBlockId: selected.id, successorBlockId: null }
+      : { kind: "selected-block-edit", chapterId: "ch1", blockIds: [selected.id], operation };
+    const dependencies = dependenciesFor(operation);
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Perform the selected action", refs: [], task })).toEqual({ status: "success" });
+    const proposal = useAgentConsoleStore.getState().pendingProposal;
+    if (proposal === null) throw new Error("Expected original proposal");
+    return { controller, dependencies, proposal, selected };
+  }
+
+  it.each(["clean", "bridge"] as const)("refuses a deleted %s source instead of the surviving duplicate", async (operation) => {
+    const { controller, dependencies, proposal, selected } = await begin(operation);
+    useProjectStore.getState().deleteBlock(selected.id);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("Start the original action again") } });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
+  });
+
+  it("refuses deletion and identical recreation of every live source ID", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+    let afterId: string | null = null;
+    for (let index = 0; index < 3; index += 1) afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: "Identical paragraph." });
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+  });
+
+  it("refuses delete/recreate-all even after a save remints every ID by changing block count", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+    let afterId: string | null = null;
+    for (let index = 0; index < 3; index += 1) {
+      afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: index === 2 ? "Identical paragraph.\n\nIdentical paragraph." : "Identical paragraph." });
+    }
+    await useProjectStore.getState().saveChapter();
+    expect(useProjectStore.getState().blocks).toHaveLength(4);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
+  });
+
+  it.each(["selected", "all"] as const)("accepts genuine JSON/reparse renewal but then refuses %s deletion in the new live generation", async (removed) => {
+    const { controller, dependencies, proposal, selected } = await begin("clean");
+    const snapshot = await toAgentSnapshot();
+    snapshot.messages = [];
+    snapshot.summary = null;
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot))));
+    await useProjectStore.getState().selectChapter("ch1");
+    const renewed = useProjectStore.getState().blocks[1];
+    expect(renewed.id).not.toBe(selected.id);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toEqual({ status: "success" });
+    const replacement = useAgentConsoleStore.getState().pendingProposal;
+    if (replacement === null) throw new Error("Expected replacement proposal");
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    if (removed === "selected") useProjectStore.getState().deleteBlock(renewed.id);
+    else {
+      useProjectStore.getState().deleteBlocks(useProjectStore.getState().blocks.map((item) => item.id));
+      let afterId: string | null = null;
+      for (let index = 0; index < 3; index += 1) afterId = useProjectStore.getState().insertAfter(afterId, { type: "narration", text: "Identical paragraph." });
+    }
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try once more", refs: [], task: { kind: "proposal-follow-up", proposalId: replacement.id } })).toMatchObject({ status: "failure" });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(2);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(replacement);
+  });
+
+  it("requires an explicit restart for an old identityless receipt after a real reload", async () => {
+    const { controller, dependencies, proposal } = await begin("clean");
+    const snapshot = await toAgentSnapshot();
+    for (const item of snapshot.proposalRecords) {
+      if (item.source.kind === "run" && item.source.origin?.kind === "selected-block-edit") delete item.source.origin.identity;
+    }
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot))));
+    await useProjectStore.getState().selectChapter("ch1");
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again", refs: [], task: { kind: "proposal-follow-up", proposalId: proposal.id } })).toMatchObject({ status: "failure", failure: { message: expect.stringContaining("old receipt cannot prove a reload") } });
+    expect(dependencies.getModel).toHaveBeenCalledTimes(1);
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(proposal);
   });
 });

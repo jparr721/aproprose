@@ -301,26 +301,31 @@ mod tests {
 
     #[cfg(unix)]
     fn controlled_tool(directory: &Path, script: &str, passes: usize) -> BuildTool {
-        use std::os::unix::fs::PermissionsExt;
-        let program = directory.join("controlled-tex");
-        std::fs::write(&program, format!("#!/bin/sh\n{script}\n")).unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script_path = directory.join("controlled-tex");
+        std::fs::write(&script_path, format!("#!/bin/sh\n{script}\n")).unwrap();
         BuildTool {
-            program,
+            program: PathBuf::from("/bin/sh"),
             passes,
-            args: vec![],
+            args: vec!["controlled-tex"],
         }
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn controlled_compiler_runs_two_passes_and_returns_pdf() {
+        use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let tool = controlled_tool(
             directory.path(),
-            "printf x >> passes; printf 'pdf bytes' > main.pdf",
+            "test \"$1\" = main.tex || exit 2; printf x >> passes; printf 'pdf bytes' > main.pdf",
             2,
         );
+        let script = directory.path().join("controlled-tex");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&script)
+            .unwrap();
         let result = compile_with_tool(
             directory.path(),
             "main.tex",
@@ -328,6 +333,7 @@ mod tests {
             Duration::from_secs(2),
         )
         .await;
+        drop(writer);
         assert!(result.ok, "{}", result.log);
         assert_eq!(
             std::fs::read(directory.path().join("passes")).unwrap(),

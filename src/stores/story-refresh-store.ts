@@ -168,6 +168,7 @@ export function createStoryRefreshState(
           meta: structuredClone(captured.meta),
           provider: captured.provider,
           modelId: captured.modelId,
+          preferences: Object.freeze({ ...captured.preferences }),
           reconcileCandidates: processingFollowUpReasons.includes(
             "candidate-input-stale",
           ),
@@ -343,6 +344,10 @@ const storyRefreshStoreDependencies: StoryRefreshStoreDependencies = {
       meta: structuredClone(projectState.meta),
       provider: settings.aiProvider,
       modelId: settings.aiModel,
+      preferences: {
+        styleGuide: settings.styleGuide,
+        editingRules: settings.editingRules,
+      },
     };
   },
   buildStoryRefresh: defaultBuildStoryRefresh,

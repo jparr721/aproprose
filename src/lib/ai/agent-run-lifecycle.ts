@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import type { AuthorPreferences } from "@/lib/ai/author-preferences";
 import {
   compactionTokenTarget,
   compactConversation,
@@ -12,7 +13,13 @@ import {
   type AgentFailurePhase,
 } from "@/lib/ai/agent-failure";
 import { settleAgentMessages } from "@/lib/ai/agent-messages";
-import { buildAgentInstructions } from "@/lib/ai/agent-prompts";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
+import { AgentProposalError } from "@/lib/ai/agent-proposals";
+import {
+  ProposalOriginError,
+  proposalOriginChapterId,
+  resolveProposalOrigin,
+} from "@/lib/ai/proposal-origin";
 import type {
   AgentToolFailure,
   StreamAgentRunInput,
@@ -21,8 +28,10 @@ import type {
 import {
   characterDescribeGrounding,
   invalidateDraftSourceRefreshes,
+  loadChapterSnapshot,
   OutlinePlannerGroundingError,
   refreshAttachedDraftSources,
+  requireBridgeAnchor,
   resolveOutlinePlannerGroundingInput,
   type SubmissionCapture,
 } from "@/lib/ai/agent-submission-context";
@@ -70,6 +79,7 @@ export interface AgentControllerDependencies {
     model: LanguageModel,
     source: string,
     signal: AbortSignal,
+    preferences: AuthorPreferences,
   ) => Promise<string>;
   stream: (input: StreamAgentRunInput) => Promise<StreamAgentRunResult>;
   recordFailure: (entry: AgentFailureLogEntry) => Promise<void>;
@@ -218,7 +228,7 @@ export function runFailure(
   provider: AiProvider,
   phase: AgentFailurePhase,
 ): AgentFailure {
-  if (error instanceof AgentDraftCompletionError) {
+  if (error instanceof AgentDraftCompletionError || error instanceof ProposalOriginError) {
     return { reason: "tool", message: error.message, action: null, settingsTarget: null };
   }
   if (error instanceof OutlinePlannerGroundingError) {
@@ -496,7 +506,35 @@ export function createAgentRunLifecycle(
         }
         throw targetResult.reason;
       }
-      const frozen = targetResult.value;
+      const target = targetResult.value;
+      const originalChapterId = target.chapter === null && target.task.kind === "proposal-follow-up"
+        ? proposalOriginChapterId({
+            proposalId: target.task.proposalId,
+            mode: capture.mode,
+            projectRoot: capture.projectRoot,
+            records: capture.proposalRecords,
+            messages: capture.messages,
+          })
+        : null;
+      const frozen = {
+        task: target.task,
+        chapter: originalChapterId === null ? target.chapter : await loadChapterSnapshot(capture.project, originalChapterId, capture.activeChapter),
+      };
+      if (!ownsCurrentRun()) return { status: "stopped" };
+      const origin = resolveProposalOrigin({
+        task: frozen.task,
+        mode: capture.mode,
+        projectRoot: capture.projectRoot,
+        targetChapterId: frozen.chapter === null ? null : frozen.chapter.chapterId,
+        blocks: frozen.chapter === null ? [] : frozen.chapter.blocks,
+        sourceGeneration: frozen.chapter === null ? null : frozen.chapter.sourceGeneration,
+        records: capture.proposalRecords,
+        messages: capture.messages,
+      });
+      if (origin.task.kind === "bridge") {
+        if (frozen.chapter === null) throw new AgentProposalError("wrong-chapter", "The original bridge chapter is unavailable. Start the original action again.");
+        requireBridgeAnchor(origin.task, frozen.chapter);
+      }
       const describeGrounding = characterDescribeGrounding(
         capture,
         frozen.task,
@@ -535,7 +573,9 @@ export function createAgentRunLifecycle(
           currentSummary: summary,
           tokenTarget: compactionTokenTarget(capture.lastUsage),
           summarize: (source) =>
-            dependencies.summarize(model, source, abortController.signal),
+            dependencies.summarize(model, source, abortController.signal, {
+              styleGuide: capture.styleGuide, editingRules: capture.editingRules,
+            }),
         });
         if (!ownsCurrentRun()) return { status: "stopped" };
         summary = compacted.summary;
@@ -565,24 +605,28 @@ export function createAgentRunLifecycle(
         user,
       ];
       failurePhase = null;
-      const baseInstructions = buildAgentInstructions({
+      const policy = compileAgentPolicy({
         mode: run.mode,
         task: run.task,
+        origin,
         styleGuide: capture.styleGuide,
         editingRules: capture.editingRules,
         sessionId: capture.sessionId,
       });
       const instructions =
-        [baseInstructions, plannerGrounding, describeGrounding]
+        [policy.instructions, plannerGrounding, describeGrounding]
           .filter((part): part is string => part !== null)
           .join("\n\n");
       const environment = createAgentToolEnvironment({
         run,
+        origin,
+        policy,
         model,
         styleGuide: capture.styleGuide,
         editingRules: capture.editingRules,
         project: capture.project,
         meta: capture.meta,
+        activeChapter: capture.activeChapter,
         targetChapter: frozen.chapter,
         history: capture.messages,
         assistantMessageId,
@@ -593,7 +637,7 @@ export function createAgentRunLifecycle(
         makeId: dependencies.id,
         now: dependencies.now,
         stageProposal: (proposal) => {
-          if (run.task.kind === "bridge" && (
+          if (origin.task.kind === "bridge" && (
             proposal.kind !== "manuscript" || proposal.changes.length === 0 ||
             proposal.changes.some((item) => item.change.kind !== "insert" || item.change.newText === null || item.change.newText.trim() === "")
           )) {
@@ -603,7 +647,7 @@ export function createAgentRunLifecycle(
           if (run.task.kind !== "proposal-follow-up") {
             useViewStore.getState().closeManuscriptReview();
             sessionStore.getState().stageProposal(proposal, {
-              kind: "run", runId: run.id, task: run.task, text: capture.text,
+              kind: "run", runId: run.id, task: run.task, text: capture.text, origin: origin.origin,
             });
             if (run.task.kind === "bridge") {
               useViewStore.getState().selectChange(agentSessionKey(capture.sessionId), proposal.id);
@@ -659,7 +703,7 @@ export function createAgentRunLifecycle(
         failure: null,
       });
       latestAssistant = completed;
-      if (run.task.kind === "bridge" && stagedProposal === null) {
+      if (origin.task.kind === "bridge" && stagedProposal === null) {
         throw new AgentDraftCompletionError("No continuation draft was produced. Open AI to review the response before trying again.");
       }
       const settled = settledAssistantMessage(completed);
@@ -669,7 +713,7 @@ export function createAgentRunLifecycle(
           throw new AgentDraftCompletionError("The draft changed during this request. Its replacement was not saved; review the current draft before trying again.");
         }
         sessionStore.getState().commitProposalReplacement(run.task.proposalId, stagedProposal, {
-          kind: "run", runId: run.id, task: run.task, text: capture.text,
+          kind: "run", runId: run.id, task: run.task, text: capture.text, origin: origin.origin,
         });
       }
       sessionStore.getState().finishRun(settled, result.usage);

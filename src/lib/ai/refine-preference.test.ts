@@ -101,7 +101,7 @@ describe("refinePreference", () => {
     {
       field: "editingRules",
       label: "Writing and editing instructions",
-      scope: "Writing and Edit",
+      scope: "planning and evaluation rules across AI actions",
     },
   ] satisfies Array<{ field: PreferenceField; label: string; scope: string }>)(
     "labels $label and preserves exact source/request data outside the system prompt",

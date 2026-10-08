@@ -79,6 +79,8 @@ import {
   conflictingTargetChangeIds,
   invalidProposalCorrelationIds,
   materializeManuscriptChanges,
+  rebaseManuscriptReviewPreconditions,
+  rebaseOutlineReviewPreconditions,
   validateManuscriptChanges,
   validateOutlineChanges,
 } from "@/lib/ai/agent-proposals";
@@ -277,6 +279,8 @@ interface ProjectState {
    */
   editCaret: "start" | "end" | number | null;
   chapterDirty: boolean;
+  // Only an explicit source load authorizes old proposal IDs to relocate.
+  chapterSourceGeneration: string;
   saving: boolean;
 
   compile: CompileState;
@@ -821,6 +825,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
     editing: false,
     editCaret: null,
     chapterDirty: false,
+    chapterSourceGeneration: uid(),
     saving: false,
     compile: EMPTY_COMPILE,
     error: null,
@@ -961,6 +966,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         set({
           activeChapterId: id,
           blocks,
+          chapterSourceGeneration: uid(),
           // Highlight the last block in nav mode — no caret/autofocus on load.
           selectedId: blocks.length ? blocks[blocks.length - 1].id : null,
           selectedIds: [],
@@ -1333,6 +1339,9 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
           reason: "apply-failed",
         };
       }
+      const reviewPreconditions = changes.length === 0 ? undefined : rebaseManuscriptReviewPreconditions(
+        proposal, state.blocks, outcome.blocks, changeIds, outcome.insertedBlockIds,
+      );
       if (changes.length > 0) {
         const meta = appliesOverview
           ? {
@@ -1356,7 +1365,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         persistMeta(meta);
         set({ meta });
       }
-      return { status: "applied", appliedChangeIds: changeIds };
+      return { status: "applied", appliedChangeIds: changeIds, ...(reviewPreconditions === undefined ? {} : { reviewPreconditions }) };
     },
 
     updateBlock: (id, patch) =>
@@ -2443,6 +2452,9 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
           reason: "apply-failed",
         };
       }
+      const reviewPreconditions = selectedProposal.changes.length === 0 ? undefined : rebaseOutlineReviewPreconditions(
+        proposal, cards, getChapterOutline(chapters, proposal.chapterId).cards, changeIds,
+      );
       const meta = {
         ...before,
         chapters,
@@ -2467,6 +2479,7 @@ export const useProjectStore = create<ProjectState>((rawSet, get) => {
         status: "applied",
         appliedChangeIds: changeIds,
         undoToken,
+        ...(reviewPreconditions === undefined ? {} : { reviewPreconditions }),
       };
     },
 

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { Book } from "@/book";
+import { EMPTY_META } from "@/lib/migration";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
 import {
+  activeAgentTools,
   agentToolOutputSummary,
   createAgentToolHandlers,
   createAgentTools,
@@ -34,6 +38,7 @@ const chapter: ChapterToolValue = {
       type: "narration",
       text: "Full private chapter text.",
       fingerprint: "abc",
+      citationText: "Full private chapter text.",
     },
   ],
 };
@@ -105,6 +110,21 @@ const pendingOutline: OutlinePendingProposal = {
 function environment(): AgentToolEnvironment {
   return {
     run,
+    policy: compileAgentPolicy({ mode: run.mode, task: run.task, sessionId: { kind: "project" }, styleGuide: "", editingRules: "" }),
+    assertRunOwnership: vi.fn(),
+    book: new Book({
+      project: {
+        root: "/book", name: "A book", mainFile: "main.tex", title: "A book", author: "Author",
+        metadata: { title: "A book", subtitle: "", author: "Author", publisher: "", isbn: "" },
+        chapters: [{ id: "ch1", title: "One", label: "1", file: "one.tex", wordCount: 4 }],
+      },
+      meta: structuredClone(EMPTY_META),
+      chapter: {
+        chapterId: "ch1", title: "One",
+        blocks: [{ id: "b1", type: "narration", text: "Full private chapter text.", raw: "Full private chapter text.\n\n", dirty: false }],
+      },
+      loadChapter: vi.fn(),
+    }),
     signal: new AbortController().signal,
     readChapter: vi.fn().mockResolvedValue(chapter),
     readOutline: vi.fn().mockResolvedValue({ premise: "", chapters: [] }),
@@ -130,13 +150,20 @@ function environment(): AgentToolEnvironment {
 describe("createAgentTools", () => {
   it("exposes exactly the approved shared tool set", () => {
     expect(Object.keys(createAgentTools(environment())).sort()).toEqual([
+      "ask_author",
+      "read_book_manifest",
+      "read_book_metadata",
       "read_chapter",
+      "read_chapter_range",
+      "read_character",
       "read_conversation_context",
       "read_lore",
       "read_outline",
       "read_pending_proposal",
+      "read_story_knowledge",
       "run_continuity",
       "run_critique",
+      "search_book",
       "stage_manuscript_proposal",
       "stage_outline_proposal",
       "stage_overview_proposal",
@@ -152,7 +179,10 @@ describe("character profile tool", () => {
   };
 
   function characterEnvironment(): AgentToolEnvironment {
-    return { ...environment(), run: characterRun };
+    return {
+      ...environment(), run: characterRun,
+      policy: compileAgentPolicy({ mode: characterRun.mode, task: characterRun.task, sessionId: { kind: "character", characterId: "c1" }, styleGuide: "", editingRules: "" }),
+    };
   }
 
   it("updates only the character frozen into the environment", async () => {
@@ -310,6 +340,72 @@ describe("character profile tool", () => {
   });
 });
 
+describe("purpose-bound book tool catalog", () => {
+  it("persists a visible author question without manufacturing an answer", async () => {
+    const env = environment();
+    const handlers = createAgentToolHandlers(env);
+    const question = { question: "Should the memory remain unreliable?", rationale: "The answer determines whether the contradiction needs explanation.", options: ["Preserve uncertainty", "Clarify the memory"] };
+    const output = await handlers.askAuthor(question);
+    expect(output.value).toEqual(question);
+    expect(output.summary.target).toBe(question.question);
+    expect(output.value).not.toHaveProperty("answer");
+    await expect(handlers.askAuthor({ ...question, question: " " })).rejects.toThrow();
+    await expect(handlers.askAuthor({ ...question, options: Array(7).fill("An option") })).rejects.toThrow();
+  });
+  it("discovers existing book material without loading manuscript chapters", async () => {
+    const env = environment();
+    const handlers = createAgentToolHandlers(env);
+    const manifest = await handlers.readBookManifest({});
+    expect(manifest.value.chapters[0]).toMatchObject({ id: "ch1", title: "One" });
+    expect((await handlers.readBookMetadata({})).value.author).toBe("Author");
+    expect(env.assertRunOwnership).toHaveBeenCalled();
+  });
+
+  it("returns a bounded complete semantic range and reports exact coverage", async () => {
+    const env = environment();
+    const handlers = createAgentToolHandlers(env);
+    const output = await handlers.readChapterRange({ chapterId: "ch1", start: 0, limit: 1 });
+    expect(output.value).toMatchObject({ chapterId: "ch1", totalBlocks: 1, start: 0, endExclusive: 1, hasMore: false });
+    expect(output.value.blocks[0].citationText).toBe("Full private chapter text.");
+    expect(output.value.source.target).toMatchObject({ kind: "chapter", id: "ch1" });
+    await expect(handlers.readChapterRange({ chapterId: "ch1", start: 0, limit: 101 })).rejects.toThrow();
+    await expect(handlers.readChapterRange({ chapterId: "ch1", start: 2, limit: 1 })).rejects.toThrow("Chapter range starts outside the chapter");
+  });
+
+  it("searches the bound Book instance and reports inspected coverage", async () => {
+    const handlers = createAgentToolHandlers(environment());
+    const output = await handlers.searchBook({ query: "private", chapterIds: null, limit: 5 });
+    expect(output.value.inspectedChapterIds).toEqual(["ch1"]);
+    expect(output.value.matches[0]).toMatchObject({ blockId: "b1", text: "Full private chapter text." });
+    expect(agentToolOutputSummary(output).detail).toBe("1 match");
+  });
+
+  it("filters capabilities for inference and rejects unauthorized host calls before mutation", async () => {
+    const env = environment();
+    env.policy = compileAgentPolicy({ mode: "edit", task: { kind: "chapter-analysis", chapterId: "ch1", analysis: "critique" }, sessionId: { kind: "project" }, styleGuide: "", editingRules: "" });
+    const handlers = createAgentToolHandlers(env);
+    await expect(handlers.askAuthor({ question: "Can I edit it?", rationale: "Unauthorized ask", options: [] })).rejects.toThrow("Agent tool is not permitted");
+    await expect(handlers.stageManuscript({ summary: "Unauthorized edit", changes: [] })).rejects.toThrow("Agent tool is not permitted");
+    await expect(handlers.stageOutline({ summary: "Unauthorized cards", changes: [] })).rejects.toThrow("Agent tool is not permitted");
+    expect(env.buildManuscriptProposal).not.toHaveBeenCalled();
+    expect(env.buildOutlineProposal).not.toHaveBeenCalled();
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+    expect(activeAgentTools(env.policy.capabilities)).toContain("search_book");
+    expect(activeAgentTools(env.policy.capabilities)).not.toContain("stage_manuscript_proposal");
+  });
+
+  it("checks cancellation and revoked ownership even for cached Book reads", async () => {
+    const env = environment();
+    const controller = new AbortController();
+    controller.abort(new Error("Run cancelled"));
+    env.signal = controller.signal;
+    await expect(createAgentToolHandlers(env).readBookManifest({})).rejects.toThrow("Run cancelled");
+    const revoked = environment();
+    vi.mocked(revoked.assertRunOwnership).mockImplementation(() => { throw new Error("Run ownership revoked"); });
+    await expect(createAgentToolHandlers(revoked).readBookMetadata({})).rejects.toThrow("Run ownership revoked");
+  });
+});
+
 describe("agent tool outputs", () => {
   it("returns full chapter content to the runtime and a safe UI summary", async () => {
     const handlers = createAgentToolHandlers(environment());
@@ -329,6 +425,114 @@ describe("agent tool outputs", () => {
 });
 
 describe("stage tools", () => {
+  const overviewChange = {
+    id: "overview-change-1",
+    before: "Original overview",
+    after: "Revised overview",
+    reason: "Reflect the reviewed changes",
+    sourceFingerprint: "overview-fingerprint",
+  };
+  const scopedStages = [
+    {
+      action: "copyeditor",
+      task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b1"], operation: "clean" },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "block-structurer",
+      task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b1"], operation: "structure" },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "bridge-writer",
+      task: { kind: "bridge", chapterId: "ch1", anchorBlockId: "b1", successorBlockId: null },
+      stage: "stageManuscript",
+      builder: "buildManuscriptProposal",
+      proposal: pending,
+    },
+    {
+      action: "chapter-planner",
+      task: { kind: "outline-sculpt", chapterId: "ch1" },
+      stage: "stageOutline",
+      builder: "buildOutlineProposal",
+      proposal: pendingOutline,
+    },
+  ] satisfies Array<{
+    action: string;
+    task: AgentRun["task"];
+    stage: "stageManuscript" | "stageOutline";
+    builder: "buildManuscriptProposal" | "buildOutlineProposal";
+    proposal: ManuscriptPendingProposal | OutlinePendingProposal;
+  }>;
+
+  function environmentWithoutOverview(task: AgentRun["task"]): AgentToolEnvironment {
+    const scopedRun: AgentRun = { ...run, task };
+    const policy = compileAgentPolicy({
+      mode: scopedRun.mode,
+      task,
+      sessionId: { kind: "project" },
+      styleGuide: "",
+      editingRules: "",
+    });
+    return {
+      ...environment(),
+      run: scopedRun,
+      policy: { ...policy, capabilities: policy.capabilities.filter((capability) => capability !== "stage-overview") },
+    };
+  }
+
+  it.each(scopedStages)("rejects $action bundled overview input before construction", async ({ task, stage, builder }) => {
+    const env = environmentWithoutOverview(task);
+    const handlers = createAgentToolHandlers(env);
+    for (const overview of ["Revised overview", ""]) {
+      await expect(handlers[stage]({ summary: "Narrow edit", changes: [], overview }))
+        .rejects.toThrow("Agent tool is not permitted");
+    }
+    expect(env[builder]).not.toHaveBeenCalled();
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it.each(scopedStages)("rejects $action builder-produced overview changes before staging", async ({ task, stage, builder, proposal }) => {
+    const env = environmentWithoutOverview(task);
+    vi.spyOn(env, builder).mockReturnValue({ ...proposal, overviewChange });
+    await expect(createAgentToolHandlers(env)[stage]({ summary: "Narrow edit", changes: [] }))
+      .rejects.toThrow("Agent tool is not permitted");
+    expect(env[builder]).toHaveBeenCalledOnce();
+    expect(env.replacePendingProposal).not.toHaveBeenCalled();
+  });
+
+  it.each(scopedStages)("permits $action staging with omitted or null overview", async ({ task, stage, builder, proposal }) => {
+    const env = environmentWithoutOverview(task);
+    const handlers = createAgentToolHandlers(env);
+    await handlers[stage]({ summary: "Narrow edit", changes: [] });
+    await handlers[stage]({ summary: "Narrow edit", changes: [], overview: null });
+    expect(env[builder]).toHaveBeenCalledTimes(2);
+    expect(env.replacePendingProposal).toHaveBeenCalledTimes(2);
+    expect(env.replacePendingProposal).toHaveBeenLastCalledWith(proposal);
+  });
+
+  it.each([
+    { stage: "stageManuscript", builder: "buildManuscriptProposal", proposal: pending },
+    { stage: "stageOutline", builder: "buildOutlineProposal", proposal: pendingOutline },
+  ] satisfies Array<{
+    stage: "stageManuscript" | "stageOutline";
+    builder: "buildManuscriptProposal" | "buildOutlineProposal";
+    proposal: ManuscriptPendingProposal | OutlinePendingProposal;
+  }>)("permits authorized overview bundles through $stage", async ({ stage, builder, proposal }) => {
+    const env = environment();
+    const bundled = { ...proposal, overviewChange };
+    vi.spyOn(env, builder).mockReturnValue(bundled);
+    const input = { summary: "Editorial change", changes: [], overview: "Revised overview" };
+    const output = await createAgentToolHandlers(env)[stage](input);
+    expect(env[builder]).toHaveBeenCalledWith(input);
+    expect(env.replacePendingProposal).toHaveBeenCalledWith(bundled);
+    expect(output.value.changeCount).toBe(2);
+  });
+
   it("replaces the pending workspace only after a proposal validates", async () => {
     const env = environment();
     const handlers = createAgentToolHandlers(env);

@@ -77,8 +77,8 @@ const critiqueClauses = [
   '"blockIds": the ids of the specific SCENE BLOCKS the note is about',
   "copied exactly from their [id] labels",
   "Use [] when the note concerns the whole scene",
-  "roughly 4-7 notes",
-  "Lead with at least one genuine strength; never produce only criticism",
+  "Return high-signal findings in order of editorial impact",
+  "do not manufacture praise",
   "Do not invent problems that aren't on the page",
   'If the author included an explicit request ("AUTHOR\'S REQUEST")',
   "focus your notes on what they asked about",
@@ -191,6 +191,7 @@ describe("critique anchoring", () => {
 
     const call = capturedGeneration<typeof critiqueResultSchema>();
     expect(call.system).toContain("Frozen analysis voice.");
+    expect(call.system).toContain("Frozen analysis editing rules.");
     expect(call.model).toBe(analysisModel);
     expectClauses(call.system, sharedAnalysisClauses);
     expectClauses(call.system, critiqueClauses);
@@ -217,7 +218,7 @@ describe("critique anchoring", () => {
       "ids of the SCENE BLOCKS this concerns, copied exactly from their [id] labels; null when it concerns the whole scene",
     );
     expect(notes.description).toBe(
-      "a balanced handful of notes, leading with at least one strength",
+      "supported high-impact craft findings; preserve genuine strengths without a praise quota",
     );
   });
 });
@@ -239,6 +240,7 @@ describe("continuityCheck anchoring", () => {
 
     const call = capturedGeneration<typeof continuityResultSchema>();
     expect(call.system).toContain("Frozen analysis voice.");
+    expect(call.system).toContain("Frozen analysis editing rules.");
     expect(call.model).toBe(analysisModel);
     expectClauses(call.system, sharedAnalysisClauses);
     expectClauses(call.system, continuityClauses);

@@ -155,6 +155,7 @@ function captureFixture(modelId: string | null): ReturnType<StoryRefreshStoreDep
     meta: structuredClone(state.meta),
     provider: "openai",
     modelId,
+    preferences: { styleGuide: "Captured voice.", editingRules: "Captured editing rules." },
   };
 }
 

@@ -14,6 +14,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { AgentMessage } from "@/components/app/agent-console/agent-message";
+import { sanitizeAgentMessages } from "@/lib/ai/agent-messages";
 import type {
   AgentMessageMetadata,
   AgentUIMessage,
@@ -112,6 +113,49 @@ beforeEach(() => {
 });
 
 describe("AgentMessage content", () => {
+  it("renders a tool-only author question and its choices without an assistant text response", () => {
+    const input = {
+      question: "Should Dad's memory remain unreliable?",
+      rationale: "This determines whether to clarify the contradiction.",
+      options: ["Preserve uncertainty", "Clarify the memory"],
+    };
+    renderAgentMessage(assistantMessage("assistant-question", [{
+      type: "tool-ask_author", toolCallId: "question-1", state: "output-available", input,
+      output: { kind: "runtime", summary: { label: "Question for author", target: input.question, detail: input.rationale, itemCount: 1 }, value: input },
+    }], metadata({})));
+    expect(screen.getByText(input.question)).toBeTruthy();
+    expect(screen.getByText(input.rationale)).toBeTruthy();
+    for (const option of input.options) expect(screen.getByText(option)).toBeTruthy();
+    expect(screen.getByText(input.question).closest('[data-slot="card"]')).toBeTruthy();
+    expect(screen.queryByRole("button", { name: input.options[0] })).toBeNull();
+  });
+
+  it("renders a reopened summary-only author question from its preserved input", () => {
+    const input = { question: "What changes for the narrator in this scene?", rationale: "A turn will determine which card belongs here.", options: [] };
+    const messages = sanitizeAgentMessages([assistantMessage("reopened-question", [{
+      type: "tool-ask_author", toolCallId: "reopened-question-1", state: "output-available", input,
+      output: { kind: "runtime", summary: { label: "Question for author", target: input.question, detail: input.rationale, itemCount: 1 }, value: input },
+    }], metadata({}))]);
+    renderAgentMessage(messages[0]);
+    expect(screen.getByText(input.question)).toBeTruthy();
+    expect(screen.getByText(input.rationale)).toBeTruthy();
+  });
+
+  it("shows dynamic completed questions and hides failed or unexecuted question attempts", () => {
+    const input = { question: "What should the reader distrust?", rationale: "The choice determines which evidence to preserve.", options: [] };
+    renderAgentMessage(assistantMessage("dynamic-question", [{
+      type: "dynamic-tool", toolName: "ask_author", toolCallId: "dynamic-question-1", state: "output-available", input,
+      output: { kind: "summary", summary: { label: "Question for author", target: input.question, detail: "1 question", itemCount: 1 } },
+    }], metadata({})));
+    expect(screen.getByText(input.question)).toBeTruthy();
+    cleanup();
+    renderAgentMessage(assistantMessage("failed-questions", [
+      { type: "tool-ask_author", toolCallId: "unexecuted-question", state: "input-available", input },
+      { type: "tool-ask_author", toolCallId: "failed-question", state: "output-error", input, errorText: "Tool execution failed" },
+    ], metadata({})));
+    expect(screen.queryByText(input.question)).toBeNull();
+    expect(screen.queryByText(input.rationale)).toBeNull();
+  });
   it("copies all text parts and confirms the copy", async () => {
     renderAgentMessage(
       assistantMessage(

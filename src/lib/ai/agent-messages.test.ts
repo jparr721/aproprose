@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Book } from "@/book";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
+import { createAgentToolHandlers, createAgentTools, type AgentToolEnvironment } from "@/lib/ai/agent-tools";
+import { EMPTY_META } from "@/lib/migration";
 import {
   convertAgentMessagesToModel,
   sanitizeAgentMessages,
@@ -6,6 +10,45 @@ import {
   validateAgentMessages,
 } from "@/lib/ai/agent-messages";
 import type { AgentUIMessage } from "@/lib/ai/agent-types";
+
+function messageToolEnvironment(): AgentToolEnvironment {
+  const meta = structuredClone(EMPTY_META);
+  meta.characters = [{
+    id: "c1", name: "Mara", role: "Courier", color: "#123456",
+    profile: { appearance: "PRIVATE PROFILE BODY", mannerisms: "", motivations: "", relationships: "", history: "", voice: "" },
+  }];
+  meta.knowledge.chapters.ch1 = {
+    sourceFingerprint: "chapter-fingerprint", summary: "PRIVATE KNOWLEDGE BODY", premiseSignals: [],
+    conflictSignals: [], stakeSignals: [], arcSignals: [], endingSignals: [],
+    characterObservations: [], unknownCharacterObservations: [],
+  };
+  const unavailable = (): never => { throw new Error("Persistence validation must not execute tools"); };
+  const run = {
+    id: "run-1", projectRoot: "/book", mode: "writing", task: { kind: "conversation", targetChapterId: "ch1" },
+    userMessageId: "user-1", attachments: [], startedAt: "2026-07-30T00:00:00.000Z",
+  } satisfies AgentToolEnvironment["run"];
+  return {
+    run,
+    policy: compileAgentPolicy({ mode: run.mode, task: run.task, sessionId: { kind: "project" }, styleGuide: "", editingRules: "" }),
+    signal: new AbortController().signal,
+    assertRunOwnership: () => undefined,
+    book: new Book({
+      project: {
+        root: "/book", name: "Book", mainFile: "main.tex", title: "Book", author: "Author",
+        metadata: { title: "Book", subtitle: "", author: "Author", publisher: "", isbn: "" },
+        chapters: [{ id: "ch1", label: "1", title: "One", file: "one.tex", wordCount: 3 }],
+      },
+      meta,
+      chapter: { chapterId: "ch1", title: "One", blocks: [{ id: "b1", type: "narration", text: "PRIVATE CHAPTER BODY", raw: "PRIVATE SOURCE BYTES", dirty: false }] },
+      loadChapter: unavailable,
+    }),
+    readChapter: unavailable, readOutline: unavailable, readLore: unavailable,
+    runCritique: unavailable, runContinuity: unavailable, readConversationContext: unavailable,
+    getPendingProposal: unavailable, buildManuscriptProposal: unavailable,
+    buildOutlineProposal: unavailable, buildOverviewProposal: unavailable,
+    replacePendingProposal: unavailable, updateCharacterProfile: unavailable,
+  };
+}
 
 const metadata: AgentUIMessage["metadata"] = {
   runId: "run-1",
@@ -175,7 +218,55 @@ function assistantWithUntrustedToolTargets(): AgentUIMessage {
 }
 
 describe("sanitizeAgentMessages", () => {
-  it("settles overview staging and persists only its summary", () => {
+  it("round-trips the exact unanswered question through actual tool schemas and model replay", async () => {
+    const env = messageToolEnvironment();
+    const tools = createAgentTools(env);
+    const question = {
+      question: "Should Dad's memory remain unreliable?",
+      rationale: "The answer determines whether the contradiction is intentional.",
+      options: ["Preserve uncertainty", "Clarify the memory"],
+    };
+    const output = await createAgentToolHandlers(env).askAuthor(question);
+    const message: AgentUIMessage = {
+      id: "assistant-question", role: "assistant", metadata,
+      parts: [{ type: "tool-ask_author", toolCallId: "question-1", state: "output-available", input: question, output }],
+    };
+    const sanitized = sanitizeAgentMessages([message]);
+    const reopened = await validateAgentMessages(JSON.parse(JSON.stringify(sanitized)), tools);
+    expect(reopened[0].parts[0]).toMatchObject({ type: "tool-ask_author", input: question, output: { kind: "summary" } });
+    expect(JSON.stringify(reopened)).not.toContain('"answer"');
+    const replayed = JSON.stringify(await convertAgentMessagesToModel(reopened, tools));
+    expect(replayed).toContain(question.question);
+    expect(replayed).toContain(question.rationale);
+    expect(replayed).toContain(question.options[0]);
+    expect(replayed).toContain(question.options[1]);
+    expect(sanitizeAgentMessages(reopened)).toEqual(reopened);
+  });
+
+  it("round-trips all new read tools without persisting full source, profile or knowledge bodies", async () => {
+    const env = messageToolEnvironment();
+    const handlers = createAgentToolHandlers(env);
+    const parts: AgentUIMessage["parts"] = [
+      { type: "tool-read_book_manifest", toolCallId: "manifest", state: "output-available", input: {}, output: await handlers.readBookManifest({}) },
+      { type: "tool-read_book_metadata", toolCallId: "metadata", state: "output-available", input: {}, output: await handlers.readBookMetadata({}) },
+      { type: "tool-read_story_knowledge", toolCallId: "knowledge", state: "output-available", input: {}, output: await handlers.readStoryKnowledge({}) },
+      { type: "tool-read_character", toolCallId: "character", state: "output-available", input: { characterId: "c1" }, output: await handlers.readCharacter({ characterId: "c1" }) },
+      { type: "tool-read_chapter_range", toolCallId: "range", state: "output-available", input: { chapterId: "ch1", start: 0, limit: 1 }, output: await handlers.readChapterRange({ chapterId: "ch1", start: 0, limit: 1 }) },
+      { type: "tool-search_book", toolCallId: "search", state: "output-available", input: { query: "PRIVATE", chapterIds: ["ch1"], limit: 10 }, output: await handlers.searchBook({ query: "PRIVATE", chapterIds: ["ch1"], limit: 10 }) },
+    ];
+    const sanitized = sanitizeAgentMessages([{ id: "assistant-discovery", role: "assistant", metadata, parts }]);
+    const reopened = await validateAgentMessages(JSON.parse(JSON.stringify(sanitized)), createAgentTools(env));
+    expect(reopened[0].parts).toHaveLength(parts.length);
+    const serialized = JSON.stringify(reopened);
+    for (const marker of ["PRIVATE CHAPTER BODY", "PRIVATE SOURCE BYTES", "PRIVATE PROFILE BODY", "PRIVATE KNOWLEDGE BODY"]) {
+      expect(serialized).not.toContain(marker);
+    }
+    for (const part of reopened[0].parts) {
+      expect(part).toMatchObject({ state: "output-available", output: { kind: "summary" } });
+    }
+  });
+
+  it("settles overview staging and persists only its schema-valid summary", async () => {
     const message: AgentUIMessage = {
       id: "overview-complete",
       role: "assistant",
@@ -190,6 +281,7 @@ describe("sanitizeAgentMessages", () => {
     };
     expect(settleAgentMessages([message])[0].parts).toHaveLength(1);
     const persisted = sanitizeAgentMessages([message]);
+    await expect(validateAgentMessages(persisted, createAgentTools(messageToolEnvironment()))).resolves.toEqual(persisted);
     expect(persisted[0].parts[0]).toMatchObject({
       input: { summary: "", overview: "", reason: "" },
       output: { kind: "summary", summary: { ...toolSummary, label: "Stage story overview proposal", detail: "2 changes" } },

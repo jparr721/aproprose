@@ -3,20 +3,35 @@
 import { useNotificationStore } from "@/stores/notification-store";
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Book } from "@/book";
 import type {
   AgentMessageMetadata,
+  AgentTask,
   AgentPersistenceIssue,
+  AgentProposalRecord,
+  AgentSessionId,
   AgentUIMessage,
+  AgentUiTools,
   DraftContextRef,
   PendingProposal,
   PersistedAgentState,
   PersistedUsage,
+  ProposalReviewPreconditions,
+  ProposalOrigin,
 } from "@/lib/ai/agent-types";
 import {
   dispatchAgentIntent,
   submitAgentRequest,
 } from "@/lib/ai/agent-controller";
-import { convertAgentMessagesToModel } from "@/lib/ai/agent-messages";
+import {
+  convertAgentMessagesToModel,
+  validateAgentMessages,
+} from "@/lib/ai/agent-messages";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
+import {
+  createAgentTools,
+  type AgentToolEnvironment,
+} from "@/lib/ai/agent-tools";
 import { resetAiProvider } from "@/lib/ai/model";
 import { EMPTY_META } from "@/lib/migration";
 import type { ProjectInfo } from "@/lib/types";
@@ -24,6 +39,7 @@ import {
   agentSessionStore,
   characterAgentSessionEntries,
   clearCharacterAgentSessions,
+  clearOutlineAgentSessions,
   deleteCharacterAgentSession,
   selectPendingProposal,
   useAgentConsoleStore,
@@ -266,6 +282,100 @@ function project(root: string): ProjectInfo {
   };
 }
 
+function persistenceToolEnvironment(): AgentToolEnvironment {
+  const unavailable = (): never => {
+    throw new Error("Persistence validation must not execute tools");
+  };
+  const run = {
+    id: "run-1",
+    projectRoot: "/books/one",
+    mode: "writing",
+    task: { kind: "conversation", targetChapterId: "chapter-1" },
+    userMessageId: "user-1",
+    attachments: [],
+    startedAt: "2026-07-30T12:00:00.000Z",
+  } satisfies AgentToolEnvironment["run"];
+  return {
+    run,
+    policy: compileAgentPolicy({
+      mode: run.mode,
+      task: run.task,
+      sessionId: { kind: "project" },
+      styleGuide: "",
+      editingRules: "",
+    }),
+    book: new Book({
+      project: project(run.projectRoot),
+      meta: EMPTY_META,
+      chapter: null,
+      loadChapter: unavailable,
+    }),
+    signal: new AbortController().signal,
+    assertRunOwnership: unavailable,
+    readChapter: unavailable,
+    readOutline: unavailable,
+    readLore: unavailable,
+    runCritique: unavailable,
+    runContinuity: unavailable,
+    readConversationContext: unavailable,
+    getPendingProposal: unavailable,
+    buildManuscriptProposal: unavailable,
+    buildOutlineProposal: unavailable,
+    buildOverviewProposal: unavailable,
+    replacePendingProposal: unavailable,
+    updateCharacterProfile: unavailable,
+  };
+}
+
+const registeredToolInputs = {
+  ask_author: {
+    question: "Did Dad win twice, or should the printed count change?",
+    rationale: "The chapter reports three wins but describes only two.",
+    options: ["Change the count to two", "Add the missing third win"],
+  },
+  read_book_manifest: {},
+  read_book_metadata: {},
+  read_story_knowledge: {},
+  read_character: { characterId: "c1" },
+  read_chapter_range: { chapterId: "chapter-1", start: 0, limit: 1 },
+  search_book: { query: "Dad", chapterIds: null, limit: 1 },
+  read_chapter: { chapterId: "chapter-1" },
+  read_outline: { chapterId: "chapter-1" },
+  read_lore: { query: null },
+  run_critique: { chapterId: "chapter-1", focus: null },
+  run_continuity: { chapterId: "chapter-1", focus: null },
+  read_conversation_context: { messageIds: [] },
+  read_pending_proposal: { proposalId: "proposal-1" },
+  stage_manuscript_proposal: { summary: "Fix the count", changes: [] },
+  stage_outline_proposal: { summary: "Complete the scene", changes: [] },
+  stage_overview_proposal: {
+    summary: "Clarify Dad's role",
+    overview: "PRIVATE PROPOSED OVERVIEW",
+    reason: "PRIVATE PROPOSAL REASON",
+  },
+  update_character_profile: {
+    characterId: "c1",
+    profile: {
+      appearance: null,
+      mannerisms: "PRIVATE PROFILE EDIT",
+      motivations: null,
+      relationships: null,
+      history: null,
+      voice: null,
+    },
+  },
+} satisfies { [Name in keyof AgentUiTools]: AgentUiTools[Name]["input"] };
+
+const privateRuntimeOutput = {
+  kind: "runtime",
+  summary: { label: "Read book", target: "Book", detail: "1 item", itemCount: 1 },
+  value: {
+    chapter: "PRIVATE CHAPTER BODY",
+    knowledge: "PRIVATE KNOWLEDGE BODY",
+    profile: "PRIVATE PROFILE BODY",
+  },
+};
+
 function captureMutationErrors(mutations: Array<() => void>): unknown[] {
   return mutations.map((mutation) => {
     try {
@@ -318,6 +428,172 @@ afterEach(() => {
 });
 
 describe("agent persistence", () => {
+  it("covers every registered tool in the persistence regression fixtures", () => {
+    expect(Object.keys(registeredToolInputs).sort()).toEqual(
+      Object.keys(createAgentTools(persistenceToolEnvironment())).sort(),
+    );
+  });
+
+  describe.each(["static", "dynamic"])("%s tool persistence", (encoding) => {
+    it.each(Object.entries(registeredToolInputs))(
+      "saves and reloads registered tool %s through the native persistence path",
+      async (name, input) => {
+        const disk = new Map<string, unknown>();
+        tauri.readAppData.mockImplementation(async (key: string) =>
+          disk.has(key) ? structuredClone(disk.get(key)) : null,
+        );
+        tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+          disk.set(key, structuredClone(value));
+        });
+        const toolPart = encoding === "static"
+          ? { type: `tool-${name}` }
+          : { type: "dynamic-tool", toolName: name };
+        const messages = await validateAgentMessages([
+          textMessage("user-1", "user", "Investigate this chapter", "complete"),
+          {
+            id: `assistant-${name}`,
+            role: "assistant",
+            metadata,
+            parts: [{
+              ...toolPart,
+              toolCallId: `call-${name}`,
+              state: "output-available",
+              input,
+              output: privateRuntimeOutput,
+            }],
+          },
+        ], createAgentTools(persistenceToolEnvironment()));
+        useAgentConsoleStore.setState({ messages });
+
+        const snapshot = await toAgentSnapshot();
+        await saveAgentState("/books/one", snapshot);
+        const restored = await loadAgentState("/books/one");
+
+        expect(restored.messages).toHaveLength(2);
+        expect(restored.messages[1].parts).toEqual(snapshot.messages[1].parts);
+        expect(restored.messages[1].parts[0]).toMatchObject({
+          ...toolPart,
+          state: "output-available",
+          output: { kind: "summary" },
+        });
+        if (name === "ask_author") {
+          expect(restored.messages[1].parts[0]).toHaveProperty("input", input);
+        }
+        for (const serialized of [JSON.stringify(disk.get(agentStateKey("/books/one"))), JSON.stringify(restored)]) {
+          for (const marker of ["PRIVATE CHAPTER BODY", "PRIVATE KNOWLEDGE BODY", "PRIVATE PROFILE BODY", "PRIVATE PROPOSED OVERVIEW", "PRIVATE PROPOSAL REASON", "PRIVATE PROFILE EDIT"]) {
+            expect(serialized).not.toContain(marker);
+          }
+        }
+      },
+    );
+
+    it("rejects unregistered tools without writing them", async () => {
+      const toolPart = encoding === "static"
+        ? { type: "tool-unregistered_book_tool" }
+        : { type: "dynamic-tool", toolName: "unregistered_book_tool" };
+      const messages = await validateAgentMessages([{
+        id: "assistant-unregistered-tool",
+        role: "assistant",
+        metadata,
+        parts: [{
+          ...toolPart,
+          toolCallId: "call-unregistered",
+          state: "output-available",
+          input: {},
+          output: {
+            kind: "summary",
+            summary: { label: "Unknown", target: "Book", detail: "1 item", itemCount: 1 },
+          },
+        }],
+      }]);
+
+      await expect(saveAgentState("/books/one", persistedState("", messages))).rejects.toMatchObject({
+        issue: { kind: "save", projectRoot: "/books/one" },
+      });
+      await expect(fromAgentSnapshot("/books/one", persistedState("", messages))).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+      expect(tauri.writeAppData).not.toHaveBeenCalled();
+    });
+
+    it("rejects raw runtime bodies on persisted new tools", async () => {
+      const toolPart = encoding === "static"
+        ? { type: "tool-read_story_knowledge" }
+        : { type: "dynamic-tool", toolName: "read_story_knowledge" };
+      const messages = await validateAgentMessages([{
+        id: "assistant-raw-knowledge",
+        role: "assistant",
+        metadata,
+        parts: [{
+          ...toolPart,
+          toolCallId: "call-knowledge",
+          state: "output-available",
+          input: {},
+          output: privateRuntimeOutput,
+        }],
+      }], createAgentTools(persistenceToolEnvironment()));
+
+      await expect(saveAgentState("/books/one", persistedState("", messages))).rejects.toMatchObject({
+        issue: { kind: "save", projectRoot: "/books/one" },
+      });
+      await expect(fromAgentSnapshot("/books/one", persistedState("", messages))).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+      expect(tauri.writeAppData).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reopens scoped editorial questions with book read summaries and retained proposals", async () => {
+    const root = "/books/editorial-question";
+    const sessionId = { kind: "outline", chapterId: "chapter-1" } satisfies Parameters<typeof agentSessionStore>[0];
+    const disk = new Map<string, unknown>();
+    tauri.readAppData.mockImplementation(async (key: string) =>
+      disk.has(key) ? structuredClone(disk.get(key)) : null,
+    );
+    tauri.writeAppData.mockImplementation(async (key: string, value: unknown) => {
+      disk.set(key, structuredClone(value));
+    });
+    useProjectStore.setState({ project: project(root) });
+    await transitionAgentProject(root);
+    const outline = agentSessionStore(sessionId);
+    outline.getState().hydrate(root, emptyPersistedAgentState());
+    const messages = await validateAgentMessages([
+      textMessage("user-1", "user", "Investigate Dad's chapter", "complete"),
+      {
+        id: "assistant-question",
+        role: "assistant",
+        metadata: { ...metadata, mode: "writing", task: { kind: "outline-sculpt", chapterId: "chapter-1" } },
+        parts: [
+          { type: "tool-read_story_knowledge", toolCallId: "call-knowledge", state: "output-available", input: {}, output: privateRuntimeOutput },
+          { type: "tool-ask_author", toolCallId: "call-question", state: "output-available", input: registeredToolInputs.ask_author, output: privateRuntimeOutput },
+        ],
+      },
+      textMessage("user-answer", "user", "Change the count to two", "complete"),
+    ], createAgentTools(persistenceToolEnvironment()));
+    outline.setState({ messages });
+    outline.getState().stageProposal({ ...proposal, projectRoot: root }, { kind: "legacy" });
+
+    await saveAgentSessionCollection(root);
+    clearOutlineAgentSessions();
+    await hydrateAgentOutlineSession(root, sessionId.chapterId);
+
+    const reopened = agentSessionStore(sessionId).getState();
+    expect(reopened.messages).toHaveLength(3);
+    expect(reopened.messages[1].parts[1]).toMatchObject({
+      type: "tool-ask_author",
+      input: registeredToolInputs.ask_author,
+      output: { kind: "summary" },
+    });
+    expect(reopened.messages[2].parts[0]).toMatchObject({ text: "Change the count to two" });
+    expect(reopened.pendingProposal).toEqual({ ...proposal, projectRoot: root });
+    expect(reopened.proposalRecords).toHaveLength(1);
+    const saved = JSON.stringify(disk.get(agentSessionCollectionKey(root)));
+    expect(saved).toContain(registeredToolInputs.ask_author.question);
+    expect(saved).not.toContain("PRIVATE KNOWLEDGE BODY");
+    expect(saved).not.toContain("PRIVATE CHAPTER BODY");
+    expect(saved).not.toContain("PRIVATE PROFILE BODY");
+  });
+
   it("retains the newest recovery revision until that revision is durable", () => {
     const coordinator = createAgentPersistenceCoordinator();
     const root = "/books/one";
@@ -386,6 +662,37 @@ describe("agent persistence", () => {
     await failure;
     await following;
     expect(order).toEqual(["first started", "following started"]);
+  });
+
+  it("waits for persistence transitions queued while the barrier is pending", async () => {
+    const coordinator = createAgentPersistenceCoordinator();
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const order: string[] = [];
+    const initial = coordinator.enqueueTransition(async () => {
+      order.push("first started");
+      await first.promise;
+    });
+    const waiting = coordinator.waitForTransitions().then(() => {
+      order.push("barrier settled");
+    });
+    const following = coordinator.enqueueTransition(async () => {
+      order.push("following started");
+      await second.promise;
+    });
+    first.resolve();
+    await initial;
+    await Promise.resolve();
+    expect(order).toEqual(["first started", "following started"]);
+
+    second.resolve();
+    await following;
+    await waiting;
+    expect(order).toEqual([
+      "first started",
+      "following started",
+      "barrier settled",
+    ]);
   });
 
   it("rejects a persisted character describe task whose ID is blank", async () => {
@@ -691,6 +998,251 @@ describe("agent persistence", () => {
       "The rain softened against the glass.",
     );
     expect(restoredProposal.projectRoot).toBe("/book");
+  });
+
+  describe("proposal review preconditions", () => {
+    const reviewProposals: PendingProposal[] = [
+      {
+        ...proposal,
+        changes: [
+          proposal.changes[0],
+          { ...proposal.changes[0], id: "change-2" },
+        ],
+      },
+      {
+        ...proposal,
+        kind: "outline",
+        changes: [
+          {
+            id: "change-1",
+            change: {
+              kind: "rewrite",
+              cardId: "card-1",
+              title: "Revised arrival",
+              intention: null,
+              toIndex: null,
+              reason: "Clarify the arrival",
+            },
+            precondition: {
+              kind: "card",
+              target: {
+                sourceId: "card-1",
+                order: 0,
+                fingerprint: "card-fingerprint",
+                sourceType: "outline-card",
+                label: "Arrival",
+                exactText: "Arrival",
+                previewText: "Arrival",
+              },
+            },
+          },
+          {
+            id: "change-2",
+            change: {
+              kind: "add",
+              cardId: null,
+              title: "Departure",
+              intention: "Leave the city",
+              toIndex: null,
+              reason: "Complete the journey",
+            },
+            precondition: {
+              kind: "outline-order",
+              orderFingerprint: "original-outline-order",
+            },
+          },
+        ],
+      },
+    ];
+    const manuscriptReview: ProposalReviewPreconditions = {
+      kind: "manuscript",
+      changes: {
+        "change-2": {
+          kind: "target",
+          target: {
+            sourceId: "block-1",
+            order: 2,
+            fingerprint: "advanced-fingerprint",
+            sourceType: "narration",
+            label: "Narration block",
+            exactText: "The advanced source.",
+            previewText: "The advanced source.",
+          },
+        },
+      },
+    };
+    const outlineReview: ProposalReviewPreconditions = {
+      kind: "outline",
+      changes: {
+        "change-2": {
+          kind: "outline-order",
+          orderFingerprint: "advanced-outline-order",
+        },
+      },
+    };
+    const appliedDecisions: AgentProposalRecord["decisions"] = {
+      "change-1": { status: "applied", decidedAt: "2026-10-07T12:00:00.000Z" },
+    };
+
+    function persistedReviewState(args: {
+      reviewProposal: PendingProposal;
+      reviewPreconditions: unknown;
+      decisions: AgentProposalRecord["decisions"];
+    }): unknown {
+      const { projectRoot: _projectRoot, ...persistedProposal } = args.reviewProposal;
+      return {
+        ...emptyPersistedAgentState(),
+        proposalRecords: [{
+          proposal: persistedProposal,
+          source: { kind: "legacy" },
+          decisions: args.decisions,
+          replacedByProposalId: null,
+          reviewPreconditions: args.reviewPreconditions,
+        }],
+        currentProposalId: persistedProposal.id,
+      };
+    }
+
+    it.each(reviewProposals)("round-trips $kind review preconditions and the original draft", async (reviewProposal) => {
+      const reviewPreconditions = reviewProposal.kind === "manuscript"
+        ? manuscriptReview
+        : outlineReview;
+      const record: AgentProposalRecord = {
+        proposal: reviewProposal,
+        source: { kind: "legacy" },
+        decisions: appliedDecisions,
+        replacedByProposalId: null,
+        reviewPreconditions,
+      };
+      useAgentConsoleStore.getState().hydrate("/books/one", {
+        ...emptyPersistedAgentState(),
+        proposalRecords: [record],
+        currentProposalId: reviewProposal.id,
+      });
+
+      const snapshot = await toAgentSnapshot();
+      const restored = await fromAgentSnapshot("/books/reopened", snapshot);
+
+      expect(snapshot.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+      expect(restored.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+      expect(restored.proposalRecords[0].proposal).toEqual({
+        ...reviewProposal,
+        projectRoot: "/books/reopened",
+      });
+      expect(restored.proposalRecords[0].decisions).toEqual(record.decisions);
+    });
+
+    it.each(reviewProposals)("loads empty $kind review preconditions without an applied decision", async (reviewProposal) => {
+      const reviewPreconditions = { kind: reviewProposal.kind, changes: {} };
+
+      const restored = await fromAgentSnapshot("/books/one", persistedReviewState({
+        reviewProposal,
+        reviewPreconditions,
+        decisions: {},
+      }));
+
+      expect(restored.proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+    });
+
+    it("preserves removed-source review guards through hydration", async () => {
+      if (manuscriptReview.kind !== "manuscript") throw new Error("Expected manuscript guards");
+      const change = manuscriptReview.changes["change-2"];
+      if (change === undefined || change.kind !== "target") throw new Error("Expected target guard");
+      const reviewPreconditions: ProposalReviewPreconditions = {
+        kind: "manuscript",
+        changes: { "change-2": { ...change, target: { ...change.target, removed: true } } },
+      };
+      const restored = await fromAgentSnapshot("/books/one", persistedReviewState({
+        reviewProposal: reviewProposals[0], reviewPreconditions, decisions: appliedDecisions,
+      }));
+      useAgentConsoleStore.getState().hydrate("/books/one", restored);
+      expect(selectPendingProposal(useAgentConsoleStore.getState(), proposal.id)).toMatchObject({
+        changes: [{ id: "change-2", precondition: { target: { removed: true } } }],
+      });
+      expect((await toAgentSnapshot()).proposalRecords[0].reviewPreconditions).toEqual(reviewPreconditions);
+    });
+
+    it("loads old v4 proposal records without review preconditions", async () => {
+      const { projectRoot: _projectRoot, ...persistedProposal } = proposal;
+
+      const restored = await fromAgentSnapshot(
+        "/books/one",
+        persistedProposalState(persistedProposal, proposal.id),
+      );
+
+      expect(restored.proposalRecords[0]).not.toHaveProperty("reviewPreconditions");
+      expect(restored.proposalRecords[0].proposal).toEqual(proposal);
+    });
+
+    it.each([
+      {
+        name: "unknown change IDs",
+        reviewPreconditions: {
+          kind: "manuscript",
+          changes: { unknown: manuscriptReview.changes["change-2"] },
+        },
+      },
+      { name: "a proposal kind mismatch", reviewPreconditions: outlineReview },
+      {
+        name: "an empty proposal kind mismatch",
+        reviewPreconditions: { kind: "outline", changes: {} },
+      },
+      {
+        name: "a manuscript change correlation mismatch",
+        reviewPreconditions: {
+          kind: "manuscript",
+          changes: {
+            "change-2": {
+              kind: "insert",
+              boundary: "immediate",
+              anchor: null,
+              expectedNext: null,
+            },
+          },
+        },
+      },
+    ])("rejects review preconditions with $name", async ({ reviewPreconditions }) => {
+      const raw = persistedReviewState({
+        reviewProposal: reviewProposals[0],
+        reviewPreconditions,
+        decisions: appliedDecisions,
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
+
+    it("rejects an outline review precondition correlation mismatch", async () => {
+      const reviewProposal = reviewProposals[1];
+      if (reviewProposal.kind !== "outline") throw new Error("Expected an outline proposal fixture.");
+      const raw = persistedReviewState({
+        reviewProposal,
+        reviewPreconditions: {
+          kind: "outline",
+          changes: { "change-2": reviewProposal.changes[0].precondition },
+        },
+        decisions: appliedDecisions,
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
+
+    it.each(["undecided", "dismissed"])("rejects nonempty review preconditions when earlier changes are %s", async (status) => {
+      const raw = persistedReviewState({
+        reviewProposal: reviewProposals[0],
+        reviewPreconditions: manuscriptReview,
+        decisions: status === "dismissed"
+          ? { "change-1": { status: "dismissed", decidedAt: "2026-10-07T12:00:00.000Z" } }
+          : {},
+      });
+
+      await expect(fromAgentSnapshot("/books/one", raw)).rejects.toMatchObject({
+        issue: { kind: "corrupt", projectRoot: "/books/one" },
+      });
+    });
   });
 
   it("round-trips explicit immediate and next-prose insert boundaries", async () => {
@@ -1388,6 +1940,108 @@ describe("agent persistence", () => {
     await switching;
     expect(tauri.readAppData).toHaveBeenCalledWith(agentStateKey("/books/new"));
   });
+
+  it.each([
+    { kind: "outline", chapterId: "waiting-session" },
+    { kind: "character", characterId: "waiting-session" },
+  ] satisfies Exclude<AgentSessionId, { kind: "project" }>[])(
+    "waits for the old project save before hydrating its new $kind session",
+    async (sessionId) => {
+      const oldRoot = "/books/scoped-save-old";
+      const nextRoot = "/books/scoped-save-new";
+      useProjectStore.setState({ project: project(oldRoot), status: "ready" });
+      await transitionAgentProject(oldRoot);
+      useAgentConsoleStore.getState().setDraftText("Old project draft");
+      const oldWrite = deferred<void>();
+      tauri.writeAppData.mockReturnValueOnce(oldWrite.promise);
+      useProjectStore.setState({
+        project: project(nextRoot),
+        meta: { ...EMPTY_META, characters: [{
+          id: "waiting-session", name: "Mara", role: "Courier", color: "#123456",
+          profile: { appearance: "", mannerisms: "", motivations: "", relationships: "", history: "", voice: "" },
+        }] },
+      });
+      const switching = transitionAgentProject(nextRoot);
+      await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentStateKey(oldRoot), expect.objectContaining({ draftText: "Old project draft" }),
+      ));
+      vi.useFakeTimers();
+      let settled = false;
+      const hydration = (sessionId.kind === "outline"
+        ? hydrateAgentOutlineSession(nextRoot, sessionId.chapterId)
+        : hydrateAgentCharacterSession(nextRoot, sessionId.characterId)
+      ).then(() => {
+        settled = true;
+        const store = agentSessionStore(sessionId);
+        store.getState().setDraftText("New scoped draft");
+        store.getState().beginPreflight();
+        return store;
+      });
+      let settledBeforeSave = false;
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        settledBeforeSave = settled;
+      } finally {
+        oldWrite.resolve(undefined);
+      }
+      const [, hydratedStore] = await Promise.all([switching, hydration]);
+
+      expect(settledBeforeSave).toBe(false);
+      expect(agentSessionStore(sessionId)).toBe(hydratedStore);
+      expect(hydratedStore.getState()).toMatchObject({
+        hydratedProjectRoot: nextRoot,
+        draftText: "New scoped draft",
+        runStatus: "submitted",
+      });
+      await saveAgentSessionCollection(nextRoot);
+      expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentSessionCollectionKey(nextRoot),
+        expect.objectContaining({ sessions: expect.objectContaining({
+          [`${sessionId.kind}:waiting-session`]: expect.objectContaining({ draftText: "New scoped draft" }),
+        }) }),
+      );
+    },
+  );
+
+  it.each([
+    { kind: "outline", chapterId: "waiting-session" },
+    { kind: "character", characterId: "waiting-session" },
+  ] satisfies Exclude<AgentSessionId, { kind: "project" }>[])(
+    "cancels stale $kind hydration when the project changes during its wait",
+    async (sessionId) => {
+      const oldRoot = "/books/scoped-switch-old";
+      const firstRoot = "/books/scoped-switch-first";
+      const secondRoot = "/books/scoped-switch-second";
+      useProjectStore.setState({ project: project(oldRoot), status: "ready" });
+      await transitionAgentProject(oldRoot);
+      const oldWrite = deferred<void>();
+      tauri.writeAppData.mockReturnValueOnce(oldWrite.promise);
+      tauri.readAppData.mockImplementation(async (key: string) =>
+        key === agentSessionCollectionKey(secondRoot)
+          ? { v: 1, sessions: { [`${sessionId.kind}:waiting-session`]: persistedState("Current scoped draft", []) } }
+          : null,
+      );
+      useProjectStore.setState({ project: project(firstRoot) });
+      const firstSwitch = transitionAgentProject(firstRoot);
+      await vi.waitFor(() => expect(tauri.writeAppData).toHaveBeenCalledWith(
+        agentStateKey(oldRoot), expect.anything(),
+      ));
+      const hydration = sessionId.kind === "outline"
+        ? hydrateAgentOutlineSession(firstRoot, sessionId.chapterId)
+        : hydrateAgentCharacterSession(firstRoot, sessionId.characterId);
+      useProjectStore.setState({ project: project(secondRoot) });
+      const secondSwitch = transitionAgentProject(secondRoot);
+      oldWrite.resolve(undefined);
+      await Promise.all([firstSwitch, secondSwitch, hydration]);
+
+      expect(tauri.readAppData).not.toHaveBeenCalledWith(agentSessionCollectionKey(firstRoot));
+      expect(agentSessionStore(sessionId).getState()).toMatchObject({
+        hydratedProjectRoot: secondRoot,
+        draftText: "Current scoped draft",
+        persistenceTransition: null,
+      });
+    },
+  );
 
   it("closes manuscript review synchronously when switching roots", async () => {
     await transitionAgentProject("/books/review-old");
@@ -3309,6 +3963,7 @@ describe("agent persistence", () => {
 
     const firstHydration = hydrateAgentOutlineSession(root, chapterId);
     const secondHydration = hydrateAgentOutlineSession(root, chapterId);
+    await vi.waitFor(() => expect(tauri.readAppData).toHaveBeenCalledOnce());
     planner.getState().hydrate(root, emptyPersistedAgentState());
     planner.getState().beginPreflight();
     read.resolve({
@@ -3935,5 +4590,43 @@ describe("retained Changes persistence", () => {
     await expect(retryAgentSessionPersistence(root, sessionId)).rejects.toThrow();
     expect(tauri.writeAppData).not.toHaveBeenCalled();
     expect(raw).toEqual({ v: 1, sessions: "unreadable" });
+  });
+});
+
+
+describe("persisted proposal origin receipts", () => {
+  const sourceTask = { kind: "selected-block-edit", chapterId: "chapter-1", blockIds: ["block-1"], operation: "clean" } satisfies AgentTask;
+
+  it.each(["edit", "legacy"] as const)("round-trips the %s original mode and selection in optional v4 receipts", async (mode) => {
+    if (proposal.kind !== "manuscript" || proposal.changes[0].precondition.kind !== "target") throw new Error("Expected original source receipt");
+    const locator = proposal.changes[0].precondition.target;
+    const origin: ProposalOrigin = { kind: "selected-block-edit", mode, chapterId: "chapter-1", operation: "clean", blocks: [locator],
+      identity: { generation: "parsed-chapter", blockIds: [locator.sourceId], locators: { [locator.sourceId]: locator } } };
+    const record: AgentProposalRecord = { proposal, source: { kind: "run", runId: "original-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null };
+    useAgentConsoleStore.setState({ proposalRecords: [record], currentProposalId: proposal.id });
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/books/one", JSON.parse(JSON.stringify(snapshot)));
+    expect(restored.proposalRecords[0].source).toEqual(record.source);
+    expect(snapshot.v).toBe(4);
+  });
+
+  it("continues reading v4 run sources that predate origin receipts", async () => {
+    const record: AgentProposalRecord = { proposal, source: { kind: "run", runId: "old-run", task: sourceTask, text: "Clean" }, decisions: {}, replacedByProposalId: null };
+    useAgentConsoleStore.setState({ proposalRecords: [record], currentProposalId: proposal.id });
+    const restored = await fromAgentSnapshot("/books/one", JSON.parse(JSON.stringify(await toAgentSnapshot())));
+    expect(restored.proposalRecords[0].source).toEqual(record.source);
+    expect(restored.proposalRecords[0].source).not.toHaveProperty("origin");
+  });
+
+  it.each([
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "invented", blocks: [] },
+    { kind: "task", mode: "edit", task: { kind: "proposal-follow-up", proposalId: "itself" } },
+    { kind: "bridge", mode: "edit", chapterId: "chapter-1", anchor: { sourceId: "missing-receipt" }, successor: null },
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "clean", blocks: [], identity: { generation: "", blockIds: [], locators: {} } },
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "clean", blocks: [], identity: { generation: "chapter", blockIds: [], locators: [], invented: true } },
+  ])("rejects malformed $kind receipts at the persistence boundary", async (origin) => {
+    const { projectRoot: _projectRoot, ...persistedProposal } = proposal;
+    const snapshot = { ...emptyPersistedAgentState(), proposalRecords: [{ proposal: persistedProposal, source: { kind: "run", runId: "bad-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null }], currentProposalId: proposal.id };
+    await expect(fromAgentSnapshot("/books/one", snapshot)).rejects.toMatchObject({ issue: { kind: "corrupt" } });
   });
 });

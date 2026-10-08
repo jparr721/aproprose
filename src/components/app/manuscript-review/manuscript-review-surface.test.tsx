@@ -981,7 +981,7 @@ describe("ManuscriptReviewSurface decisions and lifecycle", () => {
     ]);
   });
 
-  it("reprojects a dependent move as stale after accepting a removal", () => {
+  it("keeps a retained move fresh after accepting its sibling removal", () => {
     const current = proposal("proposal-dependent", [
       removeChange("remove-bravo", frozenBlocks, 1),
       moveChange("move-charlie", frozenBlocks, 2, 0),
@@ -1002,18 +1002,63 @@ describe("ManuscriptReviewSurface decisions and lifecycle", () => {
     ).toBe(false);
     expect(
       container.querySelector(
-        '[data-review-row-kind="stale"][data-agent-change-id="move-charlie"]',
+        '[data-review-row-kind="move-destination"][data-agent-change-id="move-charlie"]',
       ),
     ).toBeTruthy();
-    expect(screen.getByText("Source changed - regenerate")).toBeTruthy();
+    expect(screen.queryByText("Source changed - regenerate")).toBeNull();
     expect(screen.getByRole("button", { name: "Accept All" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
     expect(screen.getByRole("button", { name: "Reject All" })).toHaveProperty(
       "disabled",
       false,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
+
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "charlie", "alpha", "dialogue", "scene",
+    ]);
+    expect(useAgentConsoleStore.getState().pendingProposal).toBeNull();
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
+    expect(container.querySelector('[data-slot="card"]')).toBeNull();
+  });
+
+  it("marks a retained move stale when the author edits after its sibling removal", () => {
+    const current = proposal("proposal-dependent-author-edit", [
+      removeChange("remove-bravo", frozenBlocks, 1),
+      moveChange("move-charlie", frozenBlocks, 2, 0),
+    ]);
+    const { container } = renderProposal(current);
+    const removeRow = container.querySelector(
+      '[data-agent-decision-change-id="remove-bravo"]',
+    );
+    if (!(removeRow instanceof HTMLElement)) throw new Error("Expected the removal decision row");
+
+    fireEvent.click(within(removeRow).getByRole("button", { name: "Accept" }));
+    act(() => {
+      useProjectStore.getState().updateBlock("alpha", { text: "The author changed the harbor." });
+    });
+
+    expect(
+      container.querySelector(
+        '[data-review-row-kind="stale"][data-agent-change-id="move-charlie"]',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Source changed - regenerate")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Accept All" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Accept" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Reject All" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Accept All" }));
+    expect(useProjectStore.getState().blocks.map((block) => block.id)).toEqual([
+      "alpha", "charlie", "dialogue", "scene",
+    ]);
+    expect(useProjectStore.getState().blocks[0].text).toBe("The author changed the harbor.");
+    expect(useAgentConsoleStore.getState().pendingProposal).toMatchObject({
+      id: current.id, changes: [{ id: "move-charlie" }],
+    });
+    expect(useViewStore.getState().manuscriptReviewProposalId).toBe(current.id);
   });
 
   it("accepts all fresh changes and removes the exhausted surface", () => {

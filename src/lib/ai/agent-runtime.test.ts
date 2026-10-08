@@ -2,6 +2,9 @@ import type {
   LanguageModelV3StreamPart,
   LanguageModelV3StreamResult,
 } from "@ai-sdk/provider";
+import { Book } from "@/book";
+import { EMPTY_META } from "@/lib/migration";
+import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
 import { describe, expect, it, vi } from "vitest";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
@@ -173,13 +176,21 @@ function overviewStageToolCallResult(): LanguageModelV3StreamResult {
 function makeEnvironment(): AgentToolEnvironment {
   return {
     run,
+    policy: compileAgentPolicy({ mode: run.mode, task: run.task, sessionId: { kind: "project" }, styleGuide: "", editingRules: "" }),
+    assertRunOwnership: () => {},
+    book: new Book({
+      project: { root: "/book", name: "Book", mainFile: "main.tex", title: "Book", author: "Author", metadata: { title: "Book", subtitle: "", author: "Author", publisher: "", isbn: "" }, chapters: [{ id: "ch1", title: "One", label: "1", file: "one.tex", wordCount: 0 }] },
+      meta: structuredClone(EMPTY_META),
+      chapter: { chapterId: "ch1", title: "One", blocks: [] },
+      loadChapter: async () => { throw new Error("Unexpected chapter read"); },
+    }),
     signal: new AbortController().signal,
     readChapter: async (chapterId) => ({
       chapterId,
       title: "Chapter One",
       blocks: [],
     }),
-    readOutline: async () => ({ premise: "", chapters: [] }),
+    readOutline: async () => ({ premise: "", overview: "", characters: [], chapters: [] }),
     readLore: async () => ({ entries: [] }),
     runCritique: async () => [],
     runContinuity: async () => [],
@@ -197,6 +208,7 @@ function makeEnvironment(): AgentToolEnvironment {
     replacePendingProposal: () => {
       throw new Error("Unexpected proposal replacement");
     },
+    updateCharacterProfile: async () => { throw new Error("Unexpected character update"); },
   };
 }
 
@@ -274,7 +286,7 @@ describe("streamAgentRun", () => {
     const model = new MockLanguageModelV3({
       doStream: async () => {
         modelCalls += 1;
-        return manuscriptStageToolCallResult(`call-stage-${modelCalls}`);
+        return modelCalls <= 2 ? manuscriptStageToolCallResult(`call-stage-${modelCalls}`) : textResult("Review the passage and tell me which direction works.");
       },
     });
     const input = makeRuntimeInput(model);
@@ -288,7 +300,7 @@ describe("streamAgentRun", () => {
       },
     });
 
-    expect(modelCalls).toBe(2);
+    expect(modelCalls).toBe(3);
     expect(stagingAttempts).toBe(2);
     expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
   });
@@ -318,6 +330,7 @@ describe("streamAgentRun", () => {
     const model = new MockLanguageModelV3({
       doStream: async () => {
         modelCalls += 1;
+        if (modelCalls > 2) return textResult("Which consequence should this card establish?");
         return streamResult([
           {
             type: "tool-call",
@@ -347,12 +360,12 @@ describe("streamAgentRun", () => {
       },
     });
 
-    expect(modelCalls).toBe(2);
+    expect(modelCalls).toBe(3);
     expect(stagingAttempts).toBe(2);
     expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
   });
 
-  it("stops after a successful overview proposal is staged", async () => {
+  it("explains a successful overview proposal before yielding", async () => {
     let modelCalls = 0;
     const proposal: PendingProposal = {
       id: "overview-proposal-1",
@@ -375,7 +388,7 @@ describe("streamAgentRun", () => {
     const model = new MockLanguageModelV3({
       doStream: async () => {
         modelCalls += 1;
-        return overviewStageToolCallResult();
+        return modelCalls === 1 ? overviewStageToolCallResult() : textResult("Review this overview change.");
       },
     });
     const input = makeRuntimeInput(model);
@@ -389,11 +402,11 @@ describe("streamAgentRun", () => {
       },
     });
 
-    expect(modelCalls).toBe(1);
+    expect(modelCalls).toBe(2);
     expect(replacePendingProposal).toHaveBeenCalledExactlyOnceWith(proposal);
   });
 
-  it("bounds failed manuscript staging recovery at eight model steps", async () => {
+  it("bounds failed manuscript staging recovery at the specialist step budget", async () => {
     let modelCalls = 0;
     const onToolFailure = vi.fn(async () => undefined);
     const replacePendingProposal = vi.fn();
@@ -414,8 +427,8 @@ describe("streamAgentRun", () => {
       onToolFailure,
     });
 
-    expect(modelCalls).toBe(8);
-    expect(onToolFailure).toHaveBeenCalledTimes(8);
+    expect(modelCalls).toBe(24);
+    expect(onToolFailure).toHaveBeenCalledTimes(24);
     expect(replacePendingProposal).not.toHaveBeenCalled();
   });
 
@@ -507,7 +520,7 @@ describe("streamAgentRun", () => {
     });
   });
 
-  it("uses frozen instructions and stops after eight non-staging steps", async () => {
+  it("uses frozen instructions and stops after the specialist non-staging step budget", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
       doStream: async (options) => {
@@ -524,7 +537,7 @@ describe("streamAgentRun", () => {
 
     await streamAgentRun(makeRuntimeInput(model));
 
-    expect(calls).toBe(8);
+    expect(calls).toBe(24);
   });
 
   it.each([

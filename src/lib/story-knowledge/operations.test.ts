@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emptyCharacterProfile } from "@/lib/story-knowledge/model";
@@ -28,7 +29,7 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { warning: vi.fn() },
+  toast: { warning: vi.fn(), error: vi.fn() },
 }));
 
 const knowledgeModel = new MockLanguageModelV3();
@@ -141,7 +142,11 @@ function chapterKnowledge(): ChapterKnowledge {
   };
 }
 
-beforeEach(() => vi.mocked(generateText).mockReset());
+beforeEach(() => {
+  vi.mocked(generateText).mockReset();
+  vi.mocked(toast.warning).mockReset();
+  vi.mocked(toast.error).mockReset();
+});
 
 describe("story chunk analysis", () => {
   it("drops map observations that cite unknown characters or unoffered evidence", async () => {
@@ -355,13 +360,18 @@ describe("story chunk analysis", () => {
   it("forwards abort and retries one failed generation", async () => {
     const abort = new AbortController();
     vi.mocked(generateText)
-      .mockRejectedValueOnce(new Error("temporary"))
+      .mockRejectedValueOnce(Object.assign(new Error("provider temporarily unavailable"), { statusCode: 503 }))
       .mockResolvedValueOnce({ output: emptyMapOutput() } as never);
 
     await analyzeStoryChunk(mapInputFixture(), aiOptions(abort.signal));
 
     expect(generateText).toHaveBeenCalledTimes(2);
     expect(vi.mocked(generateText).mock.calls[1][0].abortSignal).toBe(abort.signal);
+    expect(toast.warning).toHaveBeenCalledExactlyOnceWith(
+      "Your AI provider is temporarily unavailable. Retry shortly.",
+      { id: "ai-request-retry", description: "Retrying once." },
+    );
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("prompts for evidence-only analysis without permanent traits from reactions", async () => {

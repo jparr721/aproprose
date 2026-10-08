@@ -23,7 +23,8 @@ interface GenerationRequest {
 const mocks = vi.hoisted(() => ({
   getModel: vi.fn<(provider: AiProvider, modelId: string) => Promise<LanguageModel>>(),
   generateText: vi.fn<(request: GenerationRequest) => Promise<{ output: unknown }>>(),
-  warning: vi.fn<(message: string) => void>(),
+  warning: vi.fn<typeof import("sonner").toast.warning>(),
+  error: vi.fn<typeof import("sonner").toast.error>(),
 }));
 
 vi.mock("ai", async (importOriginal) => {
@@ -33,7 +34,7 @@ vi.mock("ai", async (importOriginal) => {
 
 vi.mock("@/lib/ai/model", () => ({ getModel: mocks.getModel }));
 
-vi.mock("sonner", () => ({ toast: { warning: mocks.warning } }));
+vi.mock("sonner", () => ({ toast: { warning: mocks.warning, error: mocks.error } }));
 
 const model: LanguageModel = new MockLanguageModelV3();
 
@@ -53,6 +54,7 @@ beforeEach(() => {
     output: { text: "Use direct, spare prose. Preserve deliberate fragments." },
   });
   mocks.warning.mockReset();
+  mocks.error.mockReset();
 });
 
 describe("refinePreference", () => {
@@ -164,7 +166,7 @@ describe("refinePreference", () => {
     { name: "whitespace-only text", output: { text: " \n\t " } },
     { name: "oversized text", output: { text: "x".repeat(PREFERENCE_MAX_CHARS + 1) } },
   ] satisfies Array<{ name: string; output: unknown }>)(
-    "validates $name even when the SDK does not validate it",
+    "rejects $name without retrying when SDK validation is bypassed",
     async ({ output }) => {
       mocks.generateText.mockResolvedValue({ output });
 
@@ -172,8 +174,12 @@ describe("refinePreference", () => {
         refinePreference(existingPreference, options(new AbortController().signal)),
       ).rejects.toBeInstanceOf(ZodError);
 
-      expect(mocks.generateText).toHaveBeenCalledTimes(2);
-      expect(mocks.warning).toHaveBeenCalledExactlyOnceWith("AI request failed - retrying");
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.warning).not.toHaveBeenCalled();
+      expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
+        "The AI request could not be completed. Retry the request.",
+        { id: "ai-request-error", action: undefined },
+      );
     },
   );
 
@@ -189,7 +195,7 @@ describe("refinePreference", () => {
         selected.provider = "openai";
         selected.modelId = "different-model";
         selected.signal = new AbortController().signal;
-        throw new Error("temporary transport failure");
+        throw Object.assign(new Error("provider temporarily unavailable"), { statusCode: 503 });
       })
       .mockResolvedValueOnce({ output: { text: "Retained author intent." } });
 
@@ -206,13 +212,17 @@ describe("refinePreference", () => {
     expect(second.model).toBe(first.model);
     expect(second.abortSignal).toBe(controller.signal);
     expect(second.maxRetries).toBe(0);
-    expect(mocks.warning).toHaveBeenCalledOnce();
+    expect(mocks.warning).toHaveBeenCalledExactlyOnceWith(
+      "Your AI provider is temporarily unavailable. Retry shortly.",
+      { id: "ai-request-retry", description: "Retrying once." },
+    );
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("keeps the last failure after the single retry", async () => {
-    const last: Error = new Error("provider is still unavailable");
+    const last: Error = Object.assign(new Error("provider is still unavailable"), { statusCode: 503 });
     mocks.generateText
-      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error("network connection lost"))
       .mockRejectedValueOnce(last);
 
     await expect(
@@ -220,7 +230,33 @@ describe("refinePreference", () => {
     ).rejects.toBe(last);
 
     expect(mocks.generateText).toHaveBeenCalledTimes(2);
-    expect(mocks.warning).toHaveBeenCalledOnce();
+    expect(mocks.warning).toHaveBeenCalledExactlyOnceWith(
+      "The AI request could not be completed. Check your connection and retry.",
+      { id: "ai-request-retry", description: "Retrying once." },
+    );
+    expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
+      "Your AI provider is temporarily unavailable. Retry shortly.",
+      { id: "ai-request-error", action: undefined },
+    );
+  });
+
+  it("does not retry rejected credentials and preserves the original error", async () => {
+    const failure: Error = Object.assign(new Error("unauthorized private provider detail"), { statusCode: 401 });
+    mocks.generateText.mockRejectedValueOnce(failure);
+
+    await expect(
+      refinePreference(existingPreference, options(new AbortController().signal)),
+    ).rejects.toBe(failure);
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
+      "Replace the AI provider key, then submit again.",
+      {
+        id: "ai-request-error",
+        action: { label: "Open AI settings", onClick: expect.any(Function) },
+      },
+    );
   });
 
   it("does not generate when model resolution fails", async () => {
@@ -265,6 +301,7 @@ describe("refinePreference", () => {
     expect(mocks.getModel).not.toHaveBeenCalled();
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("rejects cancellation during model resolution before generation", async () => {
@@ -279,6 +316,7 @@ describe("refinePreference", () => {
 
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("discards a response that arrives after cancellation", async () => {
@@ -293,6 +331,7 @@ describe("refinePreference", () => {
 
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("does not retry a transport rejection caused by cancellation", async () => {
@@ -307,6 +346,7 @@ describe("refinePreference", () => {
 
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("does not retry an SDK abort error", async () => {
@@ -318,5 +358,6 @@ describe("refinePreference", () => {
 
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 });

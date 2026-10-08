@@ -423,6 +423,14 @@ residual risk: inherited descendant-process cleanup and separate real-PDF race r
 - Legacy frontmatter migration positive control passed separately (`r4-legacy-positive.log`).
 - Root creates the standalone bug-fix commit and ledger checkpoint, then exact full local gate and push before final fresh round 5. Full gate remains pending; no additional approval or completed review claimed.
 
+### Round 4 fix full gate / required CI context repair
+
+- S4-1 standalone fix `36d1ac1`, browser measurement fixture repair `9f12476`: complete exact local gate PASS with 1784 frontend tests, 36 browser tests, 92 native tests plus 2 explicitly passed ignored tests, typecheck/build/version, strict lint, isolated QA bundle, and actual packaged launch. Evidence `r4-full-gate.log` and `final-*` logs.
+- Browser fixture previously compared pane/widget bounds across different animation frames. Separate fixture repair measures both atomically with unchanged bounds/tolerance; four focused tests passed before the complete gate. Production UI behavior unchanged by this fixture correction.
+- Live branch protection requires legacy context names (`typecheck + tests`, `cargo test + clippy`, Chromium/WebKit regression) omitted by renamed reusable validation. Root's YAML-versus-live-API regression observed three missing contexts, then all four required contexts present. Workflow assertion accepts only success and rejects failure, canceled, skipped, and empty outcomes.
+- Standalone CI fix `e32ba21` emits required context names through a fail-closed matrix depending on the entire reusable validation. Branch protection itself was not edited.
+- Rerun exact full gate on final documentation plus CI commit before push/final round 5. Earlier green gate does not cover `e32ba21`; no final push or review approval claimed yet.
+
 - QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.
 - Deck convention: self-contained HTML with screenshots in `docs/slides/<topic>-YYYY-MM-DD.html`; one screenshot per captioned slide, assets embedded or under `docs/slides`.

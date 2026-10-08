@@ -158,7 +158,7 @@ function assertNoDroppedChanges(
   );
 }
 
-function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
+export function blockLocator(blocks: Block[], sourceId: string): SourceLocator {
   const order = blocks.findIndex((block) => block.id === sourceId);
   if (order < 0) {
     throw new AgentProposalError("source-missing", `Block not found: ${sourceId}`);
@@ -563,7 +563,7 @@ export interface StaleProposalChange {
   reason: ProposalStaleReason;
 }
 
-function resolveBlockLocator(
+export function resolveBlockLocator(
   locator: SourceLocator,
   blocks: Block[],
 ): Block | null {

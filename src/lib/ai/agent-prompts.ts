@@ -102,6 +102,7 @@ function taskInstructions(task: AgentTask): string {
 }
 
 export interface AgentPolicyInput {
+  origin?: { mode: AgentMode; task: AgentTask };
   mode: AgentMode;
   task: AgentTask;
   styleGuide: string;
@@ -125,14 +126,17 @@ export function resolvePurposeAgentAction(args: Pick<AgentPolicyInput, "mode" | 
 }
 
 export function compileAgentPolicy(args: AgentPolicyInput): PurposeAgentPolicy {
-  const action = resolvePurposeAgentAction(args);
+  const purpose = args.origin ?? args;
+  const action = resolvePurposeAgentAction({ ...args, mode: purpose.mode, task: purpose.task });
   const author = new AuthorProfile({ read: () => ({ styleGuide: args.styleGuide, editingRules: args.editingRules }) }).resolve();
   const marker = action === "chapter-planner" ? OUTLINE_PLANNING_MARKER
     : action === "character-developer" ? CHARACTER_DESCRIBE_MARKER
-      : args.mode === "writing" ? WRITING_MODE_MARKER : EDIT_MODE_MARKER;
+      : purpose.mode === "writing" ? WRITING_MODE_MARKER : EDIT_MODE_MARKER;
   return createPurposeAgent(action, author).compile({
     applicationInstructions: action === "character-developer" ? "Work only on the open project. Never expose chain-of-thought or hidden reasoning." : BASE_AGENT_INSTRUCTIONS,
-    taskInstructions: taskInstructions(args.task),
+    taskInstructions: args.task.kind === "proposal-follow-up" && purpose.task.kind !== "proposal-follow-up"
+      ? `${taskInstructions(purpose.task)}\n${taskInstructions(args.task)}`
+      : taskInstructions(args.task),
     marker,
   });
 }

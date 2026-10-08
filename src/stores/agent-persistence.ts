@@ -46,59 +46,19 @@ import { useViewStore } from "@/stores/view-store";
 
 const agentModeSchema = z.enum(["writing", "edit"]);
 
+const generalTaskSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("conversation"), targetChapterId: z.string().nullable() }),
+  z.strictObject({ kind: z.literal("chapter-analysis"), chapterId: z.string(), analysis: z.enum(["critique", "continuity"]) }),
+  z.strictObject({ kind: z.literal("next-beat"), chapterId: z.string(), blockIds: z.array(z.string()) }),
+  z.strictObject({ kind: z.literal("outline-sculpt"), chapterId: z.string() }),
+  z.strictObject({ kind: z.literal("character-describe"), characterId: z.string().min(1) }),
+]);
+
 const agentTaskSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("conversation"),
-      targetChapterId: z.string().nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("bridge"),
-      chapterId: z.string(),
-      anchorBlockId: z.string().nullable(),
-      successorBlockId: z.string().nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("selected-block-edit"),
-      chapterId: z.string(),
-      blockIds: z.array(z.string()),
-      operation: z.enum(["clean", "structure", "custom"]),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("chapter-analysis"),
-      chapterId: z.string(),
-      analysis: z.enum(["critique", "continuity"]),
-    })
-    .strict(),
-  z.strictObject({
-    kind: z.literal("next-beat"),
-    chapterId: z.string(),
-    blockIds: z.array(z.string()),
-  }),
-  z
-    .object({
-      kind: z.literal("outline-sculpt"),
-      chapterId: z.string(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("character-describe"),
-      characterId: z.string().min(1),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("proposal-follow-up"),
-      proposalId: z.string(),
-    })
-    .strict(),
+  ...generalTaskSchema.options,
+  z.strictObject({ kind: z.literal("bridge"), chapterId: z.string(), anchorBlockId: z.string().nullable(), successorBlockId: z.string().nullable() }),
+  z.strictObject({ kind: z.literal("selected-block-edit"), chapterId: z.string(), blockIds: z.array(z.string()), operation: z.enum(["clean", "structure", "custom"]) }),
+  z.strictObject({ kind: z.literal("proposal-follow-up"), proposalId: z.string() }),
 ]);
 
 const draftContextRefSchema = z.discriminatedUnion("kind", [
@@ -318,6 +278,20 @@ const pendingProposalSchema = z
     });
   });
 
+const proposalOriginSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("legacy") }),
+  z.strictObject({
+    kind: z.literal("selected-block-edit"), mode: agentModeSchema,
+    chapterId: z.string(), operation: z.enum(["clean", "structure", "custom"]),
+    blocks: z.array(sourceLocatorSchema),
+  }),
+  z.strictObject({
+    kind: z.literal("bridge"), mode: agentModeSchema, chapterId: z.string(),
+    anchor: sourceLocatorSchema.nullable(), successor: sourceLocatorSchema.nullable(),
+  }),
+  z.strictObject({ kind: z.literal("task"), mode: agentModeSchema, task: generalTaskSchema }),
+]);
+
 const proposalRecordSchema = z.object({
   proposal: pendingProposalSchema,
   source: z.discriminatedUnion("kind", [
@@ -327,6 +301,7 @@ const proposalRecordSchema = z.object({
       runId: z.string().min(1),
       task: agentTaskSchema,
       text: z.string(),
+      origin: proposalOriginSchema.optional(),
     }).strict(),
   ]),
   decisions: z.record(z.string(), z.object({

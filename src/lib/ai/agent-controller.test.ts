@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
+import type { LanguageModelV3StreamPart, LanguageModelV3StreamResult } from "@ai-sdk/provider";
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -52,6 +53,8 @@ import { modelContextWindow } from "@/lib/ai/agent-compaction";
 import { createAgentToolHandlers } from "@/lib/ai/agent-tools";
 import { projectChapter } from "@/book";
 import { buildManuscriptPendingProposal, buildOutlinePendingProposal } from "@/lib/ai/agent-proposals";
+import { captureProposalOrigin } from "@/lib/ai/proposal-origin";
+import { streamAgentRun } from "@/lib/ai/agent-runtime";
 import type {
   AgentToolFailure,
   StreamAgentRunInput,
@@ -86,7 +89,7 @@ import {
   EMPTY_AGENT_STATE,
   useAgentConsoleStore,
 } from "@/stores/agent-console-store";
-import { emptyPersistedAgentState } from "@/stores/agent-persistence";
+import { emptyPersistedAgentState, fromAgentSnapshot, toAgentSnapshot } from "@/stores/agent-persistence";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useViewStore } from "@/stores/view-store";
@@ -3114,7 +3117,7 @@ describe("retry and local events", () => {
       blocks: [
         block("b1", "Current first.", "narration"),
         block("b2", "Current anchor.", "narration"),
-        block("replacement-successor", "Current successor.", "narration"),
+        block("b3", "Current successor.", "narration"),
       ],
     });
     const dependencies = makeDependencies(null);
@@ -3206,6 +3209,7 @@ describe("proposal staging lifecycle", () => {
     expect(useViewStore.getState().manuscriptReviewProposalId).toBeNull();
     expect(useAgentConsoleStore.getState().proposalRecords[1].source).toEqual({
       kind: "run", runId: run.input.run.id, task: run.input.run.task, text: "Stage a proposal.",
+      origin: { kind: "task", mode: run.input.run.mode, task: run.input.run.task },
     });
     await run.finish();
   });
@@ -3527,5 +3531,188 @@ describe("production compaction", () => {
         system: expect.stringContaining("SPECIALIST CONTRACT: conversation-compactor/1"),
       }),
     );
+  });
+});
+
+
+function providerOriginStream(chunks: LanguageModelV3StreamPart[]): LanguageModelV3StreamResult {
+  return { stream: new ReadableStream<LanguageModelV3StreamPart>({ start(controller) {
+    for (const chunk of chunks) controller.enqueue(chunk);
+    controller.close();
+  } }) };
+}
+
+describe("specialist proposal follow-up origin", () => {
+  it.each(["clean", "structure", "bridge"] as const)(
+    "retains %s policy and frozen scope over two restored follow-ups with renewed IDs",
+    async (operation) => {
+      const source = "First paragraph.\n\nSelected paragraph.\n\nLast paragraph.\n";
+      useProjectStore.setState({ blocks: parseChapter(source) });
+      let replacementTurn = false;
+      const dependencies = makeDependencies(null);
+      dependencies.stream.mockImplementation(streamAgentRun);
+      dependencies.getModel = async () => {
+        let step = 0;
+        return new MockLanguageModelV3({
+          doStream: async (): Promise<LanguageModelV3StreamResult> => {
+            const blocks = useProjectStore.getState().blocks;
+            const outside = replacementTurn && step === 0;
+            const target = blocks[outside ? 0 : 1];
+            const change = operation === "bridge" ? {
+              kind: "insert", blockId: null, afterId: target.id,
+              type: "narration", speaker: null, newText: "A precise bridge.",
+              toIndex: null, reason: "Connect the paragraphs",
+            } : {
+              kind: "rewrite", blockId: target.id, afterId: null,
+              type: "narration", speaker: null, newText: "A precise revision.",
+              toIndex: null, reason: "Improve the selection",
+            };
+            const chunks: LanguageModelV3StreamPart[] = step < (replacementTurn ? 2 : 1)
+              ? [{ type: "tool-call", toolCallId: `stage-${step}`, toolName: "stage_manuscript_proposal",
+                input: JSON.stringify({ summary: "Revise the same task", changes: [change] }) }]
+              : [{ type: "text-start", id: "done" }, { type: "text-delta", id: "done", delta: "Finished" }, { type: "text-end", id: "done" }];
+            step += 1;
+            chunks.push({ type: "finish", finishReason: { unified: chunks[0].type === "tool-call" ? "tool-calls" : "stop", raw: "stop" }, usage: {
+              inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 4, text: 4, reasoning: 0 },
+            } });
+            return providerOriginStream(chunks);
+          },
+        });
+      };
+      const controller = createAgentController(dependencies);
+      const blocks = useProjectStore.getState().blocks;
+      const task: AgentTask = operation === "bridge"
+        ? { kind: "bridge", chapterId: "ch1", anchorBlockId: blocks[1].id, successorBlockId: blocks[2].id }
+        : { kind: "selected-block-edit", chapterId: "ch1", blockIds: [blocks[1].id], operation };
+      expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Perform this action", refs: [], task })).toEqual({ status: "success" });
+      const initialPolicy = dependencies.stream.mock.calls[0][0].environment.policy;
+      expect(initialPolicy.action).toBe(operation === "bridge" ? "bridge-writer" : operation === "clean" ? "copyeditor" : "block-structurer");
+      replacementTurn = true;
+      for (let turn = 0; turn < 2; turn += 1) {
+        const snapshot = await toAgentSnapshot();
+        snapshot.messages = [];
+        snapshot.summary = null;
+        const restored = await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(snapshot)));
+        useAgentConsoleStore.getState().hydrate("/book", restored);
+        const previous = useAgentConsoleStore.getState().pendingProposal;
+        if (previous === null) throw new Error("Expected pending specialist proposal");
+        const renewed = parseChapter(source);
+        expect(renewed[1].id).not.toBe(blocks[1].id);
+        useProjectStore.setState({ blocks: renewed });
+        useSettingsStore.setState({ styleGuide: `Latest author voice ${turn}`, editingRules: `Latest author rule ${turn}` });
+        expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: previous.id } })).toEqual({ status: "success" });
+        const input = dependencies.stream.mock.calls.at(-1)?.[0];
+        if (input === undefined) throw new Error("Expected follow-up stream");
+        expect(input.run.task).toEqual({ kind: "proposal-follow-up", proposalId: previous.id });
+        expect(input.environment.policy.action).toBe(initialPolicy.action);
+        expect(input.environment.policy.capabilities).toEqual(initialPolicy.capabilities);
+        expect(input.environment.policy.stepBudget).toBe(initialPolicy.stepBudget);
+        expect(input.environment.policy.stopAfterProposal).toBe(true);
+        expect(input.instructions).toContain(`Latest author voice ${turn}`);
+        expect(input.instructions).toContain(`Latest author rule ${turn}`);
+        expect(input.instructions).toContain("APROPROSE EDIT MODE");
+        expect(input.instructions).not.toContain("APROPROSE WRITING MODE");
+        expect(input.instructions).toContain(previous.id);
+        expect(input.instructions).toContain(renewed[1].id);
+        const state = useAgentConsoleStore.getState();
+        expect(state.proposalRecords).toHaveLength(turn + 2);
+        expect(state.proposalRecords.at(-2)?.replacedByProposalId).toBe(state.pendingProposal?.id);
+        expect(state.messages.at(-1)?.parts).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: "tool-stage_manuscript_proposal", toolCallId: "stage-0", state: "output-error" }),
+          expect.objectContaining({ type: "tool-stage_manuscript_proposal", toolCallId: "stage-1", state: "output-available" }),
+        ]));
+        expect(state.pendingProposal?.changes[0].change).toMatchObject(operation === "bridge" ? { afterId: renewed[1].id } : { blockId: renewed[1].id });
+      }
+    },
+  );
+});
+
+
+describe("global overview follow-up origin", () => {
+  it("retains a chapter-targeted writer origin for a global overview replacement", async () => {
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => {
+      let staged = false;
+      return new MockLanguageModelV3({ doStream: async () => {
+        const chunks: LanguageModelV3StreamPart[] = staged
+          ? [{ type: "text-start", id: "done" }, { type: "text-delta", id: "done", delta: "Done" }, { type: "text-end", id: "done" }]
+          : [{ type: "tool-call", toolCallId: "overview", toolName: "stage_overview_proposal", input: JSON.stringify({ summary: "Clarify direction", overview: "The conflict changes the whole city.", reason: "Clarify the central stakes" }) }];
+        staged = true;
+        chunks.push({ type: "finish", finishReason: { unified: chunks[0].type === "tool-call" ? "tool-calls" : "stop", raw: "stop" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } });
+        return providerOriginStream(chunks);
+      } });
+    };
+    const controller = createAgentController(dependencies);
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Revise the overview", refs: [], task: conversationTask("ch1") })).toEqual({ status: "success" });
+    const original = useAgentConsoleStore.getState().pendingProposal;
+    if (original === null) throw new Error("Expected overview proposal");
+    expect(original.kind).toBe("overview");
+    expect(original.chapterId).toBeNull();
+    useAgentConsoleStore.getState().hydrate("/book", await fromAgentSnapshot("/book", JSON.parse(JSON.stringify(await toAgentSnapshot()))));
+    expect(await controller.submitAgentRequest({ kind: "run", mode: "edit", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } })).toEqual({ status: "success" });
+    expect(dependencies.stream.mock.calls.at(-1)?.[0].environment.policy.action).toBe("writer");
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(2);
+  });
+});
+
+
+describe("specialist follow-up completion and stale boundaries", () => {
+  function originalSelection() {
+    const task = { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["b2"], operation: "clean" } satisfies AgentTask;
+    let id = 0;
+    const proposal = buildManuscriptPendingProposal({
+      run: { id: "original", projectRoot: "/book", mode: "edit", task, userMessageId: "original-user", attachments: [], startedAt: "now" },
+      raw: { chapterId: "ch1", summary: "Original selection", changes: [{ kind: "rewrite", blockId: "b2", afterId: null, type: "narration", speaker: null, newText: "Original cleaned text.", toIndex: null, reason: "Clean" }] },
+      blocks: activeBlocks, currentPending: null, originatingMessageId: "original-assistant", makeId: () => `original-${++id}`, now: "now", currentOverview: "",
+    });
+    useAgentConsoleStore.getState().stageProposal(proposal, { kind: "run", runId: "original", task, text: "Clean", origin: captureProposalOrigin({ task, mode: "edit", blocks: activeBlocks }) });
+    return proposal;
+  }
+
+  it.each(["success", "error", "stop"] as const)("keeps the original specialist draft until a %s completion", async (outcome) => {
+    const original = originalSelection();
+    const finish = deferred<void>();
+    const dependencies = makeDependencies(null);
+    dependencies.stream.mockImplementation(streamAgentRun);
+    dependencies.getModel = async () => new MockLanguageModelV3({ doStream: async () => ({
+      stream: new ReadableStream<LanguageModelV3StreamPart>({
+        start(controller) {
+          controller.enqueue({ type: "tool-call", toolCallId: "replacement", toolName: "stage_manuscript_proposal", input: JSON.stringify({ summary: "Replace the same selection", changes: [{ kind: "rewrite", blockId: "b2", afterId: null, type: "narration", speaker: null, newText: "Better cleaned text.", toIndex: null, reason: "Clean" }] }) });
+          void finish.promise.then(() => {
+            if (outcome === "error") controller.error(new Error("Provider connection failed"));
+            else {
+              controller.enqueue({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } } });
+              controller.close();
+            }
+          });
+        },
+      }),
+    }) });
+    const controller = createAgentController(dependencies);
+    const submission = controller.submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } });
+    await vi.waitFor(() => expect(useAgentConsoleStore.getState().messages.at(-1)?.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "tool-stage_manuscript_proposal", state: "output-available" })])));
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(1);
+    if (outcome === "stop") controller.stopAgentRun();
+    finish.resolve();
+    expect((await submission).status).toBe(outcome === "error" ? "failure" : outcome === "stop" ? "stopped" : "success");
+    expect(useAgentConsoleStore.getState().proposalRecords).toHaveLength(outcome === "success" ? 2 : 1);
+    if (outcome !== "success") expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+  });
+
+  it("refuses changed original source before invoking the provider and preserves the draft", async () => {
+    const original = originalSelection();
+    useProjectStore.setState({ blocks: activeBlocks.map((item) => item.id === "b2" ? { ...item, text: "The author revised this source." } : item) });
+    const dependencies = makeDependencies(null);
+    const getModel = vi.fn(dependencies.getModel);
+    dependencies.getModel = getModel;
+    const result = await createAgentController(dependencies).submitAgentRequest({ kind: "run", mode: "writing", text: "Try again, same task", refs: [], task: { kind: "proposal-follow-up", proposalId: original.id } });
+    expect(result).toMatchObject({ status: "failure", failure: { reason: "tool", action: null, message: expect.stringContaining("Start the original action again") } });
+    expect(getModel).not.toHaveBeenCalled();
+    expect(dependencies.stream).not.toHaveBeenCalled();
+    expect(useAgentConsoleStore.getState().pendingProposal).toEqual(original);
+    expect(useAgentConsoleStore.getState().messages).toEqual([]);
   });
 });

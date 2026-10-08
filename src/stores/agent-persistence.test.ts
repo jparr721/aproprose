@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Book } from "@/book";
 import type {
   AgentMessageMetadata,
+  AgentTask,
   AgentPersistenceIssue,
   AgentProposalRecord,
   AgentSessionId,
@@ -16,6 +17,7 @@ import type {
   PersistedAgentState,
   PersistedUsage,
   ProposalReviewPreconditions,
+  ProposalOrigin,
 } from "@/lib/ai/agent-types";
 import {
   dispatchAgentIntent,
@@ -4486,5 +4488,39 @@ describe("retained Changes persistence", () => {
     await expect(retryAgentSessionPersistence(root, sessionId)).rejects.toThrow();
     expect(tauri.writeAppData).not.toHaveBeenCalled();
     expect(raw).toEqual({ v: 1, sessions: "unreadable" });
+  });
+});
+
+
+describe("persisted proposal origin receipts", () => {
+  const sourceTask = { kind: "selected-block-edit", chapterId: "chapter-1", blockIds: ["block-1"], operation: "clean" } satisfies AgentTask;
+
+  it("round-trips the frozen original mode and selection in optional v4 receipts", async () => {
+    if (proposal.kind !== "manuscript" || proposal.changes[0].precondition.kind !== "target") throw new Error("Expected original source receipt");
+    const origin: ProposalOrigin = { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "clean", blocks: [proposal.changes[0].precondition.target] };
+    const record: AgentProposalRecord = { proposal, source: { kind: "run", runId: "original-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null };
+    useAgentConsoleStore.setState({ proposalRecords: [record], currentProposalId: proposal.id });
+    const snapshot = await toAgentSnapshot();
+    const restored = await fromAgentSnapshot("/books/one", JSON.parse(JSON.stringify(snapshot)));
+    expect(restored.proposalRecords[0].source).toEqual(record.source);
+    expect(snapshot.v).toBe(4);
+  });
+
+  it("continues reading v4 run sources that predate origin receipts", async () => {
+    const record: AgentProposalRecord = { proposal, source: { kind: "run", runId: "old-run", task: sourceTask, text: "Clean" }, decisions: {}, replacedByProposalId: null };
+    useAgentConsoleStore.setState({ proposalRecords: [record], currentProposalId: proposal.id });
+    const restored = await fromAgentSnapshot("/books/one", JSON.parse(JSON.stringify(await toAgentSnapshot())));
+    expect(restored.proposalRecords[0].source).toEqual(record.source);
+    expect(restored.proposalRecords[0].source).not.toHaveProperty("origin");
+  });
+
+  it.each([
+    { kind: "selected-block-edit", mode: "edit", chapterId: "chapter-1", operation: "invented", blocks: [] },
+    { kind: "task", mode: "edit", task: { kind: "proposal-follow-up", proposalId: "itself" } },
+    { kind: "bridge", mode: "edit", chapterId: "chapter-1", anchor: { sourceId: "missing-receipt" }, successor: null },
+  ])("rejects malformed $kind receipts at the persistence boundary", async (origin) => {
+    const { projectRoot: _projectRoot, ...persistedProposal } = proposal;
+    const snapshot = { ...emptyPersistedAgentState(), proposalRecords: [{ proposal: persistedProposal, source: { kind: "run", runId: "bad-run", task: sourceTask, text: "Clean", origin }, decisions: {}, replacedByProposalId: null }], currentProposalId: proposal.id };
+    await expect(fromAgentSnapshot("/books/one", snapshot)).rejects.toMatchObject({ issue: { kind: "corrupt" } });
   });
 });

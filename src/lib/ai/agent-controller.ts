@@ -21,8 +21,15 @@ import { buildCharacterGrounding } from "@/lib/ai/character-grounding";
 import { settleAgentMessages } from "@/lib/ai/agent-messages";
 import { getModel } from "@/lib/ai/model";
 import { resolveModelContextWindow } from "@/lib/ai/models";
+import {
+  ProposalOriginError,
+  proposalOriginChapterId,
+  resolveProposalOrigin,
+  type ResolvedProposalOrigin,
+} from "@/lib/ai/proposal-origin";
 import { compileAgentPolicy } from "@/lib/ai/agent-prompts";
 import {
+  AgentProposalError,
   buildManuscriptPendingProposal,
   buildOverviewPendingProposal,
   buildOutlinePendingProposal,
@@ -35,6 +42,7 @@ import {
 } from "@/lib/ai/agent-runtime";
 import type { AgentToolEnvironment } from "@/lib/ai/agent-tools";
 import type {
+  AgentProposalRecord,
   AgentFailure,
   AgentFailureReason,
   AgentIntent,
@@ -197,6 +205,7 @@ interface SubmissionCapture {
   summary: ReturnType<typeof useAgentConsoleStore.getState>["summary"];
   lastUsage: ReturnType<typeof useAgentConsoleStore.getState>["lastUsage"];
   pendingProposal: PendingProposal | null;
+  proposalRecords: AgentProposalRecord[];
   retryOf: string | null;
   activeChapter: LoadedChapter | null;
   resolveTaskAndTarget: () => Promise<{
@@ -1078,7 +1087,7 @@ function runFailure(
   provider: AiProvider,
   phase: AgentFailurePhase,
 ): AgentFailure {
-  if (error instanceof AgentDraftCompletionError) {
+  if (error instanceof AgentDraftCompletionError || error instanceof ProposalOriginError) {
     return { reason: "tool", message: error.message, action: null, settingsTarget: null };
   }
   if (error instanceof OutlinePlannerGroundingError) {
@@ -1217,6 +1226,7 @@ export function createAgentController(
 
   const toolEnvironment = (args: {
     run: AgentRun;
+    origin: ResolvedProposalOrigin;
     policy: PurposeAgentPolicy;
     model: LanguageModel;
     styleGuide: string;
@@ -1256,6 +1266,16 @@ export function createAgentController(
       return args.run.task.kind === "proposal-follow-up"
         ? selectPendingProposal(state, args.run.task.proposalId)
         : state.pendingProposal;
+    };
+    const proposalRun = (kind: PendingProposal["kind"]): AgentRun => {
+      const pending = currentPending();
+      if (
+        args.run.task.kind === "proposal-follow-up" &&
+        (pending === null || pending.id !== args.run.task.proposalId || pending.kind !== kind)
+      ) {
+        throw new AgentProposalError("proposal-mismatch", "The pending proposal does not match this follow-up run.");
+      }
+      return { ...args.run, mode: args.origin.mode, task: args.origin.task };
     };
     return {
       run: args.run,
@@ -1344,7 +1364,7 @@ export function createAgentController(
         const chapter = requireTarget(chapterId);
         try {
           return buildManuscriptPendingProposal({
-            run: args.run,
+            run: proposalRun("manuscript"),
             raw: { chapterId, ...input },
             blocks: chapter.blocks,
             currentPending: currentPending(),
@@ -1374,7 +1394,7 @@ export function createAgentController(
         const cards = getChapterOutline(args.meta.chapters, chapterId).cards;
         try {
           return buildOutlinePendingProposal({
-            run: args.run,
+            run: proposalRun("outline"),
             raw: { chapterId, ...input },
             cards,
             currentPending: currentPending(),
@@ -1399,7 +1419,7 @@ export function createAgentController(
         }
         try {
           return buildOverviewPendingProposal({
-            run: args.run,
+            run: proposalRun("overview"),
             currentPending: currentPending(),
             summary: input.summary,
             overview: input.overview,
@@ -1595,7 +1615,32 @@ export function createAgentController(
         }
         throw targetResult.reason;
       }
-      const frozen = targetResult.value;
+      const target = targetResult.value;
+      const originalChapterId = target.chapter === null && target.task.kind === "proposal-follow-up"
+        ? proposalOriginChapterId({
+            proposalId: target.task.proposalId,
+            mode: capture.mode,
+            projectRoot: capture.projectRoot,
+            records: capture.proposalRecords,
+          })
+        : null;
+      const frozen = {
+        task: target.task,
+        chapter: originalChapterId === null ? target.chapter : await loadChapterSnapshot(capture.project, originalChapterId, capture.activeChapter),
+      };
+      if (!ownsCurrentRun()) return { status: "stopped" };
+      const origin = resolveProposalOrigin({
+        task: frozen.task,
+        mode: capture.mode,
+        projectRoot: capture.projectRoot,
+        targetChapterId: frozen.chapter === null ? null : frozen.chapter.chapterId,
+        blocks: frozen.chapter === null ? [] : frozen.chapter.blocks,
+        records: capture.proposalRecords,
+      });
+      if (origin.task.kind === "bridge") {
+        if (frozen.chapter === null) throw new AgentProposalError("wrong-chapter", "The original bridge chapter is unavailable. Start the original action again.");
+        requireBridgeAnchor(origin.task, frozen.chapter);
+      }
       const describeGrounding = characterDescribeGrounding(
         capture,
         frozen.task,
@@ -1669,6 +1714,7 @@ export function createAgentController(
       const policy = compileAgentPolicy({
         mode: run.mode,
         task: run.task,
+        origin,
         styleGuide: capture.styleGuide,
         editingRules: capture.editingRules,
         sessionId: capture.sessionId,
@@ -1679,6 +1725,7 @@ export function createAgentController(
           .join("\n\n");
       const environment = toolEnvironment({
         run,
+        origin,
         policy,
         model,
         styleGuide: capture.styleGuide,
@@ -1692,7 +1739,7 @@ export function createAgentController(
         signal: abortController.signal,
         sessionId: capture.sessionId,
         stageProposal: (proposal) => {
-          if (run.task.kind === "bridge" && (
+          if (origin.task.kind === "bridge" && (
             proposal.kind !== "manuscript" || proposal.changes.length === 0 ||
             proposal.changes.some((item) => item.change.kind !== "insert" || item.change.newText === null || item.change.newText.trim() === "")
           )) {
@@ -1702,7 +1749,7 @@ export function createAgentController(
           if (run.task.kind !== "proposal-follow-up") {
             useViewStore.getState().closeManuscriptReview();
             sessionStore.getState().stageProposal(proposal, {
-              kind: "run", runId: run.id, task: run.task, text: capture.text,
+              kind: "run", runId: run.id, task: run.task, text: capture.text, origin: origin.origin,
             });
             if (run.task.kind === "bridge") {
               useViewStore.getState().selectChange(agentSessionKey(capture.sessionId), proposal.id);
@@ -1758,7 +1805,7 @@ export function createAgentController(
         failure: null,
       });
       latestAssistant = completed;
-      if (run.task.kind === "bridge" && stagedProposal === null) {
+      if (origin.task.kind === "bridge" && stagedProposal === null) {
         throw new AgentDraftCompletionError("No continuation draft was produced. Open AI to review the response before trying again.");
       }
       const settled = settledAssistantMessage(completed);
@@ -1768,7 +1815,7 @@ export function createAgentController(
           throw new AgentDraftCompletionError("The draft changed during this request. Its replacement was not saved; review the current draft before trying again.");
         }
         sessionStore.getState().commitProposalReplacement(run.task.proposalId, stagedProposal, {
-          kind: "run", runId: run.id, task: run.task, text: capture.text,
+          kind: "run", runId: run.id, task: run.task, text: capture.text, origin: origin.origin,
         });
       }
       sessionStore.getState().finishRun(settled, result.usage);
@@ -1933,6 +1980,7 @@ export function createAgentController(
           ? null
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
+      proposalRecords: structuredClone(consoleState.proposalRecords),
       retryOf: args.retryOf,
       activeChapter,
     };
@@ -2004,6 +2052,7 @@ export function createAgentController(
           ? null
           : structuredClone(consoleState.lastUsage),
       pendingProposal,
+      proposalRecords: structuredClone(consoleState.proposalRecords),
       retryOf: null,
       activeChapter,
       resolveTaskAndTarget: taskTarget.resolve,

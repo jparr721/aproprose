@@ -6,6 +6,7 @@ import {
   WRITING_MODE_MARKER,
   OUTLINE_PLANNING_MARKER,
   buildAgentInstructions,
+  compileAgentPolicy,
 } from "@/lib/ai/agent-prompts";
 
 const build = (mode: "writing" | "edit") =>
@@ -138,5 +139,28 @@ describe("analysis prompts", () => {
       expect(prompt).toContain("blockIds");
       expect(prompt).toContain("[id]");
     }
+  });
+});
+
+
+describe("follow-up purpose compilation", () => {
+  it("combines the original specialist boundary with the outer replacement identity", () => {
+    const policy = compileAgentPolicy({
+      mode: "writing", task: { kind: "proposal-follow-up", proposalId: "replacement-target" },
+      origin: { mode: "edit", task: { kind: "selected-block-edit", chapterId: "ch1", blockIds: ["current-source"], operation: "clean" } },
+      styleGuide: "Latest voice", editingRules: "Latest protected rule", sessionId: { kind: "project" },
+    });
+    expect(policy.action).toBe("copyeditor");
+    expect(policy.instructions).toContain("Clean only the selected prose conservatively");
+    expect(policy.instructions).toContain("clean only blocks current-source in chapter ch1");
+    expect(policy.instructions).toContain("replace pending proposal replacement-target completely");
+    expect(policy.instructions).toContain("Latest voice");
+    expect(policy.instructions).toContain("Latest protected rule");
+    expect(policy.instructions).toContain(EDIT_MODE_MARKER);
+    expect(policy.instructions).not.toContain(WRITING_MODE_MARKER);
+  });
+
+  it("keeps declared legacy follow-ups on the existing mode policy", () => {
+    expect(compileAgentPolicy({ mode: "writing", task: { kind: "proposal-follow-up", proposalId: "legacy" }, styleGuide: "", editingRules: "", sessionId: { kind: "project" } }).action).toBe("writer");
   });
 });

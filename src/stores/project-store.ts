@@ -8,6 +8,7 @@
 
 import { create } from "zustand";
 import { sumBy } from "es-toolkit";
+import { arrayMove } from "@dnd-kit/sortable";
 import { toast } from "sonner";
 import type {
   ActKind,
@@ -293,7 +294,7 @@ interface ProjectState {
   createProject: (parent: string, name: string, author: string) => Promise<void>;
   addChapter: (title: string) => Promise<void>;
   renameChapter: (id: string, title: string) => Promise<void>;
-  moveChapter: (id: string, dir: -1 | 1) => Promise<void>;
+  moveChapter: (id: string, toIndex: number) => Promise<void>;
   deleteChapter: (id: string) => Promise<void>;
   updateMetadata: (fields: Partial<NovelMetadata>) => Promise<void>;
   migrateProject: () => Promise<void>;
@@ -909,17 +910,15 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
-    moveChapter: async (id, dir) => {
+    moveChapter: async (id, toIndex) => {
       const { project } = get();
       if (!project) return;
       const idx = project.chapters.findIndex((c) => c.id === id);
-      const to = idx + dir;
-      if (idx < 0 || to < 0 || to >= project.chapters.length) return;
+      if (idx < 0 || idx === toIndex || !Number.isInteger(toIndex) || toIndex < 0 || toIndex >= project.chapters.length) return;
       const model = toModel(project);
-      const [m] = model.chapters.splice(idx, 1);
-      model.chapters.splice(to, 0, m);
+      const reordered = { ...model, chapters: arrayMove(model.chapters, idx, toIndex) };
       try {
-        const updated = await writeSkeleton(project.root, model);
+        const updated = await writeSkeleton(project.root, reordered);
         set({ project: updated });
         useStoryRefreshStore
           .getState()

@@ -1,11 +1,20 @@
 [
   {
-    "version": "0.17.5",
+    "version": "0.17.6",
     "date": "2026-10-07",
     "summary": "Scrollbars stay clear of your writing and settings.",
     "highlights": [
       "Settings fields, character counters, and changelog dates remain visible beside the scrollbar.",
       "Scroll areas preserve content space in left-to-right and right-to-left layouts."
+    ]
+  },
+  {
+    "version": "0.17.5",
+    "date": "2026-10-07",
+    "summary": "Chapter navigation is aligned and easier to rearrange.",
+    "highlights": [
+      "Chapter numbers line up with the Add chapter button, with chapter actions replacing the number on hover or focus.",
+      "Drag chapter rows to reorder the manuscript without losing your active chapter or unsaved edits."
     ]
   },
   {

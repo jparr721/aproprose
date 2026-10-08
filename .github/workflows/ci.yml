@@ -53,6 +53,24 @@ jobs:
   validate:
     uses: ./.github/workflows/validate.yml
 
+  protected-checks:
+    name: ${{ matrix.check }}
+    needs: validate
+    if: always()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - typecheck + tests
+          - cargo test + clippy
+          - Chromium + WebKit regression
+    steps:
+      - name: Require complete reusable validation
+        env:
+          VALIDATION_RESULT: ${{ needs.validate.result }}
+        run: test "$VALIDATION_RESULT" = success
+
   release:
     name: release main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

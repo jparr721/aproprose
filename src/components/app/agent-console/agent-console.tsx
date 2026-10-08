@@ -6,6 +6,7 @@ import { ReviewTray } from "@/components/app/agent-console/review-tray";
 import { AiConsoleErrorBoundary } from "@/components/app/error-boundary";
 import {
   Alert,
+  AlertAction,
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";

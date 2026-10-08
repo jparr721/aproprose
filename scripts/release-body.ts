@@ -11,26 +11,48 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { z } from "zod";
 
-export interface ChangelogEntry {
-  version: string;
-  date: string;
-  summary: string;
-  highlights: string[];
+const changelogSchema = z.array(z.object({
+  version: z.string(),
+  date: z.string(),
+  summary: z.string(),
+  highlights: z.array(z.string()),
+}));
+
+export type ChangelogEntry = z.infer<typeof changelogSchema>[number];
+
+export function parseChangelog(changelog: unknown): ChangelogEntry[] {
+  const result = changelogSchema.safeParse(changelog);
+  if (!result.success) {
+    throw new Error(`Invalid changelog.json: ${result.error.message}`);
+  }
+  return result.data;
 }
 
-export function findEntry(changelog: ChangelogEntry[], version: string): ChangelogEntry {
-  const entry = changelog.find((e) => e.version === version);
+export function findEntry(changelog: unknown, version: string): ChangelogEntry {
+  const entries = parseChangelog(changelog).filter((entry) => entry.version === version);
+  if (entries.length > 1) {
+    throw new Error(`changelog.json has duplicate entries for ${version}`);
+  }
+  const entry = entries[0];
   if (!entry) {
     throw new Error(`changelog.json has no entry for ${version}`);
   }
-  if (typeof entry.summary !== "string" || entry.summary.trim() === "") {
+  const date = new Date(`${entry.date}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== entry.date
+  ) {
+    throw new Error(`changelog.json entry for ${version} has an invalid date; expected YYYY-MM-DD`);
+  }
+  if (entry.summary.trim() === "") {
     throw new Error(`changelog.json entry for ${version} has an invalid summary`);
   }
   if (
-    !Array.isArray(entry.highlights) ||
     entry.highlights.length === 0 ||
-    !entry.highlights.every((h) => typeof h === "string" && h.trim() !== "")
+    !entry.highlights.every((h) => h.trim() !== "")
   ) {
     throw new Error(`changelog.json entry for ${version} has invalid highlights`);
   }
@@ -47,7 +69,7 @@ function main(): void {
     throw new Error("Usage: bun run scripts/release-body.ts <X.Y.Z>");
   }
   const changelogPath = resolve(import.meta.dirname, "..", "changelog.json");
-  const changelog = JSON.parse(readFileSync(changelogPath, "utf8")) as ChangelogEntry[];
+  const changelog: unknown = JSON.parse(readFileSync(changelogPath, "utf8"));
   process.stdout.write(buildReleaseBody(findEntry(changelog, version)));
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findEntry, buildReleaseBody } from "./release-body";
+import { findEntry, buildReleaseBody, parseChangelog } from "./release-body";
 
 const VALID = {
   version: "0.4.0",
@@ -10,7 +10,7 @@ const VALID = {
 
 describe("findEntry", () => {
   it("returns the matching entry", () => {
-    expect(findEntry([VALID], "0.4.0")).toBe(VALID);
+    expect(findEntry([VALID], "0.4.0")).toEqual(VALID);
   });
 
   it("throws when no entry matches the version", () => {
@@ -27,6 +27,30 @@ describe("findEntry", () => {
       /invalid highlights/,
     );
   });
+
+  it("rejects duplicate versions instead of picking an arbitrary entry", () => {
+    expect(() => findEntry([VALID, VALID], "0.4.0")).toThrow(/duplicate entries/);
+  });
+
+  it.each(["", "2026-6-27", "2026-02-30", "2026-13-01", "not-a-date"])(
+    "rejects the invalid date %j",
+    (date) => {
+      expect(() => findEntry([{ ...VALID, date }], "0.4.0")).toThrow(/invalid date/);
+    },
+  );
+
+  it("accepts a valid leap day", () => {
+    expect(findEntry([{ ...VALID, date: "2028-02-29" }], "0.4.0").date).toBe("2028-02-29");
+  });
+});
+
+describe("parseChangelog", () => {
+  it.each([null, {}, [null], [{ ...VALID, version: 4 }], [{ ...VALID, highlights: [1] }]])(
+    "rejects malformed changelog data %j at the boundary",
+    (value) => {
+      expect(() => parseChangelog(value)).toThrow(/Invalid changelog.json/);
+    },
+  );
 });
 
 describe("buildReleaseBody", () => {

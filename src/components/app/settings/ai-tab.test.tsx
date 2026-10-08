@@ -28,6 +28,7 @@ vi.mock("@/lib/ai/models", () => ({
 
 vi.mock("@/lib/ai/model", () => ({
   resetAiProvider: vi.fn(),
+  getModel: vi.fn(),
 }));
 
 import { AiTab } from "@/components/app/settings/ai-tab";
@@ -108,6 +109,8 @@ describe("AiTab", () => {
     await waitFor(() => expect(mocks.getAiKeyStatus).toHaveBeenCalledOnce());
     expect(screen.getByText("Writing and editing instructions")).toBeTruthy();
     expect(screen.getByText("Applies to Writing and Edit.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "AI help for writing voice" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "AI help for writing and editing instructions" })).toBeTruthy();
   });
 
   it("shows a safe key-status failure and retries without rendering bridge details", async () => {

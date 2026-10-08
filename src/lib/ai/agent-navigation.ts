@@ -14,7 +14,7 @@ import type {
   SourceLocator,
 } from "@/lib/ai/agent-types";
 import { projectManuscriptReview } from "@/lib/ai/manuscript-review-projection";
-import type { Block } from "@/lib/types";
+import type { Block, ProjectInfo } from "@/lib/types";
 import { getChapterOutline } from "@/lib/outline/model";
 import { useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useOutlineBoardStore } from "@/stores/outline-board-store";
@@ -45,12 +45,14 @@ function selectBlock(block: Block): boolean {
 }
 
 async function selectChapterBlock(
+  project: ProjectInfo,
   chapterId: string,
   resolve: BlockResolver,
 ): Promise<boolean> {
+  if (useProjectStore.getState().project !== project) return false;
   await useProjectStore.getState().selectChapter(chapterId);
   const state = useProjectStore.getState();
-  if (state.activeChapterId !== chapterId) return false;
+  if (state.project !== project || state.activeChapterId !== chapterId) return false;
   const block = resolve(state.blocks);
   if (block === null) {
     state.select(null);
@@ -75,9 +77,10 @@ async function navigateToBlock(
     return block === null ? false : selectBlock(block);
   }
 
+  const project = projectState.project;
   const result = await useViewStore
     .getState()
-    .requestGuarded(() => selectChapterBlock(chapterId, resolve));
+    .requestGuarded(() => selectChapterBlock(project, chapterId, resolve));
   return result.status === "ran" ? result.value : false;
 }
 
@@ -87,9 +90,11 @@ function clearSelectionAtChapterEnd(): boolean {
   return true;
 }
 
-async function selectChapterEnd(chapterId: string): Promise<boolean> {
+async function selectChapterEnd(project: ProjectInfo, chapterId: string): Promise<boolean> {
+  if (useProjectStore.getState().project !== project) return false;
   await useProjectStore.getState().selectChapter(chapterId);
-  if (useProjectStore.getState().activeChapterId !== chapterId) return false;
+  const current = useProjectStore.getState();
+  if (current.project !== project || current.activeChapterId !== chapterId) return false;
   return clearSelectionAtChapterEnd();
 }
 
@@ -104,9 +109,10 @@ async function navigateToChapterEnd(chapterId: string): Promise<boolean> {
   if (projectState.activeChapterId === chapterId) {
     return clearSelectionAtChapterEnd();
   }
+  const project = projectState.project;
   const result = await useViewStore
     .getState()
-    .requestGuarded(() => selectChapterEnd(chapterId));
+    .requestGuarded(() => selectChapterEnd(project, chapterId));
   return result.status === "ran" ? result.value : false;
 }
 
@@ -255,9 +261,12 @@ export async function openManuscriptProposalInEditor(
 }
 
 export async function navigateToProposalChange(
+  projectRoot: string,
   chapterId: string,
   change: ManuscriptPendingChange | OutlinePendingChange,
 ): Promise<boolean> {
+  const project = useProjectStore.getState().project;
+  if (project === null || project.root !== projectRoot) return false;
   if (isManuscriptChange(change)) {
     const locator = manuscriptLocator(change);
     if (locator === null) {
@@ -290,14 +299,14 @@ export async function navigateToProposalSource(proposal: PendingProposal): Promi
   }
   if (initial.activeChapterId !== proposal.chapterId) {
     const result = await useViewStore.getState().requestGuarded(async () => {
-      if (useProjectStore.getState().project?.root !== proposal.projectRoot) return false;
+      if (useProjectStore.getState().project !== initial.project) return false;
       await useProjectStore.getState().selectChapter(proposal.chapterId);
       return true;
     });
     if (result.status === "canceled" || !result.value) return false;
   }
   const current = useProjectStore.getState();
-  if (current.project === null || current.project.root !== proposal.projectRoot || current.activeChapterId !== proposal.chapterId) return false;
+  if (current.project !== initial.project || current.activeChapterId !== proposal.chapterId) return false;
   const view = useViewStore.getState();
   view.closeManuscriptReview();
   if (view.outlineOpen) view.toggleOutline();

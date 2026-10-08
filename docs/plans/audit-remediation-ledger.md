@@ -123,7 +123,7 @@
 
 - Initial full gate: active in authorized local mode; frontend/browser and native debug checks passed, isolated native bundle/smoke pending.
 - PR: https://github.com/jparr721/aproprose/pull/70 (ready, attached), base `main`, initial pushed head `387810fb2bfa13e347a0a9ca5837e1b9a3833f9a`.
-- Review rounds: 3/5 completed; round 3 `FIX-THEN-SHIP`, 2 P2 must-fix fixed, gate finishing. Rounds 1/2 fixed 4 each; inherited round-1 scope dissent retained. Minimum 3 met, but no clean APPROVE exit; no sixth round without explicit user override.
+- Review rounds: 4/5 completed; round 4 `FIX-THEN-SHIP`, 1 P2 must-fix active. Rounds 1/2 fixed 4 each; round 3 fixed 2. Minimum 3 met, but no clean APPROVE exit; round 5 is the final authorized round.
 - Simplification: pending; once over the whole PR diff after clean review exit.
 - Final exact-commit gate and CI: pending.
 
@@ -392,6 +392,36 @@ residual risk: inherited process-descendant cleanup remains deferred.
 - Updated isolated QA production bundle PASS in 1m47s; actual copied packaged app visible through 3-second settle PASS. Evidence `r3-fix-bundle.log` and `r3-fix-artifact.log`.
 - Fix commits `1bab840`, `50d3513`, `feacf30` remain the reviewed-fix source. Main `827e65a` stable; root commits ledger and pushes normally, no rebase.
 - Fresh round 4 full fight ready after push confirmation. No round 4 started and simplification has not run.
+
+### Round 4 verdict / final-round fix active
+
+```text
+=== REVIEW VERDICT ===
+scope:      https://github.com/jparr721/aproprose/pull/70 @ a0f896e, base 827e65a
+variant:    full
+verdict:    FIX-THEN-SHIP
+must-fix:   1 P2 S4-1 (project.rs validator and novel.rs legacy raw-marker handling)
+followups:  #72, #76
+dissent:    none for round 4
+residual risk: inherited descendant-process cleanup and separate real-PDF race remain followups.
+=== END ===
+```
+
+- Full five fresh angles, fresh Level/Splinter, and exactly one owner defense completed. All owners conceded the surviving proof; no round-4 dissent.
+- S4-1: supported commented marker/title chapters are omitted by project validation and legacy raw-marker slicing used for managed open/regeneration. Public harness plus independent Level reproduction prove an earlier missing body can be accepted and the returned model causes write_skeleton to drop its declaration.
+- Root owns regression-first fix only in `src-tauri/src/project.rs` and `src-tauri/src/novel.rs`; no generic parser expansion beyond supported syntax contract. Evidence retained in `round-4-findings.md` and canonical `r4-*` reports.
+- Newly observed inherited real-PDF race tracked separately in repository issue #76; issue #72 unchanged. No scope expansion or sixth review authorized.
+- CI run 37732621034: Windows native tests passed, package build pending; other jobs passed. No final CI-green claim yet.
+- Full fix gate and push next, then fresh round 5 full fight. Round 5 is the final allowed round; if must-fix remains after its accepted fixes, stop/report per skill rather than starting round 6 or merging without clean termination.
+- Whole-diff simplifier has not run; exact-final-commit gate, merge, real-data QA, and screenshot deck remain pending.
+
+### Round 4 fix focused proof
+
+- Permanent S4-1 regressions observed red: all three failed as expected in `r4-managed-red.log`.
+- Shared strict managed parser now returns complete pairs through `ChapterRef` conversion for open/regeneration, preserving supported marker declarations and raw legacy titles.
+- Eight focused managed tests passed, including three new regressions looping across eight marker cases, missing/invalid-UTF-8 bodies, and raw-title preservation. Evidence `r4-managed-green.log`.
+- Legacy frontmatter migration positive control passed separately (`r4-legacy-positive.log`).
+- Root creates the standalone bug-fix commit and ledger checkpoint, then exact full local gate and push before final fresh round 5. Full gate remains pending; no additional approval or completed review claimed.
 
 - QA target: post-merge commit by pipeline default, or preview if user explicitly requests PR left open.
 - Proof: real changed app/components plus real filesystem/Git/LaTeX fixtures, no fabricated live-service proof.

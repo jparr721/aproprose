@@ -24,9 +24,10 @@ for (const width of [960, 1440]) {
     for (const theme of ["light", "sepia", "dark"] as const) {
       await page.evaluate((value) => window.workshop.setTheme(value), theme);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-      const box = await editor.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.width).toBeGreaterThanOrEqual(350);
+      await expect.poll(async () => {
+        const box = await editor.boundingBox();
+        return box === null ? 0 : box.width;
+      }).toBeGreaterThanOrEqual(350);
       for (const surface of ["editor", "pdf"] as const) {
         await page.evaluate((value) => window.workshop.openFind(value), surface);
         const pane = page.locator(`[data-search-surface="${surface}"]`);

@@ -160,15 +160,16 @@ function ChapterRow({ chapter, index }: { chapter: ChapterRef; index: number }) 
       <SidebarMenuButton
         isActive={on}
         onClick={() => guard(() => void selectChapter(chapter.id))}
-        className="pr-14"
       >
         <span>{chapter.title}</span>
       </SidebarMenuButton>
-      <SidebarMenuBadge className="right-8">{index + 1}</SidebarMenuBadge>
+      <SidebarMenuBadge className="w-5 px-0 group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0 group-has-data-[state=open]/menu-item:opacity-0">
+        {index + 1}
+      </SidebarMenuBadge>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuAction title="Chapter actions" showOnHover>
+          <SidebarMenuAction title="Chapter actions" showOnHover className="opacity-0">
             <IconDots />
           </SidebarMenuAction>
         </DropdownMenuTrigger>

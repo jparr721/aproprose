@@ -1,12 +1,25 @@
 [
   {
-    "version": "0.17.3",
+    "version": "0.17.4",
     "date": "2026-10-07",
     "summary": "A quieter AI console keeps writing and editing controls close to your draft.",
     "highlights": [
       "Choose Writing or Edit from the composer footer, with descriptions and prompts that clarify each mode.",
       "Switching modes preserves your draft and attached context.",
       "The AI panel opens and closes smoothly, with its redundant header removed."
+    ]
+  },
+  {
+    "version": "0.17.3",
+    "date": "2026-10-07",
+    "summary": "Aproprose is now smoother to edit and clearer to use with AI.",
+    "highlights": [
+      "Sidebar chapters, characters, and lore sections now expand and collapse smoothly.",
+      "Typing in manuscript blocks is more responsive.",
+      "AI panels show a Thinking indicator before a response arrives.",
+      "AI errors explain the next step, retry temporary failures, and link to relevant AI settings.",
+      "Press Ctrl+L, or Cmd+L on macOS, to add selected blocks to the AI conversation.",
+      "Launching Aproprose again focuses the existing window instead of opening another."
     ]
   },
   {

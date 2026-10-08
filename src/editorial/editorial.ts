@@ -19,6 +19,12 @@ export type InvestigationOutcome =
   | { kind: "resumed" | "cancelled" | "unavailable" }
   | { kind: "started"; outcome: AgentSubmissionOutcome };
 
+export function canStartChapterInvestigation(state: AgentConsoleData): boolean {
+  return state.messages.length === 0 && state.summary === null &&
+    state.pendingProposal === null && state.proposalRecords.length === 0 &&
+    state.interruptedRun === null && state.runStatus === "idle";
+}
+
 export class Editorial {
   constructor(private readonly dependencies: EditorialDependencies) {}
 
@@ -31,11 +37,7 @@ export class Editorial {
     if (!this.dependencies.isReady(state, input.projectRoot) || state.persistenceIssue !== null) {
       return { kind: "unavailable" };
     }
-    if (
-      state.messages.length > 0 || state.summary !== null ||
-      state.pendingProposal !== null || state.interruptedRun !== null ||
-      state.runError !== null || state.runStatus !== "idle"
-    ) {
+    if (!canStartChapterInvestigation(state)) {
       return { kind: "resumed" };
     }
     return { kind: "started", outcome: await this.dependencies.start(input.chapterId) };

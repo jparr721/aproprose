@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { IconMessages, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,11 +24,12 @@ import { useOutlineBoardStore } from "@/stores/outline-board-store";
 import { useProjectStore } from "@/stores/project-store";
 import { agentConsoleOwnershipStatus, useAgentSessionStore } from "@/stores/agent-console-store";
 import { hydrateAgentOutlineSession } from "@/stores/agent-persistence";
-import { PROJECT_AGENT_SESSION } from "@/lib/ai/agent-types";
+import { PROJECT_AGENT_SESSION, type AgentSessionId } from "@/lib/ai/agent-types";
 import { AgentSection } from "@/components/app/agent-console/agent-console";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { stopAgentRun } from "@/lib/ai/agent-controller";
 import { editorial } from "@/app/editorial";
+import { canStartChapterInvestigation } from "@/editorial/editorial";
 import { reportAiError } from "@/lib/notifications";
 import type { ActKind, BeatType } from "@/lib/types";
 
@@ -64,11 +65,16 @@ export function ChapterSubview() {
   const addLoreToCard = useProjectStore((s) => s.addLoreToCard);
   const removeLoreFromCard = useProjectStore((s) => s.removeLoreFromCard);
   const projectRoot = project === null ? null : project.root;
+  const sessionId: AgentSessionId = chapterId === null ? PROJECT_AGENT_SESSION : { kind: "outline", chapterId };
   const ready = useAgentSessionStore(
-    chapterId === null ? PROJECT_AGENT_SESSION : { kind: "outline", chapterId },
+    sessionId,
     (state) => projectRoot !== null &&
       agentConsoleOwnershipStatus(state, projectRoot) === "ready" &&
       state.persistenceIssue === null,
+  );
+  const failedStart = useAgentSessionStore(
+    sessionId,
+    (state) => state.runError !== null && canStartChapterInvestigation(state),
   );
   const investigationController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -87,18 +93,19 @@ export function ChapterSubview() {
       stopAgentRun({ kind: "outline", chapterId });
     };
   }, [chapterId, chapterView, projectRoot]);
-  useEffect(() => {
+  const investigate = useCallback((): void => {
     const controller = investigationController.current;
     if (
       chapterId === null || projectRoot === null || chapterView !== "planner" ||
-      !ready || controller === null
+      controller === null || controller.signal.aborted
     ) return;
     void editorial.investigateChapter({ projectRoot, chapterId, signal: controller.signal })
       .catch((error: unknown) => reportAiError(error, null, "Chapter investigation", projectRoot, null));
-  }, [chapterId, chapterView, projectRoot, ready]);
+  }, [chapterId, chapterView, projectRoot]);
+  useEffect(() => {
+    if (ready) investigate();
+  }, [investigate, ready]);
   if (!chapterId || !ch || !chapterRef || !project) return null;
-
-  const sessionId = { kind: "outline" as const, chapterId };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -118,22 +125,29 @@ export function ChapterSubview() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <ButtonGroup aria-label="Chapter planning view">
-          <Button
-            onClick={showManual}
-            size="sm"
-            variant={chapterView === "manual" ? "default" : "outline"}
-          >
-            Manual
-          </Button>
-          <Button
-            onClick={() => openPlanner(chapterId)}
-            size="sm"
-            variant={chapterView === "planner" ? "default" : "outline"}
-          >
-            <IconMessages /> Plan with AI
-          </Button>
-        </ButtonGroup>
+        <div className="flex items-center gap-2">
+          <ButtonGroup aria-label="Chapter planning view">
+            <Button
+              onClick={showManual}
+              size="sm"
+              variant={chapterView === "manual" ? "default" : "outline"}
+            >
+              Manual
+            </Button>
+            <Button
+              onClick={() => openPlanner(chapterId)}
+              size="sm"
+              variant={chapterView === "planner" ? "default" : "outline"}
+            >
+              <IconMessages /> Plan with AI
+            </Button>
+          </ButtonGroup>
+          {chapterView === "planner" && ready && failedStart ? (
+            <Button onClick={investigate} size="sm" type="button" variant="outline">
+              Retry investigation
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {chapterView === "planner" ? (

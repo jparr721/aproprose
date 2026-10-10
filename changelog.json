@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.19.2",
+    "date": "2026-10-10",
+    "summary": "Keep sent messages and their copy actions together across AI chats.",
+    "highlights": [
+      "Align copy actions with user messages in the AI Console, Outline Planner, and Character Describe chats."
+    ]
+  },
+  {
     "version": "0.19.1",
     "date": "2026-10-10",
     "summary": "Make update notifications easier to scan and act on.",

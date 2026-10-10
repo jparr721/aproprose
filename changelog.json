@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.19.5",
+    "date": "2026-10-10",
+    "summary": "Simplify the chapter planning header.",
+    "highlights": [
+      "Remove the redundant title, chapter context, and close control from the AI planner."
+    ]
+  },
+  {
     "version": "0.19.4",
     "date": "2026-10-10",
     "summary": "Review generated characters alongside revisions in Changes.",

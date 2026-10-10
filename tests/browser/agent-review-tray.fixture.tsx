@@ -4,7 +4,7 @@ import { ChangesPanel } from "@/components/app/changes-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { blockFingerprint, outlineOrderFingerprint, storyOverviewFingerprint } from "@/lib/ai/agent-context";
 import type { AgentSessionId, ManuscriptPendingProposal, OutlinePendingProposal, OverviewPendingProposal } from "@/lib/ai/agent-types";
-import type { Block } from "@/lib/types";
+import type { Block, CharacterCandidate } from "@/lib/types";
 import { agentSessionStore } from "@/stores/agent-console-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useViewStore } from "@/stores/view-store";
@@ -77,12 +77,29 @@ for (const surface of surfaces) {
 }
 useViewStore.getState().selectChange("project", "plan-sidebar");
 
+const characterReview = new URLSearchParams(window.location.search).has("characters");
+if (characterReview) {
+  const candidates: CharacterCandidate[] = ["Two unidentified men", "Raul Pizano", "Unnamed bagel-counter woman"].map((name, index) => ({
+    id: `candidate-${index}`, name, role: "Generated from manuscript evidence", evidenceFingerprint: `candidate-fp-${index}`,
+    profile: {
+      appearance: "Their faces are angular and hard. They arrive in a black SUV and inspect the house window by window.",
+      mannerisms: "They patiently inspect the house, manipulate the deadbolt without forcing entry, leave an item in the door, and do not call out.",
+      motivations: "Their surveillance suggests deliberate interest in the house, but the evidence does not establish why.",
+      relationships: "They appear connected to the card left by the detective, but their identities remain unknown.",
+      history: "The visitors have returned several times in the recent chapters.", voice: "Quiet and deliberate",
+    },
+    evidence: [{ chapterId: "chapter-1", sourceId: sourceBlock.id, order: index, fingerprint: `evidence-${index}`, occurrence: 0, previewText: "The men studied each window before leaving a card in the door." }],
+  }));
+  useProjectStore.setState((state) => ({ meta: { ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: candidates } } }));
+  useViewStore.getState().selectChange("characters", projectRoot);
+}
+
 const host = document.getElementById("root");
 if (host === null) throw new Error("Missing agent review card fixture root");
 
 createRoot(host).render(
   <TooltipProvider>
-    <main className="flex min-h-svh flex-col gap-8 p-8 lg:flex-row [--prose-size:28px]">
+    {characterReview ? <main className="h-svh w-80 max-w-full" data-testid="characters"><ChangesPanel /></main> : <main className="flex min-h-svh flex-col gap-8 p-8 lg:flex-row [--prose-size:28px]">
       {surfaces.map((surface) => (
         <div key={surface.name} className={surface.className} data-testid={surface.name}>
           <AgentSection
@@ -102,6 +119,6 @@ createRoot(host).render(
       <div className="h-[36rem] w-80 max-w-full shrink-0" data-testid="changes">
         <ChangesPanel />
       </div>
-    </main>
+    </main>}
   </TooltipProvider>,
 );

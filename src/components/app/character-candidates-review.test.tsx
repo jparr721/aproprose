@@ -3,14 +3,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/tauri", () => ({
+vi.mock(import("@/lib/tauri"), async (importOriginal) => ({
+  ...await importOriginal(),
   readAppData: vi.fn().mockResolvedValue(null),
   readProjectMeta: vi.fn().mockResolvedValue(null),
   writeAppData: vi.fn().mockResolvedValue(undefined),
   writeProjectMeta: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { CharacterCandidatesDialog } from "@/components/app/outline/character-candidates-dialog";
+import { ChangesPanel } from "@/components/app/changes-panel";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { EMPTY_AGENT_STATE, clearCharacterAgentSessions, clearOutlineAgentSessions, useAgentConsoleStore } from "@/stores/agent-console-store";
+import { useViewStore } from "@/stores/view-store";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { writeProjectMeta } from "@/lib/tauri";
 import type { CharacterCandidate } from "@/lib/types";
@@ -52,7 +56,15 @@ const candidate: CharacterCandidate = {
   ],
 };
 
+function renderReview(): ReturnType<typeof render> {
+  return render(<TooltipProvider><ChangesPanel /></TooltipProvider>);
+}
+
 beforeEach(() => {
+  clearCharacterAgentSessions();
+  clearOutlineAgentSessions();
+  useAgentConsoleStore.setState({ ...EMPTY_AGENT_STATE, requestedProjectRoot: "/book", activeProjectRoot: "/book", hydratedProjectRoot: "/book" });
+  useViewStore.setState({ changesOpen: true, selectedChange: null });
   vi.mocked(writeProjectMeta).mockReset();
   vi.mocked(writeProjectMeta).mockResolvedValue(undefined);
   useProjectStore.setState({
@@ -111,10 +123,9 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("CharacterCandidatesDialog", () => {
+describe("CharacterCandidatesReview", () => {
   it("shows generated details and evidence before accepting", async () => {
-    render(<CharacterCandidatesDialog />);
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+    renderReview();
 
     expect(screen.getByText("Inez")).toBeTruthy();
     expect(screen.getByText("Watchmaker")).toBeTruthy();
@@ -131,8 +142,7 @@ describe("CharacterCandidatesDialog", () => {
   });
 
   it("dismisses a candidate without creating a character", async () => {
-    render(<CharacterCandidatesDialog />);
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+    renderReview();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Inez" }));
 
     await waitFor(() => {
@@ -146,8 +156,7 @@ describe("CharacterCandidatesDialog", () => {
   it("keeps candidate actions pending until metadata is persisted", async () => {
     const write = deferred<void>();
     vi.mocked(writeProjectMeta).mockReturnValueOnce(write.promise);
-    render(<CharacterCandidatesDialog />);
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+    renderReview();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Inez" }));
 
@@ -167,8 +176,7 @@ describe("CharacterCandidatesDialog", () => {
 
   it("shows persistence errors and restores a failed candidate action", async () => {
     vi.mocked(writeProjectMeta).mockRejectedValueOnce(new Error("disk full"));
-    render(<CharacterCandidatesDialog />);
-    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+    renderReview();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Inez" }));
 
@@ -182,7 +190,7 @@ describe("CharacterCandidatesDialog", () => {
     ).toBe(false);
   });
 
-  it("pluralizes the candidate count", () => {
+  it("renders every pending candidate", () => {
     useProjectStore.setState((state) => ({
       meta: {
         ...state.meta,
@@ -196,10 +204,10 @@ describe("CharacterCandidatesDialog", () => {
       },
     }));
 
-    render(<CharacterCandidatesDialog />);
+    renderReview();
 
     expect(
-      screen.getByRole("button", { name: "Review 2 characters" }),
+      screen.getByRole("button", { name: "Add Rio" }),
     ).toBeTruthy();
   });
 });

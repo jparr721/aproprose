@@ -19,6 +19,7 @@ import {
   type AgentConsoleState,
   type AgentConsoleStore,
 } from "@/stores/agent-console-store";
+import type { CharacterCandidate } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 
 export interface AgentChangesEntry {
@@ -39,6 +40,7 @@ export interface AgentChangesPersistence {
 }
 
 export interface AgentChangesSnapshot {
+  characterCandidates: ReadonlyArray<CharacterCandidate>;
   records: AgentChangesEntry[];
   pendingCount: number;
   pendingChangeCount: number;
@@ -78,10 +80,13 @@ function sameReviewState(state: AgentConsoleState, previous: AgentConsoleState):
     state.runError === previous.runError;
 }
 
+const NO_CANDIDATES: ReadonlyArray<CharacterCandidate> = [];
+let cachedCandidates: ReadonlyArray<CharacterCandidate> = NO_CANDIDATES;
 let cachedRoot: string | null = null;
 let cachedStores: AgentConsoleStore[] = [];
 let cachedStates: AgentConsoleState[] = [];
 let cachedSnapshot: AgentChangesSnapshot = {
+  characterCandidates: NO_CANDIDATES,
   records: [],
   pendingCount: 0,
   pendingChangeCount: 0,
@@ -92,10 +97,11 @@ let cachedSnapshot: AgentChangesSnapshot = {
 
 export function getAgentChangesSnapshot(): AgentChangesSnapshot {
   const root = useProjectStore.getState().project?.root ?? null;
+  const candidates = root === null ? NO_CANDIDATES : useProjectStore.getState().meta.knowledge.characterCandidates;
   const sessions = sessionEntries();
   const states = sessions.map(({ store }) => store.getState());
   if (
-    root === cachedRoot &&
+    root === cachedRoot && candidates === cachedCandidates &&
     sessions.length === cachedStores.length &&
     sessions.every(({ store }, index) =>
       store === cachedStores[index] && sameReviewState(states[index], cachedStates[index]),
@@ -134,12 +140,14 @@ export function getAgentChangesSnapshot(): AgentChangesSnapshot {
   );
   const active = persistence.find((entry) => entry.runStatus !== "idle");
   cachedRoot = root;
+  cachedCandidates = candidates;
   cachedStores = sessions.map(({ store }) => store);
   cachedStates = states;
   cachedSnapshot = {
+    characterCandidates: candidates,
     records,
-    pendingCount: records.filter((entry) => entry.pendingChangeCount > 0).length,
-    pendingChangeCount: records.reduce((count, entry) => count + entry.pendingChangeCount, 0),
+    pendingCount: records.filter((entry) => entry.pendingChangeCount > 0).length + (candidates.length > 0 ? 1 : 0),
+    pendingChangeCount: records.reduce((count, entry) => count + entry.pendingChangeCount, candidates.length),
     runStatus: active === undefined ? "idle" : active.runStatus,
     activeSessionId: active === undefined ? null : active.sessionId,
     persistence,

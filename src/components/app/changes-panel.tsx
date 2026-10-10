@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { IconArrowRight, IconCheck, IconChevronRight, IconDots, IconFileDiff, IconFileText, IconHistory, IconInfoCircle, IconPencil, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
 import { AgentPersistenceBanner } from "@/components/app/agent-console/agent-console";
 import { AgentDiffPreview } from "@/components/app/agent-console/diff-preview";
+import { CharacterCandidatesReview } from "@/components/app/character-candidates-review";
 import { PROSE } from "@/components/app/block/constants";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -365,19 +366,26 @@ function ProposalPreview({ entry, disabled, onRestored }: { entry: AgentChangesE
 }
 
 export function ChangesPanel() {
-  const { records, pendingCount, runStatus, activeSessionId, persistence } = useAgentChanges();
+  const { records, characterCandidates, pendingCount, runStatus, activeSessionId, persistence } = useAgentChanges();
   const selectedKey = useViewStore((state) => state.selectedChange);
   const [filter, setFilter] = useState<DraftFilter>("pending");
   const busy = runStatus !== "idle";
-  const historyCount = records.length - pendingCount;
+  const historyCount = records.filter((entry) => entry.pendingChangeCount === 0).length;
   const visible = records.filter((entry) => filter === "pending" ? entry.pendingChangeCount > 0 : entry.pendingChangeCount === 0);
   const requested = selectedKey === null ? undefined : records.find((entry) => entry.sessionKey === selectedKey.sessionKey && entry.record.proposal.id === selectedKey.proposalId);
   const selected = requested !== undefined && visible.includes(requested) ? requested : visible[0];
+  const projectRoot = useProjectStore((state) => state.project === null ? null : state.project.root);
+  const charactersRequested = selectedKey !== null && selectedKey.sessionKey === "characters" && selectedKey.proposalId === projectRoot;
+  const showCharacters = filter === "pending" && (charactersRequested || selected === undefined && characterCandidates.length > 0);
   const unavailable = persistence.some((entry) => entry.sessionId.kind !== "character" && !entry.available);
   const loading = persistence.some((entry) => entry.sessionId.kind !== "character" && !entry.available && entry.issue === null);
   useEffect(() => {
-    if (requested !== undefined) setFilter(requested.pendingChangeCount > 0 ? "pending" : "history");
-  }, [requested]);
+    if (charactersRequested) setFilter("pending");
+    else if (requested !== undefined) setFilter(requested.pendingChangeCount > 0 ? "pending" : "history");
+  }, [requested, charactersRequested]);
+  useEffect(() => {
+    if (showCharacters && !charactersRequested && projectRoot !== null) useViewStore.getState().selectChange("characters", projectRoot);
+  }, [showCharacters, charactersRequested, projectRoot]);
   const switchFilter = (next: DraftFilter): void => {
     useViewStore.getState().clearChangeSelection();
     setFilter(next);
@@ -399,7 +407,14 @@ export function ChangesPanel() {
               <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="Close Changes" onClick={closeChanges}><IconX /></Button></TooltipTrigger><TooltipContent>Close panel</TooltipContent></Tooltip>
             </div>
             <div className="flex flex-col gap-2" aria-label="Saved drafts">
-              {visible.map((entry) => <Button key={`${entry.sessionKey}:${entry.record.proposal.id}`} variant="ghost" aria-pressed={selected === entry} onClick={() => useViewStore.getState().selectChange(entry.sessionKey, entry.record.proposal.id)} className={cn("h-auto items-start justify-start gap-3 whitespace-normal border border-transparent px-3 py-3 text-left", selected === entry && "border-border bg-muted/60")}>
+              {filter === "pending" && characterCandidates.length > 0 ? (
+                <Button variant="ghost" aria-pressed={showCharacters} onClick={() => { if (projectRoot !== null) useViewStore.getState().selectChange("characters", projectRoot); }} className={cn("h-auto items-start justify-start gap-3 whitespace-normal border border-transparent px-3 py-3 text-left", showCharacters && "border-border bg-muted/60")}>
+                  <IconPlus className="mt-0.5 text-muted-foreground" />
+                  <div className="min-w-0 flex-1"><TypographySmall className="line-clamp-2 leading-5">Review new characters</TypographySmall><TypographyMuted className="mt-1 text-xs">Characters - {characterCandidates.length} pending</TypographyMuted></div>
+                  <IconChevronRight className="mt-0.5 text-muted-foreground" />
+                </Button>
+              ) : null}
+              {visible.map((entry) => <Button key={`${entry.sessionKey}:${entry.record.proposal.id}`} variant="ghost" aria-pressed={!showCharacters && selected === entry} onClick={() => useViewStore.getState().selectChange(entry.sessionKey, entry.record.proposal.id)} className={cn("h-auto items-start justify-start gap-3 whitespace-normal border border-transparent px-3 py-3 text-left", !showCharacters && selected === entry && "border-border bg-muted/60")}>
                 {entry.pendingChangeCount === 0 && historyLabel(entry.record) === "Applied" ? <IconCheck className="mt-0.5 text-success" /> : <IconFileDiff className="mt-0.5 text-muted-foreground" />}
                 <div className="min-w-0 flex-1"><TypographySmall className="line-clamp-2 leading-5">{entry.record.proposal.summary}</TypographySmall><TypographyMuted className="mt-1 text-xs">{entry.record.proposal.kind === "overview" ? "Story overview" : entry.record.proposal.kind === "outline" ? "Outline" : "Manuscript"}{entry.pendingChangeCount > 0 ? ` - ${entry.pendingChangeCount} pending` : ` - ${historyLabel(entry.record)}`}</TypographyMuted></div>
                 <IconChevronRight className="mt-0.5 text-muted-foreground" />
@@ -412,7 +427,7 @@ export function ChangesPanel() {
             return <Alert key={entry.sessionKey} variant="destructive"><AlertTitle>AI request failed</AlertTitle><AlertDescription>{safeAgentErrorText(entry.runError)}<Button variant="outline" size="sm" onClick={() => useViewStore.getState().openAiConsole()}>View AI output<IconArrowRight /></Button></AlertDescription></Alert>;
           })}
           <div className="border-t border-border pt-5">
-            {selected !== undefined ? <ProposalPreview key={`${selected.sessionKey}:${selected.record.proposal.id}`} entry={selected} disabled={busy} onRestored={() => { setFilter("pending"); useViewStore.getState().selectChange(selected.sessionKey, selected.record.proposal.id); }} /> : <div className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+            {showCharacters ? <CharacterCandidatesReview key={projectRoot} disabled={busy} /> : selected !== undefined ? <ProposalPreview key={`${selected.sessionKey}:${selected.record.proposal.id}`} entry={selected} disabled={busy} onRestored={() => { setFilter("pending"); useViewStore.getState().selectChange(selected.sessionKey, selected.record.proposal.id); }} /> : <div className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
               {unavailable ? <>{loading ? <Spinner className="motion-reduce:animate-none" /> : <IconInfoCircle className="size-6 text-muted-foreground" />}<TypographyLarge>{loading ? "Loading Changes" : "Changes unavailable"}</TypographyLarge><TypographyMuted>{loading ? "Loading saved AI sessions" : "Resolve the storage issue to review saved Changes."}</TypographyMuted></> : busy ? <TypographyLarge>Your draft will appear here</TypographyLarge> : <><IconCheck className="size-6 text-muted-foreground" /><TypographyLarge>{filter === "pending" ? "All caught up" : "No history yet"}</TypographyLarge><Button variant="outline" size="sm" onClick={closeChanges}>Back to writing</Button></>}
             </div>}
           </div>

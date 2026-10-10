@@ -45,6 +45,21 @@ describe("agent Changes aggregate", () => {
     useProjectStore.setState({ project, meta: EMPTY_META });
   });
 
+  it("includes candidate reviews in pending counts and invalidates the cached snapshot", () => {
+    const before = getAgentChangesSnapshot();
+    useProjectStore.setState((state) => ({ meta: {
+      ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: [{
+        id: "candidate", evidenceFingerprint: "fp", name: "Inez", role: "Watchmaker",
+        profile: { appearance: "", mannerisms: "", motivations: "", relationships: "", history: "", voice: "" }, evidence: [],
+      }] },
+    } }));
+    expect(getAgentChangesSnapshot()).not.toBe(before);
+    expect(getAgentChangesSnapshot()).toMatchObject({ pendingCount: 1, pendingChangeCount: 1 });
+    expect(getAgentChangesSnapshot().records).toHaveLength(0);
+    useProjectStore.setState({ project: null });
+    expect(getAgentChangesSnapshot()).toMatchObject({ pendingCount: 0, pendingChangeCount: 0 });
+  });
+
   it("counts pending proposal rows across sessions and keeps history visible", () => {
     useAgentConsoleStore.getState().stageProposal(proposal("project-result"), { kind: "legacy" });
     const outline = agentSessionStore({ kind: "outline", chapterId: "chapter-1" });

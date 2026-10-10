@@ -1,10 +1,10 @@
-import { CharacterCandidatesDialog } from "@/components/app/outline/character-candidates-dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { TypographyMuted } from "@/components/ui/typography";
 import { openNotifications } from "@/lib/notifications";
 import type { ProjectKnowledge } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
+import { useViewStore } from "@/stores/view-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 function coverageLabel(
@@ -62,7 +62,11 @@ export function StoryRefreshStatus() {
           {coverageLabel(chapterIds, knowledge, latestSavedFingerprints)}
         </TypographyMuted>
       ) : null}
-      <CharacterCandidatesDialog />
+      {project !== null && knowledge.characterCandidates.length > 0 ? (
+        <Button variant="outline" size="sm" onClick={() => useViewStore.getState().selectChange("characters", project.root)}>
+          Review {knowledge.characterCandidates.length} {knowledge.characterCandidates.length === 1 ? "character" : "characters"}
+        </Button>
+      ) : null}
     </div>
   );
 }

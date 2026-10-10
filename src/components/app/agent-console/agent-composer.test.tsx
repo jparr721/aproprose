@@ -368,6 +368,68 @@ describe("AgentComposer draft behavior", () => {
     expect(screen.getByRole("button", { name: "Working on your request" }).getAttribute("aria-expanded")).toBe("false");
   });
 
+  it.each([
+    { kind: "project" },
+    { kind: "outline", chapterId: "settled-activity" },
+    { kind: "character", characterId: "settled-activity" },
+  ] satisfies AgentSessionId[])("retains an opened settled activity across the next run and remount in $kind sessions", (sessionId) => {
+    const store = agentSessionStore(sessionId);
+    const settledRun = activeRun("edit");
+    const settledAssistant: AgentUIMessage = {
+      id: "assistant-settled-activity",
+      role: "assistant",
+      metadata: {
+        runId: settledRun.id,
+        mode: settledRun.mode,
+        task: settledRun.task,
+        state: "complete",
+        createdAt: settledRun.startedAt,
+        failure: null,
+        retryOf: null,
+        usage: null,
+      },
+      parts: [{
+        type: "tool-read_pending_proposal",
+        toolCallId: "settled-proposal",
+        state: "output-available",
+        input: { proposalId: "proposal-1" },
+        output: {
+          kind: "summary",
+          summary: { label: "Read proposal", target: "Proposal", detail: "1 change", itemCount: 1 },
+        },
+      }],
+    };
+    store.getState().hydrate(project.root, {
+      ...emptyPersistedAgentState(),
+      messages: [settledAssistant],
+    });
+
+    const rendered = render(
+      <AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />,
+    );
+    const settledActivity = screen.getByRole("button", { name: "Activity complete" });
+    expect(settledActivity.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(settledActivity);
+    expect(settledActivity.getAttribute("aria-expanded")).toBe("true");
+
+    const nextRun = { ...activeRun("edit"), id: "run-after-settled-activity" };
+    act(() => {
+      store.getState().beginPreflight();
+      store.getState().beginRun(nextRun, userMessage(nextRun, "Follow up"));
+      store.getState().markStreaming();
+    });
+    expect(screen.getByRole("button", { name: "Working on your request" }).getAttribute("aria-expanded")).toBe("true");
+
+    act(() => store.getState().finishRun(null, null));
+    expect(screen.getByRole("button", { name: "Activity complete" }).getAttribute("aria-expanded")).toBe("true");
+
+    rendered.unmount();
+    render(
+      <AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />,
+    );
+    expect(screen.getByRole("button", { name: "Activity complete" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("shares the activity disclosure choice within a session but isolates other sessions", () => {
     const sharedSession = { kind: "outline" as const, chapterId: "activity-shared" };
     const otherSession = { kind: "outline" as const, chapterId: "activity-other" };

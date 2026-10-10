@@ -176,6 +176,15 @@ describe("ChapterSubview", () => {
     expect(useOutlineBoardStore.getState().chapterView).toBe("manual");
   });
 
+  it("closes the planner through the Storyboard breadcrumb", () => {
+    render(<ChapterSubview />);
+    fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
+
+    fireEvent.click(screen.getByText("Storyboard"));
+
+    expect(useOutlineBoardStore.getState().openChapterId).toBeNull();
+  });
+
   it("starts a chapter investigation after hydration without requiring a starter prompt", async () => {
     render(<ChapterSubview />);
     fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));

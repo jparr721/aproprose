@@ -332,6 +332,67 @@ describe("AgentComposer draft behavior", () => {
     expect(store.getState().messages[0].parts).toEqual([{ type: "text", text: "Keep my follow-up" }]);
   });
 
+  it.each([
+    { kind: "project" },
+    { kind: "outline", chapterId: "activity-choice" },
+    { kind: "character", characterId: "activity-choice" },
+  ] satisfies AgentSessionId[])("keeps a closed activity disclosure closed on the next send in $kind sessions", (sessionId) => {
+    const store = agentSessionStore(sessionId);
+    store.getState().hydrate(project.root, emptyPersistedAgentState());
+    store.getState().beginPreflight();
+    const rendered = render(
+      <AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />,
+    );
+
+    const activity = screen.getByRole("button", { name: "Working on your request" });
+    expect(activity.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(activity);
+    expect(activity.getAttribute("aria-expanded")).toBe("false");
+
+    const run = activeRun("edit");
+    act(() => {
+      store.getState().beginRun(run, userMessage(run, "First request"));
+      store.getState().markStreaming();
+    });
+    expect(screen.getByRole("button", { name: "Working on your request" }).getAttribute("aria-expanded")).toBe("false");
+
+    act(() => store.getState().finishRun(null, null));
+    expect(screen.queryByRole("button", { name: "Activity complete" })).toBeNull();
+    act(() => store.getState().beginPreflight());
+    expect(screen.getByRole("button", { name: "Working on your request" }).getAttribute("aria-expanded")).toBe("false");
+
+    rendered.unmount();
+    render(
+      <AgentComposer placeholder="Ask about your manuscript" sessionId={sessionId} task={null} />,
+    );
+    expect(screen.getByRole("button", { name: "Working on your request" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("shares the activity disclosure choice within a session but isolates other sessions", () => {
+    const sharedSession = { kind: "outline" as const, chapterId: "activity-shared" };
+    const otherSession = { kind: "outline" as const, chapterId: "activity-other" };
+    for (const sessionId of [sharedSession, otherSession]) {
+      const store = agentSessionStore(sessionId);
+      store.getState().hydrate(project.root, emptyPersistedAgentState());
+      store.getState().beginPreflight();
+    }
+
+    render(
+      <>
+        <AgentComposer placeholder="Ask about your manuscript" sessionId={sharedSession} task={null} />
+        <AgentComposer placeholder="Ask about your manuscript" sessionId={sharedSession} task={null} />
+        <AgentComposer placeholder="Ask about your manuscript" sessionId={otherSession} task={null} />
+      </>,
+    );
+
+    const activities = screen.getAllByRole("button", { name: "Working on your request" });
+    fireEvent.click(activities[0]);
+
+    expect(activities[0].getAttribute("aria-expanded")).toBe("false");
+    expect(activities[1].getAttribute("aria-expanded")).toBe("false");
+    expect(activities[2].getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("shows tool activity without reasoning and collapses it when the run finishes", () => {
     const run = activeRun("edit");
     const messageMetadata: AgentMessageMetadata = {
@@ -380,6 +441,9 @@ describe("AgentComposer draft behavior", () => {
     act(() => useAgentConsoleStore.getState().beginPreflight());
     expect(screen.getByRole("button", { name: "Working on your request" })).toBeTruthy();
     expect(screen.queryByText("Read proposal")).toBeNull();
+    act(() => useAgentConsoleStore.getState().finishRun(null, null));
+    expect(screen.getByRole("button", { name: "Activity complete" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Read proposal")).toBeTruthy();
   });
 
   it.each(["stopped", "error"] satisfies AgentMessageMetadata["state"][])("settles unfinished tools after a run is %s", (state) => {

@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.19.3",
+    "date": "2026-10-10",
+    "summary": "Keep AI activity details in the state you choose.",
+    "highlights": [
+      "Keep activity details open or closed across new messages in each chat."
+    ]
+  },
+  {
     "version": "0.19.2",
     "date": "2026-10-10",
     "summary": "Keep sent messages and their copy actions together across AI chats.",

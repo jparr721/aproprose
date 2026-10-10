@@ -78,6 +78,8 @@ const toolStepStates: Record<AgentToolPart["state"], Pick<ChainOfThoughtStepProp
 
 function AgentActivity({ sessionId }: { sessionId: AgentSessionId }) {
   const runStatus = useAgentSessionStore(sessionId, (state) => state.runStatus);
+  const activityOpenOverride = useAgentSessionStore(sessionId, (state) => state.activityOpenOverride);
+  const setActivityOpenOverride = useAgentSessionStore(sessionId, (state) => state.setActivityOpenOverride);
   const assistant = useAgentSessionStore(sessionId, (state) =>
     state.messages.findLast((message) =>
       message.role === "assistant" &&
@@ -96,7 +98,12 @@ function AgentActivity({ sessionId }: { sessionId: AgentSessionId }) {
   else if (state === "error" || needsAttention) label = "Activity needs attention";
 
   return (
-    <ChainOfThought aria-label="AI activity" role="status" key={working ? "working" : "settled"} defaultOpen={working}>
+    <ChainOfThought
+      aria-label="AI activity"
+      onOpenChange={setActivityOpenOverride}
+      open={activityOpenOverride ?? working}
+      role="status"
+    >
       <ChainOfThoughtHeader>
         {working ? <Spinner aria-hidden="true" /> : null}
         {label}

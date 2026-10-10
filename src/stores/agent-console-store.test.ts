@@ -379,6 +379,30 @@ describe("agent console store", () => {
     useAgentConsoleStore.getState().hydrate("/book", emptyPersistedState());
   });
 
+  it("keeps activity disclosure choices per session and clears them on reset", () => {
+    const characterSession = {
+      kind: "character" as const,
+      characterId: "activity-choice",
+    };
+    const characterStore = agentSessionStore(characterSession);
+
+    try {
+      expect(useAgentConsoleStore.getState().activityOpenOverride).toBeNull();
+      expect(characterStore.getState().activityOpenOverride).toBeNull();
+
+      useAgentConsoleStore.getState().setActivityOpenOverride(false);
+      characterStore.getState().setActivityOpenOverride(true);
+
+      expect(useAgentConsoleStore.getState().activityOpenOverride).toBe(false);
+      expect(characterStore.getState().activityOpenOverride).toBe(true);
+
+      useAgentConsoleStore.getState().resetProject();
+      expect(useAgentConsoleStore.getState().activityOpenOverride).toBeNull();
+    } finally {
+      deleteCharacterAgentSession(characterSession.characterId);
+    }
+  });
+
   it("registers character sessions with a describing profile", () => {
     const sessionId = { kind: "character" as const, characterId: "c1" };
 

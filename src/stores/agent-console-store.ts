@@ -95,6 +95,7 @@ export interface AgentConsoleData {
   interruptedRun: InterruptedRun | null;
   activeRun: AgentRun | null;
   runStatus: AgentRunStatus;
+  activityOpenOverride: boolean | null;
   runError: AgentFailure | null;
   persistenceIssue: AgentPersistenceIssue | null;
   requestedProjectRoot: string | null;
@@ -169,6 +170,7 @@ export interface AgentConsoleState extends AgentConsoleData {
   appendLocalMessage: (message: AgentUIMessage) => void;
   setSummary: (summary: ConversationSummary) => void;
   setPersistenceIssue: (issue: AgentPersistenceIssue | null) => void;
+  setActivityOpenOverride: (open: boolean) => void;
 }
 
 export const EMPTY_AGENT_STATE: AgentConsoleData = {
@@ -186,6 +188,7 @@ export const EMPTY_AGENT_STATE: AgentConsoleData = {
   interruptedRun: null,
   activeRun: null,
   runStatus: "idle",
+  activityOpenOverride: null,
   runError: null,
   persistenceIssue: null,
   requestedProjectRoot: null,
@@ -1127,6 +1130,7 @@ const createAgentConsoleState: StateCreator<AgentConsoleState> = (set, get) => (
     }),
   setSummary: (summary) => set(() => ({ summary })),
   setPersistenceIssue: (persistenceIssue) => set(() => ({ persistenceIssue })),
+  setActivityOpenOverride: (activityOpenOverride) => set(() => ({ activityOpenOverride })),
 });
 
 export const useAgentConsoleStore = create<AgentConsoleState>()(

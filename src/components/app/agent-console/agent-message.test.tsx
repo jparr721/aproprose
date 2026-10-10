@@ -178,6 +178,19 @@ describe("AgentMessage content", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Message copied");
   });
 
+  it("aligns user message actions with the trailing edge of the message", () => {
+    renderAgentMessage({
+      id: "user-copy",
+      role: "user",
+      metadata: metadata({}),
+      parts: [{ type: "text", text: "A user message." }],
+    });
+
+    const copyButton = screen.getByRole("button", { name: "Copy" });
+
+    expect(copyButton.parentElement?.classList.contains("group-[.is-user]:self-end")).toBe(true);
+  });
+
   it("renders message text as a markdown response", () => {
     renderAgentMessage(
       assistantMessage(

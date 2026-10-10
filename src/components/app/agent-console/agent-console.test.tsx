@@ -141,6 +141,13 @@ const message: AgentUIMessage = {
   parts: [{ type: "text", text: "The bridge can stay quiet." }],
 };
 
+const userMessage: AgentUIMessage = {
+  id: "user-1",
+  role: "user",
+  metadata,
+  parts: [{ type: "text", text: "Please make this clear." }],
+};
+
 const draftRef: DraftContextRef = {
   kind: "block",
   chapterId: "chapter-1",
@@ -208,6 +215,64 @@ afterEach(async () => {
   tauri.writeAppData.mockResolvedValue(undefined);
   await retryAgentPersistence();
   await transitionAgentProject(null);
+});
+
+describe("agent chat message alignment", () => {
+  it.each([
+    {
+      name: "the agent panel",
+      region: "AI Console",
+      sessionId: { kind: "project" },
+    },
+    {
+      name: "the outline chat",
+      region: "Outline Planner",
+      sessionId: { kind: "outline", chapterId: "chapter-1" },
+    },
+    {
+      name: "the character chat",
+      region: "Character Describe",
+      sessionId: { kind: "character", characterId: "character-1" },
+    },
+  ] satisfies Array<{ name: string; region: string; sessionId: AgentSessionId }>)(
+    "aligns user copy actions to the message edge in $name",
+    ({ region, sessionId }) => {
+      agentSessionStore(sessionId).setState({
+        ...EMPTY_AGENT_STATE,
+        activeProjectRoot: project.root,
+        hydratedProjectRoot: project.root,
+        messages: [userMessage],
+        requestedProjectRoot: project.root,
+      });
+
+      if (sessionId.kind === "project") {
+        render(<AgentConsole />);
+      } else {
+        render(
+          <AgentSection
+            ariaLabel={region}
+            closeLabel={`Close ${region}`}
+            contextLabel="Quiet Novel"
+            emptyDescription="Ask a question"
+            emptyTitle="Scoped conversation"
+            onClose={vi.fn()}
+            placeholder="Ask a question"
+            sessionId={sessionId}
+            task={null}
+            title={region}
+          />,
+        );
+      }
+
+      const surface = within(screen.getByRole("region", { name: region }));
+      const copyButton = surface.getByRole("button", { name: "Copy" });
+
+      expect(
+        copyButton.parentElement?.classList.contains("group-[.is-user]:self-end"),
+      ).toBe(true);
+      expect(copyButton.closest(".group.is-user")).not.toBeNull();
+    },
+  );
 });
 
 describe("scoped agent store subscriptions", () => {

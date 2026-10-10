@@ -368,6 +368,8 @@ function ProposalPreview({ entry, disabled, onRestored }: { entry: AgentChangesE
 export function ChangesPanel() {
   const { records, characterCandidates, pendingCount, runStatus, activeSessionId, persistence } = useAgentChanges();
   const selectedKey = useViewStore((state) => state.selectedChange);
+  const changesOpen = useViewStore((state) => state.changesOpen);
+  const focus = useViewStore((state) => state.focus);
   const [filter, setFilter] = useState<DraftFilter>("pending");
   const busy = runStatus !== "idle";
   const historyCount = records.filter((entry) => entry.pendingChangeCount === 0).length;
@@ -384,8 +386,8 @@ export function ChangesPanel() {
     else if (requested !== undefined) setFilter(requested.pendingChangeCount > 0 ? "pending" : "history");
   }, [requested, charactersRequested]);
   useEffect(() => {
-    if (showCharacters && !charactersRequested && projectRoot !== null) useViewStore.getState().selectChange("characters", projectRoot);
-  }, [showCharacters, charactersRequested, projectRoot]);
+    if (changesOpen && !focus && showCharacters && !charactersRequested && projectRoot !== null) useViewStore.getState().selectChange("characters", projectRoot);
+  }, [changesOpen, focus, showCharacters, charactersRequested, projectRoot]);
   const switchFilter = (next: DraftFilter): void => {
     useViewStore.getState().clearChangeSelection();
     setFilter(next);
@@ -427,7 +429,8 @@ export function ChangesPanel() {
             return <Alert key={entry.sessionKey} variant="destructive"><AlertTitle>AI request failed</AlertTitle><AlertDescription>{safeAgentErrorText(entry.runError)}<Button variant="outline" size="sm" onClick={() => useViewStore.getState().openAiConsole()}>View AI output<IconArrowRight /></Button></AlertDescription></Alert>;
           })}
           <div className="border-t border-border pt-5">
-            {showCharacters ? <CharacterCandidatesReview key={projectRoot} disabled={busy} /> : selected !== undefined ? <ProposalPreview key={`${selected.sessionKey}:${selected.record.proposal.id}`} entry={selected} disabled={busy} onRestored={() => { setFilter("pending"); useViewStore.getState().selectChange(selected.sessionKey, selected.record.proposal.id); }} /> : <div className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+            <div hidden={!showCharacters}><CharacterCandidatesReview key={projectRoot} disabled={busy} /></div>
+            {showCharacters ? null : selected !== undefined ? <ProposalPreview key={`${selected.sessionKey}:${selected.record.proposal.id}`} entry={selected} disabled={busy} onRestored={() => { setFilter("pending"); useViewStore.getState().selectChange(selected.sessionKey, selected.record.proposal.id); }} /> : <div className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
               {unavailable ? <>{loading ? <Spinner className="motion-reduce:animate-none" /> : <IconInfoCircle className="size-6 text-muted-foreground" />}<TypographyLarge>{loading ? "Loading Changes" : "Changes unavailable"}</TypographyLarge><TypographyMuted>{loading ? "Loading saved AI sessions" : "Resolve the storage issue to review saved Changes."}</TypographyMuted></> : busy ? <TypographyLarge>Your draft will appear here</TypographyLarge> : <><IconCheck className="size-6 text-muted-foreground" /><TypographyLarge>{filter === "pending" ? "All caught up" : "No history yet"}</TypographyLarge><Button variant="outline" size="sm" onClick={closeChanges}>Back to writing</Button></>}
             </div>}
           </div>

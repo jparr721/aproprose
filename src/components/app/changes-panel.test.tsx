@@ -82,7 +82,6 @@ describe("ChangesPanel", () => {
     useViewStore.getState().selectChange("characters", "/another-book");
     renderPanel();
     expect(screen.getByText("Proposed first")).toBeTruthy();
-    expect(screen.queryByText("No pending characters")).toBeNull();
   });
 
   it("shows proposal rows, frozen context, top batch Apply and trash without duplicate panel chrome", () => {

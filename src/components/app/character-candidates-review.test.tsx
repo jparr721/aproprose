@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock(import("@/lib/tauri"), async (importOriginal) => ({
@@ -15,6 +15,7 @@ import { ChangesPanel } from "@/components/app/changes-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EMPTY_AGENT_STATE, clearCharacterAgentSessions, clearOutlineAgentSessions, useAgentConsoleStore } from "@/stores/agent-console-store";
 import { useViewStore } from "@/stores/view-store";
+import type { OverviewPendingProposal } from "@/lib/ai/agent-types";
 import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import { writeProjectMeta } from "@/lib/tauri";
 import type { CharacterCandidate } from "@/lib/types";
@@ -23,12 +24,15 @@ import { useProjectStore } from "@/stores/project-store";
 function deferred<Value>(): {
   promise: Promise<Value>;
   resolve: (value: Value) => void;
+  reject: (error: Error) => void;
 } {
   let resolve!: (value: Value) => void;
-  const promise = new Promise<Value>((resolvePromise) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 const candidate: CharacterCandidate = {
@@ -64,7 +68,7 @@ beforeEach(() => {
   clearCharacterAgentSessions();
   clearOutlineAgentSessions();
   useAgentConsoleStore.setState({ ...EMPTY_AGENT_STATE, requestedProjectRoot: "/book", activeProjectRoot: "/book", hydratedProjectRoot: "/book" });
-  useViewStore.setState({ changesOpen: true, selectedChange: null });
+  useViewStore.setState({ changesOpen: true, aiOpen: false, focus: false, selectedChange: null });
   vi.mocked(writeProjectMeta).mockReset();
   vi.mocked(writeProjectMeta).mockResolvedValue(undefined);
   useProjectStore.setState({
@@ -124,6 +128,80 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("CharacterCandidatesReview", () => {
+  for (const phase of ["loaded", "arrives"]) {
+    it.each([
+      { changesOpen: false, aiOpen: false, focus: false },
+      { changesOpen: false, aiOpen: true, focus: false },
+      { changesOpen: true, aiOpen: false, focus: true },
+    ])(`preserves the workspace when candidates ${phase}: %j`, (layout) => {
+      useViewStore.setState(layout);
+      if (phase === "arrives") {
+        useProjectStore.setState((state) => ({ meta: { ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: [] } } }));
+      }
+      renderReview();
+      if (phase === "arrives") {
+        act(() => { useProjectStore.setState((state) => ({ meta: { ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: [candidate] } } })); });
+      }
+      expect(useViewStore.getState()).toMatchObject(layout);
+      fireEvent.click(screen.getByRole("button", { name: /Review new characters/ }));
+      expect(useViewStore.getState()).toMatchObject({ changesOpen: true, aiOpen: false, focus: false });
+    });
+  }
+
+  for (const navigation of ["history", "revision"]) {
+    for (const action of ["accept", "dismiss"]) {
+      it.each(["resolve", "reject"] as const)(`retains ${action} save state across ${navigation} navigation until %s`, async (outcome) => {
+        const write = deferred<void>();
+        vi.mocked(writeProjectMeta).mockReturnValueOnce(write.promise);
+        try {
+          const rio: CharacterCandidate = { ...candidate, id: "candidate-rio", evidenceFingerprint: "rio-fp", name: "Rio" };
+          useProjectStore.setState((state) => ({ meta: { ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: [candidate, rio] } } }));
+          const overview: OverviewPendingProposal = {
+            id: "overview", kind: "overview", projectRoot: "/book", chapterId: null, summary: "Revise overview", createdAt: "2026-10-10T00:00:00.000Z", originatingMessageId: "assistant", changes: [],
+            overviewChange: { id: "overview-change", before: "", after: "A clockwork mystery", reason: "Focus the story", sourceFingerprint: "fp" },
+          };
+          useAgentConsoleStore.getState().stageProposal(overview, { kind: "legacy" });
+          useViewStore.getState().selectChange("characters", "/book");
+          renderReview();
+          fireEvent.click(screen.getByRole("button", { name: action === "accept" ? "Add Inez" : "Dismiss Inez" }));
+          if (navigation === "history") {
+            fireEvent.click(screen.getByRole("button", { name: "History (0)" }));
+            expect(screen.queryByRole("button", { name: "Add Rio" })).toBeNull();
+            fireEvent.click(screen.getByRole("button", { name: "Pending drafts (2)" }));
+          } else {
+            fireEvent.click(screen.getByRole("button", { name: /Revise overview/ }));
+            expect(screen.queryByRole("button", { name: "Add Rio" })).toBeNull();
+          }
+          fireEvent.click(screen.getByRole("button", { name: /Review new characters/ }));
+          expect(screen.getByRole("button", { name: "Add Rio" }).hasAttribute("disabled")).toBe(true);
+          expect(screen.getByRole("button", { name: "Dismiss Rio" }).hasAttribute("disabled")).toBe(true);
+          expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+          fireEvent.click(screen.getByRole("button", { name: "Add Rio" }));
+          expect(useProjectStore.getState().meta.knowledge.characterCandidates).toEqual([rio]);
+          await act(async () => {
+            if (outcome === "resolve") write.resolve(undefined);
+            else write.reject(new Error("disk full"));
+          });
+          await waitFor(() => expect(screen.getByRole("button", { name: "Add Rio" }).hasAttribute("disabled")).toBe(false));
+          if (outcome === "reject") {
+            expect(screen.getByRole("alert").textContent).toContain("See Settings > Notifications");
+            expect(useProjectStore.getState().meta.knowledge.characterCandidates).toEqual([candidate, rio]);
+            expect(useProjectStore.getState().meta.characters).toHaveLength(1);
+            fireEvent.click(screen.getByRole("button", { name: "Add Rio" }));
+            await waitFor(() => expect(screen.queryByRole("button", { name: "Add Rio" })).toBeNull());
+            const saved: unknown = JSON.parse(vi.mocked(writeProjectMeta).mock.calls[1][1]);
+            expect(saved).toMatchObject({ characters: [{ name: "Mara" }, { name: "Rio" }], knowledge: { characterCandidates: [candidate] } });
+          } else {
+            expect(screen.queryByRole("alert")).toBeNull();
+            expect(useProjectStore.getState().meta.characters).toHaveLength(action === "accept" ? 2 : 1);
+          }
+        } finally {
+          await act(async () => write.resolve(undefined));
+        }
+      });
+    }
+  }
+
   it("shows generated details and evidence before accepting", async () => {
     renderReview();
 

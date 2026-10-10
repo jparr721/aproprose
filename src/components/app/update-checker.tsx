@@ -20,6 +20,7 @@ import { parseUpdateNotes } from "@/lib/changelog";
 import { useChangelogStore } from "@/stores/changelog-store";
 import { saveBeforeExit } from "@/lib/exit-guard";
 import { useProjectStore } from "@/stores/project-store";
+import { IconArrowRight } from "@tabler/icons-react";
 
 const UPDATE_TOAST_ID = "app-update";
 
@@ -43,13 +44,20 @@ function buildDeps(): UpdateFlowDeps {
       new Promise<boolean>((resolve) => {
         toast("New update available", {
           id: UPDATE_TOAST_ID,
-          description: `v${update.currentVersion} -> v${update.version}`,
+          description: (
+            <span className="inline-flex items-center gap-1.5">
+              <span>v{update.currentVersion}</span>
+              <IconArrowRight aria-hidden="true" className="size-4" />
+              <span>v{update.version}</span>
+            </span>
+          ),
           duration: Infinity,
           closeButton: true,
           action: (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
+                className="px-1"
                 onClick={() =>
                   useChangelogStore.getState().open({
                     version: update.version,
@@ -59,7 +67,7 @@ function buildDeps(): UpdateFlowDeps {
               >
                 See changes
               </Button>
-              <Button onClick={() => resolve(true)}>
+              <Button className="px-1" onClick={() => resolve(true)}>
                 Update
               </Button>
             </div>

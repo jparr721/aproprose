@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.19.1",
+    "date": "2026-10-10",
+    "summary": "Make update notifications easier to scan and act on.",
+    "highlights": [
+      "Show a right arrow between the installed and available versions, with a tighter Update action."
+    ]
+  },
+  {
     "version": "0.19.0",
     "date": "2026-10-07",
     "summary": "Investigate existing chapters with a focused editorial partner and purpose-built AI actions.",

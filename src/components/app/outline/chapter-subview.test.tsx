@@ -167,7 +167,22 @@ describe("ChapterSubview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
     expect(useOutlineBoardStore.getState().chapterView).toBe("planner");
     expect(screen.getByRole("region", { name: "Outline Planner" })).toBeTruthy();
+    expect(screen.queryByText("Outline Planner")).toBeNull();
+    expect(screen.queryByText("n / 1. What the Letter Said")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close Outline Planner" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Agent mode" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manual" }));
+    expect(useOutlineBoardStore.getState().chapterView).toBe("manual");
+  });
+
+  it("closes the planner through the Storyboard breadcrumb", () => {
+    render(<ChapterSubview />);
+    fireEvent.click(screen.getByRole("button", { name: "Plan with AI" }));
+
+    fireEvent.click(screen.getByText("Storyboard"));
+
+    expect(useOutlineBoardStore.getState().openChapterId).toBeNull();
   });
 
   it("starts a chapter investigation after hydration without requiring a starter prompt", async () => {

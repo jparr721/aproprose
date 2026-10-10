@@ -235,6 +235,7 @@ function AgentSectionContent({
   const ownershipStatus = useAgentSessionStore(sessionId, (state) =>
     agentConsoleOwnershipStatus(state, project?.root ?? null),
   );
+  const isChapterPlanner = task !== null && task.kind === "outline-sculpt";
   const openAiSettings = (target: "key" | "model"): void => {
     useSettingsDialogStore.getState().openAiSettings(target);
   };
@@ -246,7 +247,7 @@ function AgentSectionContent({
       data-agent-console
       data-agent-section
     >
-      {sessionId.kind === "project" ? null : (
+      {sessionId.kind === "project" || isChapterPlanner ? null : (
         <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
           <div className="min-w-0">
             <TypographyLarge>{title}</TypographyLarge>

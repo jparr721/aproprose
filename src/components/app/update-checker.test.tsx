@@ -53,8 +53,11 @@ describe("UpdateChecker toast", () => {
     if (!React.isValidElement(action)) throw new Error("Update toast actions must be JSX");
     const actionMarkup = renderToStaticMarkup(action);
     expect(actionMarkup).toContain('<div class="flex items-center gap-1">');
+    const seeChangesButtonClasses = actionMarkup.match(/<button[^>]*class="([^"]*)"[^>]*>See changes<\/button>/);
+    if (seeChangesButtonClasses === null) throw new Error("See changes button classes were not rendered");
     const updateButtonClasses = actionMarkup.match(/<button[^>]*class="([^"]*)"[^>]*>Update<\/button>/);
     if (updateButtonClasses === null) throw new Error("Update button classes were not rendered");
+    expect(seeChangesButtonClasses[1].split(/\s+/)).toContain("px-1");
     expect(updateButtonClasses[1].split(/\s+/)).toContain("px-1");
   });
 });

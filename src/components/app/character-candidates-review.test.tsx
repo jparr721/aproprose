@@ -125,7 +125,7 @@ beforeEach(() => {
   } as never);
 });
 
-afterEach(() => cleanup());
+afterEach(cleanup);
 
 describe("CharacterCandidatesReview", () => {
   for (const phase of ["loaded", "arrives"]) {

@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.19.4",
+    "date": "2026-10-10",
+    "summary": "Review generated characters alongside revisions in Changes.",
+    "highlights": [
+      "Replace the character review dialog with scrollable candidate cards in the pending Changes panel.",
+      "Keep character actions contained on narrow panels and preserve pending saves while browsing revisions.",
+      "Keep the current workspace layout when background character suggestions arrive."
+    ]
+  },
+  {
     "version": "0.19.3",
     "date": "2026-10-10",
     "summary": "Keep AI activity details in the state you choose.",

@@ -224,6 +224,11 @@ describe("CharacterDetailSheet", () => {
       "outline",
     );
     expect(screen.getByLabelText("Character Describe")).toBeTruthy();
+    expect(screen.getByText("Character Describe")).toBeTruthy();
+    expect(screen.getByText("Quiet Novel / Mara")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Close Character Describe" }),
+    ).toBeTruthy();
     expect(
       screen.getByPlaceholderText("Describe Mara or explore new details"),
     ).toBeTruthy();

@@ -41,13 +41,20 @@ describe("UpdateChecker toast", () => {
     const description = options.description;
     if (!React.isValidElement(description)) throw new Error("Update version description must be JSX");
     const descriptionMarkup = renderToStaticMarkup(description);
-    expect(descriptionMarkup).toContain("tabler-icon-arrow-right");
+    const currentVersionIndex = descriptionMarkup.indexOf("v0.18.3");
+    const arrowIndex = descriptionMarkup.indexOf("tabler-icon-arrow-right");
+    const availableVersionIndex = descriptionMarkup.indexOf("v0.19.0");
+    expect(currentVersionIndex).toBeGreaterThanOrEqual(0);
+    expect(currentVersionIndex).toBeLessThan(arrowIndex);
+    expect(arrowIndex).toBeLessThan(availableVersionIndex);
     expect(descriptionMarkup).not.toContain("->");
 
     const action = options.action;
     if (!React.isValidElement(action)) throw new Error("Update toast actions must be JSX");
     const actionMarkup = renderToStaticMarkup(action);
-    expect(actionMarkup).toContain("gap-1");
-    expect(actionMarkup).toMatch(/<button[^>]*class="[^"]*px-1[^"]*"[^>]*>Update<\/button>/);
+    expect(actionMarkup).toContain('<div class="flex items-center gap-1">');
+    const updateButtonClasses = actionMarkup.match(/<button[^>]*class="([^"]*)"[^>]*>Update<\/button>/);
+    if (updateButtonClasses === null) throw new Error("Update button classes were not rendered");
+    expect(updateButtonClasses[1].split(/\s+/)).toContain("px-1");
   });
 });

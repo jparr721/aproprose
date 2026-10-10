@@ -59,6 +59,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ChangesPanel", () => {
+  it("reviews generated characters beside existing revisions without opening a dialog", () => {
+    useProjectStore.setState((state) => ({ meta: {
+      ...state.meta, knowledge: { ...state.meta.knowledge, characterCandidates: [{
+        id: "candidate-inez", evidenceFingerprint: "fp", name: "Inez", role: "Watchmaker",
+        profile: { appearance: "Silver hair", mannerisms: "Counts exits", motivations: "", relationships: "", history: "", voice: "" },
+        evidence: [{ chapterId: "ch1", sourceId: "b1", order: 0, fingerprint: "e1", occurrence: 0, previewText: "She counts every door twice." }],
+      }] },
+    } }));
+    renderPanel();
+    expect(screen.getByRole("button", { name: "Pending drafts (2)" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Review new characters/ }));
+    expect(screen.getByText("Silver hair")).toBeTruthy();
+    expect(screen.getByText("She counts every door twice.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add Inez" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Revise one/ }));
+    expect(screen.getByText("Proposed first")).toBeTruthy();
+  });
+
+  it("does not keep a previous project's character review selected", () => {
+    useViewStore.getState().selectChange("characters", "/another-book");
+    renderPanel();
+    expect(screen.getByText("Proposed first")).toBeTruthy();
+  });
+
   it("shows proposal rows, frozen context, top batch Apply and trash without duplicate panel chrome", () => {
     const { container } = renderPanel();
     const panel = screen.getByRole("region", { name: "Changes" });

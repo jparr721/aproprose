@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 for (const width of [1280, 480]) {
   test.describe(`review card at ${width}px`, () => {
@@ -78,5 +78,43 @@ for (const width of [1280, 480]) {
       await expect(overviewText).toContainText("A reunion tests an old friendship");
       expect(await overviewText.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBe(28);
     });
+  });
+}
+
+for (const width of [320, 480]) {
+  test(`character revisions scroll and contain actions at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 600 });
+    await page.goto("/tests/browser/agent-review-tray.html?characters");
+    const panel = page.getByRole("region", { name: "Changes" });
+    await expect(panel.getByRole("button", { name: "Pending drafts (5)" })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const viewport = panel.locator('[data-slot="scroll-area-viewport"]');
+    expect(await viewport.evaluate((element) => element.scrollHeight)).toBeGreaterThan(600);
+    for (const name of ["Two unidentified men", "Raul Pizano", "Unnamed bagel-counter woman"]) {
+      const add = panel.getByRole("button", { name: `Add ${name}`, exact: true });
+      const dismiss = panel.getByRole("button", { name: `Dismiss ${name}`, exact: true });
+      await add.scrollIntoViewIfNeeded();
+      await expect(add).toBeInViewport();
+      await expect(dismiss).toBeInViewport();
+      const bounds = await panel.boundingBox();
+      if (bounds === null) throw new Error("Missing Changes panel geometry");
+      for (const button of [add, dismiss]) {
+        const box = await button.boundingBox();
+        if (box === null) throw new Error("Missing candidate action geometry");
+        expect(box.x).toBeGreaterThanOrEqual(bounds.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+      }
+    }
+    expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await viewport.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath("character-review-actions.png") });
+    await panel.getByRole("button", { name: "Add Unnamed bagel-counter woman", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Add Unnamed bagel-counter woman", exact: true })).toHaveCount(0);
+    await panel.getByRole("button", { name: "Dismiss Raul Pizano", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Dismiss Raul Pizano", exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: /Review new characters/ })).toContainText("1 pending");
+    await panel.getByRole("button", { name: "Dismiss Two unidentified men", exact: true }).click();
+    await expect(panel.getByText("No pending characters")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Pending drafts (4)" })).toBeVisible();
   });
 }

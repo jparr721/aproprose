@@ -8,6 +8,7 @@ import { emptyProjectKnowledge } from "@/lib/story-knowledge/model";
 import type { ChapterKnowledge } from "@/lib/types";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsDialogStore } from "@/stores/settings-dialog-store";
+import { useViewStore } from "@/stores/view-store";
 import { useStoryRefreshStore } from "@/stores/story-refresh-store";
 
 const chapterKnowledge = (sourceFingerprint: string): ChapterKnowledge => ({
@@ -175,7 +176,7 @@ describe("StoryRefreshStatus", () => {
     expect(screen.getByText("Up to date")).toBeTruthy();
   });
 
-  it("shows the number of character candidates", () => {
+  it("opens character review in Changes without a dialog", () => {
     useProjectStore.setState((state) => ({
       meta: {
         ...state.meta,
@@ -207,5 +208,8 @@ describe("StoryRefreshStatus", () => {
     expect(
       screen.getByRole("button", { name: "Review 1 character" }),
     ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review 1 character" }));
+    expect(useViewStore.getState()).toMatchObject({ changesOpen: true, selectedChange: { sessionKey: "characters", proposalId: "/book" } });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
